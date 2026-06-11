@@ -1,0 +1,18 @@
+.login-photo-frame {
+  background-image: url('/login-bg.png');
+  background-size: cover;
+  background-position: center;
+}
+
+.login-photo-overlay {
+  background:
+    linear-gradient(180deg, rgba(20, 54, 38, .15) 0%, rgba(20, 54, 38, 0) 30%, rgba(20, 54, 38, .55) 75%, rgba(20, 54, 38, .85) 100%),
+    linear-gradient(180deg, rgba(46, 125, 82, .35), rgba(46, 125, 82, .35));
+}
+
+.login-grain {
+  background-image: radial-gradient(rgba(255, 255, 255, .06) 1px, transparent 1px);
+  background-size: 3px 3px;
+  mix-blend-mode: overlay;
+  opacity: 0.35;
+}

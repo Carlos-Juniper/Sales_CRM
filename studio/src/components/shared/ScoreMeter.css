@@ -1,0 +1,8 @@
+.score-meter-fill {
+  width: var(--meter-width);
+  background-color: var(--meter-color);
+}
+
+.score-meter-label {
+  color: var(--meter-color);
+}

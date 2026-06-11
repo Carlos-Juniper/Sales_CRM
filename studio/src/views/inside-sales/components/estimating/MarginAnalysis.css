@@ -1,0 +1,24 @@
+.margin-category-dot {
+  background-color: var(--dot-color);
+}
+
+.margin-bar-fill {
+  width: var(--bar-width);
+  background-color: var(--bar-color);
+  opacity: 0.85;
+}
+
+.margin-target-line {
+  left: var(--target-pos);
+}
+
+.margin-hist-line {
+  left: var(--hist-pos);
+}
+
+.margin-mix-bar {
+  width: var(--mix-width);
+  max-width: 60%;
+  background-color: var(--mix-color);
+  min-width: 4px;
+}

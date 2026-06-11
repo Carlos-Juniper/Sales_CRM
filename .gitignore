@@ -1,0 +1,27 @@
+# Migrations
+migrations/
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+studio/coverage/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# Logs
+*.log

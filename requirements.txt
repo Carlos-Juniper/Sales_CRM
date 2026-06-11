@@ -1,0 +1,8 @@
+juniper-crm-shared @ git+https://github.com/Carlos-Juniper/juniper-crm-shared.git@main
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0
+bcrypt>=4.0.0
+msal>=1.28.0
+aiomysql==0.2.0
+python-dotenv==1.0.1

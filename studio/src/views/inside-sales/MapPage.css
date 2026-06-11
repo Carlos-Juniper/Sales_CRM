@@ -1,0 +1,42 @@
+.map-tooltip {
+  min-width: 180px;
+}
+
+.map-tooltip-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.map-tooltip-subtitle {
+  font-size: 11px;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+
+.map-tooltip-row {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+}
+
+.map-tooltip-value {
+  font-weight: 500;
+}
+
+.map-tooltip-muted {
+  color: #6b7280;
+}
+
+.map-tooltip-score {
+  font-weight: 700;
+  color: var(--score-color);
+}
+
+.filter-btn-active {
+  background-color: var(--btn-color);
+}
+
+.map-legend-dot {
+  background-color: var(--dot-color);
+}

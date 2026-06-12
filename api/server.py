@@ -22,12 +22,14 @@ from typing import Any, Optional
 import bcrypt
 import jwt
 import msal
+from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from google.cloud import bigquery
 from pydantic import BaseModel
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 
 from db import (

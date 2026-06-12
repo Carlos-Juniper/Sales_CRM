@@ -1,0 +1,26 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - -t
+      - us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app
+      - .
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - push
+      - us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    args:
+      - gcloud
+      - run
+      - deploy
+      - juniper-crm-app
+      - --image=us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app
+      - --region=us-central1
+      - --platform=managed
+      - --allow-unauthenticated
+      - --set-env-vars=GCP_PROJECT=juniper-crm-498215-p5,BQ_DATASET=crm
+      - --set-secrets=JWT_SECRET=JWT_SECRET:latest
+      - --project=juniper-crm-498215-p5

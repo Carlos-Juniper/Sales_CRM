@@ -2,7 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, Inbox, FileText, GitBranch,
   ChevronLeft, ChevronRight, LogOut, Leaf, Settings,
-  Map, Calculator,
+  Map, Calculator, Building,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
@@ -26,6 +26,7 @@ const navItems: NavItem[] = [
   { label: 'Outreach Queue', icon: Users, href: '/inside-sales/outreach', roles: ['inside_sales', 'manager'] },
   { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: ['inside_sales', 'manager'] },
   { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: ['inside_sales', 'manager'] },
+  { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: ['inside_sales', 'manager'] },
   { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: ['inside_sales', 'manager'] },
   { label: 'Estimating', icon: Calculator, href: '/inside-sales/estimating', roles: ['inside_sales', 'manager'] },
   // Outside Sales section

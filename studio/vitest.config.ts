@@ -8,6 +8,9 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // Override VITE_API_URL so apiClient uses a relative base URL (/api),
+    // keeping MSW handler paths like http.get('/api/...') correct in jsdom.
+    env: { VITE_API_URL: '' },
     coverage: {
       provider: 'v8',
       include: ['src/**'],

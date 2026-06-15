@@ -74,6 +74,21 @@ export const BID_URGENCY_THRESHOLD_DAYS = 7
 export const STRONG_FIT_SCORE = 85
 export const GOOD_FIT_SCORE = 65
 
+export const HOA_STATUS_VARIANTS: Record<string, string> = {
+  Prospect: 'sky',
+  Bidding: 'purple',
+  Active: 'green',
+  'At Risk': 'amber',
+  Lost: 'red',
+}
+
+export const PM_STATUS_VARIANTS: Record<string, string> = {
+  Partner: 'green',
+  Engaged: 'blue',
+  Target: 'amber',
+  Inactive: 'secondary',
+}
+
 export const ASPIRE_DIVISIONS: { label: string; value: number }[] = [
   { label: 'Maintenance: Contract',           value: 1574 },
   { label: 'Maintenance: Enhancements',       value: 1570 },

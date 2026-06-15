@@ -22,12 +22,14 @@ from typing import Any, Optional
 import bcrypt
 import jwt
 import msal
+from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from google.cloud import bigquery
 from pydantic import BaseModel
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 
 from db import (
@@ -172,9 +174,63 @@ class PatchBidBody(BaseModel):
     notes: Optional[str] = None
 
 
+class CreateHOAPropertyBody(BaseModel):
+    property_name: str
+    association_name: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: str = "FL"
+    zip: Optional[str] = None
+    county: Optional[str] = None
+    acreage: Optional[float] = None        # stored as estimated_acreage
+    units: Optional[int] = None
+    status: str = "Prospect"
+    branch_id: Optional[str] = None
+    management_company_id: Optional[str] = None
+
+
+class PMContactBody(BaseModel):
+    name: str
+    title: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class CreateManagementCompanyBody(BaseModel):
+    company_name: str                       # stored as name
+    website: Optional[str] = None
+    phone: Optional[str] = None
+    street: Optional[str] = None           # stored as mailing_address
+    city: Optional[str] = None             # stored as mailing_city
+    state: str = "FL"                      # stored as mailing_state
+    zip: Optional[str] = None              # stored as mailing_zip
+    primary_email: Optional[str] = None   # stored as contact_email
+    branch_id: Optional[str] = None
+    contacts: list[PMContactBody] = []
+
+
+class PatchManagementCompanyBody(BaseModel):
+    company_name: Optional[str] = None
+    website: Optional[str] = None
+    phone: Optional[str] = None
+    street: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
+    primary_email: Optional[str] = None
+    branch_id: Optional[str] = None
+    assigned_to: Optional[str] = None
+    status: Optional[str] = None
+    last_contacted: Optional[str] = None
+    contact_status: Optional[str] = None
+
+
 class PatchHoaPropertyBody(BaseModel):
     status: Optional[str] = None
     management_company_id: Optional[str] = None
+    assigned_to: Optional[str] = None
+    last_contacted: Optional[str] = None
+    contact_status: Optional[str] = None
 
 
 class LoginBody(BaseModel):
@@ -344,10 +400,7 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
         if hoa_prop_id:
             if new_status == "won":
                 await set_hoa_property_status(hoa_prop_id, "won")
-            elif new_status == "lost":
-                if not await has_won_lead_for_property(hoa_prop_id):
-                    if await count_active_leads_for_property(hoa_prop_id) == 0:
-                        await set_hoa_property_status(hoa_prop_id, "uncontacted")
+            # "lost" no longer auto-downgrades the property — status is managed manually
         await execute(
             f"""
             INSERT INTO {T('lead_actions')}
@@ -369,15 +422,12 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
 
 @app.delete("/api/leads/{lead_id}", status_code=204)
 async def delete_lead(lead_id: str, _user: dict = Depends(require_auth)) -> None:
-    lead = await _fetch_lead(lead_id)
+    await _fetch_lead(lead_id)
     await execute(
         f"UPDATE {T('leads')} SET deleted_at = CURRENT_TIMESTAMP() WHERE id = @id AND deleted_at IS NULL",
         [P("id", "STRING", lead_id)],
     )
-    hoa_prop_id = lead.get("hoa_property_id")
-    if hoa_prop_id and not await has_won_lead_for_property(hoa_prop_id):
-        if await count_active_leads_for_property(hoa_prop_id) == 0:
-            await set_hoa_property_status(hoa_prop_id, "uncontacted")
+    # Property status is managed manually — deleting a lead does not auto-downgrade it
 
 
 # ── Outreach ─────────────────────────────────────────────────────────────────
@@ -453,6 +503,19 @@ async def send_outreach(body: OutreachSendBody, _user: dict = Depends(require_au
         """,
         [P("id", "STRING", body.lead_id)],
     )
+
+    # Auto-flip the linked HOA property's contact_status when outreach is sent
+    from api.pipeline import set_property_contacted
+
+    lead_rows = await query(
+        f"SELECT hoa_property_id FROM {T('leads')} WHERE id = @id",
+        [P("id", "STRING", body.lead_id)],
+    )
+    if lead_rows:
+        hoa_prop_id = lead_rows[0].get("hoa_property_id")
+        if hoa_prop_id:
+            await set_property_contacted(hoa_prop_id)
+
     return {"success": True, "message_id": f"msg_{uuid.uuid4().hex[:12]}"}
 
 
@@ -461,7 +524,8 @@ async def send_outreach(body: OutreachSendBody, _user: dict = Depends(require_au
 _HOA_JSON_COLS = frozenset({"raw_data"})
 
 
-def _coerce_hoa_row(row: dict) -> dict:
+def _shape_hoa_row(row: dict) -> dict:
+    """Coerce BigQuery types and rename DB columns to frontend-expected names."""
     out: dict[str, Any] = {}
     for k, v in row.items():
         if isinstance(v, Decimal):
@@ -479,6 +543,9 @@ def _coerce_hoa_row(row: dict) -> dict:
             out[k] = v
         else:
             out[k] = v
+    # Rename DB columns to frontend-expected names
+    out["acreage"] = out.get("estimated_acreage")
+    out["branch"] = out.get("branch_id")
     return out
 
 
@@ -489,17 +556,29 @@ async def _fetch_hoa_property(hoa_property_id: str) -> dict:
     )
     if not rows:
         raise HTTPException(status_code=404, detail="HOA property not found")
-    return _coerce_hoa_row(rows[0])
+    return _shape_hoa_row(rows[0])
+
+
+@app.get("/api/hoa-properties/filter-options")
+async def hoa_filter_options(_user: dict = Depends(require_auth)) -> dict:
+    rows = await query(
+        f"SELECT DISTINCT city, branch_id FROM {T('hoa_properties')} WHERE city IS NOT NULL ORDER BY city"
+    )
+    cities = sorted({r["city"] for r in rows if r.get("city")})
+    branches = sorted({r["branch_id"] for r in rows if r.get("branch_id")})
+    return {"cities": cities, "branches": branches}
 
 
 @app.get("/api/hoa-properties")
 async def list_hoa_properties(
     state: Optional[str] = None,
-    status: Optional[str] = None,
-    branch_id: Optional[str] = None,
+    status: Optional[str] = None,       # comma-separated for multi-select: "Prospect,Active"
+    branch_id: Optional[str] = None,    # comma-separated: "Central,South"
+    city: Optional[str] = None,         # comma-separated: "Orlando,Tampa"
+    search: Optional[str] = None,
     min_acreage: Optional[float] = None,
     page: int = 1,
-    page_size: int = Query(default=25, le=100),
+    page_size: int = Query(default=25, le=1000),
     _user: dict = Depends(require_auth),
 ) -> dict:
     conditions: list[str] = []
@@ -509,11 +588,27 @@ async def list_hoa_properties(
         conditions.append("state = @state")
         params.append(P("state", "STRING", state.upper()))
     if status:
-        conditions.append("status = @hoa_status")
-        params.append(P("hoa_status", "STRING", status))
+        vals = [s.strip() for s in status.split(",") if s.strip()]
+        if vals:
+            conditions.append("status IN UNNEST(@hoa_statuses)")
+            params.append(PA("hoa_statuses", "STRING", vals))
     if branch_id:
-        conditions.append("branch_id = @branch_id")
-        params.append(P("branch_id", "STRING", branch_id))
+        vals = [s.strip() for s in branch_id.split(",") if s.strip()]
+        if vals:
+            conditions.append("branch_id IN UNNEST(@branch_ids)")
+            params.append(PA("branch_ids", "STRING", vals))
+    if city:
+        vals = [s.strip() for s in city.split(",") if s.strip()]
+        if vals:
+            conditions.append("city IN UNNEST(@cities)")
+            params.append(PA("cities", "STRING", vals))
+    if search:
+        conditions.append(
+            "(LOWER(property_name) LIKE LOWER(@search)"
+            " OR LOWER(COALESCE(association_name,'')) LIKE LOWER(@search)"
+            " OR LOWER(COALESCE(city,'')) LIKE LOWER(@search))"
+        )
+        params.append(P("search", "STRING", f"%{search}%"))
     if min_acreage is not None:
         conditions.append("estimated_acreage >= @min_acreage")
         params.append(P("min_acreage", "FLOAT64", min_acreage))
@@ -531,12 +626,61 @@ async def list_hoa_properties(
     )
 
     return {
-        "data": [_coerce_hoa_row(r) for r in rows],
+        "data": [_shape_hoa_row(r) for r in rows],
         "total": total,
         "page": page,
         "page_size": page_size,
         "total_pages": math.ceil(total / page_size) if page_size > 0 else 0,
     }
+
+
+_ALLOWED_HOA_STATUSES = frozenset({"Prospect", "Bidding", "Active", "At Risk", "Lost"})
+
+
+@app.post("/api/hoa-properties", status_code=201)
+async def create_hoa_property(
+    body: CreateHOAPropertyBody,
+    _user: dict = Depends(require_auth),
+) -> dict:
+    if body.status not in _ALLOWED_HOA_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status '{body.status}'")
+    user_id = _user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token missing user id")
+    new_id = str(uuid.uuid4())
+    # parcel_id and arcgis_source are NOT NULL in schema — use sentinel values for manual entries
+    await execute(
+        f"""
+        INSERT INTO {T('hoa_properties')}
+            (id, property_name, association_name, address, city, state, zip, county,
+             estimated_acreage, units, status, branch_id, management_company_id,
+             assigned_to, contact_status, parcel_id, arcgis_source,
+             created_at, updated_at)
+        VALUES
+            (@id, @property_name, @association_name, @address, @city, @state, @zip, @county,
+             @estimated_acreage, @units, @status, @branch_id, @management_company_id,
+             @assigned_to, 'uncontacted', @parcel_id, 'manual',
+             CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+        """,
+        [
+            P("id", "STRING", new_id),
+            P("property_name", "STRING", body.property_name),
+            P("association_name", "STRING", body.association_name),
+            P("address", "STRING", body.address),
+            P("city", "STRING", body.city),
+            P("state", "STRING", body.state),
+            P("zip", "STRING", body.zip),
+            P("county", "STRING", body.county),
+            P("estimated_acreage", "FLOAT64", body.acreage),
+            P("units", "INT64", body.units),
+            P("status", "STRING", body.status),
+            P("branch_id", "STRING", body.branch_id),
+            P("management_company_id", "STRING", body.management_company_id),
+            P("assigned_to", "STRING", user_id),
+            P("parcel_id", "STRING", f"manual-{new_id}"),
+        ],
+    )
+    return await _fetch_hoa_property(new_id)
 
 
 @app.post("/api/hoa-properties/{hoa_property_id}/promote", status_code=201)
@@ -552,6 +696,19 @@ async def promote_hoa_property(
     return _coerce_row(lead.to_dict())
 
 
+_HOA_PATCHABLE = frozenset({
+    "status", "management_company_id",
+    "assigned_to", "last_contacted", "contact_status",
+})
+_HOA_BQ_TYPES: dict[str, str] = {
+    "status": "STRING",
+    "management_company_id": "STRING",
+    "assigned_to": "STRING",
+    "last_contacted": "DATE",
+    "contact_status": "STRING",
+}
+
+
 @app.patch("/api/hoa-properties/{hoa_property_id}")
 async def patch_hoa_property(
     hoa_property_id: str,
@@ -562,10 +719,15 @@ async def patch_hoa_property(
     if not data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    _PATCHABLE = frozenset({"status", "management_company_id"})
-    updates = [(f, v) for f, v in data.items() if f in _PATCHABLE]
+    updates = [(f, v) for f, v in data.items() if f in _HOA_PATCHABLE]
     if not updates:
         raise HTTPException(status_code=400, detail="No patchable fields provided")
+
+    if "last_contacted" in data:
+        try:
+            date.fromisoformat(str(data["last_contacted"]))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="last_contacted must be a valid ISO date (YYYY-MM-DD)")
 
     existing = await query(
         f"SELECT id FROM {T('hoa_properties')} WHERE id = @id",
@@ -575,7 +737,7 @@ async def patch_hoa_property(
         raise HTTPException(status_code=404, detail="HOA property not found")
 
     set_clause = ", ".join(f"{f} = @{f}" for f, _ in updates)
-    bq_params = [P(f, "STRING", v) for f, v in updates]
+    bq_params = [P(f, _HOA_BQ_TYPES.get(f, "STRING"), v) for f, v in updates]
     bq_params.append(P("hoa_id", "STRING", hoa_property_id))
 
     await execute(
@@ -583,6 +745,268 @@ async def patch_hoa_property(
         bq_params,
     )
     return await _fetch_hoa_property(hoa_property_id)
+
+
+# ── Management Companies ─────────────────────────────────────────────────────
+
+# Maps PatchManagementCompanyBody field names to DB column names where they differ.
+_MGMT_FIELD_TO_COL: dict[str, str] = {
+    "company_name": "name",
+    "street": "mailing_address",
+    "city": "mailing_city",
+    "state": "mailing_state",
+    "zip": "mailing_zip",
+    "primary_email": "contact_email",
+}
+
+_MGMT_COL_BQ_TYPES: dict[str, str] = {
+    "name": "STRING",
+    "website": "STRING",
+    "phone": "STRING",
+    "mailing_address": "STRING",
+    "mailing_city": "STRING",
+    "mailing_state": "STRING",
+    "mailing_zip": "STRING",
+    "contact_email": "STRING",
+    "branch_id": "STRING",
+    "assigned_to": "STRING",
+    "status": "STRING",
+    "last_contacted": "DATE",
+    "contact_status": "STRING",
+}
+
+
+def _shape_mgmt_row(row: dict, contacts: list[dict] | None = None) -> dict:
+    """Map DB column names to frontend-expected field names."""
+    return {
+        "id": row.get("id"),
+        "company_name": row.get("name"),
+        "website": row.get("website"),
+        "phone": row.get("phone"),
+        "street": row.get("mailing_address"),
+        "city": row.get("mailing_city"),
+        "state": row.get("mailing_state"),
+        "zip": row.get("mailing_zip"),
+        "primary_email": row.get("contact_email"),
+        "branch_id": row.get("branch_id"),
+        "assigned_to": row.get("assigned_to"),
+        "status": row.get("status"),
+        "last_contacted": row.get("last_contacted").isoformat() if isinstance(row.get("last_contacted"), date) else row.get("last_contacted"),
+        "contact_status": row.get("contact_status"),
+        "created_at": row.get("created_at").isoformat() if isinstance(row.get("created_at"), datetime) else row.get("created_at"),
+        "updated_at": row.get("updated_at").isoformat() if isinstance(row.get("updated_at"), datetime) else row.get("updated_at"),
+        "contacts": contacts if contacts is not None else [],
+    }
+
+
+def _shape_contact_row(row: dict) -> dict:
+    return {
+        "id": row.get("id"),
+        "name": row.get("contact_name"),
+        "title": row.get("title"),
+        "email": row.get("email"),
+        "phone": row.get("phone"),
+    }
+
+
+@app.get("/api/management-companies")
+async def list_management_companies(
+    search: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    status: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    page: int = 1,
+    page_size: int = Query(default=50, le=5000),
+    _user: dict = Depends(require_auth),
+) -> dict:
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    if search:
+        conditions.append("LOWER(name) LIKE LOWER(@search)")
+        params.append(P("search", "STRING", f"%{search}%"))
+    if branch_id:
+        conditions.append("branch_id = @branch_id")
+        params.append(P("branch_id", "STRING", branch_id))
+    if status:
+        conditions.append("status = @mgmt_status")
+        params.append(P("mgmt_status", "STRING", status))
+    if assigned_to:
+        conditions.append("assigned_to = @assigned_to")
+        params.append(P("assigned_to", "STRING", assigned_to))
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    offset = (page - 1) * page_size
+
+    count_rows = await query(
+        f"SELECT COUNT(*) AS cnt FROM {T('property_management_companies')} {where}",
+        list(params),
+    )
+    total = int(count_rows[0]["cnt"]) if count_rows else 0
+
+    data_params = list(params) + [P("lim", "INT64", page_size), P("off", "INT64", offset)]
+    rows = await query(
+        f"SELECT * FROM {T('property_management_companies')} {where} ORDER BY created_at DESC LIMIT @lim OFFSET @off",
+        data_params,
+    )
+
+    # Batch-fetch contacts for all returned companies to avoid N+1 queries
+    contacts_by_company: dict[str, list[dict]] = {}
+    if rows:
+        company_ids = [r["id"] for r in rows]
+        contact_rows = await query(
+            f"""
+            SELECT * FROM {T('hoa_contact_information')}
+            WHERE management_company_id IN UNNEST(@ids)
+            ORDER BY id ASC
+            """,
+            [PA("ids", "STRING", company_ids)],
+        )
+        for cr in contact_rows:
+            cid = cr["management_company_id"]
+            contacts_by_company.setdefault(cid, []).append(_shape_contact_row(cr))
+
+    items = [_shape_mgmt_row(r, contacts_by_company.get(r["id"], [])) for r in rows]
+
+    return {
+        "data": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": math.ceil(total / page_size) if page_size > 0 else 0,
+    }
+
+
+@app.post("/api/management-companies", status_code=201)
+async def create_management_company(
+    body: CreateManagementCompanyBody,
+    _user: dict = Depends(require_auth),
+) -> dict:
+    user_id = _user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token missing user id")
+    new_id = str(uuid.uuid4())
+    await execute(
+        f"""
+        INSERT INTO {T('property_management_companies')}
+            (id, name, website, phone, mailing_address, mailing_city, mailing_state,
+             mailing_zip, contact_email, branch_id, assigned_to, status, contact_status,
+             created_at, updated_at)
+        VALUES
+            (@id, @name, @website, @phone, @mailing_address, @mailing_city, @mailing_state,
+             @mailing_zip, @contact_email, @branch_id, @assigned_to, 'Target', 'uncontacted',
+             CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+        """,
+        [
+            P("id", "STRING", new_id),
+            P("name", "STRING", body.company_name),
+            P("website", "STRING", body.website),
+            P("phone", "STRING", body.phone),
+            P("mailing_address", "STRING", body.street),
+            P("mailing_city", "STRING", body.city),
+            P("mailing_state", "STRING", body.state),
+            P("mailing_zip", "STRING", body.zip),
+            P("contact_email", "STRING", body.primary_email),
+            P("branch_id", "STRING", body.branch_id),
+            P("assigned_to", "STRING", user_id),
+        ],
+    )
+
+    # Insert each contact that has at least a name or email
+    for contact in body.contacts:
+        if not (contact.name or "").strip() and not (contact.email or "").strip():
+            continue
+        contact_id = str(uuid.uuid4())
+        await execute(
+            f"""
+            INSERT INTO {T('hoa_contact_information')}
+                (id, management_company_id, contact_name, title, email, phone, source, created_at)
+            VALUES
+                (@id, @mgmt_id, @contact_name, @title, @email, @phone, 'manual', CURRENT_TIMESTAMP())
+            """,
+            [
+                P("id", "STRING", contact_id),
+                P("mgmt_id", "STRING", new_id),
+                P("contact_name", "STRING", contact.name),
+                P("title", "STRING", contact.title),
+                P("email", "STRING", contact.email or None),
+                P("phone", "STRING", contact.phone),
+            ],
+        )
+
+    # Fetch the newly created company row
+    company_rows = await query(
+        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", new_id)],
+    )
+    contact_rows = await query(
+        f"""
+        SELECT * FROM {T('hoa_contact_information')}
+        WHERE management_company_id = @id ORDER BY id ASC
+        """,
+        [P("id", "STRING", new_id)],
+    )
+    contacts = [_shape_contact_row(cr) for cr in contact_rows]
+    return _shape_mgmt_row(company_rows[0], contacts)
+
+
+@app.patch("/api/management-companies/{company_id}")
+async def patch_management_company(
+    company_id: str,
+    body: PatchManagementCompanyBody,
+    _user: dict = Depends(require_auth),
+) -> dict:
+    data = body.model_dump(exclude_none=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    _PATCHABLE = frozenset({
+        "company_name", "website", "phone", "street", "city", "state", "zip",
+        "primary_email", "branch_id", "assigned_to", "status",
+        "last_contacted", "contact_status",
+    })
+    updates_raw = [(f, v) for f, v in data.items() if f in _PATCHABLE]
+    if not updates_raw:
+        raise HTTPException(status_code=400, detail="No patchable fields provided")
+
+    if "last_contacted" in data:
+        try:
+            date.fromisoformat(str(data["last_contacted"]))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="last_contacted must be a valid ISO date (YYYY-MM-DD)")
+
+    existing = await query(
+        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Management company not found")
+
+    # Translate body field names to DB column names
+    updates_db = [(_MGMT_FIELD_TO_COL.get(f, f), v) for f, v in updates_raw]
+
+    set_clause = ", ".join(f"{col} = @{col}" for col, _ in updates_db)
+    bq_params = [P(col, _MGMT_COL_BQ_TYPES.get(col, "STRING"), v) for col, v in updates_db]
+    bq_params.append(P("company_id", "STRING", company_id))
+
+    await execute(
+        f"UPDATE {T('property_management_companies')} SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = @company_id",
+        bq_params,
+    )
+
+    company_rows = await query(
+        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    contact_rows = await query(
+        f"""
+        SELECT * FROM {T('hoa_contact_information')}
+        WHERE management_company_id = @id ORDER BY id ASC
+        """,
+        [P("id", "STRING", company_id)],
+    )
+    contacts = [_shape_contact_row(cr) for cr in contact_rows]
+    return _shape_mgmt_row(company_rows[0], contacts)
 
 
 # ── Bids ─────────────────────────────────────────────────────────────────────
@@ -652,6 +1076,28 @@ async def patch_bid(bid_id: str, body: PatchBidBody, _user: dict = Depends(requi
         f"UPDATE {T('bids')} SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = @bid_id",
         bq_params,
     )
+
+    # When a bid moves to 'pursuing', mark the linked HOA property as contacted
+    from api.pipeline import set_property_contacted
+
+    new_bid_status = data.get("status")
+    if new_bid_status == "pursuing":
+        bid_rows = await query(
+            f"SELECT lead_id FROM {T('bids')} WHERE id = @id",
+            [P("id", "STRING", bid_id)],
+        )
+        if bid_rows:
+            lead_id_for_bid = bid_rows[0].get("lead_id")
+            if lead_id_for_bid:
+                lead_rows = await query(
+                    f"SELECT hoa_property_id FROM {T('leads')} WHERE id = @id",
+                    [P("id", "STRING", lead_id_for_bid)],
+                )
+                if lead_rows:
+                    hoa_prop_id = lead_rows[0].get("hoa_property_id")
+                    if hoa_prop_id:
+                        await set_property_contacted(hoa_prop_id)
+
     rows = await query(f"SELECT * FROM {T('bids')} WHERE id = @id", [P("id", "STRING", bid_id)])
     return _coerce_row(rows[0])
 

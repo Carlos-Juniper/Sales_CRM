@@ -7,6 +7,7 @@ import {
   DashboardPage, LeadFeedPage, OutreachQueuePage, BidTrackerPage,
   PipelinePage, MapPage, EstimatingPage,
 } from '@/views/inside-sales'
+import AccountsPage from '@/views/inside-sales/AccountsPage'
 import OutsideSalesPage from '@/views/outside-sales'
 import BranchManagerPage from '@/views/branch-manager'
 import { InsideSalesGuard, OutsideSalesGuard } from '@/guards'
@@ -56,6 +57,10 @@ export const router = createBrowserRouter([
       {
         path: 'inside-sales/estimating',
         element: <InsideSalesGuard><EstimatingPage /></InsideSalesGuard>,
+      },
+      {
+        path: 'inside-sales/accounts',
+        element: <InsideSalesGuard><AccountsPage /></InsideSalesGuard>,
       },
       // Outside Sales
       {

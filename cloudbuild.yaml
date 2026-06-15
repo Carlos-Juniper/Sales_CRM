@@ -1,14 +1,19 @@
 steps:
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - 'gcloud secrets versions access latest --secret=GITHUB_TOKEN --project=juniper-crm-498215-p5 > /workspace/github_token'
+
   - name: 'gcr.io/cloud-builders/docker'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         docker build \
-          --secret id=github_token,env=GITHUB_TOKEN \
+          --secret id=github_token,src=/workspace/github_token \
           -t us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app \
           .
-    secretEnv: ['GITHUB_TOKEN']
     env:
       - 'DOCKER_BUILDKIT=1'
 
@@ -30,8 +35,3 @@ steps:
       - --set-env-vars=GCP_PROJECT=juniper-crm-498215-p5,BQ_DATASET=crm
       - --set-secrets=JWT_SECRET=JWT_SECRET:latest
       - --project=juniper-crm-498215-p5
-
-availableSecrets:
-  secretManager:
-    - versionName: projects/juniper-crm-498215-p5/secrets/GITHUB_TOKEN/versions/latest
-      env: 'GITHUB_TOKEN'

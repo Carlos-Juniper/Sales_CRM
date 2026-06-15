@@ -10,8 +10,16 @@ RUN npm run build
 FROM python:3.11-slim
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=secret,id=github_token \
+    TOKEN=$(cat /run/secrets/github_token) \
+    && pip install --no-cache-dir \
+        "juniper-crm-shared @ git+https://${TOKEN}@github.com/juniperlandscaping/juniper-crm-shared.git@main" \
+        -r requirements.txt
 
 COPY api/ ./api/
 COPY --from=frontend /app/studio/dist ./dist

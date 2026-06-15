@@ -1,10 +1,16 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
     args:
-      - build
-      - -t
-      - us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app
-      - .
+      - '-c'
+      - |
+        docker build \
+          --secret id=github_token,env=GITHUB_TOKEN \
+          -t us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app \
+          .
+    secretEnv: ['GITHUB_TOKEN']
+    env:
+      - 'DOCKER_BUILDKIT=1'
 
   - name: 'gcr.io/cloud-builders/docker'
     args:
@@ -24,3 +30,8 @@ steps:
       - --set-env-vars=GCP_PROJECT=juniper-crm-498215-p5,BQ_DATASET=crm
       - --set-secrets=JWT_SECRET=JWT_SECRET:latest
       - --project=juniper-crm-498215-p5
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/juniper-crm-498215-p5/secrets/GITHUB_TOKEN/versions/latest
+      env: 'GITHUB_TOKEN'

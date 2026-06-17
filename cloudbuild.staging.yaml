@@ -13,12 +13,10 @@ steps:
     args:
       - '-c'
       - |
-        docker build \
+        DOCKER_BUILDKIT=1 docker build \
           --secret id=github_token,src=/workspace/github_token \
           -t us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app-staging \
           .
-    env:
-      - 'DOCKER_BUILDKIT=1'
 
   - name: 'gcr.io/cloud-builders/docker'
     args:

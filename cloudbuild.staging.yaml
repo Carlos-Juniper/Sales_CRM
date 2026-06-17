@@ -28,7 +28,7 @@ steps:
       - gcloud
       - run
       - deploy
-      - juniper-crm-app-staging
+      - juniper-crm-staging
       - --image=us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app-staging
       - --region=us-central1
       - --platform=managed

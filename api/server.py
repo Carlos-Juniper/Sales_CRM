@@ -21,7 +21,6 @@ from typing import Any, Optional
 
 import bcrypt
 import jwt
-import msal
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -1242,39 +1241,30 @@ async def login(body: LoginBody, response: Response) -> dict:
 
 
 class EntraCallbackBody(BaseModel):
-    code: str
-    redirect_uri: str
+    id_token: str
 
 
 @app.post("/api/auth/entra-callback")
 async def entra_callback(body: EntraCallbackBody, response: Response) -> dict:
     client_id = os.environ["ENTRA_CLIENT_ID"]
     tenant_id = os.environ["ENTRA_TENANT_ID"]
-    client_secret = os.environ["ENTRA_CLIENT_SECRET"]
-
-    authority = f"https://login.microsoftonline.com/{tenant_id}"
-    msal_app = msal.ConfidentialClientApplication(
-        client_id, authority=authority, client_credential=client_secret
-    )
 
     try:
-        loop = asyncio.get_event_loop()
-        token_result = await loop.run_in_executor(
-            None,
-            lambda: msal_app.acquire_token_by_authorization_code(
-                body.code,
-                scopes=[],
-                redirect_uri=body.redirect_uri,
-            ),
+        jwks_uri = f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
+        jwks_client = jwt.PyJWKClient(jwks_uri)
+        signing_key = jwks_client.get_signing_key_from_jwt(body.id_token)
+        claims = jwt.decode(
+            body.id_token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=client_id,
         )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="SSO token expired")
     except Exception as exc:
-        logger.error("MSAL token exchange failed", exc_info=True)
-        raise HTTPException(status_code=503, detail="Could not reach Microsoft authentication service") from exc
+        logger.error("Entra ID token validation failed", exc_info=True)
+        raise HTTPException(status_code=401, detail="Invalid SSO token")
 
-    if "error" in token_result:
-        raise HTTPException(status_code=401, detail=token_result.get("error_description", "SSO token exchange failed"))
-
-    claims = token_result.get("id_token_claims", {})
     email = claims.get("email") or claims.get("preferred_username", "")
     if not email:
         raise HTTPException(status_code=401, detail="No email in Entra ID token")

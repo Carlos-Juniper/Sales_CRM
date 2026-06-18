@@ -23,12 +23,11 @@ export default function AuthCallbackPage() {
     async function handleCallback() {
       try {
         const result = await msalInstance.handleRedirectPromise()
-        if (!result?.code) {
+        if (!result?.idToken) {
           navigate('/login', { replace: true })
           return
         }
-        const redirectUri = `${window.location.origin}/auth/callback`
-        const user = await entraCallback(result.code, redirectUri)
+        const user = await entraCallback(result.idToken)
         login(user)
         navigate(roleDefaultRoute(user.role), { replace: true })
       } catch {

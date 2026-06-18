@@ -23,9 +23,12 @@ import bcrypt
 import jwt
 import msal
 from dotenv import load_dotenv
+from pathlib import Path
+
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from google.cloud import bigquery
 from pydantic import BaseModel
 
@@ -231,6 +234,16 @@ class PatchHoaPropertyBody(BaseModel):
     assigned_to: Optional[str] = None
     last_contacted: Optional[str] = None
     contact_status: Optional[str] = None
+    # Location and identity fields
+    property_name: Optional[str] = None
+    association_name: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
+    county: Optional[str] = None
+    estimated_acreage: Optional[float] = None
+    units: Optional[int] = None
 
 
 class LoginBody(BaseModel):
@@ -699,6 +712,9 @@ async def promote_hoa_property(
 _HOA_PATCHABLE = frozenset({
     "status", "management_company_id",
     "assigned_to", "last_contacted", "contact_status",
+    "property_name", "association_name",
+    "address", "city", "state", "zip", "county",
+    "estimated_acreage", "units",
 })
 _HOA_BQ_TYPES: dict[str, str] = {
     "status": "STRING",
@@ -706,6 +722,15 @@ _HOA_BQ_TYPES: dict[str, str] = {
     "assigned_to": "STRING",
     "last_contacted": "DATE",
     "contact_status": "STRING",
+    "property_name": "STRING",
+    "association_name": "STRING",
+    "address": "STRING",
+    "city": "STRING",
+    "state": "STRING",
+    "zip": "STRING",
+    "county": "STRING",
+    "estimated_acreage": "NUMERIC",
+    "units": "INT64",
 }
 
 
@@ -803,7 +828,7 @@ def _shape_contact_row(row: dict) -> dict:
     return {
         "id": row.get("id"),
         "name": row.get("contact_name"),
-        "title": row.get("title"),
+        "title": row.get("role"),
         "email": row.get("email"),
         "phone": row.get("phone"),
     }
@@ -916,19 +941,19 @@ async def create_management_company(
     for contact in body.contacts:
         if not (contact.name or "").strip() and not (contact.email or "").strip():
             continue
-        contact_id = str(uuid.uuid4())
+        contact_id = uuid.uuid4().int % (2**62) + 1
         await execute(
             f"""
             INSERT INTO {T('hoa_contact_information')}
-                (id, management_company_id, contact_name, title, email, phone, source, created_at)
+                (id, management_company_id, contact_name, role, email, phone, source, created_at)
             VALUES
-                (@id, @mgmt_id, @contact_name, @title, @email, @phone, 'manual', CURRENT_TIMESTAMP())
+                (@id, @mgmt_id, @contact_name, @role, @email, @phone, 'manual', CURRENT_TIMESTAMP())
             """,
             [
-                P("id", "STRING", contact_id),
+                P("id", "INT64", contact_id),
                 P("mgmt_id", "STRING", new_id),
                 P("contact_name", "STRING", contact.name),
-                P("title", "STRING", contact.title),
+                P("role", "STRING", contact.title),
                 P("email", "STRING", contact.email or None),
                 P("phone", "STRING", contact.phone),
             ],
@@ -1273,3 +1298,20 @@ async def logout(response: Response) -> dict:
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(require_auth)) -> dict:
     return user
+
+
+# ── Frontend (SPA) ───────────────────────────────────────────────────────────
+
+_DIST_DIR = Path(__file__).parent.parent / "dist"
+
+if _DIST_DIR.is_dir():
+    _assets_dir = _DIST_DIR / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str) -> FileResponse:
+        candidate = _DIST_DIR / full_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_DIST_DIR / "index.html")

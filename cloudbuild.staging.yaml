@@ -1,0 +1,38 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - 'gcloud secrets versions access latest --secret=GITHUB_TOKEN --project=juniper-crm-498215-p5 > /workspace/github_token'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        DOCKER_BUILDKIT=1 docker build \
+          --secret id=github_token,src=/workspace/github_token \
+          -t us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app-staging \
+          .
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - push
+      - us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app-staging
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    args:
+      - gcloud
+      - run
+      - deploy
+      - juniper-crm-staging
+      - --image=us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app-staging
+      - --region=us-central1
+      - --platform=managed
+      - --allow-unauthenticated
+      - --set-env-vars=GCP_PROJECT=juniper-crm-498215-p5,BQ_DATASET=crm,ENVIRONMENT=staging
+      - --set-secrets=JWT_SECRET=JWT_SECRET:latest
+      - --project=juniper-crm-498215-p5

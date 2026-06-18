@@ -6,7 +6,10 @@ steps:
     entrypoint: 'bash'
     args:
       - '-c'
-      - 'gcloud secrets versions access latest --secret=GITHUB_TOKEN --project=juniper-crm-498215-p5 > /workspace/github_token'
+      - |
+        gcloud secrets versions access latest --secret=GITHUB_TOKEN --project=juniper-crm-498215-p5 > /workspace/github_token
+        gcloud secrets versions access latest --secret=ENTRA_CLIENT_ID --project=juniper-crm-498215-p5 > /workspace/entra_client_id
+        gcloud secrets versions access latest --secret=ENTRA_TENANT_ID --project=juniper-crm-498215-p5 > /workspace/entra_tenant_id
 
   - name: 'gcr.io/cloud-builders/docker'
     entrypoint: 'bash'
@@ -15,6 +18,8 @@ steps:
       - |
         DOCKER_BUILDKIT=1 docker build \
           --secret id=github_token,src=/workspace/github_token \
+          --build-arg VITE_ENTRA_CLIENT_ID=$(cat /workspace/entra_client_id) \
+          --build-arg VITE_ENTRA_TENANT_ID=$(cat /workspace/entra_tenant_id) \
           -t us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app-staging \
           .
 
@@ -34,5 +39,5 @@ steps:
       - --platform=managed
       - --allow-unauthenticated
       - --set-env-vars=GCP_PROJECT=juniper-crm-498215-p5,BQ_DATASET=crm,ENVIRONMENT=staging
-      - --set-secrets=JWT_SECRET=JWT_SECRET:latest
+      - --set-secrets=JWT_SECRET=JWT_SECRET:latest,ENTRA_CLIENT_ID=ENTRA_CLIENT_ID:latest,ENTRA_TENANT_ID=ENTRA_TENANT_ID:latest,ENTRA_CLIENT_SECRET=ENTRA_CLIENT_SECRET:latest
       - --project=juniper-crm-498215-p5

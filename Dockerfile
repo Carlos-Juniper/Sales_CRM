@@ -4,6 +4,8 @@ WORKDIR /app/studio
 COPY studio/package*.json ./
 RUN npm ci
 COPY studio/ ./
+ARG VITE_ENTRA_CLIENT_ID
+ARG VITE_ENTRA_TENANT_ID
 RUN npm run build
 
 # ── Stage 2: Python API ───────────────────────────────────────────────────

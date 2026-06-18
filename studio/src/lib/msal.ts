@@ -7,7 +7,7 @@ const msalConfig: Configuration = {
     redirectUri: `${window.location.origin}/auth/callback`,
   },
   cache: {
-    cacheLocation: 'sessionStorage',
+    cacheLocation: 'localStorage',
   },
 }
 

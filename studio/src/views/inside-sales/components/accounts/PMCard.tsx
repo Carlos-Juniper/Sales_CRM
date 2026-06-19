@@ -1,5 +1,9 @@
-import { ChevronDown } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, Pencil } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { PMStatusBadge } from './PMStatusBadge'
+import { AddPMPanel } from './AddPMPanel'
+import { usePatchManagementCompany, useAddPMContact, useUpdatePMContact, useDeletePMContact } from '@/hooks/useManagementCompanies'
 import type { ManagementCompany, HOAProperty } from '@/types/accounts'
 
 interface PMCardProps {
@@ -11,7 +15,14 @@ interface PMCardProps {
 }
 
 export function PMCard({ company, properties, expanded, onToggle, onSelectProperty }: PMCardProps) {
+  const [editOpen, setEditOpen] = useState(false)
+  const patchManagementCompany = usePatchManagementCompany()
+  const addPMContact = useAddPMContact()
+  const updatePMContact = useUpdatePMContact()
+  const deletePMContact = useDeletePMContact()
+
   return (
+    <>
     <div className="border border-[hsl(var(--border))] rounded-xl bg-[hsl(var(--card))] overflow-hidden">
       {/* Header — click triggers onToggle */}
       <div
@@ -32,6 +43,18 @@ export function PMCard({ company, properties, expanded, onToggle, onSelectProper
 
         <div className="flex items-center gap-2 flex-shrink-0">
           <PMStatusBadge status={company.status} />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            aria-label="Edit company"
+            onClick={(e) => {
+              e.stopPropagation()
+              setEditOpen(true)
+            }}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
           <ChevronDown
             className={`h-4 w-4 text-[hsl(var(--muted-fg))] transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
           />
@@ -107,5 +130,25 @@ export function PMCard({ company, properties, expanded, onToggle, onSelectProper
         </div>
       )}
     </div>
+
+    <AddPMPanel
+      isOpen={editOpen}
+      onClose={() => setEditOpen(false)}
+      initialValues={company}
+      onSave={async () => {}}
+      onUpdate={async (body) => {
+        await patchManagementCompany.mutateAsync({ id: company.id, body })
+      }}
+      onAddContact={async (body) => {
+        await addPMContact.mutateAsync({ companyId: company.id, body })
+      }}
+      onUpdateContact={async (contactId, body) => {
+        await updatePMContact.mutateAsync({ companyId: company.id, contactId, body })
+      }}
+      onDeleteContact={async (contactId) => {
+        await deletePMContact.mutateAsync({ companyId: company.id, contactId })
+      }}
+    />
+    </>
   )
 }

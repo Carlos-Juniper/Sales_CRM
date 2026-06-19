@@ -25,11 +25,23 @@ export interface CreateHOAPropertyPayload {
 }
 
 export interface PatchHOAPropertyPayload {
+  // CRM fields
   status?: HOAProperty['status']
   management_company_id?: string | null
   assigned_to?: string | null
   last_contacted?: string | null
   contact_status?: HOAProperty['contact_status']
+  branch_id?: string | null
+  // Location and identity fields (editable via edit modal)
+  property_name?: string
+  association_name?: string | null
+  address?: string
+  city?: string
+  state?: string
+  zip?: string
+  county?: string | null
+  estimated_acreage?: number | null
+  units?: number | null
 }
 
 export const hoaPropertiesApi = {

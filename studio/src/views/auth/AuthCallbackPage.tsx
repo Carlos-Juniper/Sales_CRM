@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Leaf } from 'lucide-react'
-import { msalInstance } from '@/lib/msal'
+import { exchangeCodeForIdToken } from '@/lib/azureAuth'
 import { entraCallback } from '@/api/auth'
 import { useAuthStore } from '@/store/authStore'
 
@@ -22,13 +22,15 @@ export default function AuthCallbackPage() {
 
     async function handleCallback() {
       try {
-        const result = await msalInstance.handleRedirectPromise()
-        if (!result?.code) {
+        const params = new URLSearchParams(window.location.search)
+        const code = params.get('code')
+        const state = params.get('state')
+        if (!code || !state) {
           navigate('/login', { replace: true })
           return
         }
-        const redirectUri = `${window.location.origin}/auth/callback`
-        const user = await entraCallback(result.code, redirectUri)
+        const idToken = await exchangeCodeForIdToken(code, state)
+        const user = await entraCallback(idToken)
         login(user)
         navigate(roleDefaultRoute(user.role), { replace: true })
       } catch {

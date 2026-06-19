@@ -1,9 +1,41 @@
-import { describe, it, expect, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@/test/utils'
 import { PMCard } from '@/views/inside-sales/components/accounts/PMCard'
 import type { HOAProperty, ManagementCompany } from '@/types/accounts'
+
+// ── Hook mock ─────────────────────────────────────────────────────
+
+const mockPatchManagementCompany = vi.fn().mockResolvedValue(undefined)
+const mockAddPMContact = vi.fn().mockResolvedValue(undefined)
+const mockUpdatePMContact = vi.fn().mockResolvedValue(undefined)
+const mockDeletePMContact = vi.fn().mockResolvedValue(undefined)
+
+const makeMutation = (fn: ReturnType<typeof vi.fn>) => ({
+  mutateAsync: fn,
+  mutate: fn,
+  isPending: false,
+  isSuccess: false,
+  isError: false,
+  error: null,
+  data: undefined,
+  reset: vi.fn(),
+})
+
+vi.mock('@/hooks/useManagementCompanies', () => ({
+  usePatchManagementCompany: () => makeMutation(mockPatchManagementCompany),
+  useAddPMContact: () => makeMutation(mockAddPMContact),
+  useUpdatePMContact: () => makeMutation(mockUpdatePMContact),
+  useDeletePMContact: () => makeMutation(mockDeletePMContact),
+}))
+
+beforeEach(() => {
+  mockPatchManagementCompany.mockClear().mockResolvedValue(undefined)
+  mockAddPMContact.mockClear().mockResolvedValue(undefined)
+  mockUpdatePMContact.mockClear().mockResolvedValue(undefined)
+  mockDeletePMContact.mockClear().mockResolvedValue(undefined)
+})
 
 // ── Fixtures ──────────────────────────────────────────────────────
 
@@ -230,6 +262,107 @@ describe('PMCard — property selection', () => {
 
     expect(onSelectProperty).toHaveBeenCalledTimes(1)
     expect(onSelectProperty).toHaveBeenCalledWith(p2)
+  })
+})
+
+describe('PMCard — edit button', () => {
+  it('renders an "Edit company" button in the card header', () => {
+    render(
+      <PMCard
+        company={makeCompany()}
+        properties={sampleProperties}
+        expanded={false}
+        onToggle={vi.fn()}
+        onSelectProperty={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /edit company/i })).toBeInTheDocument()
+  })
+
+  it('clicking "Edit company" opens the AddPMPanel with the company name pre-filled', async () => {
+    const user = userEvent.setup()
+    render(
+      <PMCard
+        company={makeCompany()}
+        properties={sampleProperties}
+        expanded={false}
+        onToggle={vi.fn()}
+        onSelectProperty={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /edit company/i }))
+
+    // The edit panel title should now be visible
+    expect(await screen.findByText(/edit management company/i)).toBeInTheDocument()
+    // The company name should be pre-filled in the form
+    const nameInput = screen.getByPlaceholderText(/alliant property management/i) as HTMLInputElement
+    expect(nameInput.value).toBe('Alliant Property Management')
+  })
+
+  it('clicking "Edit company" does not toggle the card open/closed (stopPropagation)', async () => {
+    const onToggle = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <PMCard
+        company={makeCompany()}
+        properties={sampleProperties}
+        expanded={false}
+        onToggle={onToggle}
+        onSelectProperty={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /edit company/i }))
+
+    // onToggle must not fire — the edit button uses stopPropagation
+    expect(onToggle).not.toHaveBeenCalled()
+  })
+
+  it('AddPMPanel opened via edit button is in edit mode (shows "Save changes", not "Create company")', async () => {
+    const user = userEvent.setup()
+    render(
+      <PMCard
+        company={makeCompany()}
+        properties={sampleProperties}
+        expanded={false}
+        onToggle={vi.fn()}
+        onSelectProperty={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /edit company/i }))
+
+    expect(await screen.findByRole('button', { name: /save changes/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create company/i })).not.toBeInTheDocument()
+  })
+
+  it('saving edits from the panel calls patchManagementCompany with the updated payload', async () => {
+    const user = userEvent.setup()
+    render(
+      <PMCard
+        company={makeCompany()}
+        properties={sampleProperties}
+        expanded={false}
+        onToggle={vi.fn()}
+        onSelectProperty={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /edit company/i }))
+    await screen.findByText(/edit management company/i)
+
+    // Change the phone field
+    const phoneInput = screen.getByPlaceholderText(/\(239\) 454-1101/i) as HTMLInputElement
+    await user.clear(phoneInput)
+    await user.type(phoneInput, '(239) 999-0000')
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() => expect(mockPatchManagementCompany).toHaveBeenCalledTimes(1))
+    const callArgs = mockPatchManagementCompany.mock.calls[0][0] as { id: string; body: Record<string, unknown> }
+    expect(callArgs.id).toBe('pm1')
+    expect(callArgs.body.phone).toBe('(239) 999-0000')
   })
 })
 

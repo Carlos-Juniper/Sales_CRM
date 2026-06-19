@@ -13,6 +13,6 @@ export function me() {
   return apiClient.get<AuthUser>('/auth/me')
 }
 
-export function entraCallback(code: string, redirectUri: string) {
-  return apiClient.post<AuthUser>('/auth/entra-callback', { code, redirect_uri: redirectUri })
+export function entraCallback(idToken: string) {
+  return apiClient.post<AuthUser>('/auth/entra-callback', { id_token: idToken })
 }

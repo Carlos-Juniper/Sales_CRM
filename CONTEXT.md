@@ -37,3 +37,9 @@ A user ID (FK to `crm_users`) representing the sales rep who owns an HOA Propert
 
 **branch_id**
 A string identifier for the Juniper branch responsible for an account (e.g. `"Fort Myers"`). The branch name doubles as the ID. Consistent across `hoa_properties`, `management_companies`, and `leads`.
+
+**source**
+Which system originally created an HOA Property record. Stored in `hoa_properties.source`. Values: `'arcgis'` (scraped from ArcGIS), `'aspire'` (imported from Aspire). Renamed from `arcgis_source` in migration 004 to be system-agnostic. Future scrapers add new values here rather than new columns.
+
+**property_id**
+An integer FK to Aspire's `PropertyID` on an HOA Property. Populated only for `source='aspire'` rows. NULL for ArcGIS-sourced rows. Enforces a unique constraint — prevents re-importing the same Aspire property twice.

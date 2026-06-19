@@ -1,12 +1,16 @@
-import { MapPin, Building2, ArrowRight } from 'lucide-react'
+import { useState } from 'react'
+import { MapPin, Building2, ArrowRight, Pencil } from 'lucide-react'
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel'
 import { Button } from '@/components/ui/button'
 import { AccountStatusBadge } from './AccountStatusBadge'
+import { AddHOAPanel } from './AddHOAPanel'
+import { usePatchHOAProperty } from '@/hooks/useHOAProperties'
 import type { HOAProperty, ManagementCompany } from '@/types/accounts'
 
 interface HOADetailPanelProps {
   property: HOAProperty
   company: ManagementCompany | null
+  managementCompanies: ManagementCompany[]
   isOpen: boolean
   onClose: () => void
   onCreateBid: (property: HOAProperty) => void
@@ -31,14 +35,18 @@ function InfoRow({ label, value }: { label: string; value: string | null | undef
   )
 }
 
-export function HOADetailPanel({ property, company, isOpen, onClose, onCreateBid }: HOADetailPanelProps) {
+export function HOADetailPanel({ property, company, managementCompanies, isOpen, onClose, onCreateBid }: HOADetailPanelProps) {
+  const [editOpen, setEditOpen] = useState(false)
+  const patchHOAProperty = usePatchHOAProperty()
+
   const acreage = property.acreage != null ? `${property.acreage} ac` : '—'
   const units = property.units != null ? property.units.toLocaleString() : '—'
 
   return (
+    <>
     <SlideOverPanel isOpen={isOpen} onClose={onClose} title={property.property_name}>
       <div className="p-5 space-y-5">
-        {/* Status + branch badges */}
+        {/* Status + branch badges + edit button */}
         <div className="flex items-center gap-2">
           <AccountStatusBadge status={property.status} />
           {property.branch && (
@@ -47,6 +55,15 @@ export function HOADetailPanel({ property, company, isOpen, onClose, onCreateBid
               {property.branch}
             </span>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 w-7 p-0"
+            aria-label="Edit property"
+            onClick={() => setEditOpen(true)}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
         </div>
 
         {/* Key metrics */}
@@ -114,5 +131,18 @@ export function HOADetailPanel({ property, company, isOpen, onClose, onCreateBid
         </Button>
       </div>
     </SlideOverPanel>
+
+    <AddHOAPanel
+      isOpen={editOpen}
+      onClose={() => setEditOpen(false)}
+      initialValues={property}
+      managementCompanies={managementCompanies}
+      onSave={async () => {}}
+      onUpdate={async (body) => {
+        await patchHOAProperty.mutateAsync({ id: property.id, body })
+        setEditOpen(false)
+      }}
+    />
+    </>
   )
 }

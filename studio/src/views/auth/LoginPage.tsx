@@ -9,7 +9,7 @@ import { useUIStore } from '@/store/uiStore'
 import { login as authLogin } from '@/api/auth'
 import { ApiError } from '@/api/client'
 import { COMPANY_INFO } from '@/lib/constants'
-import { msalInstance, loginRequest } from '@/lib/msal'
+import { redirectToAzureLogin } from '@/lib/azureAuth'
 import './LoginPage.css'
 
 export default function LoginPage() {
@@ -50,7 +50,7 @@ export default function LoginPage() {
 
   async function handleSsoClick() {
     try {
-      await msalInstance.loginRedirect(loginRequest)
+      await redirectToAzureLogin()
     } catch {
       toast('Could not reach Microsoft sign-in. Try again.', { variant: 'error' })
     }

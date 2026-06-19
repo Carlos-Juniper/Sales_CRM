@@ -21,7 +21,6 @@ from typing import Any, Optional
 
 import bcrypt
 import jwt
-import msal
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -234,6 +233,7 @@ class PatchHoaPropertyBody(BaseModel):
     assigned_to: Optional[str] = None
     last_contacted: Optional[str] = None
     contact_status: Optional[str] = None
+    branch_id: Optional[str] = None
     # Location and identity fields
     property_name: Optional[str] = None
     association_name: Optional[str] = None
@@ -244,6 +244,20 @@ class PatchHoaPropertyBody(BaseModel):
     county: Optional[str] = None
     estimated_acreage: Optional[float] = None
     units: Optional[int] = None
+
+
+class AddPMContactBody(BaseModel):
+    name: str
+    title: Optional[str] = None   # stored in `role` column
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class PatchPMContactBody(BaseModel):
+    name: Optional[str] = None
+    title: Optional[str] = None   # stored in `role` column
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class LoginBody(BaseModel):
@@ -712,6 +726,7 @@ async def promote_hoa_property(
 _HOA_PATCHABLE = frozenset({
     "status", "management_company_id",
     "assigned_to", "last_contacted", "contact_status",
+    "branch_id",
     "property_name", "association_name",
     "address", "city", "state", "zip", "county",
     "estimated_acreage", "units",
@@ -722,6 +737,7 @@ _HOA_BQ_TYPES: dict[str, str] = {
     "assigned_to": "STRING",
     "last_contacted": "DATE",
     "contact_status": "STRING",
+    "branch_id": "STRING",
     "property_name": "STRING",
     "association_name": "STRING",
     "address": "STRING",
@@ -1034,6 +1050,159 @@ async def patch_management_company(
     return _shape_mgmt_row(company_rows[0], contacts)
 
 
+@app.post("/api/management-companies/{company_id}/contacts")
+async def add_management_company_contact(
+    company_id: str,
+    body: AddPMContactBody,
+    _user: dict = Depends(require_auth),
+) -> dict:
+    existing = await query(
+        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Management company not found")
+
+    contact_id = uuid.uuid4().int % (2**62) + 1
+    await execute(
+        f"""
+        INSERT INTO {T('hoa_contact_information')}
+            (id, management_company_id, contact_name, role, email, phone, source, created_at)
+        VALUES
+            (@id, @mgmt_id, @contact_name, @role, @email, @phone, 'manual', CURRENT_TIMESTAMP())
+        """,
+        [
+            P("id", "INT64", contact_id),
+            P("mgmt_id", "STRING", company_id),
+            P("contact_name", "STRING", body.name),
+            P("role", "STRING", body.title),
+            P("email", "STRING", body.email),
+            P("phone", "STRING", body.phone),
+        ],
+    )
+
+    company_rows = await query(
+        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    contact_rows = await query(
+        f"""
+        SELECT * FROM {T('hoa_contact_information')}
+        WHERE management_company_id = @id ORDER BY id ASC
+        """,
+        [P("id", "STRING", company_id)],
+    )
+    contacts = [_shape_contact_row(cr) for cr in contact_rows]
+    return _shape_mgmt_row(company_rows[0], contacts)
+
+
+@app.patch("/api/management-companies/{company_id}/contacts/{contact_id}")
+async def patch_management_company_contact(
+    company_id: str,
+    contact_id: int,
+    body: PatchPMContactBody,
+    _user: dict = Depends(require_auth),
+) -> dict:
+    existing_company = await query(
+        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    if not existing_company:
+        raise HTTPException(status_code=404, detail="Management company not found")
+
+    existing_contact = await query(
+        f"""
+        SELECT id FROM {T('hoa_contact_information')}
+        WHERE id = @id AND management_company_id = @mgmt_id
+        """,
+        [P("id", "INT64", contact_id), P("mgmt_id", "STRING", company_id)],
+    )
+    if not existing_contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    data = body.model_dump(exclude_none=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    # Map body field names to DB column names
+    _CONTACT_FIELD_TO_COL = {"name": "contact_name", "title": "role"}
+    updates = [(_CONTACT_FIELD_TO_COL.get(f, f), v) for f, v in data.items()]
+
+    set_clause = ", ".join(f"{col} = @{col}" for col, _ in updates)
+    bq_params = [P(col, "STRING", v) for col, v in updates]
+    bq_params.append(P("contact_id", "INT64", contact_id))
+    bq_params.append(P("mgmt_id", "STRING", company_id))
+
+    await execute(
+        f"""
+        UPDATE {T('hoa_contact_information')}
+        SET {set_clause}
+        WHERE id = @contact_id AND management_company_id = @mgmt_id
+        """,
+        bq_params,
+    )
+
+    company_rows = await query(
+        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    contact_rows = await query(
+        f"""
+        SELECT * FROM {T('hoa_contact_information')}
+        WHERE management_company_id = @id ORDER BY id ASC
+        """,
+        [P("id", "STRING", company_id)],
+    )
+    contacts = [_shape_contact_row(cr) for cr in contact_rows]
+    return _shape_mgmt_row(company_rows[0], contacts)
+
+
+@app.delete("/api/management-companies/{company_id}/contacts/{contact_id}")
+async def delete_management_company_contact(
+    company_id: str,
+    contact_id: int,
+    _user: dict = Depends(require_auth),
+) -> dict:
+    existing_company = await query(
+        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    if not existing_company:
+        raise HTTPException(status_code=404, detail="Management company not found")
+
+    existing_contact = await query(
+        f"""
+        SELECT id FROM {T('hoa_contact_information')}
+        WHERE id = @id AND management_company_id = @mgmt_id
+        """,
+        [P("id", "INT64", contact_id), P("mgmt_id", "STRING", company_id)],
+    )
+    if not existing_contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    await execute(
+        f"""
+        DELETE FROM {T('hoa_contact_information')}
+        WHERE id = @contact_id AND management_company_id = @mgmt_id
+        """,
+        [P("contact_id", "INT64", contact_id), P("mgmt_id", "STRING", company_id)],
+    )
+
+    company_rows = await query(
+        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    contact_rows = await query(
+        f"""
+        SELECT * FROM {T('hoa_contact_information')}
+        WHERE management_company_id = @id ORDER BY id ASC
+        """,
+        [P("id", "STRING", company_id)],
+    )
+    contacts = [_shape_contact_row(cr) for cr in contact_rows]
+    return _shape_mgmt_row(company_rows[0], contacts)
+
+
 # ── Bids ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/bids")
@@ -1242,39 +1411,30 @@ async def login(body: LoginBody, response: Response) -> dict:
 
 
 class EntraCallbackBody(BaseModel):
-    code: str
-    redirect_uri: str
+    id_token: str
 
 
 @app.post("/api/auth/entra-callback")
 async def entra_callback(body: EntraCallbackBody, response: Response) -> dict:
     client_id = os.environ["ENTRA_CLIENT_ID"]
     tenant_id = os.environ["ENTRA_TENANT_ID"]
-    client_secret = os.environ["ENTRA_CLIENT_SECRET"]
-
-    authority = f"https://login.microsoftonline.com/{tenant_id}"
-    msal_app = msal.ConfidentialClientApplication(
-        client_id, authority=authority, client_credential=client_secret
-    )
 
     try:
-        loop = asyncio.get_event_loop()
-        token_result = await loop.run_in_executor(
-            None,
-            lambda: msal_app.acquire_token_by_authorization_code(
-                body.code,
-                scopes=[],
-                redirect_uri=body.redirect_uri,
-            ),
+        jwks_uri = f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
+        jwks_client = jwt.PyJWKClient(jwks_uri)
+        signing_key = jwks_client.get_signing_key_from_jwt(body.id_token)
+        claims = jwt.decode(
+            body.id_token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=client_id,
         )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="SSO token expired")
     except Exception as exc:
-        logger.error("MSAL token exchange failed", exc_info=True)
-        raise HTTPException(status_code=503, detail="Could not reach Microsoft authentication service") from exc
+        logger.error("Entra ID token validation failed", exc_info=True)
+        raise HTTPException(status_code=401, detail="Invalid SSO token")
 
-    if "error" in token_result:
-        raise HTTPException(status_code=401, detail=token_result.get("error_description", "SSO token exchange failed"))
-
-    claims = token_result.get("id_token_claims", {})
     email = claims.get("email") or claims.get("preferred_username", "")
     if not email:
         raise HTTPException(status_code=401, detail="No email in Entra ID token")

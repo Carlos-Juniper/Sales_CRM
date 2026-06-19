@@ -1,4 +1,4 @@
-export type LeadType = 'HOA' | 'commercial' | 'deathcare' | 'resort'
+export type LeadType = 'HOA' | 'commercial' | 'RFP' | 'deathcare' | 'resort'
 
 export type LeadStatus =
   | 'new'
@@ -47,6 +47,7 @@ export interface Lead {
   score_factors: ScoreFactor[] | null
   estimated_acreage: number
   estimated_contract_value: number
+  units?: number | null
   contact_name: string | null
   contact_email: string | null
   contact_linkedin: string | null

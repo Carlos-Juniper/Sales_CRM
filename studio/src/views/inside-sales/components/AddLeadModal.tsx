@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import type { LeadStatus, LeadType } from '@/types'
 
-const LEAD_TYPES: LeadType[] = ['HOA', 'commercial', 'commercial']
+const LEAD_TYPES: LeadType[] = ['HOA', 'commercial', 'RFP']
 
 const COLUMN_TITLES: Partial<Record<LeadStatus, string>> = {
   new: 'New Leads',
@@ -27,11 +27,13 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
   const createLead = useCreateLead()
   const [form, setForm] = useState({
     property_name: '',
+    address: '',
     city: '',
     state: 'AZ',
     lead_type: 'HOA' as LeadType,
     estimated_contract_value: '',
     estimated_acreage: '',
+    units: '',
     contact_name: '',
     contact_email: '',
   })
@@ -51,10 +53,12 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
         estimated_contract_value: parseFloat(form.estimated_contract_value) || 0,
         estimated_acreage: parseFloat(form.estimated_acreage) || 0,
         status: defaultStatus,
+        address: form.address || undefined,
+        units: parseInt(form.units) || undefined,
         contact_name: form.contact_name || undefined,
         contact_email: form.contact_email || undefined,
       })
-      setForm({ property_name: '', city: '', state: 'AZ', lead_type: 'HOA', estimated_contract_value: '', estimated_acreage: '', contact_name: '', contact_email: '' })
+      setForm({ property_name: '', address: '', city: '', state: 'AZ', lead_type: 'HOA', estimated_contract_value: '', estimated_acreage: '', units: '', contact_name: '', contact_email: '' })
       onClose()
     } catch {
       // error toast shown by useCreateLead's onError
@@ -78,6 +82,16 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
               onChange={(e) => set('property_name', e.target.value)}
               placeholder="Silverleaf HOA"
               required
+              className="h-8 text-xs"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">Address</Label>
+            <Input
+              value={form.address}
+              onChange={(e) => set('address', e.target.value)}
+              placeholder="123 Main St"
               className="h-8 text-xs"
             />
           </div>
@@ -144,6 +158,20 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
                 value={form.estimated_acreage}
                 onChange={(e) => set('estimated_acreage', e.target.value)}
                 placeholder="25"
+                min={0}
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Units</Label>
+              <Input
+                type="number"
+                value={form.units}
+                onChange={(e) => set('units', e.target.value)}
+                placeholder="240"
                 min={0}
                 className="h-8 text-xs"
               />

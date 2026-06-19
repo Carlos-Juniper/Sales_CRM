@@ -30,6 +30,8 @@ export interface CreateLeadPayload {
   estimated_contract_value: number
   estimated_acreage: number
   status: Lead['status']
+  address?: string
+  units?: number
   contact_name?: string
   contact_email?: string
 }

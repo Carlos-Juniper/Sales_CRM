@@ -233,6 +233,7 @@ class PatchHoaPropertyBody(BaseModel):
     assigned_to: Optional[str] = None
     last_contacted: Optional[str] = None
     contact_status: Optional[str] = None
+    branch_id: Optional[str] = None
     # Location and identity fields
     property_name: Optional[str] = None
     association_name: Optional[str] = None
@@ -243,6 +244,20 @@ class PatchHoaPropertyBody(BaseModel):
     county: Optional[str] = None
     estimated_acreage: Optional[float] = None
     units: Optional[int] = None
+
+
+class AddPMContactBody(BaseModel):
+    name: str
+    title: Optional[str] = None   # stored in `role` column
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class PatchPMContactBody(BaseModel):
+    name: Optional[str] = None
+    title: Optional[str] = None   # stored in `role` column
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class LoginBody(BaseModel):
@@ -711,6 +726,7 @@ async def promote_hoa_property(
 _HOA_PATCHABLE = frozenset({
     "status", "management_company_id",
     "assigned_to", "last_contacted", "contact_status",
+    "branch_id",
     "property_name", "association_name",
     "address", "city", "state", "zip", "county",
     "estimated_acreage", "units",
@@ -721,6 +737,7 @@ _HOA_BQ_TYPES: dict[str, str] = {
     "assigned_to": "STRING",
     "last_contacted": "DATE",
     "contact_status": "STRING",
+    "branch_id": "STRING",
     "property_name": "STRING",
     "association_name": "STRING",
     "address": "STRING",
@@ -1016,6 +1033,159 @@ async def patch_management_company(
     await execute(
         f"UPDATE {T('property_management_companies')} SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = @company_id",
         bq_params,
+    )
+
+    company_rows = await query(
+        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    contact_rows = await query(
+        f"""
+        SELECT * FROM {T('hoa_contact_information')}
+        WHERE management_company_id = @id ORDER BY id ASC
+        """,
+        [P("id", "STRING", company_id)],
+    )
+    contacts = [_shape_contact_row(cr) for cr in contact_rows]
+    return _shape_mgmt_row(company_rows[0], contacts)
+
+
+@app.post("/api/management-companies/{company_id}/contacts")
+async def add_management_company_contact(
+    company_id: str,
+    body: AddPMContactBody,
+    _user: dict = Depends(require_auth),
+) -> dict:
+    existing = await query(
+        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Management company not found")
+
+    contact_id = uuid.uuid4().int % (2**62) + 1
+    await execute(
+        f"""
+        INSERT INTO {T('hoa_contact_information')}
+            (id, management_company_id, contact_name, role, email, phone, source, created_at)
+        VALUES
+            (@id, @mgmt_id, @contact_name, @role, @email, @phone, 'manual', CURRENT_TIMESTAMP())
+        """,
+        [
+            P("id", "INT64", contact_id),
+            P("mgmt_id", "STRING", company_id),
+            P("contact_name", "STRING", body.name),
+            P("role", "STRING", body.title),
+            P("email", "STRING", body.email),
+            P("phone", "STRING", body.phone),
+        ],
+    )
+
+    company_rows = await query(
+        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    contact_rows = await query(
+        f"""
+        SELECT * FROM {T('hoa_contact_information')}
+        WHERE management_company_id = @id ORDER BY id ASC
+        """,
+        [P("id", "STRING", company_id)],
+    )
+    contacts = [_shape_contact_row(cr) for cr in contact_rows]
+    return _shape_mgmt_row(company_rows[0], contacts)
+
+
+@app.patch("/api/management-companies/{company_id}/contacts/{contact_id}")
+async def patch_management_company_contact(
+    company_id: str,
+    contact_id: int,
+    body: PatchPMContactBody,
+    _user: dict = Depends(require_auth),
+) -> dict:
+    existing_company = await query(
+        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    if not existing_company:
+        raise HTTPException(status_code=404, detail="Management company not found")
+
+    existing_contact = await query(
+        f"""
+        SELECT id FROM {T('hoa_contact_information')}
+        WHERE id = @id AND management_company_id = @mgmt_id
+        """,
+        [P("id", "INT64", contact_id), P("mgmt_id", "STRING", company_id)],
+    )
+    if not existing_contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    data = body.model_dump(exclude_none=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    # Map body field names to DB column names
+    _CONTACT_FIELD_TO_COL = {"name": "contact_name", "title": "role"}
+    updates = [(_CONTACT_FIELD_TO_COL.get(f, f), v) for f, v in data.items()]
+
+    set_clause = ", ".join(f"{col} = @{col}" for col, _ in updates)
+    bq_params = [P(col, "STRING", v) for col, v in updates]
+    bq_params.append(P("contact_id", "INT64", contact_id))
+    bq_params.append(P("mgmt_id", "STRING", company_id))
+
+    await execute(
+        f"""
+        UPDATE {T('hoa_contact_information')}
+        SET {set_clause}
+        WHERE id = @contact_id AND management_company_id = @mgmt_id
+        """,
+        bq_params,
+    )
+
+    company_rows = await query(
+        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    contact_rows = await query(
+        f"""
+        SELECT * FROM {T('hoa_contact_information')}
+        WHERE management_company_id = @id ORDER BY id ASC
+        """,
+        [P("id", "STRING", company_id)],
+    )
+    contacts = [_shape_contact_row(cr) for cr in contact_rows]
+    return _shape_mgmt_row(company_rows[0], contacts)
+
+
+@app.delete("/api/management-companies/{company_id}/contacts/{contact_id}")
+async def delete_management_company_contact(
+    company_id: str,
+    contact_id: int,
+    _user: dict = Depends(require_auth),
+) -> dict:
+    existing_company = await query(
+        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
+        [P("id", "STRING", company_id)],
+    )
+    if not existing_company:
+        raise HTTPException(status_code=404, detail="Management company not found")
+
+    existing_contact = await query(
+        f"""
+        SELECT id FROM {T('hoa_contact_information')}
+        WHERE id = @id AND management_company_id = @mgmt_id
+        """,
+        [P("id", "INT64", contact_id), P("mgmt_id", "STRING", company_id)],
+    )
+    if not existing_contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    await execute(
+        f"""
+        DELETE FROM {T('hoa_contact_information')}
+        WHERE id = @contact_id AND management_company_id = @mgmt_id
+        """,
+        [P("contact_id", "INT64", contact_id), P("mgmt_id", "STRING", company_id)],
     )
 
     company_rows = await query(

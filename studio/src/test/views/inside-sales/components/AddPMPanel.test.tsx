@@ -3,6 +3,7 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@/test/utils'
 import { AddPMPanel } from '@/views/inside-sales/components/accounts/AddPMPanel'
+import type { ManagementCompany } from '@/types/accounts'
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -193,5 +194,191 @@ describe('AddPMPanel — cancel', () => {
     await user.click(screen.getByRole('button', { name: /cancel/i }))
 
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── Edit mode fixtures ────────────────────────────────────────────
+
+const sampleCompany: ManagementCompany = {
+  id: 'pm1',
+  company_name: 'Alliant Property Management',
+  website: 'www.alliantproperty.com',
+  phone: '(239) 454-1101',
+  street: '13831 Vector Ave',
+  city: 'Fort Myers',
+  state: 'FL',
+  zip: '33907',
+  primary_email: 'service@alliantproperty.com',
+  branch_id: 'b1',
+  assigned_to: 'Trent Boyd',
+  status: 'Partner',
+  contact_status: 'contacted',
+  last_contacted: '2026-05-30',
+  contacts: [
+    {
+      id: 'c1',
+      name: 'Dana Whitfield',
+      title: 'Community Association Manager',
+      email: 'dwhitfield@alliantproperty.com',
+      phone: '(239) 454-1108',
+    },
+  ],
+}
+
+function renderEditPanel(
+  onUpdate = vi.fn().mockResolvedValue(undefined),
+  onClose = vi.fn(),
+  initialValues: ManagementCompany = sampleCompany,
+  onAddContact = vi.fn().mockResolvedValue(undefined),
+  onUpdateContact = vi.fn().mockResolvedValue(undefined),
+  onDeleteContact = vi.fn().mockResolvedValue(undefined),
+) {
+  render(
+    <AddPMPanel
+      isOpen={true}
+      onClose={onClose}
+      onSave={vi.fn()}
+      initialValues={initialValues}
+      onUpdate={onUpdate}
+      onAddContact={onAddContact}
+      onUpdateContact={onUpdateContact}
+      onDeleteContact={onDeleteContact}
+    />,
+  )
+  return { onUpdate, onClose, onAddContact, onUpdateContact, onDeleteContact }
+}
+
+describe('AddPMPanel — edit mode', () => {
+  it('shows "Edit management company" as the panel title instead of "Add management company"', () => {
+    renderEditPanel()
+    expect(screen.getByText(/edit management company/i)).toBeInTheDocument()
+    expect(screen.queryByText(/add management company/i)).not.toBeInTheDocument()
+  })
+
+  it('shows "Save changes" as the submit button label instead of "Create company"', () => {
+    renderEditPanel()
+    expect(screen.getByRole('button', { name: /save changes/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create company/i })).not.toBeInTheDocument()
+  })
+
+  it('pre-fills company_name input with the value from initialValues', () => {
+    renderEditPanel()
+    const nameInput = screen.getByPlaceholderText(/alliant property management/i) as HTMLInputElement
+    expect(nameInput.value).toBe('Alliant Property Management')
+  })
+
+  it('pre-fills city and phone fields with values from initialValues', () => {
+    renderEditPanel()
+    const cityInput = screen.getByPlaceholderText(/fort myers/i) as HTMLInputElement
+    const phoneInput = screen.getByPlaceholderText(/\(239\) 454-1101/i) as HTMLInputElement
+    expect(cityInput.value).toBe('Fort Myers')
+    expect(phoneInput.value).toBe('(239) 454-1101')
+  })
+
+  it('shows existing contacts in read-only display (contact name is visible as text)', () => {
+    renderEditPanel()
+    // Contact name is now in an editable input
+    const nameInputs = screen.getAllByPlaceholderText(/dana whitfield/i) as HTMLInputElement[]
+    expect(nameInputs.some((input) => input.value === 'Dana Whitfield')).toBe(true)
+  })
+
+  it('shows contact email in read-only display', () => {
+    renderEditPanel()
+    // Contact email is now in an editable input
+    const emailInputs = screen.getAllByPlaceholderText(/dwhitfield@…/i) as HTMLInputElement[]
+    expect(emailInputs.some((input) => input.value === 'dwhitfield@alliantproperty.com')).toBe(true)
+  })
+
+  it('shows "Add contact" button in edit mode', () => {
+    renderEditPanel()
+    expect(screen.getByRole('button', { name: /add contact/i })).toBeInTheDocument()
+  })
+
+  it('existing contact name is shown in an editable input field', () => {
+    renderEditPanel()
+    const nameInputs = screen.getAllByPlaceholderText(/dana whitfield/i) as HTMLInputElement[]
+    const nameInput = nameInputs.find((input) => input.value === 'Dana Whitfield')
+    expect(nameInput).toBeDefined()
+    expect(nameInput!.tagName).toBe('INPUT')
+  })
+
+  it('can delete an existing contact row in edit mode', async () => {
+    const user = userEvent.setup()
+    renderEditPanel()
+
+    // Confirm the contact row is initially present
+    const nameInputsBefore = screen.getAllByPlaceholderText(/dana whitfield/i) as HTMLInputElement[]
+    expect(nameInputsBefore.some((input) => input.value === 'Dana Whitfield')).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: /remove contact/i }))
+
+    // After deletion, no input should have Dana Whitfield's value
+    const nameInputsAfter = screen.queryAllByPlaceholderText(/dana whitfield/i) as HTMLInputElement[]
+    expect(nameInputsAfter.every((input) => input.value !== 'Dana Whitfield')).toBe(true)
+  })
+
+  it('"Save changes" button still works and calls onUpdate with company fields', async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    renderEditPanel(onUpdate)
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
+    const payload = onUpdate.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.company_name).toBe('Alliant Property Management')
+  })
+
+  it('shows "No contacts on file" when initialValues has an empty contacts array', () => {
+    renderEditPanel(vi.fn(), vi.fn(), { ...sampleCompany, contacts: [] })
+    expect(screen.getByText(/no contacts on file/i)).toBeInTheDocument()
+  })
+
+  it('submitting calls onUpdate with the company-level fields', async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    renderEditPanel(onUpdate)
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
+    const payload = onUpdate.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.company_name).toBe('Alliant Property Management')
+    expect(payload.city).toBe('Fort Myers')
+  })
+
+  it('submitting in edit mode never calls onSave', async () => {
+    const onSave = vi.fn()
+    const onUpdate = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+
+    render(
+      <AddPMPanel
+        isOpen={true}
+        onClose={vi.fn()}
+        onSave={onSave}
+        initialValues={sampleCompany}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('create mode (no initialValues) shows "Add contact" button and calls onSave on submit', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    // Standard create-mode render
+    renderPanel(onSave)
+
+    expect(screen.getByRole('button', { name: /add contact/i })).toBeInTheDocument()
+
+    await user.type(screen.getByPlaceholderText(/alliant property management/i), 'New Company')
+    await user.click(screen.getByRole('button', { name: /create company/i }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
   })
 })

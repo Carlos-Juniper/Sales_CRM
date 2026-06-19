@@ -44,6 +44,20 @@ export interface PatchManagementCompanyPayload {
   contact_status?: ManagementCompany['contact_status']
 }
 
+export interface PMContactBody {
+  name: string
+  title?: string | null
+  email?: string | null
+  phone?: string | null
+}
+
+export interface PatchPMContactBody {
+  name?: string
+  title?: string | null
+  email?: string | null
+  phone?: string | null
+}
+
 // PMContact is imported so TypeScript resolves it — used indirectly via ManagementCompany['contacts']
 export type { PMContact }
 
@@ -62,4 +76,13 @@ export const managementCompaniesApi = {
 
   patch: (id: string, body: PatchManagementCompanyPayload) =>
     apiClient.patch<ManagementCompany>(`/management-companies/${id}`, body),
+
+  addContact: (companyId: string, body: PMContactBody) =>
+    apiClient.post<ManagementCompany>(`/management-companies/${companyId}/contacts`, body),
+
+  updateContact: (companyId: string, contactId: string, body: PatchPMContactBody) =>
+    apiClient.patch<ManagementCompany>(`/management-companies/${companyId}/contacts/${contactId}`, body),
+
+  deleteContact: (companyId: string, contactId: string) =>
+    apiClient.delete<ManagementCompany>(`/management-companies/${companyId}/contacts/${contactId}`),
 }

@@ -82,11 +82,16 @@ const samplePMCompany: ManagementCompany = {
 }
 
 vi.mock('@/hooks/useHOAProperties', () => ({
-  useHOAProperties: () => ({
-    data: [sampleHOAProperty, sampleHOAProperty2],
+  useHOAProperties: (params?: { search?: string }) => {
+    const all = [sampleHOAProperty, sampleHOAProperty2]
+    const data = params?.search
+      ? all.filter((p) => p.property_name.toLowerCase().includes(params.search!.toLowerCase()))
+      : all
+    return { data, isLoading: false, isPending: false, isError: false }
+  },
+  useHOAFilterOptions: () => ({
+    data: { branches: ['Naples', 'Fort Myers'], cities: ['Naples'] },
     isLoading: false,
-    isPending: false,
-    isError: false,
   }),
   useCreateHOAProperty: () => makemutation(mockCreateHOAProperty),
   usePatchHOAProperty: () => makemutation(mockPatchHOAProperty),

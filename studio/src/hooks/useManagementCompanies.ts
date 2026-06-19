@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { managementCompaniesApi, type CreateManagementCompanyPayload, type PatchManagementCompanyPayload } from '@/api/managementCompanies'
+import { managementCompaniesApi, type CreateManagementCompanyPayload, type PatchManagementCompanyPayload, type PMContactBody, type PatchPMContactBody } from '@/api/managementCompanies'
 import { useUIStore } from '@/store/uiStore'
 
 export const MGMT_KEY = 'management-companies'
@@ -36,5 +36,32 @@ export function usePatchManagementCompany() {
       managementCompaniesApi.patch(id, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: [MGMT_KEY] }),
     onError: () => toast('Failed to update company', { variant: 'error' }),
+  })
+}
+
+export function useAddPMContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ companyId, body }: { companyId: string; body: PMContactBody }) =>
+      managementCompaniesApi.addContact(companyId, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [MGMT_KEY] }),
+  })
+}
+
+export function useUpdatePMContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ companyId, contactId, body }: { companyId: string; contactId: string; body: PatchPMContactBody }) =>
+      managementCompaniesApi.updateContact(companyId, contactId, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [MGMT_KEY] }),
+  })
+}
+
+export function useDeletePMContact() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ companyId, contactId }: { companyId: string; contactId: string }) =>
+      managementCompaniesApi.deleteContact(companyId, contactId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [MGMT_KEY] }),
   })
 }

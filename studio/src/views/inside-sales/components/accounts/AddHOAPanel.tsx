@@ -3,8 +3,8 @@ import { SlideOverPanel } from '@/components/shared/SlideOverPanel'
 import { Button } from '@/components/ui/button'
 import { TextField } from '@/components/ui/TextField'
 import { SelectField } from '@/components/ui/SelectField'
-import type { HOAStatus, ManagementCompany } from '@/types/accounts'
-import type { CreateHOAPropertyPayload } from '@/api/hoaProperties'
+import type { HOAStatus, HOAProperty, ManagementCompany } from '@/types/accounts'
+import type { CreateHOAPropertyPayload, PatchHOAPropertyPayload } from '@/api/hoaProperties'
 
 const HOA_STATUSES: HOAStatus[] = ['Prospect', 'Bidding', 'Active', 'At Risk', 'Lost']
 
@@ -13,6 +13,9 @@ interface AddHOAPanelProps {
   onClose: () => void
   onSave: (body: CreateHOAPropertyPayload) => Promise<void>
   managementCompanies: ManagementCompany[]
+  /** Present in edit mode — pre-fills the form and switches submit to PATCH */
+  initialValues?: HOAProperty
+  onUpdate?: (body: PatchHOAPropertyPayload) => Promise<void>
 }
 
 interface FormState {
@@ -45,8 +48,28 @@ const INITIAL: FormState = {
   management_company_id: '',
 }
 
-export function AddHOAPanel({ isOpen, onClose, onSave, managementCompanies }: AddHOAPanelProps) {
-  const [form, setForm] = useState<FormState>(INITIAL)
+function formFromProperty(p: HOAProperty): FormState {
+  return {
+    property_name: p.property_name,
+    association_name: p.association_name ?? '',
+    address: p.address,
+    city: p.city,
+    state: p.state,
+    zip: p.zip,
+    county: p.county ?? '',
+    acreage: p.acreage != null ? String(p.acreage) : '',
+    units: p.units != null ? String(p.units) : '',
+    status: p.status,
+    branch: p.branch ?? '',
+    management_company_id: p.management_company_id ?? '',
+  }
+}
+
+export function AddHOAPanel({ isOpen, onClose, onSave, managementCompanies, initialValues, onUpdate }: AddHOAPanelProps) {
+  const isEditMode = initialValues !== undefined
+  const [form, setForm] = useState<FormState>(() =>
+    isEditMode ? formFromProperty(initialValues) : INITIAL
+  )
   const [saving, setSaving] = useState(false)
 
   const isValid = form.property_name.trim().length > 0
@@ -56,25 +79,48 @@ export function AddHOAPanel({ isOpen, onClose, onSave, managementCompanies }: Ad
       setForm((prev) => ({ ...prev, [key]: e.target.value }))
   }
 
+  function handleClose() {
+    // Reset to the baseline for this mode so reopening shows consistent state
+    setForm(isEditMode ? formFromProperty(initialValues) : INITIAL)
+    onClose()
+  }
+
   async function handleSubmit() {
     if (!isValid) return
     setSaving(true)
     try {
-      await onSave({
-        property_name: form.property_name.trim(),
-        association_name: form.association_name.trim(),
-        address: form.address.trim(),
-        city: form.city.trim(),
-        state: form.state.trim(),
-        zip: form.zip.trim(),
-        county: form.county.trim(),
-        acreage: form.acreage ? Number(form.acreage) : 0,
-        units: form.units ? Number(form.units) : null,
-        status: form.status,
-        branch: form.branch || null,
-        management_company_id: form.management_company_id || null,
-      })
-      setForm(INITIAL)
+      if (isEditMode && onUpdate) {
+        await onUpdate({
+          property_name: form.property_name.trim(),
+          association_name: form.association_name.trim() || null,
+          address: form.address.trim(),
+          city: form.city.trim(),
+          state: form.state.trim(),
+          zip: form.zip.trim(),
+          county: form.county.trim() || null,
+          estimated_acreage: form.acreage ? Number(form.acreage) : null,
+          units: form.units ? Number(form.units) : null,
+          status: form.status,
+          branch_id: form.branch || null,
+          management_company_id: form.management_company_id || null,
+        })
+      } else {
+        await onSave({
+          property_name: form.property_name.trim(),
+          association_name: form.association_name.trim(),
+          address: form.address.trim(),
+          city: form.city.trim(),
+          state: form.state.trim(),
+          zip: form.zip.trim(),
+          county: form.county.trim(),
+          acreage: form.acreage ? Number(form.acreage) : 0,
+          units: form.units ? Number(form.units) : null,
+          status: form.status,
+          branch: form.branch || null,
+          management_company_id: form.management_company_id || null,
+        })
+      }
+      setForm(isEditMode ? formFromProperty(initialValues) : INITIAL)
       onClose()
     } finally {
       setSaving(false)
@@ -82,7 +128,7 @@ export function AddHOAPanel({ isOpen, onClose, onSave, managementCompanies }: Ad
   }
 
   return (
-    <SlideOverPanel isOpen={isOpen} onClose={onClose} title="Add HOA property">
+    <SlideOverPanel isOpen={isOpen} onClose={handleClose} title={isEditMode ? 'Edit HOA property' : 'Add HOA property'}>
       <div className="p-5 space-y-5">
         {/* Property details */}
         <section className="space-y-3">
@@ -195,7 +241,7 @@ export function AddHOAPanel({ isOpen, onClose, onSave, managementCompanies }: Ad
 
       {/* Footer */}
       <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={onClose} type="button">
+        <Button variant="ghost" size="sm" onClick={handleClose} type="button">
           Cancel
         </Button>
         <Button
@@ -205,7 +251,7 @@ export function AddHOAPanel({ isOpen, onClose, onSave, managementCompanies }: Ad
           type="button"
           className="ml-auto"
         >
-          Create property
+          {isEditMode ? 'Save changes' : 'Create property'}
         </Button>
       </div>
     </SlideOverPanel>

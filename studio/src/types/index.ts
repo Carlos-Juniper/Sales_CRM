@@ -1,4 +1,5 @@
-export type LeadType = 'HOA' | 'commercial' | 'RFP' | 'deathcare' | 'resort'
+export const LEAD_TYPES = ['HOA', 'commercial', 'deathcare', 'resort'] as const
+export type LeadType = (typeof LEAD_TYPES)[number]
 
 export type LeadStatus =
   | 'new'

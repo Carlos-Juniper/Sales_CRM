@@ -71,10 +71,11 @@ describe('LEAD_STATUS_LABELS', () => {
 })
 
 describe('LEAD_TYPE_COLORS', () => {
-  it('has entries for RFP, HOA, and commercial', () => {
-    expect(LEAD_TYPE_COLORS).toHaveProperty('commercial')
+  it('has entries for HOA, commercial, deathcare, and resort', () => {
     expect(LEAD_TYPE_COLORS).toHaveProperty('HOA')
     expect(LEAD_TYPE_COLORS).toHaveProperty('commercial')
+    expect(LEAD_TYPE_COLORS).toHaveProperty('deathcare')
+    expect(LEAD_TYPE_COLORS).toHaveProperty('resort')
   })
 
   it('each entry has bg, text, and border class strings', () => {

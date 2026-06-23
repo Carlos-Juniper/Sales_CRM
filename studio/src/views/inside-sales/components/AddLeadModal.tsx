@@ -7,9 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+import { LEAD_TYPES } from '@/types'
 import type { LeadStatus, LeadType } from '@/types'
-
-const LEAD_TYPES: LeadType[] = ['HOA', 'commercial', 'RFP']
 
 const COLUMN_TITLES: Partial<Record<LeadStatus, string>> = {
   new: 'New Leads',
@@ -139,7 +138,7 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1">
               <Label className="text-xs">Contract value ($)</Label>
               <Input
@@ -162,9 +161,6 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
                 className="h-8 text-xs"
               />
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <Label className="text-xs">Units</Label>
               <Input

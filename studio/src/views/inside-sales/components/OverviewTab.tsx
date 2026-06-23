@@ -113,6 +113,12 @@ export function OverviewTab({ lead }: OverviewTabProps) {
             <p className="text-xs text-gray-400">Acreage</p>
             <p className="font-semibold text-gray-900 mt-0.5">{lead.estimated_acreage} ac</p>
           </div>
+          {lead.units != null && (
+            <div>
+              <p className="text-xs text-gray-400">Units</p>
+              <p className="font-semibold text-gray-900 mt-0.5">{lead.units}</p>
+            </div>
+          )}
           <div>
             <p className="text-xs text-gray-400">Type</p>
             <p className="font-semibold text-gray-900 mt-0.5 capitalize">{lead.lead_type}</p>

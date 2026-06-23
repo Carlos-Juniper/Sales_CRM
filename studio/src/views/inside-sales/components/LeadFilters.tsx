@@ -5,9 +5,8 @@ import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
 import { useLeadsStore } from '@/store/leadsStore'
 import { cn } from '@/lib/utils'
+import { LEAD_TYPES } from '@/types'
 import type { LeadType } from '@/types'
-
-const LEAD_TYPES: LeadType[] = ['HOA', 'commercial', 'deathcare', 'resort']
 const LEAD_TYPE_LABELS: Record<LeadType, string> = { HOA: 'HOA', commercial: 'Commercial', deathcare: 'Deathcare', resort: 'Resort' }
 const STATES = ['FL', 'TX', 'PA', 'NC', 'SC']
 

@@ -145,7 +145,7 @@ describe('useLeads', () => {
     const { wrapper } = createWrapper()
     const { result } = renderHook(() => useLeads(), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(capturedUrl?.searchParams.get('lead_types')).toBe('HOA,RFP')
+    expect(capturedUrl?.searchParams.get('lead_types')).toBe('HOA,commercial')
   })
 
   it('passes states filter as comma-separated query param', async () => {
@@ -230,7 +230,7 @@ describe('useOutreachHistory', () => {
   it('fetches outreach history for a lead', async () => {
     const history: OutreachHistory[] = [
       {
-        id: 'o1', lead_id: 'l1', channel: 'email', message: 'Hello',
+        id: 'o1', lead_id: 'l1', channel: 'email', direction: 'out', message: 'Hello',
         sent_at: '2025-01-01T00:00:00Z', response_received: false,
         response_at: null, sequence_step: 1, next_follow_up: null,
       },

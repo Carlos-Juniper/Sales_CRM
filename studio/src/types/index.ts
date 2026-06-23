@@ -101,10 +101,33 @@ export interface OutreachHistory {
   channel: OutreachChannel
   message: string
   sent_at: string
+  direction: 'in' | 'out'           // 'out' = we sent, 'in' = they replied
+  sender_name?: string               // for inbound messages, the contact's name
   response_received: boolean
   response_at: string | null
   sequence_step: number
   next_follow_up: string | null
+}
+
+export interface OutreachContact {
+  id: string
+  name: string
+  title: string
+  email: string
+  company: string
+  city: string
+  state: string
+  type: 'HOA' | 'commercial' | 'deathcare' | 'resort'
+}
+
+export interface OutreachQueueSummary {
+  lead_id: string
+  last_message: string
+  last_message_direction: 'in' | 'out'
+  last_message_at: string
+  last_message_channel: OutreachChannel
+  unread: boolean
+  overdue: boolean
 }
 
 export interface InsideSalesSummary {

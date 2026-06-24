@@ -28,12 +28,12 @@ describe('LeadTypeBadge', () => {
   })
 
   it('renders Commercial badge', () => {
-    render(<LeadTypeBadge type={'Commercial' as LeadType} />)
+    render(<LeadTypeBadge type={'commercial' as LeadType} />)
     expect(screen.getByText('Commercial')).toBeInTheDocument()
   })
 
   it('Commercial badge has amber styling', () => {
-    const { container } = render(<LeadTypeBadge type={'Commercial' as LeadType} />)
+    const { container } = render(<LeadTypeBadge type={'commercial' as LeadType} />)
     const badge = container.firstChild as HTMLElement
     expect(badge.className).toContain('bg-amber-100')
   })

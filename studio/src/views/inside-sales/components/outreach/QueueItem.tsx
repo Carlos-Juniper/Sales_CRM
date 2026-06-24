@@ -47,7 +47,7 @@ export function QueueItem({ lead, isSelected, onClick }: QueueItemProps) {
     <button
       type="button"
       onClick={onClick}
-      aria-selected={isSelected}
+      aria-current={isSelected || undefined}
       data-selected={isSelected}
       className={cn(
         'w-full text-left px-4 py-3 border-b border-[hsl(var(--border))] transition-colors',

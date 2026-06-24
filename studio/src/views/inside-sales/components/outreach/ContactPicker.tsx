@@ -84,7 +84,11 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
 
         {/* To field — selected chips */}
         {selectedContacts.length > 0 && (
-          <div className="px-4 py-2 border-b border-[hsl(var(--border))] flex flex-wrap gap-1.5 flex-shrink-0">
+          <div
+            role="list"
+            aria-label="Selected recipients"
+            className="px-4 py-2 border-b border-[hsl(var(--border))] flex flex-wrap gap-1.5 flex-shrink-0"
+          >
             <span className="text-xs text-[hsl(var(--muted-fg))] self-center mr-1">To:</span>
             {selectedContacts.map((c) => (
               <span
@@ -92,7 +96,6 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
                 role="listitem"
                 aria-label={c.name}
                 data-chip={c.name}
-                aria-selected="true"
                 className="inline-flex items-center gap-1 text-xs bg-[#2E7D52]/10 text-[#2E7D52] px-2 py-0.5 rounded-full font-medium"
               >
                 {`✓ ${c.name}`}
@@ -125,7 +128,12 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
         </div>
 
         {/* Contacts list */}
-        <div className="flex-1 overflow-y-auto">
+        <div
+          role="listbox"
+          aria-multiselectable="true"
+          aria-label="Contacts"
+          className="flex-1 overflow-y-auto"
+        >
           {isLoading ? (
             <div className="p-4 space-y-3">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -154,6 +162,7 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
                     <button
                       key={c.id}
                       type="button"
+                      role="option"
                       onClick={() => toggle(c.id)}
                       aria-selected={isSelected}
                       className={cn(

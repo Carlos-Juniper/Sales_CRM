@@ -12,7 +12,7 @@ import { makeUser } from '@/test/utils'
 import type { Lead } from '@/types'
 
 // Mock the PipelinePage module to avoid DnD Kit in tests
-vi.mock('@/views/inside-sales/PipelinePage', () => ({
+vi.mock('@/views/inside-sales/components/AddLeadModal', () => ({
   AddLeadModal: ({
     open,
     onClose,

@@ -96,7 +96,10 @@ export function Composer({ leadId, contactName, onSent, composeRole = true }: Co
   return (
     <div className="flex-shrink-0 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 pt-3 pb-4">
       {/* Channel tabs */}
-      <div className="flex items-center gap-1 mb-2">
+      <div
+        {...(composeRole ? { role: 'tablist' as const, 'aria-label': 'Compose channel' } : {})}
+        className="flex items-center gap-1 mb-2"
+      >
         {(['email', 'linkedin', 'phone'] as OutreachChannel[]).map((ch) => {
           const Icon = CHANNEL_ICONS[ch]
           return (

@@ -124,7 +124,7 @@ export function ConversationPane({ leadId }: ConversationPaneProps) {
         </div>
 
         {/* Channel filter tabs */}
-        <div className="flex gap-0">
+        <div role="tablist" aria-label="Filter messages by channel" className="flex gap-0">
           {(['all', 'email', 'linkedin', 'phone'] as ChannelFilter[]).map((ch) => (
             <button
               key={ch}

@@ -80,7 +80,7 @@ export function ListPane({ selectedLeadId, onSelectLead, onNewMessage }: ListPan
       </div>
 
       {/* Filter tabs */}
-      <div className="flex-shrink-0 flex border-b border-[hsl(var(--border))] px-4">
+      <div role="tablist" aria-label="Filter conversations" className="flex-shrink-0 flex border-b border-[hsl(var(--border))] px-4">
         {tabs.map((tab) => (
           <button
             key={tab.key}
@@ -111,7 +111,7 @@ export function ListPane({ selectedLeadId, onSelectLead, onNewMessage }: ListPan
 
       {/* List */}
       <ScrollArea className="flex-1">
-        <div role="list">
+        <div role="list" aria-label="Conversations">
           {isLoading ? (
             Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="h-20 border-b border-[hsl(var(--border))] animate-pulse bg-[hsl(var(--muted))]" />
@@ -126,12 +126,13 @@ export function ListPane({ selectedLeadId, onSelectLead, onNewMessage }: ListPan
             </div>
           ) : (
             filtered.map((lead: Lead) => (
-              <QueueItem
-                key={lead.id}
-                lead={lead}
-                isSelected={lead.id === selectedLeadId}
-                onClick={() => onSelectLead(lead.id)}
-              />
+              <div role="listitem" key={lead.id}>
+                <QueueItem
+                  lead={lead}
+                  isSelected={lead.id === selectedLeadId}
+                  onClick={() => onSelectLead(lead.id)}
+                />
+              </div>
             ))
           )}
         </div>

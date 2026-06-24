@@ -107,6 +107,9 @@ vi.mock('@/hooks/useManagementCompanies', () => ({
   }),
   useCreateManagementCompany: () => makemutation(mockCreateManagementCompany),
   usePatchManagementCompany: () => makemutation(vi.fn()),
+  useAddPMContact: () => makemutation(vi.fn()),
+  useUpdatePMContact: () => makemutation(vi.fn()),
+  useDeletePMContact: () => makemutation(vi.fn()),
 }))
 
 // ── Tests ─────────────────────────────────────────────────────────

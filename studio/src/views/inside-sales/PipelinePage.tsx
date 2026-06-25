@@ -118,7 +118,7 @@ function KanbanColumn({ id, title, color, leads, conversionRate, onCardClick, on
   const dotColor = COLUMN_COLORS[id] ?? 'bg-slate-500'
 
   return (
-    <div className="flex flex-col min-w-[240px] flex-1">
+    <div className="flex flex-col min-w-[200px] lg:flex-1 lg:min-w-0">
       <div className={cn('border-t-2 rounded-t-none mb-3 pt-0', color)} />
       <div className="flex items-center justify-between mb-1.5 px-0.5">
         <div className="flex items-center gap-2">
@@ -305,7 +305,7 @@ export default function PipelinePage() {
         {isLoading ? (
           <div className="flex gap-4">
             {COLUMNS.map(col => (
-              <div key={col.id} className="flex-1 min-w-[240px] space-y-2">
+              <div key={col.id} className="min-w-[200px] lg:flex-1 lg:min-w-0 space-y-2">
                 {Array.from({ length: 3 }).map((_, i) => <KanbanCardSkeleton key={i} />)}
               </div>
             ))}
@@ -317,7 +317,7 @@ export default function PipelinePage() {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <div className="flex gap-4 min-w-max pb-4">
+            <div className="flex gap-4 pb-4 min-w-max lg:w-full lg:min-w-0">
               {COLUMNS.map(col => (
                 <KanbanColumn
                   key={col.id}

@@ -3,7 +3,6 @@ import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
 import { apiClient, ApiError } from '@/api/client'
 import { useAuthStore } from '@/store/authStore'
-import { makeUser } from '../utils'
 
 beforeEach(() => {
   useAuthStore.setState({ user: null, isLoading: false })

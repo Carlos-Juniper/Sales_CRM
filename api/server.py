@@ -163,6 +163,31 @@ class OutreachSendBody(BaseModel):
     performed_by: Optional[str] = None
 
 
+class MsGraphTokenBody(BaseModel):
+    access_token: str
+    refresh_token: str
+    expires_in: int
+    scope: str = ""
+
+
+class CalendarEventCreateBody(BaseModel):
+    subject: str
+    start_iso: str
+    end_iso: str
+    attendees: list[str] = []
+    body: Optional[str] = None
+    online_meeting: bool = True
+
+
+class ScheduleMeetingBody(BaseModel):
+    subject: str
+    start_iso: str
+    end_iso: str
+    attendees: list[str] = []
+    body: Optional[str] = None
+    online_meeting: bool = True
+
+
 class CreateBidBody(BaseModel):
     lead_id: str
     estimated_value: float
@@ -465,12 +490,19 @@ async def delete_lead(lead_id: str, _user: dict = Depends(require_auth)) -> None
 _CHANNEL_TO_ACTION: dict[str, str] = {
     "email": "email_sent",
     "phone": "call_logged",
+    "call": "call_logged",
     "linkedin": "email_sent",
+    "sms": "sms_sent",
+    "note": "note_added",
+    "meeting": "meeting_scheduled",
 }
 _ACTION_TO_CHANNEL: dict[str, str] = {
     "email_sent": "email",
-    "call_logged": "phone",
+    "call_logged": "call",
+    "sms_sent": "sms",
+    "sms_received": "sms",
     "note_added": "note",
+    "meeting_scheduled": "meeting",
 }
 
 
@@ -485,7 +517,7 @@ async def get_outreach(lead_id: str, _user: dict = Depends(require_auth)) -> lis
         """,
         [
             P("lead_id", "STRING", lead_id),
-            PA("types", "STRING", ["email_sent", "call_logged", "note_added"]),
+            PA("types", "STRING", list(_ACTION_TO_CHANNEL.keys())),
         ],
     )
     return [
@@ -505,20 +537,59 @@ async def get_outreach(lead_id: str, _user: dict = Depends(require_auth)) -> lis
             "response_at": None,
             "sequence_step": 1,
             "next_follow_up": None,
+            "external_message_id": r.get("external_message_id"),
         }
         for r in rows
     ]
 
 
 @app.post("/api/outreach/send")
-async def send_outreach(body: OutreachSendBody, _user: dict = Depends(require_auth)) -> dict:
+async def send_outreach(body: OutreachSendBody, user: dict = Depends(require_auth)) -> dict:
+    try:
+        from api.compliance import assert_can_contact
+    except ImportError:
+        def assert_can_contact(*a, **k):
+            pass
+
     action_type = _CHANNEL_TO_ACTION.get(body.channel, "email_sent")
+    external_message_id: Optional[str] = None
+
+    if body.channel == "email":
+        assert_can_contact("email", email=body.performed_by)
+        try:
+            from api import graph as _graph
+            lead_rows = await query(
+                f"SELECT contact_email FROM {T('leads')} WHERE id = @id",
+                [P("id", "STRING", body.lead_id)],
+            )
+            contact_email = lead_rows[0].get("contact_email") if lead_rows else None
+            to_addrs = [contact_email] if contact_email else []
+            if to_addrs:
+                performed_by_id = body.performed_by or user.get("id", "")
+                external_message_id = await _graph.send_mail(
+                    performed_by_id,
+                    to=to_addrs,
+                    subject="Outreach from Juniper Landscaping",
+                    body_html=body.message,
+                )
+        except ValueError as exc:
+            # User hasn't granted Graph scopes — surface a friendly error
+            raise HTTPException(
+                status_code=400,
+                detail=f"Microsoft Graph not connected: {exc}. Please reconnect your Microsoft account.",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("Graph send_mail failed: %s", exc)
+            raise HTTPException(status_code=502, detail="Email send via Microsoft Graph failed")
+
     await execute(
         f"""
         INSERT INTO {T('lead_actions')}
-            (id, lead_id, action_type, detail, performed_by, performed_at)
+            (id, lead_id, action_type, detail, performed_by, performed_at, external_message_id)
         VALUES
-            (@id, @lead_id, @action_type, @detail, @performed_by, CURRENT_TIMESTAMP())
+            (@id, @lead_id, @action_type, @detail, @performed_by, CURRENT_TIMESTAMP(), @external_message_id)
         """,
         [
             P("id", "STRING", str(uuid.uuid4())),
@@ -526,6 +597,7 @@ async def send_outreach(body: OutreachSendBody, _user: dict = Depends(require_au
             P("action_type", "STRING", action_type),
             P("detail", "STRING", body.message),
             P("performed_by", "STRING", body.performed_by),
+            P("external_message_id", "STRING", external_message_id),
         ],
     )
     await execute(
@@ -548,7 +620,10 @@ async def send_outreach(body: OutreachSendBody, _user: dict = Depends(require_au
         if hoa_prop_id:
             await set_property_contacted(hoa_prop_id)
 
-    return {"success": True, "message_id": f"msg_{uuid.uuid4().hex[:12]}"}
+    return {
+        "success": True,
+        "message_id": external_message_id or f"msg_{uuid.uuid4().hex[:12]}",
+    }
 
 
 # ── HOA Properties ───────────────────────────────────────────────────────────
@@ -1489,6 +1564,20 @@ async def entra_callback(body: EntraCallbackBody, response: Response) -> dict:
     return _issue_jwt(user_rows[0], response)
 
 
+@app.post("/api/auth/ms-graph-token")
+async def store_ms_graph_token(body: MsGraphTokenBody, user: dict = Depends(require_auth)) -> dict:
+    """Store or refresh the user's Microsoft Graph OAuth tokens."""
+    from api import graph as _graph
+    await _graph.store_tokens(
+        user["id"],
+        access_token=body.access_token,
+        refresh_token=body.refresh_token,
+        expires_in=body.expires_in,
+        scope=body.scope,
+    )
+    return {"ok": True}
+
+
 @app.post("/api/auth/logout")
 async def logout(response: Response) -> dict:
     response.delete_cookie(key="session")
@@ -1498,6 +1587,85 @@ async def logout(response: Response) -> dict:
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(require_auth)) -> dict:
     return user
+
+
+# ── Calendar ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/calendar/events")
+async def calendar_list_events(
+    start: str,
+    end: str,
+    user: dict = Depends(require_auth),
+) -> list:
+    from api import graph as _graph
+    try:
+        return await _graph.list_events(user["id"], start, end)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/calendar/events")
+async def calendar_create_event(
+    body: CalendarEventCreateBody,
+    user: dict = Depends(require_auth),
+) -> dict:
+    from api import graph as _graph
+    try:
+        return await _graph.create_event(
+            user["id"],
+            subject=body.subject,
+            start_iso=body.start_iso,
+            end_iso=body.end_iso,
+            attendees=body.attendees,
+            body=body.body,
+            online_meeting=body.online_meeting,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/leads/{lead_id}/schedule-meeting")
+async def schedule_lead_meeting(
+    lead_id: str,
+    body: ScheduleMeetingBody,
+    user: dict = Depends(require_auth),
+) -> dict:
+    """Create a calendar event and record a meeting_scheduled lead action."""
+    from api import graph as _graph
+
+    try:
+        event = await _graph.create_event(
+            user["id"],
+            subject=body.subject,
+            start_iso=body.start_iso,
+            end_iso=body.end_iso,
+            attendees=body.attendees,
+            body=body.body,
+            online_meeting=body.online_meeting,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    event_id = event.get("id", "")
+
+    await execute(
+        f"""
+        INSERT INTO {T('lead_actions')}
+            (id, lead_id, action_type, detail, performed_by, performed_at, external_message_id)
+        VALUES
+            (@id, @lead_id, @action_type, @detail, @performed_by, CURRENT_TIMESTAMP(), @external_message_id)
+        """,
+        [
+            P("id", "STRING", str(uuid.uuid4())),
+            P("lead_id", "STRING", lead_id),
+            P("action_type", "STRING", "meeting_scheduled"),
+            P("detail", "STRING", body.subject),
+            P("performed_by", "STRING", user["id"]),
+            P("external_message_id", "STRING", event_id),
+        ],
+    )
+
+    return {"event": event, "lead_id": lead_id}
 
 
 # ── Frontend (SPA) ───────────────────────────────────────────────────────────

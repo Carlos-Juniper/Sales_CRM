@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS juniper.leads (
     lat                      DECIMAL(9,6)   DEFAULT NULL,
     lng                      DECIMAL(9,6)   DEFAULT NULL,
     estimated_acreage        DECIMAL(8,2)   DEFAULT NULL,
+    units                    INT            DEFAULT NULL,
     bid_deadline             DATE           DEFAULT NULL,
     estimated_contract_value DECIMAL(15,2)  DEFAULT NULL,
     source_url               TEXT           DEFAULT NULL,

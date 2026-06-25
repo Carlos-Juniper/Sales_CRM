@@ -72,7 +72,7 @@ export function HandoffModal({ lead, isOpen, onClose }: HandoffModalProps) {
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>Hand Off to Outside Sales</DialogTitle>
+              <DialogTitle>Hand Off to Estimating Team</DialogTitle>
               <DialogDescription>
                 Assign <span className="font-medium text-[hsl(var(--fg))]">{lead.property_name}</span> to a field rep for site walk and proposal.
               </DialogDescription>
@@ -105,7 +105,7 @@ export function HandoffModal({ lead, isOpen, onClose }: HandoffModalProps) {
                 <Label>Assign to rep</Label>
                 <Select value={selectedRepId} onValueChange={setSelectedRepId}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select outside sales rep…" />
+                    <SelectValue placeholder="Select estimating team rep…" />
                   </SelectTrigger>
                   <SelectContent>
                     {reps.length === 0 ? (

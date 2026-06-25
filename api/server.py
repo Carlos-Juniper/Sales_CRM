@@ -82,7 +82,7 @@ _LEAD_BQ_TYPES: dict[str, str] = {
     "status": "STRING", "assigned_to": "STRING", "notes": "STRING",
     "priority": "INT64", "property_name": "STRING", "lead_type": "STRING",
     "address": "STRING", "city": "STRING", "state": "STRING", "zip": "STRING",
-    "bid_deadline": "DATE", "estimated_acreage": "FLOAT64",
+    "bid_deadline": "DATE", "estimated_acreage": "FLOAT64", "units": "INT64",
     "estimated_contract_value": "FLOAT64", "contact_name": "STRING",
     "contact_email": "STRING", "handoff_notes": "STRING", "division_id": "INT64",
 }
@@ -128,6 +128,7 @@ class CreateLeadBody(BaseModel):
     lead_type: str
     estimated_contract_value: Optional[float] = None
     estimated_acreage: Optional[float] = None
+    units: Optional[int] = None
     status: str = "new"
     contact_name: Optional[str] = None
     contact_email: Optional[str] = None
@@ -146,6 +147,7 @@ class PatchLeadBody(BaseModel):
     zip: Optional[str] = None
     bid_deadline: Optional[str] = None
     estimated_acreage: Optional[float] = None
+    units: Optional[int] = None
     estimated_contract_value: Optional[float] = None
     contact_name: Optional[str] = None
     contact_email: Optional[str] = None
@@ -365,11 +367,11 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
         f"""
         INSERT INTO {T('leads')}
             (id, source, lead_type, property_name, city, state,
-             estimated_contract_value, estimated_acreage, status,
+             estimated_contract_value, estimated_acreage, units, status,
              contact_name, contact_email, created_at, updated_at)
         VALUES
             (@id, 'manual', @lead_type, @property_name, @city, @state,
-             @estimated_contract_value, @estimated_acreage, @status,
+             @estimated_contract_value, @estimated_acreage, @units, @status,
              @contact_name, @contact_email, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
@@ -380,6 +382,7 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
             P("state", "STRING", body.state),
             P("estimated_contract_value", "FLOAT64", body.estimated_contract_value),
             P("estimated_acreage", "FLOAT64", body.estimated_acreage),
+            P("units", "INT64", body.units),
             P("status", "STRING", body.status),
             P("contact_name", "STRING", body.contact_name),
             P("contact_email", "STRING", body.contact_email),
@@ -395,7 +398,7 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
     _PATCHABLE = frozenset({
         "status", "assigned_to", "notes", "priority",
         "property_name", "lead_type", "address", "city", "state", "zip", "bid_deadline",
-        "estimated_acreage", "estimated_contract_value",
+        "estimated_acreage", "units", "estimated_contract_value",
         "contact_name", "contact_email", "handoff_notes", "division_id",
     })
     data = body.model_dump(exclude_none=True)

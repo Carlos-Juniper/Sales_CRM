@@ -290,7 +290,7 @@ describe('LeadDetailPanel — handoff', () => {
     render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
     await screen.findByText('Silverleaf HOA')
     expect(
-      screen.getByRole('button', { name: /hand off to outside sales/i }),
+      screen.getByRole('button', { name: /hand off to estimating team/i }),
     ).toBeInTheDocument()
   })
 
@@ -299,8 +299,8 @@ describe('LeadDetailPanel — handoff', () => {
     const user = userEvent.setup()
     render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
     await screen.findByText('Silverleaf HOA')
-    await user.click(screen.getByRole('button', { name: /hand off to outside sales/i }))
-    expect(await screen.findByRole('dialog', { name: /hand off to outside sales/i })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /hand off to estimating team/i }))
+    expect(await screen.findByRole('dialog', { name: /hand off to estimating team/i })).toBeInTheDocument()
   })
 
   it('HandoffModal Cancel closes without firing PATCH', async () => {
@@ -315,11 +315,11 @@ describe('LeadDetailPanel — handoff', () => {
     const user = userEvent.setup()
     render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
     await screen.findByText('Silverleaf HOA')
-    await user.click(screen.getByRole('button', { name: /hand off to outside sales/i }))
-    const modal = await screen.findByRole('dialog', { name: /hand off to outside sales/i })
+    await user.click(screen.getByRole('button', { name: /hand off to estimating team/i }))
+    const modal = await screen.findByRole('dialog', { name: /hand off to estimating team/i })
     await user.click(within(modal).getByRole('button', { name: /cancel/i }))
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: /hand off to outside sales/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /hand off to estimating team/i })).not.toBeInTheDocument()
     })
     expect(patched).toBe(false)
   })

@@ -72,23 +72,7 @@ describe('apiClient — PATCH', () => {
 })
 
 describe('apiClient — Authorization header', () => {
-  it('includes Bearer token when user is logged in', async () => {
-    const user = makeUser({ token: 'secret-jwt-xyz' })
-    useAuthStore.setState({ user })
-
-    let capturedAuth: string | null = null
-    server.use(
-      http.get('/api/protected', ({ request }) => {
-        capturedAuth = request.headers.get('Authorization')
-        return HttpResponse.json({})
-      })
-    )
-
-    await apiClient.get('/protected')
-    expect(capturedAuth).toBe('Bearer secret-jwt-xyz')
-  })
-
-  it('omits Authorization header when no user is logged in', async () => {
+  it('never sends Authorization header (cookie-based auth)', async () => {
     let capturedAuth: string | null = 'sentinel'
     server.use(
       http.get('/api/public', ({ request }) => {
@@ -99,22 +83,6 @@ describe('apiClient — Authorization header', () => {
 
     await apiClient.get('/public')
     expect(capturedAuth).toBeNull()
-  })
-
-  it('uses the current user token, not a stale one', async () => {
-    useAuthStore.setState({ user: makeUser({ token: 'old-token' }) })
-    useAuthStore.setState({ user: makeUser({ token: 'new-token' }) })
-
-    let capturedAuth: string | null = null
-    server.use(
-      http.get('/api/check', ({ request }) => {
-        capturedAuth = request.headers.get('Authorization')
-        return HttpResponse.json({})
-      })
-    )
-
-    await apiClient.get('/check')
-    expect(capturedAuth).toBe('Bearer new-token')
   })
 })
 
@@ -128,7 +96,7 @@ describe('apiClient — ApiError', () => {
     const err = await apiClient.get('/unauthorized').catch(e => e) as ApiError
     expect(err).toBeInstanceOf(ApiError)
     expect(err.status).toBe(401)
-    expect(err.message).toBe('Unauthorized')
+    expect(err.message).toBe('Session expired')
   })
 
   it('throws ApiError on 404 with correct status', async () => {

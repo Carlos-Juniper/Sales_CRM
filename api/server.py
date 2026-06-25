@@ -499,6 +499,8 @@ async def get_outreach(lead_id: str, _user: dict = Depends(require_auth)) -> lis
                 if isinstance(r["performed_at"], datetime)
                 else str(r["performed_at"])
             ),
+            "direction": "out",
+            "sender_name": r.get("performed_by") or "",
             "response_received": False,
             "response_at": None,
             "sequence_step": 1,
@@ -1204,6 +1206,41 @@ async def delete_management_company_contact(
     )
     contacts = [_shape_contact_row(cr) for cr in contact_rows]
     return _shape_mgmt_row(company_rows[0], contacts)
+
+
+@app.get("/api/contacts")
+async def list_contacts(_user: dict = Depends(require_auth)) -> list:
+    rows = await query(
+        f"""
+        SELECT
+            c.id,
+            c.contact_name,
+            c.role,
+            c.email,
+            m.name          AS company_name,
+            m.mailing_city  AS city,
+            m.mailing_state AS state
+        FROM {T('hoa_contact_information')} c
+        JOIN {T('property_management_companies')} m
+          ON c.management_company_id = m.id
+        WHERE c.email IS NOT NULL
+        ORDER BY c.contact_name
+        """,
+        [],
+    )
+    return [
+        {
+            "id": str(r["id"]),
+            "name": r["contact_name"] or "",
+            "title": r["role"] or "",
+            "email": r["email"] or "",
+            "company": r["company_name"] or "",
+            "city": r["city"] or "",
+            "state": r["state"] or "",
+            "type": "commercial",
+        }
+        for r in rows
+    ]
 
 
 # ── Bids ─────────────────────────────────────────────────────────────────────

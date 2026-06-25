@@ -24,11 +24,12 @@ describe('LeadFilters', () => {
     expect(screen.getByPlaceholderText(/search properties/i)).toBeInTheDocument()
   })
 
-  it('renders lead type buttons: RFP, HOA, commercial', () => {
+  it('renders lead type buttons: HOA, Commercial, Deathcare, Resort', () => {
     render(<LeadFilters />)
-    expect(screen.getByRole('button', { name: 'commercial' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'HOA' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Commercial' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Deathcare' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Resort' })).toBeInTheDocument()
   })
 
   it('renders all state buttons: FL, TX, PA, NC, SC', () => {
@@ -64,7 +65,7 @@ describe('LeadFilters', () => {
     const user = userEvent.setup()
     render(<LeadFilters />)
     await user.click(screen.getByRole('button', { name: 'HOA' }))
-    await user.click(screen.getByRole('button', { name: 'commercial' }))
+    await user.click(screen.getByRole('button', { name: 'Commercial' }))
     const { leadTypes } = useLeadsStore.getState().filters
     expect(leadTypes).toContain('HOA')
     expect(leadTypes).toContain('commercial')
@@ -73,8 +74,8 @@ describe('LeadFilters', () => {
   it('clicking a state button adds it to states', async () => {
     const user = userEvent.setup()
     render(<LeadFilters />)
-    await user.click(screen.getByRole('button', { name: 'AZ' }))
-    expect(useLeadsStore.getState().filters.states).toContain('AZ')
+    await user.click(screen.getByRole('button', { name: 'FL' }))
+    expect(useLeadsStore.getState().filters.states).toContain('FL')
   })
 
   it('clicking "Clear filters" calls resetFilters', async () => {

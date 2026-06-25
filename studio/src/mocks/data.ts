@@ -1,4 +1,4 @@
-import type { Lead, Bid, User, OutreachHistory, InsideSalesSummary, MonthlyRevenue } from '@/types'
+import type { Lead, Bid, User, OutreachHistory, InsideSalesSummary, MonthlyRevenue, OutreachContact } from '@/types'
 
 export const mockUsers: User[] = [
   { id: 'u1', name: 'Alex Rivera', email: 'alex.rivera@example.com', role: 'inside_sales', branch_id: 'b1', avatar_initials: 'AR' },
@@ -9,6 +9,9 @@ export const mockUsers: User[] = [
   { id: 'u6', name: 'Dana Torres', email: 'dana.torres@example.com', role: 'inside_sales', branch_id: 'b2', avatar_initials: 'DT' },
   { id: 'u7', name: 'Riley Chen', email: 'riley.chen@example.com', role: 'manager', branch_id: 'b1', avatar_initials: 'RC' },
   { id: 'u8', name: 'Quinn Patel', email: 'quinn.patel@example.com', role: 'manager', branch_id: 'b1', avatar_initials: 'QP' },
+  { id: 'u9', name: 'Carlos Hernandez', email: 'carlos.hernandez@juniperlandscaping.com', role: 'inside_sales', branch_id: 'b1', avatar_initials: 'CH' },
+  { id: 'u10', name: 'Maria Garcia', email: 'maria.garcia@juniperlandscaping.com', role: 'outside_sales', branch_id: 'c1', avatar_initials: 'MG' },
+  { id: 'u11', name: 'Robert Chen', email: 'robert.chen@juniperlandscaping.com', role: 'manager', branch_id: 'b1', avatar_initials: 'RC' },
 ]
 
 const scoreFactors = (score: number) => [
@@ -242,18 +245,28 @@ export const mockBids: Bid[] = [
 
 export const mockOutreach: Record<string, OutreachHistory[]> = {
   l1: [
-    { id: 'o1', lead_id: 'l1', channel: 'email', message: 'Initial intro email sent.', sent_at: new Date(Date.now() - 2 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: new Date(Date.now() + 3 * 24 * 3600000).toISOString() },
+    { id: 'o1', lead_id: 'l1', channel: 'email', direction: 'out', message: 'Initial intro email sent.', sent_at: new Date(Date.now() - 2 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: new Date(Date.now() + 3 * 24 * 3600000).toISOString() },
   ],
   l2: [
-    { id: 'o2', lead_id: 'l2', channel: 'email', message: 'Intent to bid submitted.', sent_at: new Date(Date.now() - 18 * 3600000).toISOString(), response_received: true, response_at: new Date(Date.now() - 12 * 3600000).toISOString(), sequence_step: 1, next_follow_up: null },
-    { id: 'o3', lead_id: 'l2', channel: 'email', message: 'Pre-bid questions submitted.', sent_at: new Date(Date.now() - 10 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 2, next_follow_up: new Date(Date.now() + 2 * 24 * 3600000).toISOString() },
+    { id: 'o2', lead_id: 'l2', channel: 'email', direction: 'out', message: 'Intent to bid submitted.', sent_at: new Date(Date.now() - 18 * 3600000).toISOString(), response_received: true, response_at: new Date(Date.now() - 12 * 3600000).toISOString(), sequence_step: 1, next_follow_up: null },
+    { id: 'o3', lead_id: 'l2', channel: 'email', direction: 'out', message: 'Pre-bid questions submitted.', sent_at: new Date(Date.now() - 10 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 2, next_follow_up: new Date(Date.now() + 2 * 24 * 3600000).toISOString() },
   ],
   l5: [
-    { id: 'o4', lead_id: 'l5', channel: 'email', message: 'Cold intro email.', sent_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: new Date(Date.now() - 1 * 24 * 3600000).toISOString() },
+    { id: 'o4', lead_id: 'l5', channel: 'email', direction: 'out', message: 'Cold intro email.', sent_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: new Date(Date.now() - 1 * 24 * 3600000).toISOString() },
   ],
   l10: [
-    { id: 'o5', lead_id: 'l10', channel: 'email', message: 'Initial outreach.', sent_at: new Date(Date.now() - 4 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: new Date(Date.now() - 1 * 24 * 3600000).toISOString() },
-    { id: 'o6', lead_id: 'l10', channel: 'linkedin', message: 'LinkedIn connection request + note.', sent_at: new Date(Date.now() - 3 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 2, next_follow_up: new Date(Date.now()).toISOString() },
+    { id: 'o5', lead_id: 'l10', channel: 'email', direction: 'out', message: 'Initial outreach.', sent_at: new Date(Date.now() - 4 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: new Date(Date.now() - 1 * 24 * 3600000).toISOString() },
+    { id: 'o6', lead_id: 'l10', channel: 'linkedin', direction: 'out', message: 'LinkedIn connection request + note.', sent_at: new Date(Date.now() - 3 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 2, next_follow_up: new Date(Date.now()).toISOString() },
+  ],
+  l3: [
+    { id: 'o7', lead_id: 'l3', channel: 'email', direction: 'out', message: 'Hi Chris, reaching out about Juniper\'s services for Kierland Commons. We manage several neighboring commercial properties...', sent_at: new Date(Date.now() - 8 * 24 * 3600000).toISOString(), response_received: true, response_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(), sequence_step: 1, next_follow_up: null, sender_name: undefined },
+    { id: 'o8', lead_id: 'l3', channel: 'email', direction: 'in', message: 'Thanks for reaching out. We\'re happy with our current provider but I\'d be open to a comparison proposal.', sent_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: null, sender_name: 'Chris Abbott' },
+    { id: 'o9', lead_id: 'l3', channel: 'linkedin', direction: 'out', message: 'Hi Chris — thanks for the email reply! Happy to put together a side-by-side comparison. Does next Tuesday work for a quick call?', sent_at: new Date(Date.now() - 5 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 2, next_follow_up: new Date(Date.now() + 2 * 24 * 3600000).toISOString(), sender_name: undefined },
+  ],
+  l7: [
+    { id: 'o10', lead_id: 'l7', channel: 'email', direction: 'out', message: 'Hi Nicole, Juniper Landscaping maintains several Desert Ridge area properties and I wanted to introduce our services.', sent_at: new Date(Date.now() - 14 * 24 * 3600000).toISOString(), response_received: true, response_at: new Date(Date.now() - 13 * 24 * 3600000).toISOString(), sequence_step: 1, next_follow_up: null, sender_name: undefined },
+    { id: 'o11', lead_id: 'l7', channel: 'email', direction: 'in', message: 'Hi, thanks. Our contract is up in 4 months. Can you send over your service overview?', sent_at: new Date(Date.now() - 13 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: null, sender_name: 'Nicole Foster' },
+    { id: 'o12', lead_id: 'l7', channel: 'email', direction: 'out', message: 'Nicole, attaching our service overview and a few case studies from similar retail centers we maintain in the Phoenix metro.', sent_at: new Date(Date.now() - 11 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 2, next_follow_up: new Date(Date.now() - 4 * 24 * 3600000).toISOString(), sender_name: undefined },
   ],
 }
 
@@ -278,3 +291,13 @@ export const mockSummary: InsideSalesSummary = {
   won_this_month: 2,
   won_value_this_month: 735000,
 }
+
+export const mockContacts: OutreachContact[] = [
+  { id: 'c1', name: 'Jennifer Walsh', title: 'HOA Board President', email: 'jwalsh@silverleafhoa.org', company: 'Silverleaf HOA', city: 'Phoenix', state: 'AZ', type: 'HOA' },
+  { id: 'c2', name: 'Mark Benson', title: 'Procurement Manager', email: 'mbenson@tempe.gov', company: 'City of Tempe', city: 'Tempe', state: 'AZ', type: 'commercial' },
+  { id: 'c3', name: 'Chris Abbott', title: 'Property Manager', email: 'cabbott@kierland.com', company: 'Kierland Commons', city: 'Scottsdale', state: 'AZ', type: 'commercial' },
+  { id: 'c4', name: 'Patricia Morales', title: 'Community Manager', email: 'pmorales@dobsonranch.org', company: 'Dobson Ranch HOA', city: 'Mesa', state: 'AZ', type: 'HOA' },
+  { id: 'c5', name: 'Tom Hicks', title: 'Facilities Director', email: 'thicks@chandlercorp.com', company: 'Chandler Corporate Park', city: 'Chandler', state: 'AZ', type: 'commercial' },
+  { id: 'c6', name: 'Nicole Foster', title: 'Property Operations', email: 'nfoster@desertridge.com', company: 'Desert Ridge Marketplace', city: 'Phoenix', state: 'AZ', type: 'commercial' },
+  { id: 'c7', name: 'Susan Park', title: 'Director of Operations', email: 'spark@susd.k12.az.us', company: 'Scottsdale Unified School District', city: 'Phoenix', state: 'AZ', type: 'commercial' },
+]

@@ -70,9 +70,9 @@ describe('LeadCard', () => {
     expect(screen.getByText('HOA')).toBeInTheDocument()
   })
 
-  it('renders RFP type badge', () => {
-    render(<LeadCard lead={makeLead({ lead_type: 'commercial' })} />)
-    expect(screen.getByText('commercial')).toBeInTheDocument()
+  it('renders deathcare type badge', () => {
+    render(<LeadCard lead={makeLead({ lead_type: 'deathcare' })} />)
+    expect(screen.getByText('Deathcare')).toBeInTheDocument()
   })
 
   it('renders commercial type badge', () => {

@@ -16,8 +16,9 @@ const DEFAULT_ZOOM = 10
 
 const TYPE_COLORS: Record<string, string> = {
   HOA: '#2E7D52',
-  RFP: '#2563eb',
   commercial: '#f59e0b',
+  deathcare: '#64748b',
+  resort: '#3b82f6',
 }
 
 const STATUS_OPACITY: Record<string, number> = {

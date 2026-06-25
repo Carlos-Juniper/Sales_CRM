@@ -7,9 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
-import type { Lead, LeadType } from '@/types'
-
-const LEAD_TYPES: LeadType[] = ['HOA', 'commercial', 'deathcare', 'resort']
+import { LEAD_TYPES } from '@/types'
+import type { Lead } from '@/types'
 
 interface EditLeadModalProps {
   lead: Lead
@@ -29,6 +28,7 @@ export function EditLeadModal({ lead, open, onClose }: EditLeadModalProps) {
     zip: lead.zip ?? '',
     estimated_acreage: lead.estimated_acreage != null ? String(lead.estimated_acreage) : '',
     estimated_contract_value: lead.estimated_contract_value != null ? String(lead.estimated_contract_value) : '',
+    units: lead.units != null ? String(lead.units) : '',
     bid_deadline: lead.bid_deadline ?? '',
     contact_name: lead.contact_name ?? '',
     contact_email: lead.contact_email ?? '',
@@ -52,6 +52,7 @@ export function EditLeadModal({ lead, open, onClose }: EditLeadModalProps) {
           zip: form.zip || undefined,
           estimated_acreage: form.estimated_acreage ? parseFloat(form.estimated_acreage) : undefined,
           estimated_contract_value: form.estimated_contract_value ? parseFloat(form.estimated_contract_value) : undefined,
+          units: form.units ? parseInt(form.units) : undefined,
           bid_deadline: form.bid_deadline || undefined,
           contact_name: form.contact_name || undefined,
           contact_email: form.contact_email || undefined,
@@ -146,7 +147,7 @@ export function EditLeadModal({ lead, open, onClose }: EditLeadModalProps) {
           </div>
 
           {/* Deal info */}
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1">
               <Label className="text-xs">Contract value ($)</Label>
               <Input
@@ -167,6 +168,17 @@ export function EditLeadModal({ lead, open, onClose }: EditLeadModalProps) {
                 placeholder="25"
                 min={0}
                 step="0.1"
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Units</Label>
+              <Input
+                type="number"
+                value={form.units}
+                onChange={(e) => set('units', e.target.value)}
+                placeholder="240"
+                min={0}
                 className="h-8 text-xs"
               />
             </div>

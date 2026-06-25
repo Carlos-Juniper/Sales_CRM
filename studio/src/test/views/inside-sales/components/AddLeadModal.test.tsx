@@ -36,31 +36,32 @@ function renderModal(onClose = vi.fn()) {
 // ── Tests ─────────────────────────────────────────────────────────
 
 describe('AddLeadModal — lead type buttons', () => {
-  it('renders HOA, commercial, and RFP type buttons', () => {
+  it('renders HOA, commercial, deathcare, and resort type buttons', () => {
     renderModal()
     expect(screen.getByRole('button', { name: 'HOA' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'commercial' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'RFP' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'deathcare' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'resort' })).toBeInTheDocument()
   })
 
-  it('renders exactly three lead type buttons (no duplicate commercial)', () => {
+  it('renders exactly four lead type buttons (no duplicate commercial)', () => {
     renderModal()
     const commercialButtons = screen.getAllByRole('button', { name: 'commercial' })
     expect(commercialButtons).toHaveLength(1)
   })
 
-  it('selecting RFP includes it in the submit payload', async () => {
+  it('selecting deathcare includes it in the submit payload', async () => {
     const user = userEvent.setup()
     renderModal()
 
     await user.type(screen.getByPlaceholderText(/silverleaf hoa/i), 'Test Property')
     await user.type(screen.getByPlaceholderText(/phoenix/i), 'Tucson')
-    await user.click(screen.getByRole('button', { name: 'RFP' }))
+    await user.click(screen.getByRole('button', { name: 'deathcare' }))
     await user.click(screen.getByRole('button', { name: /add lead/i }))
 
     await waitFor(() => expect(mockCreateLead).toHaveBeenCalledTimes(1))
     const payload = mockCreateLead.mock.calls[0][0] as Record<string, unknown>
-    expect(payload.lead_type).toBe('RFP')
+    expect(payload.lead_type).toBe('deathcare')
   })
 })
 

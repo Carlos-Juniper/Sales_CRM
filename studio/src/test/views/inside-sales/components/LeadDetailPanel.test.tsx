@@ -53,6 +53,7 @@ const mockOutreachItem: OutreachHistory = {
   id: 'o1',
   lead_id: 'l1',
   channel: 'email',
+  direction: 'out',
   message: 'Sent intro email',
   sent_at: '2024-01-02T10:00:00.000Z',
   response_received: false,

@@ -131,10 +131,19 @@ export function useDeleteLead() {
 
 export function useOutreachQueue() {
   const { data, isLoading } = useLeads()
+  // Include 'new' leads that have been drafted/outreached alongside contacted/qualified
   const queue = (data?.data ?? []).filter((l: Lead) =>
-    l.status === 'contacted' || l.status === 'qualified'
+    l.status === 'contacted' || l.status === 'qualified' || l.status === 'new'
+  ).filter((l: Lead) =>
+    // Only include 'new' leads that have an AI draft (i.e., have been prepared for outreach)
+    l.status !== 'new' || l.ai_email_draft !== null || l.ai_linkedin_draft !== null
   )
-  return { queue, isLoading }
+  return {
+    queue,
+    isLoading,
+    overdueCount: queue.length,
+    unreadCount: 0,  // will be derived from thread data in a future iteration
+  }
 }
 
 export function useHandoffLead() {
@@ -149,5 +158,15 @@ export function useHandoffLead() {
       toast('Lead handed off', { variant: 'success' })
     },
     onError: () => toast('Handoff failed', { variant: 'error' }),
+  })
+}
+
+export const CONTACTS_KEY = 'contacts'
+
+export function useOutreachContacts() {
+  return useQuery({
+    queryKey: [CONTACTS_KEY],
+    queryFn: () => import('@/api/leads').then(m => m.contactsApi.list()),
+    staleTime: 300_000,
   })
 }

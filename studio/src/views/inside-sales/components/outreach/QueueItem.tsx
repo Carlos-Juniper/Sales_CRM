@@ -1,9 +1,29 @@
-import { Clock, Mail, Phone } from 'lucide-react'
+import { Mail, Phone } from 'lucide-react'
 import { LinkedinIcon } from '@/components/shared/LinkedinIcon'
-import { ScoreMeter } from '@/components/shared/ScoreMeter'
-import { formatCurrency, formatRelativeTime, daysUntil, cn } from '@/lib/utils'
-import { STRONG_FIT_SCORE, GOOD_FIT_SCORE } from '@/lib/constants'
-import type { Lead } from '@/types'
+import { LeadTypeBadge } from '@/components/shared/LeadTypeBadge'
+import { formatRelativeTime, getInitials, cn } from '@/lib/utils'
+import type { Lead, OutreachChannel } from '@/types'
+
+const CHANNEL_ICONS: Record<OutreachChannel, React.ComponentType<{ className?: string }>> = {
+  email: Mail,
+  linkedin: LinkedinIcon,
+  phone: Phone,
+}
+
+// Deterministic color from name — maps to one of 5 hues
+const AVATAR_COLORS = [
+  'bg-violet-500',
+  'bg-sky-500',
+  'bg-teal-500',
+  'bg-amber-500',
+  'bg-rose-500',
+]
+
+function avatarColor(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return AVATAR_COLORS[h % AVATAR_COLORS.length]
+}
 
 interface QueueItemProps {
   lead: Lead
@@ -12,79 +32,61 @@ interface QueueItemProps {
 }
 
 export function QueueItem({ lead, isSelected, onClick }: QueueItemProps) {
-  const isOverdue = true // simplified for demo
-  const isDueToday = false
+  const initials = getInitials(lead.contact_name ?? lead.property_name)
+  const color = avatarColor(lead.contact_name ?? lead.property_name)
 
-  const scoreColorClass =
-    lead.score !== null && lead.score >= STRONG_FIT_SCORE ? 'text-[#2E7D52]' :
-    lead.score !== null && lead.score >= GOOD_FIT_SCORE ? 'text-amber-600' :
-    'text-orange-600'
+  // Placeholder last-message preview; real thread data loads in ConversationPane
+  const preview = lead.ai_email_draft
+    ? `You: ${lead.ai_email_draft.slice(0, 60).replace(/\n/g, ' ')}…`
+    : 'No messages yet — draft an opener below.'
+
+  const lastChannel: OutreachChannel = 'email'
+  const ChannelIcon = CHANNEL_ICONS[lastChannel]
 
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-current={isSelected || undefined}
+      data-selected={isSelected}
       className={cn(
-        'w-full text-left px-3 py-3 border-b border-[hsl(var(--border))] transition-colors hover:bg-[hsl(var(--muted))]',
-        isSelected ? 'bg-[hsl(var(--muted))] border-l-2 border-l-[#2E7D52]' : 'border-l-2 border-l-transparent'
+        'w-full text-left px-4 py-3 border-b border-[hsl(var(--border))] transition-colors',
+        'hover:bg-[hsl(var(--muted))] flex items-start gap-3',
+        isSelected
+          ? 'bg-[hsl(var(--muted))] border-l-[3px] border-l-[#2E7D52]'
+          : 'border-l-[3px] border-l-transparent'
       )}
     >
-      {/* Row 1: status + channel badges */}
-      <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-        {isOverdue ? (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded px-1.5 py-0.5">
-            <Clock className="h-2.5 w-2.5" /> Overdue
-          </span>
-        ) : isDueToday ? (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded px-1.5 py-0.5">
-            Due today
-          </span>
-        ) : null}
-        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded px-1.5 py-0.5">
-          <Mail className="h-2.5 w-2.5" /> Email
-        </span>
-        {lead.contact_linkedin && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#0077B5] bg-blue-50 dark:bg-blue-900/20 rounded px-1.5 py-0.5">
-            <LinkedinIcon className="h-2.5 w-2.5" /> LinkedIn
-          </span>
+      {/* Avatar */}
+      <div
+        className={cn(
+          'h-9 w-9 rounded-full flex-shrink-0 flex items-center justify-center text-white text-sm font-bold',
+          color
         )}
-        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded px-1.5 py-0.5">
-          <Phone className="h-2.5 w-2.5" /> Phone
-        </span>
+      >
+        {initials}
       </div>
 
-      {/* Row 2: property name */}
-      <p className="text-sm font-semibold text-[hsl(var(--fg))] truncate leading-tight mb-0.5">
-        {lead.property_name}
-      </p>
-
-      {/* Row 3: city + contact */}
-      <p className="text-xs text-[hsl(var(--muted-fg))] truncate mb-2">
-        {lead.city}, {lead.state}
-        {lead.contact_name ? ` · ${lead.contact_name}` : ''}
-      </p>
-
-      {/* Row 4: metrics */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-[hsl(var(--fg))]">
-          {formatCurrency(lead.estimated_contract_value)}
-        </span>
-        <div className="flex-1 min-w-0">
-          <ScoreMeter score={lead.score} factors={lead.score_factors} size="sm" showLabel={false} />
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2 mb-0.5">
+          <p className="text-sm font-semibold text-[hsl(var(--fg))] truncate leading-tight">
+            {lead.property_name}
+          </p>
+          <span className="text-[10px] text-[hsl(var(--muted-fg))] flex-shrink-0">
+            {formatRelativeTime(lead.updated_at)}
+          </span>
         </div>
-        {lead.score !== null && (
-          <span className={cn('text-[10px] flex-shrink-0', scoreColorClass)}>
-            {lead.score}
-          </span>
-        )}
-        {lead.bid_deadline && (
-          <span className="text-[10px] text-orange-500 flex-shrink-0 whitespace-nowrap">
-            Bid {daysUntil(lead.bid_deadline)}d
-          </span>
-        )}
-        <span className="text-[10px] text-[hsl(var(--muted-fg))] flex-shrink-0 whitespace-nowrap">
-          {formatRelativeTime(lead.updated_at)}
-        </span>
+        <p className="text-[11px] text-[hsl(var(--muted-fg))] truncate mb-1">
+          {lead.contact_name ?? `${lead.city}, ${lead.state}`}
+        </p>
+        <div className="flex items-center gap-1.5">
+          <ChannelIcon className="h-3 w-3 text-[hsl(var(--muted-fg))] flex-shrink-0" />
+          <p className="text-xs text-[hsl(var(--muted-fg))] truncate">{preview}</p>
+        </div>
+        <div className="flex items-center gap-1 mt-1">
+          <LeadTypeBadge type={lead.lead_type} />
+        </div>
       </div>
     </button>
   )

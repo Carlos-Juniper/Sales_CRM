@@ -25,7 +25,9 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'studio-auth',
-      partialize: (state) => ({ user: state.user }),
+      partialize: (state) => ({
+        user: state.user ? { ...state.user, token: undefined } : null,
+      }),
     }
   )
 )

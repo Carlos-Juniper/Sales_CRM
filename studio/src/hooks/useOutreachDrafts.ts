@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSendOutreach } from '@/hooks/useLeads'
-import type { Lead } from '@/types'
+import type { Lead, OutreachChannel } from '@/types'
 
 export function useOutreachDrafts(lead: Lead | undefined) {
   const [emailDraft, setEmailDraft] = useState<string | null>(null)
@@ -10,7 +10,7 @@ export function useOutreachDrafts(lead: Lead | undefined) {
   const effectiveEmail = emailDraft ?? lead?.ai_email_draft ?? ''
   const effectiveLinkedin = linkedinDraft ?? lead?.ai_linkedin_draft ?? ''
 
-  async function handleSend(channel: 'email' | 'linkedin') {
+  async function handleSend(channel: OutreachChannel) {
     if (!lead) return
     const message = channel === 'email' ? effectiveEmail : effectiveLinkedin
     try {
@@ -29,5 +29,6 @@ export function useOutreachDrafts(lead: Lead | undefined) {
     setLinkedinDraft,
     handleSend,
     isPending: sendOutreach.isPending,
+    lastError: sendOutreach.error,
   }
 }

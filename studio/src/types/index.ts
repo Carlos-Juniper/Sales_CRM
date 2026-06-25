@@ -25,7 +25,7 @@ export type BidStatus =
   | 'won'
   | 'lost'
 
-export type OutreachChannel = 'email' | 'linkedin' | 'phone'
+export type OutreachChannel = 'email' | 'call' | 'sms' | 'linkedin' | 'note' | 'meeting'
 
 export interface ScoreFactor {
   name: string
@@ -177,4 +177,45 @@ export interface AuthUser {
   branch_id: string
   avatar_initials: string
   token?: string
+}
+
+// ── Microsoft Graph / Calendar ────────────────────────────────────────────────
+
+export interface CalendarEventAttendee {
+  emailAddress: { address: string; name?: string }
+  type?: 'required' | 'optional'
+}
+
+export interface CalendarEventDateTime {
+  dateTime: string
+  timeZone: string
+}
+
+export interface CalendarEvent {
+  id: string
+  subject: string
+  start: CalendarEventDateTime
+  end: CalendarEventDateTime
+  attendees: CalendarEventAttendee[]
+  onlineMeeting?: { joinUrl: string } | null
+  bodyPreview?: string
+  webLink?: string
+}
+
+export interface CalendarEventCreatePayload {
+  subject: string
+  start_iso: string
+  end_iso: string
+  attendees?: string[]
+  body?: string
+  online_meeting?: boolean
+}
+
+export interface ScheduleMeetingPayload {
+  subject: string
+  start_iso: string
+  end_iso: string
+  attendees?: string[]
+  body?: string
+  online_meeting?: boolean
 }

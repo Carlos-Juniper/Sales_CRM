@@ -1,5 +1,5 @@
 import { http, HttpResponse, delay } from 'msw'
-import { mockLeads, mockBids, mockUsers, mockOutreach, mockSummary, mockMonthlyRevenue, mockContacts } from './data'
+import { mockLeads, mockBids, mockUsers, mockOutreach, mockSummary, mockMonthlyRevenue, mockContacts, mockActivityItems, mockConsent, mockConnections } from './data'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid } from '@/types'
 
@@ -216,6 +216,49 @@ const allHandlers = [
   http.get(`${API}/contacts`, async () => {
     await delay(200)
     return HttpResponse.json(mockContacts)
+  }),
+
+  // GET /api/leads/:id/activity
+  http.get(`${API}/leads/:lead_id/activity`, async ({ params }) => {
+    await delay(200)
+    const activity = mockActivityItems[params.lead_id as string] ?? []
+    return HttpResponse.json(activity)
+  }),
+
+  // GET /api/contacts/:id/consent
+  http.get(`${API}/contacts/:contact_id/consent`, async ({ params }) => {
+    await delay(150)
+    const consent = mockConsent[params.contact_id as string] ?? {
+      contact_id: params.contact_id,
+      do_not_call: false, do_not_text: false, do_not_email: false,
+      consent_call: false, consent_text: false,
+      consent_captured_at: null, consent_source: null, consent_by: null, updated_at: null,
+    }
+    return HttpResponse.json(consent)
+  }),
+
+  // PATCH /api/contacts/:id/consent
+  http.patch(`${API}/contacts/:contact_id/consent`, async ({ params, request }) => {
+    await delay(200)
+    const body = await request.json() as Record<string, unknown>
+    const existing = mockConsent[params.contact_id as string] ?? { contact_id: params.contact_id }
+    mockConsent[params.contact_id as string] = { ...existing, ...body } as typeof mockConsent[string]
+    return HttpResponse.json(mockConsent[params.contact_id as string])
+  }),
+
+  // GET /api/compliance/check
+  http.get(`${API}/compliance/check`, async ({ request }) => {
+    await delay(100)
+    const url = new URL(request.url)
+    const to = url.searchParams.get('to')
+    const blocked = to?.startsWith('+1555BLOCKED')
+    return HttpResponse.json(blocked ? { allowed: false, reason: 'DNC list' } : { allowed: true })
+  }),
+
+  // GET /api/settings/connections
+  http.get(`${API}/settings/connections`, async () => {
+    await delay(150)
+    return HttpResponse.json(mockConnections)
   }),
 
   // POST /api/auth/login (mock)

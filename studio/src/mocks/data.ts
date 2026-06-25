@@ -1,4 +1,4 @@
-import type { Lead, Bid, User, OutreachHistory, InsideSalesSummary, MonthlyRevenue, OutreachContact } from '@/types'
+import type { Lead, Bid, User, OutreachHistory, InsideSalesSummary, MonthlyRevenue, OutreachContact, ActivityItem, ContactConsent, ConnectionsStatus } from '@/types'
 
 export const mockUsers: User[] = [
   { id: 'u1', name: 'Alex Rivera', email: 'alex.rivera@example.com', role: 'inside_sales', branch_id: 'b1', avatar_initials: 'AR' },
@@ -301,3 +301,141 @@ export const mockContacts: OutreachContact[] = [
   { id: 'c6', name: 'Nicole Foster', title: 'Property Operations', email: 'nfoster@desertridge.com', company: 'Desert Ridge Marketplace', city: 'Phoenix', state: 'AZ', type: 'commercial' },
   { id: 'c7', name: 'Susan Park', title: 'Director of Operations', email: 'spark@susd.k12.az.us', company: 'Scottsdale Unified School District', city: 'Phoenix', state: 'AZ', type: 'commercial' },
 ]
+
+export const mockActivityItems: Record<string, ActivityItem[]> = {
+  'l2': [
+    {
+      id: 'a1',
+      channel: 'email',
+      direction: 'out',
+      body: 'Intent to bid submitted.',
+      performed_by: 'Alex Rivera',
+      performed_at: new Date(Date.now() - 2 * 3600000).toISOString(),
+      recording_url: null,
+      duration_seconds: null,
+      transcript_summary: null,
+      external_message_id: null,
+    },
+    {
+      id: 'a2',
+      channel: 'email',
+      direction: 'out',
+      body: 'Pre-bid questions submitted.',
+      performed_by: 'Alex Rivera',
+      performed_at: new Date(Date.now() - 4 * 3600000).toISOString(),
+      recording_url: null,
+      duration_seconds: null,
+      transcript_summary: null,
+      external_message_id: null,
+    },
+  ],
+  'l3': [
+    {
+      id: 'a3',
+      channel: 'email',
+      direction: 'out',
+      body: 'Hi Chris, reaching out about Juniper Landscaping.',
+      performed_by: 'Alex Rivera',
+      performed_at: new Date(Date.now() - 6 * 3600000).toISOString(),
+      recording_url: null,
+      duration_seconds: null,
+      transcript_summary: null,
+      external_message_id: null,
+    },
+    {
+      id: 'a4',
+      channel: 'email',
+      direction: 'in',
+      body: 'Thanks for reaching out, interested to learn more.',
+      performed_by: 'Chris Abbott',
+      performed_at: new Date(Date.now() - 5 * 3600000).toISOString(),
+      recording_url: null,
+      duration_seconds: null,
+      transcript_summary: null,
+      external_message_id: null,
+    },
+    {
+      id: 'a5',
+      channel: 'call',
+      direction: 'out',
+      body: 'Call logged: discussed proposal timeline.',
+      performed_by: 'Alex Rivera',
+      performed_at: new Date(Date.now() - 3 * 3600000).toISOString(),
+      recording_url: 'https://recordings.twilio.com/sample-recording',
+      duration_seconds: 183,
+      transcript_summary: 'Discussed proposal timeline. Contact interested in Q3 start.',
+      external_message_id: 'CA_mock_123',
+    },
+    {
+      id: 'a6',
+      channel: 'sms',
+      direction: 'out',
+      body: 'Following up re: our call today.',
+      performed_by: 'Alex Rivera',
+      performed_at: new Date(Date.now() - 1 * 3600000).toISOString(),
+      recording_url: null,
+      duration_seconds: null,
+      transcript_summary: null,
+      external_message_id: 'SM_mock_456',
+    },
+    {
+      id: 'a8',
+      channel: 'linkedin',
+      direction: 'out',
+      body: 'Hi Chris — thanks for the email reply! Happy to put together a side-by-side comparison. Does next Tuesday work for a quick call?',
+      performed_by: 'Alex Rivera',
+      performed_at: new Date(Date.now() - 5 * 24 * 3600000).toISOString(),
+      recording_url: null,
+      duration_seconds: null,
+      transcript_summary: null,
+      external_message_id: null,
+    },
+  ],
+  'l4': [],
+  'l5': [
+    {
+      id: 'a7',
+      channel: 'call',
+      direction: 'out',
+      body: 'Left voicemail.',
+      performed_by: 'Alex Rivera',
+      performed_at: new Date(Date.now() - 25 * 3600000).toISOString(),
+      recording_url: null,
+      duration_seconds: 45,
+      transcript_summary: null,
+      external_message_id: null,
+    },
+  ],
+}
+
+export const mockConsent: Record<string, ContactConsent> = {
+  'c1': {
+    contact_id: 'c1',
+    do_not_call: false,
+    do_not_text: false,
+    do_not_email: false,
+    consent_call: true,
+    consent_text: true,
+    consent_captured_at: null,
+    consent_source: null,
+    consent_by: null,
+    updated_at: null,
+  },
+  'c-blocked': {
+    contact_id: 'c-blocked',
+    do_not_call: true,
+    do_not_text: true,
+    do_not_email: true,
+    consent_call: false,
+    consent_text: false,
+    consent_captured_at: null,
+    consent_source: null,
+    consent_by: null,
+    updated_at: null,
+  },
+}
+
+export const mockConnections: ConnectionsStatus = {
+  graph: { connected: false },
+  telephony: { configured: false, provider: '' },
+}

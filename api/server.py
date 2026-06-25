@@ -40,6 +40,7 @@ from db import (
     count_active_leads_for_property,
     has_won_lead_for_property,
 )
+from api.compliance import assert_can_contact
 
 SESSION_DURATION = 28800  # 8 hours in seconds
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
@@ -549,6 +550,164 @@ async def send_outreach(body: OutreachSendBody, _user: dict = Depends(require_au
             await set_property_contacted(hoa_prop_id)
 
     return {"success": True, "message_id": f"msg_{uuid.uuid4().hex[:12]}"}
+
+
+# ── Activity feed ────────────────────────────────────────────────────────────
+
+_ACTION_TO_CHANNEL_FULL: dict[str, str] = {
+    "email_sent": "email",
+    "call_logged": "call",
+    "sms_sent": "sms",
+    "sms_received": "sms",
+    "note_added": "note",
+    "meeting_scheduled": "meeting",
+}
+
+
+@app.get("/api/leads/{lead_id}/activity")
+async def get_lead_activity(lead_id: str, _user: dict = Depends(require_auth)) -> list:
+    """Unified activity feed across all channels."""
+    rows = await query(
+        f"""
+        SELECT * FROM {T('lead_actions')}
+        WHERE lead_id = @lead_id
+        ORDER BY performed_at DESC
+        """,
+        [P("lead_id", "STRING", lead_id)],
+    )
+    return [
+        {
+            "id": str(r["id"]),
+            "channel": _ACTION_TO_CHANNEL_FULL.get(r["action_type"], r["action_type"]),
+            "direction": "in" if r["action_type"] == "sms_received" else "out",
+            "body": r.get("detail") or "",
+            "performed_by": r.get("performed_by") or "",
+            "performed_at": (
+                r["performed_at"].isoformat()
+                if isinstance(r["performed_at"], datetime)
+                else str(r["performed_at"])
+            ),
+            "recording_url": r.get("recording_url"),
+            "duration_seconds": r.get("duration_seconds"),
+            "transcript_summary": None,
+            "external_message_id": r.get("external_message_id"),
+        }
+        for r in rows
+        if r["action_type"] in _ACTION_TO_CHANNEL_FULL
+    ]
+
+
+# ── Settings / connections ────────────────────────────────────────────────────
+
+
+@app.get("/api/settings/connections")
+async def get_connections(_user: dict = Depends(require_auth)) -> dict:
+    """Returns Microsoft Graph and Twilio connection status."""
+    user_id = _user.get("id", "")
+    try:
+        graph_rows = await query(
+            f"SELECT user_id FROM {T('user_graph_tokens')} WHERE user_id = @user_id LIMIT 1",
+            [P("user_id", "STRING", user_id)],
+        )
+        graph_connected = bool(graph_rows)
+    except Exception:
+        graph_connected = False
+
+    twilio_configured = bool(os.environ.get("TWILIO_ACCOUNT_SID"))
+    return {
+        "graph": {"connected": graph_connected},
+        "telephony": {
+            "configured": twilio_configured,
+            "provider": "twilio" if twilio_configured else "",
+        },
+    }
+
+
+# ── Contact consent ───────────────────────────────────────────────────────────
+
+_DEFAULT_CONSENT = {
+    "do_not_call": False,
+    "do_not_text": False,
+    "do_not_email": False,
+    "consent_call": False,
+    "consent_text": False,
+    "consent_captured_at": None,
+    "consent_source": None,
+    "consent_by": None,
+    "updated_at": None,
+}
+
+
+@app.get("/api/contacts/{contact_id}/consent")
+async def get_contact_consent(contact_id: str, _user: dict = Depends(require_auth)) -> dict:
+    rows = await query(
+        f"SELECT * FROM {T('contact_consent')} WHERE contact_id = @contact_id LIMIT 1",
+        [P("contact_id", "STRING", contact_id)],
+    )
+    if rows:
+        return rows[0]
+    return {"contact_id": contact_id, **_DEFAULT_CONSENT}
+
+
+@app.patch("/api/contacts/{contact_id}/consent")
+async def patch_contact_consent(
+    contact_id: str,
+    body: dict,
+    _user: dict = Depends(require_auth),
+) -> dict:
+    existing = await query(
+        f"SELECT contact_id FROM {T('contact_consent')} WHERE contact_id = @contact_id LIMIT 1",
+        [P("contact_id", "STRING", contact_id)],
+    )
+    allowed_fields = {
+        "do_not_call", "do_not_text", "do_not_email",
+        "consent_call", "consent_text",
+        "consent_captured_at", "consent_source", "consent_by",
+    }
+    updates = {k: v for k, v in body.items() if k in allowed_fields}
+
+    def _bq_type(v: Any) -> str:
+        return "BOOL" if isinstance(v, bool) else "STRING"
+
+    if not existing:
+        if updates:
+            await execute(
+                f"""
+                INSERT INTO {T('contact_consent')} (contact_id, {', '.join(updates.keys())}, updated_at)
+                VALUES (@contact_id, {', '.join('@' + k for k in updates.keys())}, CURRENT_TIMESTAMP())
+                """,
+                [P("contact_id", "STRING", contact_id)]
+                + [P(k, _bq_type(v), v) for k, v in updates.items()],
+            )
+    else:
+        if updates:
+            set_clause = ", ".join(f"{k} = @{k}" for k in updates)
+            await execute(
+                f"UPDATE {T('contact_consent')} SET {set_clause}, updated_at = CURRENT_TIMESTAMP() "
+                f"WHERE contact_id = @contact_id",
+                [P(k, _bq_type(v), v) for k, v in updates.items()]
+                + [P("contact_id", "STRING", contact_id)],
+            )
+
+    return await get_contact_consent(contact_id, _user)
+
+
+# ── Compliance check ──────────────────────────────────────────────────────────
+
+
+@app.get("/api/compliance/check")
+async def compliance_check(
+    channel: str = Query(...),
+    to: str = Query(...),
+    _user: dict = Depends(require_auth),
+) -> dict:
+    try:
+        phone = to if channel in ("call", "sms") else None
+        email = to if channel == "email" else None
+        await assert_can_contact(channel, phone=phone, email=email)
+        return {"allowed": True}
+    except HTTPException as e:
+        return {"allowed": False, "reason": e.detail}
 
 
 # ── HOA Properties ───────────────────────────────────────────────────────────

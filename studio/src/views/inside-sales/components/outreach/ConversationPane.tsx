@@ -5,20 +5,26 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { LeadTypeBadge } from '@/components/shared/LeadTypeBadge'
 import { useUIStore } from '@/store/uiStore'
 import { useLead, useOutreachHistory } from '@/hooks/useLeads'
+import { useLeadActivity } from '@/hooks/useActivity'
 import { formatCurrency, formatRelativeTime, daysUntil, cn } from '@/lib/utils'
 import { STRONG_FIT_SCORE, GOOD_FIT_SCORE } from '@/lib/constants'
-import { Bubble } from './Bubble'
+import { ActivityBubble } from './ActivityBubble'
 import { Composer } from './Composer'
-import type { OutreachChannel, OutreachHistory } from '@/types'
+import type { CommChannel, ActivityItem, OutreachHistory } from '@/types'
 
-type ChannelFilter = 'all' | OutreachChannel
+type ChannelFilter = 'all' | CommChannel
 
-const CHANNEL_TAB_LABELS: Record<ChannelFilter, string> = {
+const CHANNEL_TAB_LABELS: Record<string, string> = {
   all: 'All',
   email: 'Email',
+  call: 'Phone',
+  sms: 'Text',
   linkedin: 'LinkedIn',
-  phone: 'Text',
+  note: 'Note',
+  meeting: 'Meeting',
 }
+
+const CHANNEL_TABS: ChannelFilter[] = ['all', 'email', 'call', 'sms', 'linkedin', 'note', 'meeting']
 
 interface ConversationPaneProps {
   leadId: string
@@ -27,7 +33,8 @@ interface ConversationPaneProps {
 export function ConversationPane({ leadId }: ConversationPaneProps) {
   const navigate = useNavigate()
   const { data: lead, isLoading: leadLoading } = useLead(leadId)
-  const { data: history = [], isLoading: historyLoading } = useOutreachHistory(leadId)
+  const { data: activity = [], isLoading: activityLoading } = useLeadActivity(leadId)
+  const { data: history = [] } = useOutreachHistory(leadId)
   const selectLead = useUIStore((s) => s.selectLead)
 
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>('all')
@@ -37,14 +44,14 @@ export function ConversationPane({ leadId }: ConversationPaneProps) {
     navigate('/inside-sales/leads')
   }
 
-  const isLoading = leadLoading || historyLoading
+  const isLoading = leadLoading || activityLoading
 
-  const visibleMessages = channelFilter === 'all'
-    ? history
-    : history.filter((m: OutreachHistory) => m.channel === channelFilter)
+  const visibleItems = channelFilter === 'all'
+    ? activity
+    : activity.filter((item: ActivityItem) => item.channel === channelFilter)
 
-  // Overdue: any message has a next_follow_up in the past
-  const isOverdue = history.some(
+  // Overdue: any old outreach message has a next_follow_up in the past
+  const isOverdue = (history as OutreachHistory[]).some(
     (m: OutreachHistory) => m.next_follow_up && new Date(m.next_follow_up) < new Date()
   )
 
@@ -124,8 +131,8 @@ export function ConversationPane({ leadId }: ConversationPaneProps) {
         </div>
 
         {/* Channel filter tabs */}
-        <div role="tablist" aria-label="Filter messages by channel" className="flex gap-0">
-          {(['all', 'email', 'linkedin', 'phone'] as ChannelFilter[]).map((ch) => (
+        <div role="tablist" aria-label="Filter messages by channel" className="flex gap-0 flex-wrap">
+          {CHANNEL_TABS.map((ch) => (
             <button
               key={ch}
               role="tab"
@@ -147,7 +154,7 @@ export function ConversationPane({ leadId }: ConversationPaneProps) {
       {/* ── Thread ── */}
       <ScrollArea className="flex-1">
         <div className="px-5 py-4">
-          {visibleMessages.length === 0 ? (
+          {visibleItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <p className="text-sm font-medium text-[hsl(var(--fg))] mb-1">
                 Start the conversation
@@ -158,8 +165,8 @@ export function ConversationPane({ leadId }: ConversationPaneProps) {
             </div>
           ) : (
             <>
-              {visibleMessages.map((msg: OutreachHistory) => (
-                <Bubble key={msg.id} item={msg} />
+              {visibleItems.map((item: ActivityItem) => (
+                <ActivityBubble key={item.id} item={item} />
               ))}
             </>
           )}

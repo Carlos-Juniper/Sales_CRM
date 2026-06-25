@@ -1,6 +1,43 @@
 export const LEAD_TYPES = ['HOA', 'commercial', 'deathcare', 'resort'] as const
 export type LeadType = (typeof LEAD_TYPES)[number]
 
+// Unified communication channel type (source of truth for all three slices)
+export type CommChannel = 'email' | 'call' | 'sms' | 'linkedin' | 'note' | 'meeting'
+
+// Unified activity item from /api/leads/{id}/activity
+export interface ActivityItem {
+  id: string
+  channel: CommChannel
+  direction: 'in' | 'out'
+  body: string
+  performed_by: string
+  performed_at: string
+  recording_url?: string | null
+  duration_seconds?: number | null
+  transcript_summary?: string | null
+  external_message_id?: string | null
+}
+
+// Contact consent record
+export interface ContactConsent {
+  contact_id: string
+  do_not_call: boolean
+  do_not_text: boolean
+  do_not_email: boolean
+  consent_call: boolean
+  consent_text: boolean
+  consent_captured_at: string | null
+  consent_source: string | null
+  consent_by: string | null
+  updated_at: string | null
+}
+
+// Connections status
+export interface ConnectionsStatus {
+  graph: { connected: boolean }
+  telephony: { configured: boolean; provider: string }
+}
+
 export type LeadStatus =
   | 'new'
   | 'reviewed'

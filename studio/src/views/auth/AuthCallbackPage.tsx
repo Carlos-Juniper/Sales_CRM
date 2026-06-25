@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Leaf } from 'lucide-react'
-import { exchangeCodeForIdToken } from '@/lib/azureAuth'
-import { entraCallback } from '@/api/auth'
+import { exchangeCodeForTokens } from '@/lib/azureAuth'
+import { entraCallback, storeMsGraphToken } from '@/api/auth'
 import { useAuthStore } from '@/store/authStore'
 
 function roleDefaultRoute(role: string) {
@@ -29,9 +29,27 @@ export default function AuthCallbackPage() {
           navigate('/login', { replace: true })
           return
         }
-        const idToken = await exchangeCodeForIdToken(code, state)
-        const user = await entraCallback(idToken)
+
+        const tokens = await exchangeCodeForTokens(code, state)
+        const user = await entraCallback(tokens.id_token)
         login(user)
+
+        // Store Graph tokens server-side so email/calendar features work.
+        // This is best-effort — if it fails the user is still logged in,
+        // and they'll see a "connect Microsoft" prompt when they try to send email.
+        if (tokens.access_token && tokens.refresh_token) {
+          try {
+            await storeMsGraphToken({
+              access_token: tokens.access_token,
+              refresh_token: tokens.refresh_token,
+              expires_in: tokens.expires_in,
+              scope: tokens.scope,
+            })
+          } catch {
+            // non-fatal — Graph features will surface a reconnect prompt
+          }
+        }
+
         navigate(roleDefaultRoute(user.role), { replace: true })
       } catch {
         navigate('/login?error=sso_failed', { replace: true })

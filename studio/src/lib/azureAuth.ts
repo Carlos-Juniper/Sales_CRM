@@ -1,6 +1,11 @@
 const CLIENT_ID = import.meta.env.VITE_ENTRA_CLIENT_ID as string
 const TENANT_ID = import.meta.env.VITE_ENTRA_TENANT_ID as string
 
+// Graph scopes requested in addition to the base OpenID scopes.
+// GRAPH_SCOPES can be overridden via env (e.g. for testing without M365 licenses).
+const GRAPH_SCOPES = (import.meta.env.VITE_GRAPH_SCOPES as string | undefined)
+  ?? 'Mail.Send Mail.Read Calendars.ReadWrite offline_access'
+
 function getRedirectUri(): string {
   return `${window.location.origin}/auth/callback`
 }
@@ -36,7 +41,7 @@ export async function redirectToAzureLogin(): Promise<void> {
     response_type: 'code',
     redirect_uri: getRedirectUri(),
     response_mode: 'query',
-    scope: 'openid profile email',
+    scope: `openid profile email ${GRAPH_SCOPES}`,
     state,
     code_challenge: challenge,
     code_challenge_method: 'S256',
@@ -46,7 +51,15 @@ export async function redirectToAzureLogin(): Promise<void> {
     `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize?${params}`
 }
 
-export async function exchangeCodeForIdToken(code: string, state: string): Promise<string> {
+export interface TokenResponse {
+  id_token: string
+  access_token: string
+  refresh_token: string
+  expires_in: number
+  scope: string
+}
+
+export async function exchangeCodeForTokens(code: string, state: string): Promise<TokenResponse> {
   const storedState = sessionStorage.getItem('oauth_state')
   const verifier = sessionStorage.getItem('pkce_verifier')
 
@@ -74,5 +87,17 @@ export async function exchangeCodeForIdToken(code: string, state: string): Promi
 
   const data = await resp.json()
   if (!data.id_token) throw new Error('No id_token in response')
-  return data.id_token as string
+  return {
+    id_token: data.id_token as string,
+    access_token: data.access_token as string,
+    refresh_token: data.refresh_token as string,
+    expires_in: data.expires_in as number,
+    scope: data.scope as string,
+  }
+}
+
+/** @deprecated Use exchangeCodeForTokens instead — kept for backwards compat */
+export async function exchangeCodeForIdToken(code: string, state: string): Promise<string> {
+  const tokens = await exchangeCodeForTokens(code, state)
+  return tokens.id_token
 }

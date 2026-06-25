@@ -76,22 +76,26 @@ export default function LeadFeedPage() {
 
         {/* Lead list */}
         <ScrollArea className="flex-1">
-          <div className="p-4 space-y-2">
+          <div className="p-4 grid gap-3 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
             {isLoading && Array.from({ length: 6 }).map((_, i) => <LeadCardSkeleton key={i} />)}
 
             {isError && (
-              <EmptyState
-                title="Failed to load leads"
-                description="Check your connection and try again."
-                action={{ label: 'Retry', onClick: () => refetch() }}
-              />
+              <div className="col-span-full">
+                <EmptyState
+                  title="Failed to load leads"
+                  description="Check your connection and try again."
+                  action={{ label: 'Retry', onClick: () => refetch() }}
+                />
+              </div>
             )}
 
             {!isLoading && !isError && leads.length === 0 && (
-              <EmptyState
-                title="No leads match your filters"
-                description="Try adjusting or clearing the filters above."
-              />
+              <div className="col-span-full">
+                <EmptyState
+                  title="No leads match your filters"
+                  description="Try adjusting or clearing the filters above."
+                />
+              </div>
             )}
 
             {!isLoading && leads.map((lead: Lead) => (
@@ -105,7 +109,7 @@ export default function LeadFeedPage() {
 
             {/* Pagination */}
             {!isLoading && total > PAGE_SIZE && (
-              <div className="flex items-center justify-between pt-2">
+              <div className="col-span-full flex items-center justify-between pt-2">
                 <span className="text-xs text-[hsl(var(--muted-fg))]">
                   Page {page} of {Math.ceil(total / PAGE_SIZE)}
                 </span>

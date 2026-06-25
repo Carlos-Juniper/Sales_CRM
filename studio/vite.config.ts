@@ -18,6 +18,12 @@ export default defineConfig(({ mode: _mode }) => ({
   },
   server: {
     port: 5173,
+    // Vite 8's fs path comparison mishandles the colon in the working directory
+    // name (feat:lead-management). strict: false is dev-only and has no effect
+    // on production builds.
+    fs: {
+      strict: false,
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',

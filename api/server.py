@@ -645,7 +645,7 @@ async def get_contact_consent(contact_id: str, _user: dict = Depends(require_aut
         [P("contact_id", "STRING", contact_id)],
     )
     if rows:
-        return rows[0]
+        return dict(rows[0])
     return {"contact_id": contact_id, **_DEFAULT_CONSENT}
 
 
@@ -699,12 +699,13 @@ async def patch_contact_consent(
 async def compliance_check(
     channel: str = Query(...),
     to: str = Query(...),
+    contact_id: Optional[str] = Query(None),
     _user: dict = Depends(require_auth),
 ) -> dict:
     try:
         phone = to if channel in ("call", "sms") else None
         email = to if channel == "email" else None
-        await assert_can_contact(channel, phone=phone, email=email)
+        await assert_can_contact(channel, phone=phone, email=email, contact_id=contact_id)
         return {"allowed": True}
     except HTTPException as e:
         return {"allowed": False, "reason": e.detail}

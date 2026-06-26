@@ -251,8 +251,24 @@ const allHandlers = [
     await delay(100)
     const url = new URL(request.url)
     const to = url.searchParams.get('to')
-    const blocked = to?.startsWith('+1555BLOCKED')
-    return HttpResponse.json(blocked ? { allowed: false, reason: 'DNC list' } : { allowed: true })
+    const channel = url.searchParams.get('channel') ?? ''
+    const contactId = url.searchParams.get('contact_id')
+    if (to?.startsWith('+1555BLOCKED')) {
+      return HttpResponse.json({ allowed: false, reason: 'DNC list' })
+    }
+    if (contactId) {
+      const consent = mockConsent[contactId]
+      if (consent) {
+        const dnc =
+          (channel === 'call' && consent.do_not_call) ||
+          (channel === 'sms' && consent.do_not_text) ||
+          (channel === 'email' && consent.do_not_email)
+        if (dnc) {
+          return HttpResponse.json({ allowed: false, reason: `Contact has opted out of ${channel} communications` })
+        }
+      }
+    }
+    return HttpResponse.json({ allowed: true })
   }),
 
   // GET /api/settings/connections

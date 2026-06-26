@@ -8,6 +8,7 @@ import {
   PipelinePage, MapPage, EstimatingPage,
 } from '@/views/inside-sales'
 import AccountsPage from '@/views/inside-sales/AccountsPage'
+import ConnectionsPage from '@/views/inside-sales/ConnectionsPage'
 import OutsideSalesPage from '@/views/outside-sales'
 import BranchManagerPage from '@/views/branch-manager'
 import { InsideSalesGuard, OutsideSalesGuard } from '@/guards'
@@ -72,10 +73,14 @@ export const router = createBrowserRouter([
         path: 'branch-manager',
         element: <Navigate to="/inside-sales" replace />,
       },
-      // Settings (placeholder)
+      // Settings
       {
         path: 'settings',
         element: <RequireAuth><BranchManagerPage /></RequireAuth>,
+      },
+      {
+        path: 'inside-sales/settings/connections',
+        element: <InsideSalesGuard><ConnectionsPage /></InsideSalesGuard>,
       },
       // Catch-all
       {

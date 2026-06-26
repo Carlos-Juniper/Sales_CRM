@@ -154,3 +154,32 @@ async def test_no_contact_id_skips_consent_check():
     """With no contact_id, only DNC check runs (for phone channels)."""
     with patch("api.compliance.query", _query_returns([])):
         await assert_can_contact("call", phone="+16025551234")  # should not raise
+
+
+# ── Channel validation ────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_unknown_channel_raises_400():
+    """Channels outside the CommChannel union must be rejected before any DB call."""
+    with pytest.raises(HTTPException) as exc:
+        await assert_can_contact("carrier_pigeon", phone="+16025551234")
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_note_channel_always_allowed():
+    """'note' is a valid channel but has no compliance checks — always passes."""
+    await assert_can_contact("note", contact_id="c1")  # no mock needed; no DB calls
+
+
+@pytest.mark.asyncio
+async def test_meeting_channel_always_allowed():
+    """'meeting' is a valid channel but has no compliance checks — always passes."""
+    await assert_can_contact("meeting", contact_id="c1")
+
+
+@pytest.mark.asyncio
+async def test_linkedin_channel_always_allowed():
+    """'linkedin' is a valid channel but has no consent mapping — always passes."""
+    await assert_can_contact("linkedin", contact_id="c1")

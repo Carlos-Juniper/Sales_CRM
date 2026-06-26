@@ -9,6 +9,7 @@ import { useLeadActivity } from '@/hooks/useActivity'
 import { formatCurrency, formatRelativeTime, daysUntil, cn } from '@/lib/utils'
 import { STRONG_FIT_SCORE, GOOD_FIT_SCORE } from '@/lib/constants'
 import { ActivityBubble } from './ActivityBubble'
+import { ConsentBadge } from './ConsentBadge'
 import { Composer } from './Composer'
 import type { CommChannel, ActivityItem, OutreachHistory } from '@/types'
 
@@ -102,10 +103,11 @@ export function ConversationPane({ leadId }: ConversationPaneProps) {
           </button>
         </div>
 
-        <p className="text-xs text-[hsl(var(--muted-fg))] mb-3">
+        <p className="text-xs text-[hsl(var(--muted-fg))] mb-1">
           {lead.city}, {lead.state}
           {lead.contact_name ? ` · ${lead.contact_name}` : ''}
         </p>
+        <ConsentBadge contactId={lead.contact_id} />
 
         {/* Metric chips */}
         <div className="flex items-center gap-3 flex-wrap mb-3">

@@ -86,6 +86,7 @@ export interface Lead {
   estimated_acreage: number
   estimated_contract_value: number
   units?: number | null
+  contact_id?: string | null
   contact_name: string | null
   contact_email: string | null
   contact_linkedin: string | null

@@ -34,7 +34,7 @@ async def assert_can_contact(
     channel: str,
     *,
     phone: str | None = None,
-    email: str | None = None,
+    email: str | None = None,  # reserved for CAN-SPAM email suppression list (not yet implemented)
     contact_id: str | None = None,
 ) -> None:
     """Raise HTTPException(403) when the channel/contact is blocked."""

@@ -1,10 +1,6 @@
 import { apiClient } from './client'
 import type { AuthUser } from '@/types'
 
-export function login(email: string, password: string) {
-  return apiClient.post<AuthUser>('/auth/login', { email, password })
-}
-
 export function logout() {
   return apiClient.post<{ ok: boolean }>('/auth/logout', {})
 }

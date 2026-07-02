@@ -19,7 +19,6 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
-import bcrypt
 import jwt
 from dotenv import load_dotenv
 from pathlib import Path
@@ -261,11 +260,6 @@ class PatchPMContactBody(BaseModel):
     title: Optional[str] = None   # stored in `role` column
     email: Optional[str] = None
     phone: Optional[str] = None
-
-
-class LoginBody(BaseModel):
-    email: str
-    password: str
 
 
 # ── Auth dependency ──────────────────────────────────────────────────────────
@@ -1565,51 +1559,6 @@ def _issue_jwt(user: dict, response: Response) -> dict:
     return {k: v for k, v in payload.items() if k != "exp"}
 
 
-@app.post("/api/auth/login")
-async def login(body: LoginBody, response: Response) -> dict:
-    user_rows = await query(
-        f"SELECT id, name, email, role, branch_id, avatar_initials FROM {T('users')} WHERE email = @email",
-        [P("email", "STRING", body.email)],
-    )
-    if not user_rows:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    user = user_rows[0]
-
-    login_rows = await query(
-        f"SELECT password_hash, failed_attempts, locked_until FROM {T('logins')} WHERE user_id = @user_id",
-        [P("user_id", "STRING", user["id"])],
-    )
-    if not login_rows:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    login_row = login_rows[0]
-
-    now_utc = datetime.now(timezone.utc)
-    locked_until = login_row.get("locked_until")
-    if locked_until:
-        lu = locked_until if locked_until.tzinfo else locked_until.replace(tzinfo=timezone.utc)
-        if lu > now_utc:
-            raise HTTPException(status_code=403, detail="Account temporarily locked. Try again later.")
-
-    if not bcrypt.checkpw(body.password.encode(), login_row["password_hash"].encode()):
-        new_attempts = (login_row.get("failed_attempts") or 0) + 1
-        lock_until = now_utc + timedelta(minutes=15) if new_attempts >= 5 else None
-        await execute(
-            f"UPDATE {T('logins')} SET failed_attempts = @attempts, locked_until = @lock_until, updated_at = CURRENT_TIMESTAMP() WHERE user_id = @user_id",
-            [
-                P("attempts", "INT64", new_attempts),
-                P("lock_until", "TIMESTAMP", lock_until),
-                P("user_id", "STRING", user["id"]),
-            ],
-        )
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    await execute(
-        f"UPDATE {T('logins')} SET failed_attempts = 0, locked_until = NULL, last_login = CURRENT_TIMESTAMP(), updated_at = CURRENT_TIMESTAMP() WHERE user_id = @user_id",
-        [P("user_id", "STRING", user["id"])],
-    )
-    return _issue_jwt(user, response)
-
-
 class EntraCallbackBody(BaseModel):
     id_token: str
 
@@ -1635,16 +1584,22 @@ async def entra_callback(body: EntraCallbackBody, response: Response) -> dict:
         logger.error("Entra ID token validation failed", exc_info=True)
         raise HTTPException(status_code=401, detail="Invalid SSO token")
 
-    email = claims.get("email") or claims.get("preferred_username", "")
+    email = (claims.get("email") or claims.get("preferred_username") or "").strip().lower()
     if not email:
         raise HTTPException(status_code=401, detail="No email in Entra ID token")
 
+    # Match case-insensitively: Entra token casing isn't under our control, and
+    # seed_auth stores emails lowercased. A casing mismatch here would 403 a
+    # user who has in fact been onboarded.
     user_rows = await query(
-        f"SELECT id, name, email, role, branch_id, avatar_initials FROM {T('users')} WHERE email = @email",
+        f"SELECT id, name, email, role, branch_id, avatar_initials FROM {T('users')} WHERE LOWER(email) = @email",
         [P("email", "STRING", email)],
     )
     if not user_rows:
-        raise HTTPException(status_code=403, detail="No CRM account for this Microsoft account")
+        raise HTTPException(
+            status_code=403,
+            detail="No CRM account is provisioned for this Microsoft account — ask an admin to add you.",
+        )
 
     return _issue_jwt(user_rows[0], response)
 

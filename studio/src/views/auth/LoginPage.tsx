@@ -1,52 +1,11 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Leaf, Eye, EyeOff, AlertCircle } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { useAuthStore } from '@/store/authStore'
+import { Leaf } from 'lucide-react'
 import { useUIStore } from '@/store/uiStore'
-import { login as authLogin } from '@/api/auth'
-import { ApiError } from '@/api/client'
 import { COMPANY_INFO } from '@/lib/constants'
 import { redirectToAzureLogin } from '@/lib/azureAuth'
 import './LoginPage.css'
 
 export default function LoginPage() {
-  const navigate = useNavigate()
-  const { login } = useAuthStore()
   const toast = useUIStore((s) => s.toast)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [showPw, setShowPw] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
-    e.preventDefault()
-    if (!email || !password) { setError('Email and password are required.'); return }
-    setError('')
-    setLoading(true)
-    try {
-      const user = await authLogin(email, password)
-      login(user)
-      navigate(roleDefaultRoute(user.role), { replace: true })
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 403) {
-        setError('Account temporarily locked. Please try again later.')
-      } else {
-        setError('Invalid email or password.')
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function roleDefaultRoute(role: string) {
-    if (role === 'outside_sales') return '/outside-sales'
-    if (role === 'manager') return '/branch-manager'
-    return '/inside-sales'
-  }
 
   async function handleSsoClick() {
     try {
@@ -159,91 +118,12 @@ export default function LoginPage() {
             Continue with Azure Entra ID
           </button>
 
-          {/* Divider */}
-          <div className="flex items-center gap-3 my-5">
-            <span className="flex-1 h-px bg-[hsl(220_13%_91%)]" aria-hidden="true" />
-            <span className="text-[11px] font-medium tracking-[0.06em] uppercase text-[#6b7280] whitespace-nowrap">
-              or sign in with email
-            </span>
-            <span className="flex-1 h-px bg-[hsl(220_13%_91%)]" aria-hidden="true" />
-          </div>
-
-          {/* Email + password form */}
-          <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-3.5">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="email" className="text-[12.5px] font-semibold text-[#0d1117]">
-                Work email
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@juniperlandscaping.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-                autoFocus
-                className="h-11 text-sm bg-white border-[hsl(220_13%_91%)]"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="password" className="text-[12.5px] font-semibold text-[#0d1117]">
-                Password
-              </Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPw ? 'text' : 'password'}
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                  className="h-11 pr-10 text-sm bg-white border-[hsl(220_13%_91%)]"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPw(!showPw)}
-                  aria-label={showPw ? 'Hide password' : 'Show password'}
-                  tabIndex={-1}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-md text-[#6b7280] hover:text-[#0d1117] hover:bg-[hsl(220_14%_96%)] transition-colors duration-100"
-                >
-                  {showPw ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
-                </button>
-              </div>
-            </div>
-
-            {error && (
-              <div className="flex items-start gap-2.5 text-sm text-red-600 bg-red-50 rounded-lg p-3">
-                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <Button
-              type="submit"
-              disabled={loading}
-              className="h-[46px] w-full mt-2 bg-[#2E7D52] hover:bg-[#256644] text-white text-sm font-semibold gap-2"
-            >
-              {loading ? 'Signing in…' : (
-                <>
-                  Sign in
-                  <svg
-                    width="16" height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M5 12h14" />
-                    <path d="m13 5 7 7-7 7" />
-                  </svg>
-                </>
-              )}
-            </Button>
-          </form>
+          {/* SSO is the only entry point — role + branch resolve from crm_users
+              in the Entra callback, after Microsoft proves identity. */}
+          <p className="mt-5 text-[12.5px] leading-relaxed text-[#6b7280]">
+            Access is managed through your Juniper Microsoft account. If you can’t
+            sign in, ask an admin to provision your CRM access.
+          </p>
 
         </div>
       </div>

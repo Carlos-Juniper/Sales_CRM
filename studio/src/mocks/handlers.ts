@@ -276,20 +276,6 @@ const allHandlers = [
     await delay(150)
     return HttpResponse.json(mockConnections)
   }),
-
-  // POST /api/auth/login (mock)
-  http.post(`${API}/auth/login`, async ({ request }) => {
-    await delay(500)
-    const body = await request.json() as { email: string; password: string }
-    const user = mockUsers.find(u => u.email === body.email)
-    if (!user || body.password !== 'demo') {
-      return HttpResponse.json({ error: 'Invalid credentials' }, { status: 401 })
-    }
-    return HttpResponse.json({
-      ...user,
-      token: `mock_jwt_${user.id}_${Date.now()}`,
-    })
-  }),
 ]
 
 export const handlers = import.meta.env.DEV ? allHandlers : []

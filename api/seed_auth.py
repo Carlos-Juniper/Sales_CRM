@@ -1,29 +1,29 @@
 """
-Onboard a CRM user (no password — auth is Microsoft Entra SSO only).
+Onboard or update a CRM user (no password — auth is Microsoft Entra SSO only).
 
-Identity is proven by Entra SSO at login; this script provisions the
-*authorization* half: the crm_users row that grants a Microsoft-authenticated
-user their `role` (which parts of the app they see) and `branch_id` (data
-scoping). A Microsoft account with no crm_users row cannot sign in (403), so
-this is the one manual onboarding step per user.
+Identity is proven by Entra SSO at login. Users are auto-provisioned on first
+login with role=inside_sales and branch_id=NULL. Use this script to change a
+user's role or branch_id (e.g., promote to manager, add branch scoping) after
+they've already signed in.
 
 This writes to the SAME store the SSO callback reads from — the BigQuery
 `users` table (referenced as ``T('users')``), via the shared ``query``/
 ``execute`` helpers. That is deliberate: ``entra_callback`` authorizes users by
-reading ``T('users')`` from BigQuery, so onboarding must write there too.
+reading ``T('users')`` from BigQuery, so updates must write there too.
 (The MySQL password/credential store is gone with manual login.)
 
 Usage:
+    # Promote a user to manager with a branch:
     python -m api.seed_auth --email jane.doe@juniperlandscaping.com \
-        --name "Jane Doe" --role inside_sales --branch-id b1
+        --name "Jane Doe" --role manager --branch-id b1
 
-    # non-manager without a branch (branch_id is nullable for these roles):
+    # Assign outside_sales without a branch (branch_id is nullable for this role):
     python -m api.seed_auth --email pat.lee@juniperlandscaping.com \
         --name "Pat Lee" --role outside_sales
 
-Re-running for the same email updates that user's name/role/branch (upsert
-keyed on the normalized email), so it doubles as a "fix a role or branch" tool
-without creating duplicates.
+Running this script again for the same email updates that user's name/role/branch
+(upsert keyed on the normalized email), so it's an "edit role or branch" tool
+that avoids duplicates.
 """
 from __future__ import annotations
 

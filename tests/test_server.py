@@ -572,9 +572,9 @@ def test_dashboard_avg_score_zero_when_no_scored_leads():
 
 # ── Auth is SSO-only (manual login removed) ───────────────────────────────────
 # The manual email/password path (POST /api/auth/login, bcrypt, crm_logins) has
-# been removed. Microsoft Entra SSO is the only entry point. crm_users still
-# owns role/branch (the authorization step), so an SSO identity with no crm_users
-# row is rejected with 403.
+# been removed. Microsoft Entra SSO is the only entry point. On first login, users
+# are auto-provisioned with role=inside_sales and branch_id=NULL (admin can update
+# later). Returning users are looked up in crm_users.
 
 
 def _entra_patches(claims: dict):
@@ -626,17 +626,56 @@ def test_entra_callback_valid_token_existing_user_issues_session():
     assert "session" in resp.cookies
 
 
-def test_entra_callback_no_crm_user_returns_403_with_admin_guidance():
-    claims = {"email": "stranger@juniperlandscaping.com"}
+def test_entra_callback_auto_provisions_first_time_user():
+    # On first login (no existing crm_users row), user is auto-provisioned with
+    # role=inside_sales and branch_id=NULL (can be updated later by admin).
+    claims = {"email": "newuser@juniperlandscaping.com", "name": "New User"}
     jwk_patch, decode_patch = _entra_patches(claims)
+    query_mock = AsyncMock(return_value=[])  # No existing user
+    execute_mock = AsyncMock(return_value=1)  # INSERT succeeded
     with jwk_patch, decode_patch, patch(
-        "api.server.query", new_callable=AsyncMock, return_value=[]
-    ):
+        "api.server.query", query_mock
+    ), patch("api.server.execute", execute_mock):
         resp = client.post("/api/auth/entra-callback", json={"id_token": "valid.jwt.token"})
 
-    assert resp.status_code == 403
-    # Message should point the user at an admin (clearer QA guidance).
-    assert "admin" in resp.json()["detail"].lower()
+    assert resp.status_code == 200
+    body = resp.json()
+    # Verify auto-provisioned user has inside_sales role and no branch.
+    assert body["email"] == "newuser@juniperlandscaping.com"
+    assert body["name"] == "New User"
+    assert body["role"] == "inside_sales"
+    assert body["branch_id"] is None
+    # Session cookie should be set.
+    assert "session" in resp.cookies
+
+    # Verify execute was called to INSERT the new user.
+    assert execute_mock.await_count == 1
+    insert_sql = execute_mock.await_args[0][0]
+    assert "INSERT" in insert_sql.upper()
+    insert_params = [p.value for p in execute_mock.await_args[0][1]]
+    assert "newuser@juniperlandscaping.com" in insert_params
+    assert "New User" in insert_params
+    assert "inside_sales" in insert_params
+    assert None in insert_params  # branch_id is NULL
+
+
+def test_entra_callback_auto_provision_lowercases_email():
+    # Auto-provisioned user's email should be lowercased in the DB.
+    claims = {"email": "Jane.Doe@Juniperlandscaping.com", "name": "Jane Doe"}
+    jwk_patch, decode_patch = _entra_patches(claims)
+    query_mock = AsyncMock(return_value=[])
+    execute_mock = AsyncMock(return_value=1)
+    with jwk_patch, decode_patch, patch(
+        "api.server.query", query_mock
+    ), patch("api.server.execute", execute_mock):
+        resp = client.post("/api/auth/entra-callback", json={"id_token": "valid.jwt.token"})
+
+    assert resp.status_code == 200
+    # Email in response is lowercased.
+    assert resp.json()["email"] == "jane.doe@juniperlandscaping.com"
+    # Email in INSERT params is lowercased.
+    insert_params = [p.value for p in execute_mock.await_args[0][1]]
+    assert "jane.doe@juniperlandscaping.com" in insert_params
 
 
 def test_entra_callback_matches_email_case_insensitively():

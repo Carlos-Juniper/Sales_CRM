@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
-import { http, HttpResponse } from 'msw'
-import { server } from '@/mocks/server'
 import { render, makeUser } from '@/test/utils'
 import { useAuthStore } from '@/store/authStore'
 import { ConversationPane } from '@/views/inside-sales/components/outreach/ConversationPane'

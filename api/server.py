@@ -573,12 +573,6 @@ async def get_outreach(lead_id: str, _user: dict = Depends(require_auth)) -> lis
 
 @app.post("/api/outreach/send")
 async def send_outreach(body: OutreachSendBody, user: dict = Depends(require_auth)) -> dict:
-    try:
-        from api.compliance import assert_can_contact
-    except ImportError:
-        def assert_can_contact(*a, **k):
-            pass
-
     action_type = _CHANNEL_TO_ACTION.get(body.channel, "email_sent")
     external_message_id: Optional[str] = None
 

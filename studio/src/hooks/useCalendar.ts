@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { graphApi } from '@/api/graph'
+import { ApiError } from '@/api/client'
 import { useUIStore } from '@/store/uiStore'
 import type { CalendarEventCreatePayload, ScheduleMeetingPayload } from '@/types'
 
@@ -26,7 +27,7 @@ export function useCreateCalendarEvent() {
       toast('Meeting created', { variant: 'success' })
     },
     onError: (err: Error) => {
-      const msg = err.message.includes('not connected')
+      const msg = err instanceof ApiError && err.status === 400
         ? 'Connect your Microsoft account to create meetings'
         : 'Could not create meeting'
       toast(msg, { variant: 'error' })
@@ -46,7 +47,7 @@ export function useScheduleMeeting(leadId: string) {
       toast('Meeting scheduled', { variant: 'success' })
     },
     onError: (err: Error) => {
-      const msg = err.message.includes('not connected')
+      const msg = err instanceof ApiError && err.status === 400
         ? 'Connect your Microsoft account to schedule meetings'
         : 'Could not schedule meeting'
       toast(msg, { variant: 'error' })

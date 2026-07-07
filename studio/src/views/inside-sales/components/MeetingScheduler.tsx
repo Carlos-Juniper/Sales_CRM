@@ -31,8 +31,11 @@ export function MeetingScheduler({ lead }: MeetingSchedulerProps) {
     e.preventDefault()
     if (!date || !startTime || !endTime) return
 
-    const startIso = `${date}T${startTime}:00Z`
-    const endIso = `${date}T${endTime}:00Z`
+    // The date/time inputs are the user's LOCAL wall-clock time. Parse them as
+    // local (no trailing 'Z') and convert to UTC ISO so the event lands at the
+    // intended time regardless of the user's timezone (backend stores UTC).
+    const startIso = new Date(`${date}T${startTime}:00`).toISOString()
+    const endIso = new Date(`${date}T${endTime}:00`).toISOString()
 
     try {
       await schedule.mutateAsync({

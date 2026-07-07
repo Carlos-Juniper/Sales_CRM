@@ -1,10 +1,18 @@
+import { useMemo } from 'react'
 import { Calendar, ExternalLink, Video } from 'lucide-react'
 import { useCalendarEvents } from '@/hooks/useCalendar'
 import type { CalendarEvent } from '@/types'
 
 function formatEventTime(iso: string): string {
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    // Graph's calendarView returns datetimes WITHOUT a timezone designator when
+    // Prefer: outlook.timezone="UTC" is set (e.g. "2026-06-27T10:00:00.0000000").
+    // JS parses a bare datetime string as LOCAL time, which would shift the
+    // displayed time by the browser's UTC offset — normalize to UTC by appending
+    // 'Z' when no offset/Z is present.
+    const hasTz = /([zZ])|([+-]\d{2}:?\d{2})$/.test(iso)
+    const normalized = hasTz ? iso : `${iso}Z`
+    return new Date(normalized).toLocaleString(undefined, {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
@@ -24,9 +32,18 @@ interface UpcomingMeetingsProps {
 }
 
 export function UpcomingMeetings({ start, end }: UpcomingMeetingsProps) {
-  const now = new Date()
-  const windowStart = start ?? now.toISOString()
-  const windowEnd = end ?? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  // Compute the window once (rounded down to the current hour) so the
+  // react-query key stays stable across re-renders. Recomputing new Date() on
+  // every render would change the key each millisecond, defeating staleTime
+  // and triggering a refetch on any parent re-render.
+  const { windowStart, windowEnd } = useMemo(() => {
+    const now = new Date()
+    now.setMinutes(0, 0, 0)
+    return {
+      windowStart: start ?? now.toISOString(),
+      windowEnd: end ?? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    }
+  }, [start, end])
 
   const { data: events, isLoading, isError } = useCalendarEvents(windowStart, windowEnd)
 
@@ -77,11 +94,14 @@ export function UpcomingMeetings({ start, end }: UpcomingMeetingsProps) {
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{event.subject}</p>
             <p className="text-xs text-gray-500 mt-0.5">
-              {formatEventTime(event.start.dateTime)}
+              {event.start?.dateTime ? formatEventTime(event.start.dateTime) : 'Time TBD'}
             </p>
-            {event.attendees.length > 0 && (
+            {event.attendees && event.attendees.length > 0 && (
               <p className="text-xs text-gray-400 truncate">
-                {event.attendees.map((a) => a.emailAddress.address).join(', ')}
+                {event.attendees
+                  .map((a) => a.emailAddress?.address)
+                  .filter(Boolean)
+                  .join(', ')}
               </p>
             )}
           </div>

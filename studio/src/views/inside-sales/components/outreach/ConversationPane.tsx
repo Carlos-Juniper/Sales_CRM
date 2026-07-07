@@ -16,8 +16,11 @@ type ChannelFilter = 'all' | OutreachChannel
 const CHANNEL_TAB_LABELS: Record<ChannelFilter, string> = {
   all: 'All',
   email: 'Email',
+  call: 'Call',
+  sms: 'SMS',
   linkedin: 'LinkedIn',
-  phone: 'Text',
+  note: 'Note',
+  meeting: 'Meeting',
 }
 
 interface ConversationPaneProps {
@@ -125,7 +128,7 @@ export function ConversationPane({ leadId }: ConversationPaneProps) {
 
         {/* Channel filter tabs */}
         <div role="tablist" aria-label="Filter messages by channel" className="flex gap-0">
-          {(['all', 'email', 'linkedin', 'phone'] as ChannelFilter[]).map((ch) => (
+          {(['all', 'email', 'linkedin', 'call', 'sms', 'note', 'meeting'] as ChannelFilter[]).map((ch) => (
             <button
               key={ch}
               role="tab"

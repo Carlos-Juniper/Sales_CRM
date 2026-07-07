@@ -1,4 +1,4 @@
-import { Mail, Phone } from 'lucide-react'
+import { Mail, Phone, MessageSquare, StickyNote, Calendar } from 'lucide-react'
 import { LinkedinIcon } from '@/components/shared/LinkedinIcon'
 import { LeadTypeBadge } from '@/components/shared/LeadTypeBadge'
 import { formatRelativeTime, getInitials, cn } from '@/lib/utils'
@@ -6,8 +6,11 @@ import type { Lead, OutreachChannel } from '@/types'
 
 const CHANNEL_ICONS: Record<OutreachChannel, React.ComponentType<{ className?: string }>> = {
   email: Mail,
+  call: Phone,
+  sms: MessageSquare,
   linkedin: LinkedinIcon,
-  phone: Phone,
+  note: StickyNote,
+  meeting: Calendar,
 }
 
 // Deterministic color from name — maps to one of 5 hues

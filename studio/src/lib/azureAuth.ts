@@ -95,9 +95,3 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
     scope: data.scope as string,
   }
 }
-
-/** @deprecated Use exchangeCodeForTokens instead — kept for backwards compat */
-export async function exchangeCodeForIdToken(code: string, state: string): Promise<string> {
-  const tokens = await exchangeCodeForTokens(code, state)
-  return tokens.id_token
-}

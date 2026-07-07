@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Mail, Phone, BellOff, RefreshCw } from 'lucide-react'
+import { Mail, Phone, MessageSquare, StickyNote, Calendar, BellOff, RefreshCw } from 'lucide-react'
 import { LinkedinIcon } from '@/components/shared/LinkedinIcon'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -10,13 +10,19 @@ import type { OutreachChannel } from '@/types'
 
 const CHANNEL_ICONS: Record<OutreachChannel, React.ComponentType<{ className?: string }>> = {
   email: Mail,
+  call: Phone,
+  sms: MessageSquare,
   linkedin: LinkedinIcon,
-  phone: Phone,
+  note: StickyNote,
+  meeting: Calendar,
 }
 const CHANNEL_LABELS: Record<OutreachChannel, string> = {
   email: 'Email',
+  call: 'Call',
+  sms: 'SMS',
   linkedin: 'LinkedIn',
-  phone: 'Text',
+  note: 'Note',
+  meeting: 'Meeting',
 }
 
 interface ComposerProps {
@@ -91,7 +97,7 @@ export function Composer({ leadId, contactName, onSent, composeRole = true }: Co
   }
 
   // 1-based index of channel in the sequence order
-  const stepNum = (['email', 'linkedin', 'phone'] as OutreachChannel[]).indexOf(activeChannel) + 1
+  const stepNum = (['email', 'linkedin', 'call'] as OutreachChannel[]).indexOf(activeChannel) + 1
 
   return (
     <div className="flex-shrink-0 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 pt-3 pb-4">
@@ -100,7 +106,7 @@ export function Composer({ leadId, contactName, onSent, composeRole = true }: Co
         {...(composeRole ? { role: 'tablist' as const, 'aria-label': 'Compose channel' } : {})}
         className="flex items-center gap-1 mb-2"
       >
-        {(['email', 'linkedin', 'phone'] as OutreachChannel[]).map((ch) => {
+        {(['email', 'linkedin', 'call'] as OutreachChannel[]).map((ch) => {
           const Icon = CHANNEL_ICONS[ch]
           return (
             <button

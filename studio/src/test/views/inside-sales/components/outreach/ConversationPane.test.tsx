@@ -50,15 +50,16 @@ describe('ConversationPane', () => {
   })
 
   describe('channel filter tabs', () => {
-    it('renders All, Email, LinkedIn, and Text channel tabs', async () => {
+    it('renders All, Email, LinkedIn, and Call channel tabs', async () => {
       render(<ConversationPane leadId="l2" />)
       await screen.findByText('City of Tempe — Parks RFP')
 
-      expect(screen.getByRole('tab', { name: /all/i })).toBeInTheDocument()
+      // Exact match on "All" so it does not also match "Call".
+      expect(screen.getByRole('tab', { name: /^all$/i })).toBeInTheDocument()
       expect(screen.getByRole('tab', { name: /email/i })).toBeInTheDocument()
       expect(screen.getByRole('tab', { name: /linkedin/i })).toBeInTheDocument()
-      // Phone channel is labeled "Text"
-      expect(screen.getByRole('tab', { name: /text/i })).toBeInTheDocument()
+      // The former "phone"/"Text" channel is now the "Call" channel.
+      expect(screen.getByRole('tab', { name: /^call$/i })).toBeInTheDocument()
     })
   })
 

@@ -1,10 +1,24 @@
-import { Mail, Phone, CheckCheck, Check } from 'lucide-react'
+import { Mail, Phone, MessageSquare, StickyNote, Calendar, CheckCheck, Check } from 'lucide-react'
 import { LinkedinIcon } from '@/components/shared/LinkedinIcon'
 import { formatRelativeTime, cn } from '@/lib/utils'
-import type { OutreachHistory } from '@/types'
+import type { OutreachChannel, OutreachHistory } from '@/types'
 
-const CHANNEL_ICONS = { email: Mail, linkedin: LinkedinIcon, phone: Phone }
-const CHANNEL_LABELS = { email: 'Email', linkedin: 'LinkedIn', phone: 'Text' }
+const CHANNEL_ICONS: Record<OutreachChannel, React.ComponentType<{ className?: string }>> = {
+  email: Mail,
+  call: Phone,
+  sms: MessageSquare,
+  linkedin: LinkedinIcon,
+  note: StickyNote,
+  meeting: Calendar,
+}
+const CHANNEL_LABELS: Record<OutreachChannel, string> = {
+  email: 'Email',
+  call: 'Call',
+  sms: 'SMS',
+  linkedin: 'LinkedIn',
+  note: 'Note',
+  meeting: 'Meeting',
+}
 
 interface BubbleProps {
   item: OutreachHistory

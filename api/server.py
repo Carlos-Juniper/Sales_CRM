@@ -506,6 +506,33 @@ _ACTION_TO_CHANNEL: dict[str, str] = {
 }
 
 
+async def _record_lead_action(
+    *,
+    lead_id: str,
+    action_type: str,
+    detail: Optional[str],
+    performed_by: Optional[str],
+    external_message_id: Optional[str],
+) -> None:
+    """Insert a row into lead_actions (id generated internally)."""
+    await execute(
+        f"""
+        INSERT INTO {T('lead_actions')}
+            (id, lead_id, action_type, detail, performed_by, performed_at, external_message_id)
+        VALUES
+            (@id, @lead_id, @action_type, @detail, @performed_by, CURRENT_TIMESTAMP(), @external_message_id)
+        """,
+        [
+            P("id", "STRING", str(uuid.uuid4())),
+            P("lead_id", "STRING", lead_id),
+            P("action_type", "STRING", action_type),
+            P("detail", "STRING", detail),
+            P("performed_by", "STRING", performed_by),
+            P("external_message_id", "STRING", external_message_id),
+        ],
+    )
+
+
 @app.get("/api/outreach/{lead_id}")
 async def get_outreach(lead_id: str, _user: dict = Depends(require_auth)) -> list:
     rows = await query(
@@ -555,7 +582,6 @@ async def send_outreach(body: OutreachSendBody, user: dict = Depends(require_aut
     external_message_id: Optional[str] = None
 
     if body.channel == "email":
-        assert_can_contact("email", email=body.performed_by)
         try:
             from api import graph as _graph
             lead_rows = await query(
@@ -563,11 +589,16 @@ async def send_outreach(body: OutreachSendBody, user: dict = Depends(require_aut
                 [P("id", "STRING", body.lead_id)],
             )
             contact_email = lead_rows[0].get("contact_email") if lead_rows else None
+            # Compliance guard applies to the RECIPIENT (the lead being emailed),
+            # not the sender — check the contact's email, not performed_by.
+            assert_can_contact("email", email=contact_email, contact_id=body.lead_id)
             to_addrs = [contact_email] if contact_email else []
             if to_addrs:
-                performed_by_id = body.performed_by or user.get("id", "")
+                # The Graph token belongs to the authenticated user making the
+                # request; performed_by is only an audit label and may not be a
+                # user id, so never use it as the token-lookup key.
                 external_message_id = await _graph.send_mail(
-                    performed_by_id,
+                    user["id"],
                     to=to_addrs,
                     subject="Outreach from Juniper Landscaping",
                     body_html=body.message,
@@ -584,21 +615,12 @@ async def send_outreach(body: OutreachSendBody, user: dict = Depends(require_aut
             logger.error("Graph send_mail failed: %s", exc)
             raise HTTPException(status_code=502, detail="Email send via Microsoft Graph failed")
 
-    await execute(
-        f"""
-        INSERT INTO {T('lead_actions')}
-            (id, lead_id, action_type, detail, performed_by, performed_at, external_message_id)
-        VALUES
-            (@id, @lead_id, @action_type, @detail, @performed_by, CURRENT_TIMESTAMP(), @external_message_id)
-        """,
-        [
-            P("id", "STRING", str(uuid.uuid4())),
-            P("lead_id", "STRING", body.lead_id),
-            P("action_type", "STRING", action_type),
-            P("detail", "STRING", body.message),
-            P("performed_by", "STRING", body.performed_by),
-            P("external_message_id", "STRING", external_message_id),
-        ],
+    await _record_lead_action(
+        lead_id=body.lead_id,
+        action_type=action_type,
+        detail=body.message,
+        performed_by=body.performed_by,
+        external_message_id=external_message_id,
     )
     await execute(
         f"""
@@ -1591,6 +1613,19 @@ async def me(user: dict = Depends(require_auth)) -> dict:
 
 # ── Calendar ─────────────────────────────────────────────────────────────────
 
+async def _graph_call(coro):
+    """Await a Microsoft Graph coroutine, mapping ValueError → HTTP 400.
+
+    Local helper (not a global exception handler) so only ValueErrors raised
+    inside these Graph calls become 400s — unrelated ValueErrors elsewhere in
+    the app keep their existing handling.
+    """
+    try:
+        return await coro
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @app.get("/api/calendar/events")
 async def calendar_list_events(
     start: str,
@@ -1598,10 +1633,7 @@ async def calendar_list_events(
     user: dict = Depends(require_auth),
 ) -> list:
     from api import graph as _graph
-    try:
-        return await _graph.list_events(user["id"], start, end)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    return await _graph_call(_graph.list_events(user["id"], start, end))
 
 
 @app.post("/api/calendar/events")
@@ -1610,8 +1642,8 @@ async def calendar_create_event(
     user: dict = Depends(require_auth),
 ) -> dict:
     from api import graph as _graph
-    try:
-        return await _graph.create_event(
+    return await _graph_call(
+        _graph.create_event(
             user["id"],
             subject=body.subject,
             start_iso=body.start_iso,
@@ -1620,8 +1652,7 @@ async def calendar_create_event(
             body=body.body,
             online_meeting=body.online_meeting,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    )
 
 
 @app.post("/api/leads/{lead_id}/schedule-meeting")
@@ -1633,8 +1664,8 @@ async def schedule_lead_meeting(
     """Create a calendar event and record a meeting_scheduled lead action."""
     from api import graph as _graph
 
-    try:
-        event = await _graph.create_event(
+    event = await _graph_call(
+        _graph.create_event(
             user["id"],
             subject=body.subject,
             start_iso=body.start_iso,
@@ -1643,26 +1674,16 @@ async def schedule_lead_meeting(
             body=body.body,
             online_meeting=body.online_meeting,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    )
 
     event_id = event.get("id", "")
 
-    await execute(
-        f"""
-        INSERT INTO {T('lead_actions')}
-            (id, lead_id, action_type, detail, performed_by, performed_at, external_message_id)
-        VALUES
-            (@id, @lead_id, @action_type, @detail, @performed_by, CURRENT_TIMESTAMP(), @external_message_id)
-        """,
-        [
-            P("id", "STRING", str(uuid.uuid4())),
-            P("lead_id", "STRING", lead_id),
-            P("action_type", "STRING", "meeting_scheduled"),
-            P("detail", "STRING", body.subject),
-            P("performed_by", "STRING", user["id"]),
-            P("external_message_id", "STRING", event_id),
-        ],
+    await _record_lead_action(
+        lead_id=lead_id,
+        action_type="meeting_scheduled",
+        detail=body.subject,
+        performed_by=user["id"],
+        external_message_id=event_id,
     )
 
     return {"event": event, "lead_id": lead_id}

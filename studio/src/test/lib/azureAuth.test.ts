@@ -72,7 +72,7 @@ describe('azureAuth — exchangeCodeForTokens', () => {
       scope: 'Mail.Send Calendars.ReadWrite',
     }
 
-    global.fetch = vi.fn().mockResolvedValue({
+    globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => mockResponse,
     } as Response)
@@ -99,7 +99,7 @@ describe('azureAuth — exchangeCodeForTokens', () => {
     sessionStorage.setItem('oauth_state', 'state-abc')
     sessionStorage.setItem('pkce_verifier', 'verifier-xyz')
 
-    global.fetch = vi.fn().mockResolvedValue({ ok: false } as Response)
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false } as Response)
 
     await expect(exchangeCodeForTokens('code', 'state-abc')).rejects.toThrow(
       'Token exchange failed',

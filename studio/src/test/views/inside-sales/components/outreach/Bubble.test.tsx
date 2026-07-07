@@ -97,10 +97,24 @@ describe('Bubble', () => {
       expect(screen.getByText('LinkedIn')).toBeInTheDocument()
     })
 
-    it('shows "Text" badge for phone channel (not "Phone")', () => {
-      render(<Bubble item={makeBubble({ channel: 'phone' })} />)
-      expect(screen.getByText('Text')).toBeInTheDocument()
-      expect(screen.queryByText('Phone')).not.toBeInTheDocument()
+    it('shows "Call" badge for call channel', () => {
+      render(<Bubble item={makeBubble({ channel: 'call' })} />)
+      expect(screen.getByText('Call')).toBeInTheDocument()
+    })
+
+    it('shows "SMS" badge for sms channel', () => {
+      render(<Bubble item={makeBubble({ channel: 'sms' })} />)
+      expect(screen.getByText('SMS')).toBeInTheDocument()
+    })
+
+    it('shows "Note" badge for note channel', () => {
+      render(<Bubble item={makeBubble({ channel: 'note' })} />)
+      expect(screen.getByText('Note')).toBeInTheDocument()
+    })
+
+    it('shows "Meeting" badge for meeting channel', () => {
+      render(<Bubble item={makeBubble({ channel: 'meeting' })} />)
+      expect(screen.getByText('Meeting')).toBeInTheDocument()
     })
   })
 

@@ -18,9 +18,7 @@ export function OutreachTab({ lead }: OutreachTabProps) {
   } = useOutreachDrafts(lead)
 
   const isGraphDisconnected =
-    lastError instanceof ApiError &&
-    (lastError.status === 400 || lastError.status === 502) &&
-    lastError.message.toLowerCase().includes('microsoft graph')
+    lastError instanceof ApiError && lastError.status === 400
 
   return (
     <div className="px-6 py-5 space-y-5">

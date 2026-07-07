@@ -1,7 +1,7 @@
 import { useConnections } from '@/hooks/useConnections'
 import { CheckCircle, XCircle } from 'lucide-react'
 
-export function ConnectionsPage() {
+export default function ConnectionsPage() {
   const { data, isLoading } = useConnections()
 
   if (isLoading) return <div>Loading...</div>

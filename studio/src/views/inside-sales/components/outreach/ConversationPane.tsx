@@ -18,7 +18,7 @@ type ChannelFilter = 'all' | CommChannel
 const CHANNEL_TAB_LABELS: Record<string, string> = {
   all: 'All',
   email: 'Email',
-  call: 'Phone',
+  call: 'Call',
   sms: 'Text',
   linkedin: 'LinkedIn',
   note: 'Note',

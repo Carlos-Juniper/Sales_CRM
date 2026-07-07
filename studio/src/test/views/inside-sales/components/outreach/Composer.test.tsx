@@ -13,12 +13,12 @@ beforeEach(() => {
 
 describe('Composer', () => {
   describe('channel tabs', () => {
-    it('renders Email, LinkedIn, and Text tabs', () => {
+    it('renders Email, LinkedIn, and Call tabs', () => {
       render(<Composer leadId="l2" contactName="Mark Benson" />)
       expect(screen.getByRole('tab', { name: /email/i })).toBeInTheDocument()
       expect(screen.getByRole('tab', { name: /linkedin/i })).toBeInTheDocument()
-      // Phone channel is labeled "Text" in the UI
-      expect(screen.getByRole('tab', { name: /text/i })).toBeInTheDocument()
+      // The former "phone" channel is now the "Call" channel in the UI
+      expect(screen.getByRole('tab', { name: /^call$/i })).toBeInTheDocument()
     })
 
     it('switches active channel when a tab is clicked', async () => {

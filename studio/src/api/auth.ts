@@ -16,3 +16,12 @@ export function me() {
 export function entraCallback(idToken: string) {
   return apiClient.post<AuthUser>('/auth/entra-callback', { id_token: idToken })
 }
+
+export function storeMsGraphToken(payload: {
+  access_token: string
+  refresh_token: string
+  expires_in: number
+  scope: string
+}) {
+  return apiClient.post<{ ok: boolean }>('/auth/ms-graph-token', payload)
+}

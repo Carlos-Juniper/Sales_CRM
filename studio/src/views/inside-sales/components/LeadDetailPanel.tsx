@@ -20,6 +20,7 @@ import { OverviewTab } from './OverviewTab'
 import { OutreachTab } from './OutreachTab'
 import { HistoryTab } from './HistoryTab'
 import { BidTab } from './BidTab'
+import { CalendarTab } from './CalendarTab'
 
 interface LeadDetailPanelProps {
   leadId: string | null
@@ -183,6 +184,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                       {[
                         { value: 'overview', label: 'Overview' },
                         { value: 'outreach', label: 'Outreach' },
+                        { value: 'calendar', label: 'Calendar' },
                         { value: 'history', label: 'History' },
                         { value: 'bid', label: 'Bid' },
                       ].map(tab => (
@@ -203,6 +205,10 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
 
                   <TabsContent value="outreach" className="mt-0">
                     <OutreachTab lead={lead} />
+                  </TabsContent>
+
+                  <TabsContent value="calendar" className="mt-0">
+                    <CalendarTab lead={lead} />
                   </TabsContent>
 
                   <TabsContent value="history" className="mt-0">

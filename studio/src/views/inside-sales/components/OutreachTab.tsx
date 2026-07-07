@@ -1,9 +1,9 @@
-import { Mail } from 'lucide-react'
-import { AlertTriangle } from 'lucide-react'
+import { Mail, AlertTriangle, WifiOff } from 'lucide-react'
 import { LinkedinIcon as Linkedin } from '@/components/shared/LinkedinIcon'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useOutreachDrafts } from '@/hooks/useOutreachDrafts'
+import { ApiError } from '@/api/client'
 import type { Lead } from '@/types'
 
 interface OutreachTabProps {
@@ -11,11 +11,24 @@ interface OutreachTabProps {
 }
 
 export function OutreachTab({ lead }: OutreachTabProps) {
-  const { effectiveEmail, effectiveLinkedin, setEmailDraft, setLinkedinDraft, handleSend, isPending } =
-    useOutreachDrafts(lead)
+  const {
+    effectiveEmail, effectiveLinkedin,
+    setEmailDraft, setLinkedinDraft,
+    handleSend, isPending, lastError,
+  } = useOutreachDrafts(lead)
+
+  const isGraphDisconnected =
+    lastError instanceof ApiError && lastError.status === 400
 
   return (
     <div className="px-6 py-5 space-y-5">
+      {isGraphDisconnected && (
+        <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-800">
+          <WifiOff className="h-4 w-4 mt-0.5 flex-shrink-0" />
+          <span>Microsoft account not connected. Sign out and sign back in to re-authorize email sending.</span>
+        </div>
+      )}
+
       {lead.ai_email_draft && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">

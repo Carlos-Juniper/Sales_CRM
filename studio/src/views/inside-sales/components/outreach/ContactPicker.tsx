@@ -48,7 +48,7 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
   const { data: contacts = [], isLoading } = useOutreachContacts()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [inputValue, setInputValue] = useState('')
-  const [pickerOpen, setPickerOpen] = useState(false)
+  const [_pickerOpen, setPickerOpen] = useState(false)
   const [freeformRecipients, setFreeformRecipients] = useState<FreeformRecipient[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
 

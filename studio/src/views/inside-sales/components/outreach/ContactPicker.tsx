@@ -48,7 +48,6 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
   const { data: contacts = [], isLoading } = useOutreachContacts()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [inputValue, setInputValue] = useState('')
-  const [_pickerOpen, setPickerOpen] = useState(false)
   const [freeformRecipients, setFreeformRecipients] = useState<FreeformRecipient[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -116,7 +115,6 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
     setSelected(new Set())
     setFreeformRecipients([])
     setInputValue('')
-    setPickerOpen(false)
     onClose()
   }
 
@@ -196,8 +194,8 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
               aria-label="To field"
               placeholder={canConfirm ? '' : 'Add email, phone, or search contacts…'}
               value={inputValue}
-              onChange={(e) => { setInputValue(e.target.value); setPickerOpen(true) }}
-              onFocus={() => setPickerOpen(true)}
+              onChange={(e) => setInputValue(e.target.value)}
+              onFocus={() => {}}
               onKeyDown={handleInputKeyDown}
               className="flex-1 min-w-[140px] border-none outline-none text-sm bg-transparent text-[hsl(var(--fg))] placeholder:text-[hsl(var(--muted-fg))] py-0.5"
             />

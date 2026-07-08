@@ -65,7 +65,7 @@ export function Composer({ leadId, initialRecipients, onClose }: ComposerProps) 
       : smsBody
     try {
       await sendOutreach.mutateAsync({
-        lead_id: leadId,
+        lead_id: leadId ?? '',
         channel,
         message: body,
       })

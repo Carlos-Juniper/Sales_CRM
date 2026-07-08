@@ -57,8 +57,8 @@ describe('ActivityTimeline — unified activity feed', () => {
     render(<ConversationPane leadId="l3" />)
     await screen.findByText('Hi Chris, reaching out about Juniper Landscaping.')
 
-    // Click the "Phone" tab (call channel) - labeled "Phone" to avoid conflict with "All" tab
-    await user.click(screen.getByRole('tab', { name: /phone/i }))
+    // Click the "Call" tab to filter to call channel only
+    await user.click(screen.getByRole('tab', { name: /^call$/i }))
     await waitFor(() => {
       // Call activity body should be visible after filtering to phone/call channel
       expect(screen.getByText('Call logged: discussed proposal timeline.')).toBeInTheDocument()

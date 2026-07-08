@@ -73,16 +73,16 @@ describe('ConversationPane', () => {
     it('renders outbound bubbles for outbound messages', async () => {
       render(<ConversationPane leadId="l2" />)
       await screen.findByText('Intent to bid submitted.')
-      // o2 is direction='out', should render as an outbound bubble
-      expect(screen.getAllByTestId('bubble-out').length).toBeGreaterThan(0)
+      // o2 is direction='out' email → renders as EmailCard with "Delivered" status
+      expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0)
     })
 
     it('renders inbound bubbles for inbound messages', async () => {
       render(<ConversationPane leadId="l3" />)
-      // o8 is direction='in', from Chris Abbott
+      // o8 is direction='in' email from Chris Abbott → renders as EmailCard with "to You · Email"
       await screen.findByText(/Thanks for reaching out/)
-      expect(screen.getAllByTestId('bubble-in').length).toBeGreaterThan(0)
       expect(screen.getByText('Chris Abbott')).toBeInTheDocument()
+      expect(screen.getByText(/to You · Email/)).toBeInTheDocument()
     })
 
     it('shows all messages for l3 (mixed email + linkedin thread)', async () => {

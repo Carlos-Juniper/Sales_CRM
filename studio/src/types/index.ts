@@ -12,6 +12,7 @@ export interface ActivityItem {
   body: string
   performed_by: string
   performed_at: string
+  subject?: string
   recording_url?: string | null
   duration_seconds?: number | null
   transcript_summary?: string | null

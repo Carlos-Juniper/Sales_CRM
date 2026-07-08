@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import {
-  Mail, MessageSquare, X, Send, Clock, Paperclip,
+  Mail, MessageSquare, X, Send, Clock,
   Bold, Italic, Underline, List, ChevronDown, Info
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -8,7 +8,8 @@ import { useLead, useSendOutreach } from '@/hooks/useLeads'
 import { cn } from '@/lib/utils'
 
 interface ComposerProps {
-  leadId: string
+  leadId: string | null
+  initialRecipients?: { id: string; name: string }[]
   onClose: () => void
 }
 
@@ -22,12 +23,12 @@ function chipInitials(name: string) {
   return name.split(' ').map(x => x[0]).join('').slice(0, 2).toUpperCase()
 }
 
-export function Composer({ leadId, onClose }: ComposerProps) {
+export function Composer({ leadId, initialRecipients, onClose }: ComposerProps) {
   const { data: lead } = useLead(leadId)
   const sendOutreach = useSendOutreach()
 
   const [channel, setChannel] = useState<'email' | 'sms'>('email')
-  const [recipients, setRecipients] = useState<{ id: string; name: string }[]>([])
+  const [recipients, setRecipients] = useState<{ id: string; name: string }[]>(() => initialRecipients ?? [])
   const [subject, setSubject] = useState('')
   const [emailBody, setEmailBody] = useState('')
   const [smsBody, setSmsBody] = useState('')
@@ -207,18 +208,6 @@ export function Composer({ leadId, onClose }: ComposerProps) {
                 >
                   <List className="h-4 w-4" />
                 </button>
-                <div className="w-px h-[18px] bg-[hsl(var(--border))] mx-1" />
-                <span className="text-[11.5px] text-[hsl(var(--muted-fg))] font-semibold ml-1">Merge fields:</span>
-                <button
-                  type="button"
-                  className="text-xs font-semibold text-[hsl(var(--muted-fg))] border border-[hsl(var(--border))] rounded-md px-2 py-0.5 ml-1 hover:bg-[hsl(var(--card))]"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    document.execCommand('insertText', false, '{{first_name}}')
-                  }}
-                >
-                  {`{{first_name}}`}
-                </button>
               </div>
 
               {/* Rich text editor */}
@@ -226,9 +215,8 @@ export function Composer({ leadId, onClose }: ComposerProps) {
                 ref={editorRef}
                 contentEditable
                 suppressContentEditableWarning
-                data-ph="Write your message… Use {{first_name}} to personalize."
+                data-ph="Write your message…"
                 className="px-5 py-[18px] min-h-[200px] text-sm leading-[1.65] outline-none text-[hsl(var(--fg))] empty:before:content-[attr(data-ph)] empty:before:text-[hsl(var(--muted-fg))]"
-                dangerouslySetInnerHTML={{ __html: `Hi {{first_name}},<br><br>` }}
               />
             </>
           )}
@@ -248,13 +236,6 @@ export function Composer({ leadId, onClose }: ComposerProps) {
                   chars · <b className="text-[hsl(var(--fg))]">{smsSegs}</b>{' '}
                   segment{smsSegs > 1 ? 's' : ''}
                 </span>
-                <button
-                  type="button"
-                  className="text-xs font-semibold text-[hsl(var(--muted-fg))] border border-[hsl(var(--border))] rounded-md px-2 py-0.5 hover:bg-[hsl(var(--muted))]"
-                  onClick={() => setSmsBody(s => s + '{{first_name}}')}
-                >
-                  {`{{first_name}}`}
-                </button>
               </div>
 
               {/* Compliance notice */}
@@ -288,17 +269,6 @@ export function Composer({ leadId, onClose }: ComposerProps) {
 
         {/* ── Footer ── */}
         <div className="relative flex items-center gap-2.5 px-5 py-3 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] flex-shrink-0">
-          {/* Attachment (email only) */}
-          {channel === 'email' && (
-            <button
-              type="button"
-              title="Attach file"
-              className="w-[30px] h-[30px] rounded-[7px] border-none bg-transparent cursor-pointer text-[hsl(var(--muted-fg))] inline-flex items-center justify-center hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--fg))]"
-            >
-              <Paperclip className="h-[17px] w-[17px]" />
-            </button>
-          )}
-
           <div className="flex-1" />
 
           {/* Scheduled label chip */}

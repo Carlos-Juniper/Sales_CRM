@@ -23,7 +23,7 @@ const navItems: NavItem[] = [
   // Inside Sales section
   { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: ['inside_sales', 'manager'] },
   { label: 'Lead Feed', icon: Inbox, href: '/inside-sales/leads', roles: ['inside_sales', 'manager'] },
-  { label: 'Outreach Queue', icon: Users, href: '/inside-sales/outreach', roles: ['inside_sales', 'manager'] },
+  { label: 'Outreach', icon: Users, href: '/inside-sales/outreach', roles: ['inside_sales', 'manager'] },
   { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: ['inside_sales', 'manager'] },
   { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: ['inside_sales', 'manager'] },
   { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: ['inside_sales', 'manager'] },

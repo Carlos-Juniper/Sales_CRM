@@ -12,6 +12,7 @@ export default function OutreachQueuePage() {
 
   const [pickerOpen, setPickerOpen] = useState(false)
   const [composerOpen, setComposerOpen] = useState(false)
+  const [pickerContacts, setPickerContacts] = useState<{ id: string; name: string }[]>([])
 
   const activeId = selectedLeadId ?? null
 
@@ -19,9 +20,10 @@ export default function OutreachQueuePage() {
     selectLead(id === activeId ? null : id)
   }
 
-  function handleConfirmContacts(contactIds: string[]) {
-    void contactIds
+  function handleConfirmContacts(contacts: { id: string; name: string }[]) {
+    setPickerContacts(contacts)
     setPickerOpen(false)
+    setComposerOpen(true)
   }
 
   return (
@@ -63,10 +65,11 @@ export default function OutreachQueuePage() {
       />
 
       {/* Full composer modal */}
-      {composerOpen && activeId && (
+      {composerOpen && (
         <Composer
           leadId={activeId}
-          onClose={() => setComposerOpen(false)}
+          initialRecipients={pickerContacts.length > 0 ? pickerContacts : undefined}
+          onClose={() => { setComposerOpen(false); setPickerContacts([]) }}
         />
       )}
     </div>

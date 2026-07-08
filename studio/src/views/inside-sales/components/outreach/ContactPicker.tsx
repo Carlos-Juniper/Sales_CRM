@@ -8,7 +8,7 @@ import type { OutreachContact } from '@/types'
 interface ContactPickerProps {
   open: boolean
   onClose: () => void
-  onConfirm: (contactIds: string[]) => void
+  onConfirm: (contacts: { id: string; name: string }[]) => void
 }
 
 interface FreeformRecipient {
@@ -50,6 +50,7 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
   const [inputValue, setInputValue] = useState('')
   const [freeformRecipients, setFreeformRecipients] = useState<FreeformRecipient[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+  const [inputError, setInputError] = useState(false)
 
   if (!open) return null
 
@@ -90,6 +91,9 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
           setFreeformRecipients(prev => [...prev, { id, name: val, isFreeform: true, kind }])
         }
         setInputValue('')
+        setInputError(false)
+      } else {
+        setInputError(true)
       }
     }
     if (e.key === 'Backspace' && inputValue === '') {
@@ -103,18 +107,20 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
   }
 
   function handleConfirm() {
-    const contactIds = Array.from(selected)
-    const freeformIds = freeformRecipients.map(r => r.id)
-    onConfirm([...contactIds, ...freeformIds])
+    const contactObjs = allSelected.map(c => ({ id: c.id, name: c.name }))
+    const freeformObjs = freeformRecipients.map(r => ({ id: r.id, name: r.name }))
+    onConfirm([...contactObjs, ...freeformObjs])
     setSelected(new Set())
     setFreeformRecipients([])
     setInputValue('')
+    setInputError(false)
   }
 
   function handleClose() {
     setSelected(new Set())
     setFreeformRecipients([])
     setInputValue('')
+    setInputError(false)
     onClose()
   }
 
@@ -194,7 +200,7 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
               aria-label="To field"
               placeholder={canConfirm ? '' : 'Add email, phone, or search contacts…'}
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={(e) => { setInputValue(e.target.value); setInputError(false) }}
               onFocus={() => {}}
               onKeyDown={handleInputKeyDown}
               className="flex-1 min-w-[140px] border-none outline-none text-sm bg-transparent text-[hsl(var(--fg))] placeholder:text-[hsl(var(--muted-fg))] py-0.5"
@@ -208,6 +214,13 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
                 Press Enter to add
                 <span className="font-semibold">{inputValue.trim()}</span>
                 <span className="text-[hsl(var(--muted-fg))]">&#x21B5;</span>
+              </span>
+            </div>
+          )}
+          {inputError && (
+            <div className="mt-1.5">
+              <span className="text-[11.5px] text-red-500 font-medium">
+                Enter a valid email address or phone number
               </span>
             </div>
           )}

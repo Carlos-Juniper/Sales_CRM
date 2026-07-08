@@ -46,6 +46,9 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
 
 _ALLOWED_ORIGINS = {"http://localhost:5173", "http://localhost:5174"}
+_extra_origins = os.environ.get("CORS_EXTRA_ORIGINS", "")
+if _extra_origins:
+    _ALLOWED_ORIGINS.update(o.strip() for o in _extra_origins.split(",") if o.strip())
 
 app = FastAPI(title="Juniper CRM API")
 

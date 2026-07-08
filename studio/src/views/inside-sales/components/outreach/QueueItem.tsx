@@ -1,32 +1,7 @@
-import { Mail, Phone, MessageSquare, StickyNote, Calendar } from 'lucide-react'
-import { LinkedinIcon } from '@/components/shared/LinkedinIcon'
+import { Mail, Clock } from 'lucide-react'
 import { LeadTypeBadge } from '@/components/shared/LeadTypeBadge'
 import { formatRelativeTime, getInitials, cn } from '@/lib/utils'
-import type { Lead, OutreachChannel } from '@/types'
-
-const CHANNEL_ICONS: Record<OutreachChannel, React.ComponentType<{ className?: string }>> = {
-  email: Mail,
-  call: Phone,
-  sms: MessageSquare,
-  linkedin: LinkedinIcon,
-  note: StickyNote,
-  meeting: Calendar,
-}
-
-// Deterministic color from name — maps to one of 5 hues
-const AVATAR_COLORS = [
-  'bg-violet-500',
-  'bg-sky-500',
-  'bg-teal-500',
-  'bg-amber-500',
-  'bg-rose-500',
-]
-
-function avatarColor(name: string): string {
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
-  return AVATAR_COLORS[h % AVATAR_COLORS.length]
-}
+import type { Lead } from '@/types'
 
 interface QueueItemProps {
   lead: Lead
@@ -34,61 +9,80 @@ interface QueueItemProps {
   onClick: () => void
 }
 
-export function QueueItem({ lead, isSelected, onClick }: QueueItemProps) {
-  const initials = getInitials(lead.contact_name ?? lead.property_name)
-  const color = avatarColor(lead.contact_name ?? lead.property_name)
+const AVATAR_COLORS = ['#2E7D52', '#1d4ed8', '#b45309', '#7e22ce', '#0f766e', '#be123c', '#4338ca']
 
-  // Placeholder last-message preview; real thread data loads in ConversationPane
+function avatarHex(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return AVATAR_COLORS[h % AVATAR_COLORS.length]
+}
+
+export function QueueItem({ lead, isSelected, onClick }: QueueItemProps) {
+  const name = lead.contact_name ?? lead.property_name
+  const color = avatarHex(name)
+  const initials = getInitials(name)
+  const isOverdue = !!lead.bid_deadline && new Date(lead.bid_deadline) < new Date()
+  const ChannelIcon = Mail // default; update if Lead type exposes last_channel
+
   const preview = lead.ai_email_draft
     ? `You: ${lead.ai_email_draft.slice(0, 60).replace(/\n/g, ' ')}…`
     : 'No messages yet — draft an opener below.'
-
-  const lastChannel: OutreachChannel = 'email'
-  const ChannelIcon = CHANNEL_ICONS[lastChannel]
 
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-current={isSelected || undefined}
-      data-selected={isSelected}
+      aria-current={isSelected ? 'true' : undefined}
+      data-selected={isSelected ? 'true' : undefined}
       className={cn(
-        'w-full text-left px-4 py-3 border-b border-[hsl(var(--border))] transition-colors',
-        'hover:bg-[hsl(var(--muted))] flex items-start gap-3',
+        'w-full text-left flex gap-[11px] px-4 py-[13px]',
+        'border-b border-[hsl(var(--border))] border-l-[3px] transition-colors',
         isSelected
-          ? 'bg-[hsl(var(--muted))] border-l-[3px] border-l-[#2E7D52]'
-          : 'border-l-[3px] border-l-transparent'
+          ? 'bg-[#2E7D52]/[0.07] border-l-[#2E7D52]'
+          : 'border-l-transparent hover:bg-[hsl(var(--muted))]'
       )}
     >
       {/* Avatar */}
       <div
-        className={cn(
-          'h-9 w-9 rounded-full flex-shrink-0 flex items-center justify-center text-white text-sm font-bold',
-          color
-        )}
+        className="w-[38px] h-[38px] rounded-full flex-shrink-0 flex items-center justify-center text-[13px] font-bold text-white"
+        style={{ background: color }}
       >
         {initials}
       </div>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-start justify-between gap-2 mb-0.5">
-          <p className="text-sm font-semibold text-[hsl(var(--fg))] truncate leading-tight">
-            {lead.property_name}
-          </p>
-          <span className="text-[10px] text-[hsl(var(--muted-fg))] flex-shrink-0">
+        {/* Name + timestamp */}
+        <div className="flex justify-between items-baseline gap-2">
+          <span className="text-[13.5px] font-bold text-[hsl(var(--fg))] overflow-hidden text-ellipsis whitespace-nowrap">
+            {name}
+          </span>
+          <span className="text-[11px] text-[hsl(var(--muted-fg))] flex-shrink-0">
             {formatRelativeTime(lead.updated_at)}
           </span>
         </div>
-        <p className="text-[11px] text-[hsl(var(--muted-fg))] truncate mb-1">
-          {lead.contact_name ?? `${lead.city}, ${lead.state}`}
-        </p>
-        <div className="flex items-center gap-1.5">
-          <ChannelIcon className="h-3 w-3 text-[hsl(var(--muted-fg))] flex-shrink-0" />
-          <p className="text-xs text-[hsl(var(--muted-fg))] truncate">{preview}</p>
+
+        {/* Property sub — only show when contact name is the primary (avoids duplicate text) */}
+        {lead.contact_name && (
+          <p className="text-[11.5px] text-[hsl(var(--muted-fg))] mt-[1px] mb-1 overflow-hidden text-ellipsis whitespace-nowrap">
+            {lead.property_name}
+          </p>
+        )}
+
+        {/* Preview row */}
+        <div className="flex items-center gap-1.5 text-xs text-[hsl(var(--muted-fg))]">
+          <ChannelIcon className="h-3 w-3 flex-shrink-0" />
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap flex-1">{preview}</span>
         </div>
-        <div className="flex items-center gap-1 mt-1">
+
+        {/* Tags row */}
+        <div className="flex items-center gap-[5px] mt-1.5">
           <LeadTypeBadge type={lead.lead_type} />
+          {isOverdue && (
+            <span className="inline-flex items-center gap-[3px] text-[10.5px] font-bold px-[7px] py-0.5 rounded-full bg-red-100 text-red-700">
+              <Clock className="h-[11px] w-[11px]" /> Overdue
+            </span>
+          )}
         </div>
       </div>
     </button>

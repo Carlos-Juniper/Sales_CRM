@@ -35,10 +35,11 @@ describe('OutreachQueuePage', () => {
       expect(screen.getByText('Legacy HOA Peoria')).toBeInTheDocument()
     })
 
-    it('shows follow-up count in ListPane header', async () => {
+    it('shows a count badge on the All tab in ListPane', async () => {
       render(<OutreachQueuePage />)
+      const allTab = screen.getByRole('button', { name: /all/i })
       await waitFor(() => {
-        expect(screen.getByText(/follow-up/i)).toBeInTheDocument()
+        expect(allTab.textContent).toMatch(/\d+/)
       })
     })
 
@@ -114,7 +115,7 @@ describe('OutreachQueuePage', () => {
       render(<OutreachQueuePage />)
       await screen.findByText('City of Tempe — Parks RFP')
 
-      const overdueTab = screen.getByRole('tab', { name: /overdue/i })
+      const overdueTab = screen.getByRole('button', { name: /overdue/i })
       await user.click(overdueTab)
 
       // After clicking Overdue, expect either a filtered subset of leads

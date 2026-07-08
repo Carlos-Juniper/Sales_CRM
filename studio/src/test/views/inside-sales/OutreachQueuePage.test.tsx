@@ -207,4 +207,59 @@ describe('OutreachQueuePage', () => {
       })
     })
   })
+
+  describe('Composer modal (full composer)', () => {
+    it('Composer modal is NOT rendered when no lead is selected', async () => {
+      render(<OutreachQueuePage />)
+      await screen.findByText('City of Tempe — Parks RFP')
+
+      // The modal overlay should not be present
+      expect(document.querySelector('.fixed.inset-0.bg-black')).toBeNull()
+    })
+
+    it('"Full composer" button in ConversationPane opens the Composer modal', async () => {
+      const user = userEvent.setup()
+      render(<OutreachQueuePage />)
+      await screen.findByText('City of Tempe — Parks RFP')
+
+      // Select a lead to show ConversationPane
+      await user.click(screen.getByText('City of Tempe — Parks RFP'))
+      await screen.findByRole('button', { name: /full composer/i })
+
+      // Click "Full composer"
+      await user.click(screen.getByRole('button', { name: /full composer/i }))
+
+      await waitFor(() => {
+        // Composer modal scrim should appear
+        expect(document.querySelector('.fixed.inset-0')).not.toBeNull()
+        // 'New message' appears in the composer heading (may also appear in ListPane button)
+        expect(screen.getAllByText('New message').length).toBeGreaterThan(0)
+      })
+    })
+
+    it('closing Composer modal removes it from the DOM', async () => {
+      const user = userEvent.setup()
+      render(<OutreachQueuePage />)
+      await screen.findByText('City of Tempe — Parks RFP')
+
+      // Select lead and open composer
+      await user.click(screen.getByText('City of Tempe — Parks RFP'))
+      await screen.findByRole('button', { name: /full composer/i })
+      await user.click(screen.getByRole('button', { name: /full composer/i }))
+
+      await waitFor(() => {
+        // Composer modal scrim should appear
+        expect(document.querySelector('.fixed.inset-0')).not.toBeNull()
+      })
+
+      // Click the X button inside the composer modal
+      const closeBtn = screen.getByRole('button', { name: /^x$|close/i })
+      await user.click(closeBtn)
+
+      await waitFor(() => {
+        // After close, the composer scrim (with bg-black opacity) should be gone
+        expect(document.querySelector('.fixed.inset-0.bg-black\\/\\[0\\.42\\]')).toBeNull()
+      })
+    })
+  })
 })

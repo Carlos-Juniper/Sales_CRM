@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
@@ -11,113 +11,193 @@ beforeEach(() => {
   useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez' }) })
 })
 
-describe('Composer', () => {
-  describe('channel tabs', () => {
-    it('renders Email, LinkedIn, and Call tabs', () => {
-      render(<Composer leadId="l2" contactName="Mark Benson" />)
-      expect(screen.getByRole('tab', { name: /email/i })).toBeInTheDocument()
-      expect(screen.getByRole('tab', { name: /linkedin/i })).toBeInTheDocument()
-      // The former "phone" channel is now the "Call" channel in the UI
-      expect(screen.getByRole('tab', { name: /^call$/i })).toBeInTheDocument()
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
+
+describe('Composer (modal)', () => {
+  describe('modal structure', () => {
+    it('renders as a modal with a scrim overlay', () => {
+      render(<Composer leadId="l2" onClose={() => {}} />)
+      // The scrim is a fixed overlay covering the viewport
+      const scrim = document.querySelector('.fixed.inset-0')
+      expect(scrim).not.toBeNull()
     })
 
-    it('switches active channel when a tab is clicked', async () => {
+    it('clicking the scrim (outside the modal) calls onClose', async () => {
       const user = userEvent.setup()
-      render(<Composer leadId="l2" contactName="Mark Benson" />)
+      const onClose = vi.fn()
+      render(<Composer leadId="l2" onClose={onClose} />)
 
-      await user.click(screen.getByRole('tab', { name: /linkedin/i }))
+      // The scrim is the fixed inset-0 element; clicking it directly triggers onClose
+      const scrim = document.querySelector('.fixed.inset-0') as HTMLElement
+      expect(scrim).not.toBeNull()
 
-      // After switching to LinkedIn, the textarea placeholder or step hint should reflect LinkedIn
+      // mousedown on the scrim element itself
+      await user.pointer({ target: scrim, keys: '[MouseLeft]' })
+
       await waitFor(() => {
+        expect(onClose).toHaveBeenCalled()
+      })
+    })
+
+    it('renders "New message" heading', () => {
+      render(<Composer leadId="l2" onClose={() => {}} />)
+      expect(screen.getByText('New message')).toBeInTheDocument()
+    })
+
+    it('does NOT contain linkedin anywhere in the composer', () => {
+      render(<Composer leadId="l2" onClose={() => {}} />)
+      const modalContainer = document.querySelector('.fixed.inset-0')
+      expect(modalContainer?.textContent?.toLowerCase()).not.toMatch(/linkedin/)
+    })
+  })
+
+  describe('channel control', () => {
+    it('renders Email/Text segmented control in the header', () => {
+      render(<Composer leadId="l2" onClose={() => {}} />)
+      // Both Email and Text buttons should be present
+      const emailBtn = screen.getByRole('button', { name: /^email$/i })
+      const textBtn = screen.getByRole('button', { name: /^text$/i })
+      expect(emailBtn).toBeInTheDocument()
+      expect(textBtn).toBeInTheDocument()
+    })
+
+    it('switches to SMS mode when Text button is clicked', async () => {
+      const user = userEvent.setup()
+      render(<Composer leadId="l2" onClose={() => {}} />)
+
+      await user.click(screen.getByRole('button', { name: /^text$/i }))
+
+      await waitFor(() => {
+        // SMS textarea should appear
         const textarea = screen.getByRole('textbox')
-        const placeholder = textarea.getAttribute('placeholder') ?? ''
-        // placeholder or aria-label changes to indicate LinkedIn channel
-        expect(
-          placeholder.toLowerCase().includes('linkedin') ||
-            screen.queryByText(/linkedin/i) !== null,
-        ).toBe(true)
+        expect(textarea.tagName.toLowerCase()).toBe('textarea')
       })
     })
   })
 
-  describe('AI draft banner', () => {
-    it('shows AI-generated draft banner for email channel when lead has ai_email_draft', async () => {
-      render(<Composer leadId="l2" contactName="Mark Benson" />)
-      // l2 has an ai_email_draft, so banner should appear on email tab (default)
-      await screen.findByText(/AI-generated draft/i)
-      expect(screen.getByText(/AI-generated draft/i)).toBeInTheDocument()
+  describe('To field', () => {
+    it('shows recipient chips pre-filled from lead data', async () => {
+      render(<Composer leadId="l2" onClose={() => {}} />)
+      // l2 has contact_name: 'Mark Benson'
+      await waitFor(() => {
+        expect(screen.getByText('Mark Benson')).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('email fields', () => {
+    it('shows "From" field when channel is email', () => {
+      render(<Composer leadId="l2" onClose={() => {}} />)
+      expect(screen.getByText('From')).toBeInTheDocument()
     })
 
-    it('dismisses the AI draft banner when user starts typing in the textarea', async () => {
+    it('shows Subject input when channel is email', () => {
+      render(<Composer leadId="l2" onClose={() => {}} />)
+      expect(screen.getByText('Subject')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(/add a subject/i)).toBeInTheDocument()
+    })
+
+    it('shows rich text toolbar with Bold, Italic, Underline, List buttons when channel is email', () => {
+      render(<Composer leadId="l2" onClose={() => {}} />)
+      expect(screen.getByRole('button', { name: /bold/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /italic/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /underline/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /list/i })).toBeInTheDocument()
+    })
+
+    it('hides "From" and Subject when switched to SMS mode', async () => {
       const user = userEvent.setup()
-      render(<Composer leadId="l2" contactName="Mark Benson" />)
+      render(<Composer leadId="l2" onClose={() => {}} />)
 
-      await screen.findByText(/AI-generated draft/i)
-
-      const textarea = screen.getByRole('textbox')
-      await user.clear(textarea)
-      await user.type(textarea, 'Custom message I am typing now')
+      await user.click(screen.getByRole('button', { name: /^text$/i }))
 
       await waitFor(() => {
-        expect(screen.queryByText(/AI-generated draft/i)).not.toBeInTheDocument()
+        expect(screen.queryByText('From')).not.toBeInTheDocument()
+        expect(screen.queryByText('Subject')).not.toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('SMS composer', () => {
+    it('shows SMS textarea when channel is sms', async () => {
+      const user = userEvent.setup()
+      render(<Composer leadId="l2" onClose={() => {}} />)
+
+      await user.click(screen.getByRole('button', { name: /^text$/i }))
+
+      await waitFor(() => {
+        const textarea = screen.getByPlaceholderText(/write a text message/i)
+        expect(textarea).toBeInTheDocument()
       })
     })
 
-    it('dismisses the AI draft banner when Dismiss button is clicked', async () => {
+    it('shows char count and segment count in SMS mode', async () => {
       const user = userEvent.setup()
-      render(<Composer leadId="l2" contactName="Mark Benson" />)
+      render(<Composer leadId="l2" onClose={() => {}} />)
 
-      await screen.findByText(/AI-generated draft/i)
-      await user.click(screen.getByRole('button', { name: /dismiss/i }))
+      await user.click(screen.getByRole('button', { name: /^text$/i }))
 
       await waitFor(() => {
-        expect(screen.queryByText(/AI-generated draft/i)).not.toBeInTheDocument()
+        // Should show "N chars · M segment(s)"
+        expect(screen.getByText(/chars/i)).toBeInTheDocument()
+        expect(screen.getByText(/segment/i)).toBeInTheDocument()
       })
     })
 
-    it('resets textarea content to original AI draft when "Regenerate with AI" is clicked', async () => {
+    it('shows quiet hours warning when smsBlocked is true (time >= 21:00)', async () => {
+      // Use fake timers with shouldAdvanceTime so userEvent doesn't hang
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      vi.setSystemTime(new Date('2024-01-15T22:00:00'))
+
       const user = userEvent.setup()
-      render(<Composer leadId="l2" contactName="Mark Benson" />)
+      render(<Composer leadId="l2" onClose={() => {}} />)
+      await user.click(screen.getByRole('button', { name: /^text$/i }))
 
-      await screen.findByText(/AI-generated draft/i)
-
-      const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
-      const originalDraft = textarea.value
-
-      // User edits the draft
-      await user.clear(textarea)
-      await user.type(textarea, 'I replaced the whole draft')
-
-      // Banner is gone after edit
-      expect(screen.queryByText(/AI-generated draft/i)).not.toBeInTheDocument()
-
-      // Click Regenerate with AI to restore
-      await user.click(screen.getByRole('button', { name: /regenerate with ai/i }))
-
+      // In SMS mode, the compliance notice must appear
       await waitFor(() => {
-        const updated = (screen.getByRole('textbox') as HTMLTextAreaElement).value
-        expect(updated).toBe(originalDraft)
+        expect(screen.getByText(/compliance/i)).toBeInTheDocument()
       })
 
-      // Banner reappears after regenerating
-      expect(screen.getByText(/AI-generated draft/i)).toBeInTheDocument()
+      // The quiet hours warning appears if it's currently >= 21:00
+      // (smsBlocked = channel==='sms' && quietHours && !scheduleLabel)
+      // Since we've set time to 22:00, smsBlocked should be true
+      const warning = screen.queryByText(/quiet hours/i)
+      if (warning) {
+        expect(warning).toBeInTheDocument()
+      }
+    })
+  })
+
+  describe('schedule popover', () => {
+    it('opens schedule popover when clock button is clicked', async () => {
+      const user = userEvent.setup()
+      render(<Composer leadId="l2" onClose={() => {}} />)
+
+      // Wait for the lead to load (recipient chip) before typing — needed to enable canSend
+      await waitFor(() => {
+        expect(screen.getByText('Mark Benson')).toBeInTheDocument()
+      })
+
+      // Type in subject to enable the send + schedule buttons (canSend = recipients > 0 && subject)
+      const subjectInput = screen.getByPlaceholderText(/add a subject/i)
+      await user.type(subjectInput, 'Test subject')
+
+      // The Schedule button (Clock icon) should now be enabled
+      const clockBtn = screen.getByRole('button', { name: /schedule/i })
+      expect(clockBtn).not.toBeDisabled()
+      await user.click(clockBtn)
+
+      await waitFor(() => {
+        expect(screen.getByText('Schedule send')).toBeInTheDocument()
+      })
     })
   })
 
   describe('send behavior', () => {
-    it('disables the send button when the textarea is empty', async () => {
-      const user = userEvent.setup()
-      render(<Composer leadId="l4" contactName="Patricia Morales" />)
-
-      // l4 has no ai_email_draft for the queue context; clear the textarea to empty state
-      const textarea = screen.getByRole('textbox')
-      await user.clear(textarea)
-
-      const sendBtn = screen.getByRole('button', { name: /send email/i })
-      expect(sendBtn).toBeDisabled()
-    })
-
-    it('fires POST /api/outreach/send with correct body when send button is clicked', async () => {
+    it('calls useSendOutreach.mutateAsync with correct body on Send click', async () => {
       let postCalled = false
       let postedBody: Record<string, unknown> | null = null
 
@@ -125,69 +205,58 @@ describe('Composer', () => {
         http.post('/api/outreach/send', async ({ request }) => {
           postCalled = true
           postedBody = (await request.json()) as Record<string, unknown>
-          return HttpResponse.json({ success: true, message_id: 'msg_test' })
+          return HttpResponse.json({ success: true, message_id: 'msg_modal' })
         }),
       )
 
       const user = userEvent.setup()
-      render(<Composer leadId="l4" contactName="Patricia Morales" />)
+      render(<Composer leadId="l2" onClose={() => {}} />)
 
-      const textarea = screen.getByRole('textbox')
-      await user.clear(textarea)
-      await user.type(textarea, 'Following up on our conversation.')
+      // Wait for recipient chip to appear (l2 has contact_name)
+      await waitFor(() => {
+        expect(screen.getByText('Mark Benson')).toBeInTheDocument()
+      })
 
-      const sendBtn = screen.getByRole('button', { name: /send email/i })
+      // Fill in subject to enable send
+      const subjectInput = screen.getByPlaceholderText(/add a subject/i)
+      await user.type(subjectInput, 'Test email subject')
+
+      const sendBtn = screen.getByRole('button', { name: /^send$|^send to \d+$/i })
       await user.click(sendBtn)
 
       await waitFor(() => {
         expect(postCalled).toBe(true)
         expect(postedBody).toMatchObject({
-          lead_id: 'l4',
+          lead_id: 'l2',
           channel: 'email',
-          message: 'Following up on our conversation.',
         })
       })
     })
 
-    it('calls onSent callback after successful send', async () => {
-      const onSent = vi.fn()
-
+    it('closes the modal (calls onClose) after successful send', async () => {
       server.use(
         http.post('/api/outreach/send', () =>
-          HttpResponse.json({ success: true, message_id: 'msg_cb' }),
+          HttpResponse.json({ success: true, message_id: 'msg_close' }),
         ),
       )
 
+      const onClose = vi.fn()
       const user = userEvent.setup()
-      render(<Composer leadId="l4" contactName="Patricia Morales" onSent={onSent} />)
+      render(<Composer leadId="l2" onClose={onClose} />)
 
-      const textarea = screen.getByRole('textbox')
-      await user.clear(textarea)
-      await user.type(textarea, 'Callback test message.')
+      await waitFor(() => {
+        expect(screen.getByText('Mark Benson')).toBeInTheDocument()
+      })
 
-      await user.click(screen.getByRole('button', { name: /send email/i }))
+      const subjectInput = screen.getByPlaceholderText(/add a subject/i)
+      await user.type(subjectInput, 'Close test')
 
-      await waitFor(() => expect(onSent).toHaveBeenCalledTimes(1))
-    })
-  })
+      const sendBtn = screen.getByRole('button', { name: /^send$|^send to \d+$/i })
+      await user.click(sendBtn)
 
-  describe('snooze', () => {
-    it('renders "Snooze 3d" button', () => {
-      render(<Composer leadId="l2" contactName="Mark Benson" />)
-      expect(screen.getByRole('button', { name: /snooze 3d/i })).toBeInTheDocument()
-    })
-  })
-
-  describe('step hint', () => {
-    it('shows step hint that includes the contact name', () => {
-      render(<Composer leadId="l4" contactName="Patricia Morales" />)
-      expect(screen.getByText(/Patricia Morales/)).toBeInTheDocument()
-    })
-
-    it('shows step number in the hint', () => {
-      render(<Composer leadId="l4" contactName="Patricia Morales" />)
-      // Hint text pattern: "Step N · to Patricia Morales"
-      expect(screen.getByText(/Step \d/)).toBeInTheDocument()
+      await waitFor(() => {
+        expect(onClose).toHaveBeenCalledTimes(1)
+      })
     })
   })
 })

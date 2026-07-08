@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Search, X } from 'lucide-react'
+import { useState, useRef } from 'react'
+import { X, Check, Mail, Phone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useOutreachContacts } from '@/hooks/useLeads'
 import { cn } from '@/lib/utils'
@@ -11,21 +11,60 @@ interface ContactPickerProps {
   onConfirm: (contactIds: string[]) => void
 }
 
+interface FreeformRecipient {
+  id: string
+  name: string
+  isFreeform: true
+  kind: 'email' | 'phone'
+}
+
+function looksLikeEmail(s: string): boolean {
+  return s.includes('@') && s.length > 3
+}
+
+function looksLikePhone(s: string): boolean {
+  return /^[\d\s\-\(\)\+]{7,}$/.test(s.trim())
+}
+
+function detectKind(s: string): 'email' | 'phone' | null {
+  if (looksLikeEmail(s)) return 'email'
+  if (looksLikePhone(s)) return 'phone'
+  return null
+}
+
+const AVATAR_COLORS = ['#2E7D52', '#1d4ed8', '#b45309', '#7e22ce', '#0f766e', '#be123c', '#4338ca']
+
+function chipColor(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return AVATAR_COLORS[h % AVATAR_COLORS.length]
+}
+
+function chipInitials(name: string): string {
+  return name.split(' ').map(x => x[0]).join('').slice(0, 2).toUpperCase()
+}
+
 export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) {
   const { data: contacts = [], isLoading } = useOutreachContacts()
-  const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [inputValue, setInputValue] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [freeformRecipients, setFreeformRecipients] = useState<FreeformRecipient[]>([])
+  const inputRef = useRef<HTMLInputElement>(null)
 
   if (!open) return null
 
-  const filtered = contacts.filter((c: OutreachContact) =>
-    !search ||
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.company.toLowerCase().includes(search.toLowerCase())
+  const allSelected = contacts.filter((c: OutreachContact) => selected.has(c.id))
+  const canConfirm = selected.size > 0 || freeformRecipients.length > 0
+
+  const filteredContacts = contacts.filter((c: OutreachContact) =>
+    !inputValue ||
+    c.name.toLowerCase().includes(inputValue.toLowerCase()) ||
+    c.company.toLowerCase().includes(inputValue.toLowerCase()) ||
+    c.email?.toLowerCase().includes(inputValue.toLowerCase())
   )
 
-  // Group by company
-  const grouped = filtered.reduce<Record<string, OutreachContact[]>>((acc, c) => {
+  const grouped = filteredContacts.reduce<Record<string, OutreachContact[]>>((acc, c) => {
     if (!acc[c.company]) acc[c.company] = []
     acc[c.company].push(c)
     return acc
@@ -40,153 +79,194 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
     })
   }
 
+  function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      const val = inputValue.trim().replace(/,$/, '')
+      if (!val) return
+      const kind = detectKind(val)
+      if (kind) {
+        const id = `free-${val}`
+        if (!freeformRecipients.find(r => r.id === id)) {
+          setFreeformRecipients(prev => [...prev, { id, name: val, isFreeform: true, kind }])
+        }
+        setInputValue('')
+      }
+    }
+    if (e.key === 'Backspace' && inputValue === '') {
+      if (freeformRecipients.length > 0) {
+        setFreeformRecipients(prev => prev.slice(0, -1))
+      } else if (selected.size > 0) {
+        const lastId = Array.from(selected).pop()!
+        setSelected(prev => { const next = new Set(prev); next.delete(lastId); return next })
+      }
+    }
+  }
+
   function handleConfirm() {
-    onConfirm(Array.from(selected))
+    const contactIds = Array.from(selected)
+    const freeformIds = freeformRecipients.map(r => r.id)
+    onConfirm([...contactIds, ...freeformIds])
     setSelected(new Set())
-    setSearch('')
+    setFreeformRecipients([])
+    setInputValue('')
   }
 
   function handleClose() {
     setSelected(new Set())
-    setSearch('')
+    setFreeformRecipients([])
+    setInputValue('')
+    setPickerOpen(false)
     onClose()
   }
 
-  const selectedContacts = contacts.filter((c: OutreachContact) => selected.has(c.id))
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="New message"
-      className="fixed inset-0 z-50 flex items-center justify-center"
-    >
+    <div role="dialog" aria-modal="true" aria-label="New message" className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/40"
-        onClick={handleClose}
-      />
+      <div className="absolute inset-0 bg-black/40" onClick={handleClose} />
 
-      {/* Modal panel */}
-      <div className="relative z-10 w-full max-w-md mx-4 bg-[hsl(var(--card))] rounded-xl shadow-xl border border-[hsl(var(--border))] flex flex-col max-h-[80vh]">
+      {/* Modal */}
+      <div className="relative z-10 w-full max-w-lg mx-4 bg-[hsl(var(--card))] rounded-2xl shadow-2xl border border-[hsl(var(--border))] flex flex-col max-h-[80vh]">
+
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))] flex-shrink-0">
-          <h2 className="text-sm font-bold text-[hsl(var(--fg))]">New message</h2>
-          <button
-            type="button"
-            aria-label="Dismiss"
-            onClick={handleClose}
-            className="p-1 rounded hover:bg-[hsl(var(--muted))]"
-          >
+        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-[hsl(var(--border))] flex-shrink-0">
+          <h2 className="text-[15px] font-bold text-[hsl(var(--fg))]">New message</h2>
+          <div className="flex-1" />
+          <button type="button" onClick={handleClose} className="p-1 rounded hover:bg-[hsl(var(--muted))]">
             <X className="h-4 w-4 text-[hsl(var(--muted-fg))]" />
           </button>
         </div>
 
-        {/* To field — selected chips */}
-        {selectedContacts.length > 0 && (
-          <div
-            role="list"
-            aria-label="Selected recipients"
-            className="px-4 py-2 border-b border-[hsl(var(--border))] flex flex-wrap gap-1.5 flex-shrink-0"
-          >
-            <span className="text-xs text-[hsl(var(--muted-fg))] self-center mr-1">To:</span>
-            {selectedContacts.map((c) => (
+        {/* To: field — chips + inline input */}
+        <div
+          className="px-5 py-3 border-b border-[hsl(var(--border))] flex-shrink-0"
+          onClick={() => inputRef.current?.focus()}
+        >
+          <div className="flex flex-wrap gap-1.5 items-center min-h-[32px]">
+            <span className="text-[12.5px] font-semibold text-[hsl(var(--muted-fg))] self-center">To</span>
+
+            {/* Contact chips */}
+            {allSelected.map((c) => (
               <span
                 key={c.id}
-                role="listitem"
-                aria-label={c.name}
-                data-chip={c.name}
-                className="inline-flex items-center gap-1 text-xs bg-[#2E7D52]/10 text-[#2E7D52] px-2 py-0.5 rounded-full font-medium"
+                className="inline-flex items-center gap-1.5 py-1 pl-1 pr-1.5 rounded-full bg-[#2E7D52]/[0.10] text-[#2E7D52] text-xs font-semibold"
               >
-                {`✓ ${c.name}`}
+                <span
+                  className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
+                  style={{ background: chipColor(c.name) }}
+                >
+                  {chipInitials(c.name)}
+                </span>
+                {c.name}
                 <button
                   type="button"
-                  aria-label={`Remove ${c.name}`}
-                  onClick={() => toggle(c.id)}
-                  className="hover:text-[#2E7D52]/60"
+                  onClick={(e) => { e.stopPropagation(); toggle(c.id) }}
+                  className="opacity-60 hover:opacity-100 inline-flex"
                 >
                   <X className="h-3 w-3" />
                 </button>
               </span>
             ))}
-          </div>
-        )}
 
-        {/* Search */}
-        <div className="px-4 py-2 border-b border-[hsl(var(--border))] flex-shrink-0">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[hsl(var(--muted-fg))]" />
+            {/* Freeform chips */}
+            {freeformRecipients.map((r) => (
+              <span
+                key={r.id}
+                className="inline-flex items-center gap-1.5 py-1 pl-1.5 pr-1.5 rounded-full bg-[hsl(var(--muted))] text-[hsl(var(--fg))] text-xs font-semibold border border-[hsl(var(--border))]"
+              >
+                {r.kind === 'email'
+                  ? <Mail className="h-3 w-3 text-[hsl(var(--muted-fg))]" />
+                  : <Phone className="h-3 w-3 text-[hsl(var(--muted-fg))]" />
+                }
+                {r.name}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setFreeformRecipients(p => p.filter(x => x.id !== r.id)) }}
+                  className="opacity-60 hover:opacity-100 inline-flex"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+
+            {/* Inline input */}
             <input
-              role="searchbox"
-              type="search"
-              placeholder="Search contacts…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))] focus:outline-none focus:ring-1 focus:ring-[#2E7D52]"
+              ref={inputRef}
+              type="text"
+              aria-label="To field"
+              placeholder={canConfirm ? '' : 'Add email, phone, or search contacts…'}
+              value={inputValue}
+              onChange={(e) => { setInputValue(e.target.value); setPickerOpen(true) }}
+              onFocus={() => setPickerOpen(true)}
+              onKeyDown={handleInputKeyDown}
+              className="flex-1 min-w-[140px] border-none outline-none text-sm bg-transparent text-[hsl(var(--fg))] placeholder:text-[hsl(var(--muted-fg))] py-0.5"
             />
           </div>
+
+          {/* Enter-to-add affordance */}
+          {inputValue && detectKind(inputValue) && (
+            <div className="mt-1.5">
+              <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[#2E7D52] font-medium">
+                Press Enter to add
+                <span className="font-semibold">{inputValue.trim()}</span>
+                <span className="text-[hsl(var(--muted-fg))]">&#x21B5;</span>
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Contacts list */}
-        <div
-          role="listbox"
-          aria-multiselectable="true"
-          aria-label="Contacts"
-          className="flex-1 overflow-y-auto"
-        >
+        {/* Contact list */}
+        <div className="flex-1 overflow-y-auto min-h-0">
           {isLoading ? (
             <div className="p-4 space-y-3">
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="h-10 rounded animate-pulse bg-[hsl(var(--muted))]" />
               ))}
             </div>
-          ) : Object.keys(grouped).length === 0 ? (
+          ) : Object.keys(grouped).length === 0 && !inputValue ? (
             <div className="p-4 text-center text-sm text-[hsl(var(--muted-fg))]">
               No contacts found
             </div>
           ) : (
             Object.entries(grouped).map(([company, companyContacts]) => (
-              <div
-                key={company}
-                role="group"
-                aria-label={company}
-                data-group={company}
-                className="mb-1"
-              >
-                <p className="px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wide text-[hsl(var(--muted-fg))]">
+              <div key={company}>
+                <p className="px-5 pt-3 pb-1 text-[10px] font-extrabold uppercase tracking-[.08em] text-[hsl(var(--muted-fg))]">
                   {company}
                 </p>
                 {companyContacts.map((c) => {
-                  const isSelected = selected.has(c.id)
+                  const isOn = selected.has(c.id)
                   return (
                     <button
                       key={c.id}
                       type="button"
-                      role="option"
                       onClick={() => toggle(c.id)}
-                      aria-selected={isSelected}
                       className={cn(
-                        'w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors hover:bg-[hsl(var(--muted))]',
-                        isSelected && 'bg-[#2E7D52]/5'
+                        'w-full text-left flex items-center gap-2.5 px-5 py-[9px] transition-colors',
+                        'hover:bg-[hsl(var(--muted))]',
+                        isOn && 'text-[#2E7D52]'
                       )}
                     >
-                      <div className={cn(
-                        'h-8 w-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold',
-                        isSelected ? 'bg-[#2E7D52] text-white' : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-fg))]'
-                      )}>
-                        {c.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                      <div
+                        className="w-[30px] h-[30px] rounded-full flex-shrink-0 flex items-center justify-center text-[11px] font-bold text-white"
+                        style={{ background: chipColor(c.name) }}
+                      >
+                        {chipInitials(c.name)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-[hsl(var(--fg))] truncate">{c.name}</p>
-                        <p className="text-xs text-[hsl(var(--muted-fg))] truncate">{c.title}</p>
+                        <p className={cn('text-[13px] font-semibold', isOn ? 'text-[#2E7D52]' : 'text-[hsl(var(--fg))]')}>
+                          {c.name}
+                        </p>
+                        <p className="text-[11px] text-[hsl(var(--muted-fg))] truncate">{c.title} · {c.email}</p>
                       </div>
-                      {isSelected && (
-                        <div className="h-4 w-4 rounded-full bg-[#2E7D52] flex items-center justify-center flex-shrink-0">
-                          <svg className="h-2.5 w-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                        </div>
-                      )}
+                      {/* Checkmark */}
+                      <div className={cn(
+                        'w-[18px] h-[18px] rounded-md border-[1.5px] flex items-center justify-center flex-shrink-0',
+                        isOn
+                          ? 'bg-[#2E7D52] border-[#2E7D52] text-white'
+                          : 'border-[hsl(var(--border))]'
+                      )}>
+                        {isOn && <Check className="h-3 w-3" />}
+                      </div>
                     </button>
                   )
                 })}
@@ -196,17 +276,15 @@ export function ContactPicker({ open, onClose, onConfirm }: ContactPickerProps) 
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[hsl(var(--border))] flex-shrink-0">
-          <Button variant="outline" size="sm" onClick={handleClose}>
-            Cancel
-          </Button>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[hsl(var(--border))] flex-shrink-0">
+          <Button variant="outline" size="sm" onClick={handleClose}>Cancel</Button>
           <Button
             size="sm"
             className="bg-[#2E7D52] hover:bg-[#256644] text-white"
             onClick={handleConfirm}
-            disabled={selected.size === 0}
+            disabled={!canConfirm}
           >
-            Confirm{selected.size > 0 ? ` (${selected.size})` : ''}
+            Confirm{canConfirm ? ` (${selected.size + freeformRecipients.length})` : ''}
           </Button>
         </div>
       </div>

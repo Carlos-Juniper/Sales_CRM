@@ -4,12 +4,14 @@ import { useUIStore } from '@/store/uiStore'
 import { ListPane } from './components/outreach/ListPane'
 import { ConversationPane } from './components/outreach/ConversationPane'
 import { ContactPicker } from './components/outreach/ContactPicker'
+import { Composer } from './components/outreach/Composer'
 
 export default function OutreachQueuePage() {
   const selectedLeadId = useUIStore((s) => s.selectedLeadId)
   const selectLead = useUIStore((s) => s.selectLead)
 
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [composerOpen, setComposerOpen] = useState(false)
 
   const activeId = selectedLeadId ?? null
 
@@ -37,7 +39,11 @@ export default function OutreachQueuePage() {
         {/* ── Right: Conversation pane ── */}
         <div className="flex-1 overflow-hidden bg-[hsl(var(--background))]">
           {activeId ? (
-            <ConversationPane key={activeId} leadId={activeId} />
+            <ConversationPane
+              key={activeId}
+              leadId={activeId}
+              onOpenFullComposer={() => setComposerOpen(true)}
+            />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2">
               <MessageSquare className="h-10 w-10 text-[hsl(var(--muted-fg))] opacity-40" />
@@ -55,6 +61,14 @@ export default function OutreachQueuePage() {
         onClose={() => setPickerOpen(false)}
         onConfirm={handleConfirmContacts}
       />
+
+      {/* Full composer modal */}
+      {composerOpen && activeId && (
+        <Composer
+          leadId={activeId}
+          onClose={() => setComposerOpen(false)}
+        />
+      )}
     </div>
   )
 }

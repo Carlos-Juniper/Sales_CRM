@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS `juniper`.`crm_users` (
     `name`            VARCHAR(255) NOT NULL,
     `email`           VARCHAR(255) NOT NULL,
     `role`            VARCHAR(50)  NOT NULL,
-    `branch_id`       VARCHAR(100) NOT NULL,
+    `branch_id`       VARCHAR(100) NULL DEFAULT NULL,
     `avatar_initials` VARCHAR(5)   NOT NULL,
     `created_at`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),

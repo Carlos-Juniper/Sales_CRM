@@ -19,7 +19,6 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
-import bcrypt
 import jwt
 from dotenv import load_dotenv
 from pathlib import Path
@@ -286,11 +285,6 @@ class PatchPMContactBody(BaseModel):
     title: Optional[str] = None   # stored in `role` column
     email: Optional[str] = None
     phone: Optional[str] = None
-
-
-class LoginBody(BaseModel):
-    email: str
-    password: str
 
 
 # ── Auth dependency ──────────────────────────────────────────────────────────
@@ -1656,49 +1650,47 @@ def _issue_jwt(user: dict, response: Response) -> dict:
     return {k: v for k, v in payload.items() if k != "exp"}
 
 
-@app.post("/api/auth/login")
-async def login(body: LoginBody, response: Response) -> dict:
-    user_rows = await query(
-        f"SELECT id, name, email, role, branch_id, avatar_initials FROM {T('users')} WHERE email = @email",
-        [P("email", "STRING", body.email)],
-    )
-    if not user_rows:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    user = user_rows[0]
+def _avatar_initials(name: str) -> str:
+    """First letter of the first two words, uppercased (crm_users caps at 5)."""
+    parts = [p for p in name.split() if p]
+    initials = "".join(p[0] for p in parts[:2]).upper()
+    return initials[:5]
 
-    login_rows = await query(
-        f"SELECT password_hash, failed_attempts, locked_until FROM {T('logins')} WHERE user_id = @user_id",
-        [P("user_id", "STRING", user["id"])],
-    )
-    if not login_rows:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    login_row = login_rows[0]
 
-    now_utc = datetime.now(timezone.utc)
-    locked_until = login_row.get("locked_until")
-    if locked_until:
-        lu = locked_until if locked_until.tzinfo else locked_until.replace(tzinfo=timezone.utc)
-        if lu > now_utc:
-            raise HTTPException(status_code=403, detail="Account temporarily locked. Try again later.")
+async def _auto_provision_user(email: str, name: str) -> dict:
+    """Auto-provision a new user on first SSO login with inside_sales role and no branch."""
+    name = name.strip()
+    if not name:
+        name = email.split("@")[0]  # Fallback to email prefix if Entra has no name
 
-    if not bcrypt.checkpw(body.password.encode(), login_row["password_hash"].encode()):
-        new_attempts = (login_row.get("failed_attempts") or 0) + 1
-        lock_until = now_utc + timedelta(minutes=15) if new_attempts >= 5 else None
-        await execute(
-            f"UPDATE {T('logins')} SET failed_attempts = @attempts, locked_until = @lock_until, updated_at = CURRENT_TIMESTAMP() WHERE user_id = @user_id",
-            [
-                P("attempts", "INT64", new_attempts),
-                P("lock_until", "TIMESTAMP", lock_until),
-                P("user_id", "STRING", user["id"]),
-            ],
-        )
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    avatar_initials = _avatar_initials(name) or name[:1].upper()
+    user_id = str(uuid.uuid4())
 
     await execute(
-        f"UPDATE {T('logins')} SET failed_attempts = 0, locked_until = NULL, last_login = CURRENT_TIMESTAMP(), updated_at = CURRENT_TIMESTAMP() WHERE user_id = @user_id",
-        [P("user_id", "STRING", user["id"])],
+        f"""
+        INSERT INTO {T('users')}
+            (id, name, email, role, branch_id, avatar_initials, created_at)
+        VALUES
+            (@id, @name, @email, @role, @branch_id, @avatar_initials, CURRENT_TIMESTAMP())
+        """,
+        [
+            P("id", "STRING", user_id),
+            P("name", "STRING", name),
+            P("email", "STRING", email),
+            P("role", "STRING", "inside_sales"),
+            P("branch_id", "STRING", None),
+            P("avatar_initials", "STRING", avatar_initials),
+        ],
     )
-    return _issue_jwt(user, response)
+
+    return {
+        "id": user_id,
+        "name": name,
+        "email": email,
+        "role": "inside_sales",
+        "branch_id": None,
+        "avatar_initials": avatar_initials,
+    }
 
 
 class EntraCallbackBody(BaseModel):
@@ -1726,18 +1718,25 @@ async def entra_callback(body: EntraCallbackBody, response: Response) -> dict:
         logger.error("Entra ID token validation failed", exc_info=True)
         raise HTTPException(status_code=401, detail="Invalid SSO token")
 
-    email = claims.get("email") or claims.get("preferred_username", "")
+    email = (claims.get("email") or claims.get("preferred_username") or "").strip().lower()
     if not email:
         raise HTTPException(status_code=401, detail="No email in Entra ID token")
 
+    # Match case-insensitively: Entra token casing isn't under our control.
     user_rows = await query(
-        f"SELECT id, name, email, role, branch_id, avatar_initials FROM {T('users')} WHERE email = @email",
+        f"SELECT id, name, email, role, branch_id, avatar_initials FROM {T('users')} WHERE LOWER(email) = @email",
         [P("email", "STRING", email)],
     )
-    if not user_rows:
-        raise HTTPException(status_code=403, detail="No CRM account for this Microsoft account")
 
-    return _issue_jwt(user_rows[0], response)
+    if user_rows:
+        user = user_rows[0]
+    else:
+        # Auto-provision on first login: inside_sales role, no branch assigned yet.
+        # Admin can update role/branch_id later via admin panel or seed_auth.
+        name = (claims.get("name") or email.split("@")[0]).strip()
+        user = await _auto_provision_user(email, name)
+
+    return _issue_jwt(user, response)
 
 
 @app.post("/api/auth/ms-graph-token")

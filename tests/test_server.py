@@ -18,6 +18,9 @@ os.environ.setdefault("MYSQL_PORT", "3306")
 os.environ.setdefault("MYSQL_USER", "crm_user")
 os.environ.setdefault("MYSQL_PASSWORD", "secret")
 os.environ.setdefault("MYSQL_DB", "crm")
+os.environ.setdefault("ENTRA_CLIENT_ID", "test-client-id")
+os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
+os.environ.setdefault("JWT_SECRET", "test-secret")
 
 from api.server import app  # noqa: E402 — env must be set first
 
@@ -567,45 +570,139 @@ def test_dashboard_avg_score_zero_when_no_scored_leads():
     assert resp.json()["avg_score"] == 0.0
 
 
-# ── POST /api/auth/login ──────────────────────────────────────────────────────
+# ── Auth is SSO-only (manual login removed) ───────────────────────────────────
+# The manual email/password path (POST /api/auth/login, bcrypt, crm_logins) has
+# been removed. Microsoft Entra SSO is the only entry point. On first login, users
+# are auto-provisioned with role=inside_sales and branch_id=NULL (admin can update
+# later). Returning users are looked up in crm_users.
 
 
-def test_login_valid_credentials_returns_user_and_token():
-    cur = _make_cursor(fetchone_side=[_USER_ROW])
-    with patch("api.server.get_pool", new_callable=AsyncMock, return_value=_make_pool(cur)):
-        resp = client.post(
-            "/api/auth/login",
-            json={"email": "carlos.hernandez@juniperlandscaping.com", "password": "demo"},
-        )
+def _entra_patches(claims: dict):
+    """Patch Entra token verification so entra_callback trusts `claims`.
+
+    Returns a context-manager-friendly tuple of patches for jwt.PyJWKClient
+    (network JWKS fetch) and jwt.decode (signature/audience validation).
+    """
+    jwks_client = MagicMock()
+    jwks_client.get_signing_key_from_jwt.return_value = MagicMock(key="signing-key")
+    return (
+        patch("api.server.jwt.PyJWKClient", return_value=jwks_client),
+        patch("api.server.jwt.decode", return_value=claims),
+    )
+
+
+def test_manual_login_endpoint_is_removed():
+    # The manual login path no longer exists — the route should not be registered.
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": "carlos.hernandez@juniperlandscaping.com", "password": "demo"},
+    )
+    assert resp.status_code == 404
+
+
+def test_server_has_no_password_login_machinery():
+    import api.server as server
+
+    # bcrypt import and LoginBody model are gone; no credential store lookups remain.
+    assert not hasattr(server, "bcrypt"), "bcrypt import should be removed"
+    assert not hasattr(server, "LoginBody"), "LoginBody model should be removed"
+
+
+def test_entra_callback_valid_token_existing_user_issues_session():
+    claims = {"email": "carlos.hernandez@juniperlandscaping.com"}
+    jwk_patch, decode_patch = _entra_patches(claims)
+    with jwk_patch, decode_patch, patch(
+        "api.server.query", new_callable=AsyncMock, return_value=[_USER_ROW]
+    ):
+        resp = client.post("/api/auth/entra-callback", json={"id_token": "valid.jwt.token"})
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["id"] == "u1"
-    assert "token" in body
-    assert len(body["token"]) == 36  # UUID format
+    assert body["role"] == "inside_sales"
+    assert body["branch_id"] == "b1"
+    # Session is minted as an httponly cookie, not returned in the body.
+    assert "token" not in body
+    assert "session" in resp.cookies
 
 
-def test_login_wrong_password_returns_401():
-    cur = _make_cursor(fetchone_side=[_USER_ROW])
-    with patch("api.server.get_pool", new_callable=AsyncMock, return_value=_make_pool(cur)):
-        resp = client.post(
-            "/api/auth/login",
-            json={"email": "carlos.hernandez@juniperlandscaping.com", "password": "wrong"},
-        )
+def test_entra_callback_auto_provisions_first_time_user():
+    # On first login (no existing crm_users row), user is auto-provisioned with
+    # role=inside_sales and branch_id=NULL (can be updated later by admin).
+    claims = {"email": "newuser@juniperlandscaping.com", "name": "New User"}
+    jwk_patch, decode_patch = _entra_patches(claims)
+    query_mock = AsyncMock(return_value=[])  # No existing user
+    execute_mock = AsyncMock(return_value=1)  # INSERT succeeded
+    with jwk_patch, decode_patch, patch(
+        "api.server.query", query_mock
+    ), patch("api.server.execute", execute_mock):
+        resp = client.post("/api/auth/entra-callback", json={"id_token": "valid.jwt.token"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # Verify auto-provisioned user has inside_sales role and no branch.
+    assert body["email"] == "newuser@juniperlandscaping.com"
+    assert body["name"] == "New User"
+    assert body["role"] == "inside_sales"
+    assert body["branch_id"] is None
+    # Session cookie should be set.
+    assert "session" in resp.cookies
+
+    # Verify execute was called to INSERT the new user.
+    assert execute_mock.await_count == 1
+    insert_sql = execute_mock.await_args[0][0]
+    assert "INSERT" in insert_sql.upper()
+    insert_params = [p.value for p in execute_mock.await_args[0][1]]
+    assert "newuser@juniperlandscaping.com" in insert_params
+    assert "New User" in insert_params
+    assert "inside_sales" in insert_params
+    assert None in insert_params  # branch_id is NULL
+
+
+def test_entra_callback_auto_provision_lowercases_email():
+    # Auto-provisioned user's email should be lowercased in the DB.
+    claims = {"email": "Jane.Doe@Juniperlandscaping.com", "name": "Jane Doe"}
+    jwk_patch, decode_patch = _entra_patches(claims)
+    query_mock = AsyncMock(return_value=[])
+    execute_mock = AsyncMock(return_value=1)
+    with jwk_patch, decode_patch, patch(
+        "api.server.query", query_mock
+    ), patch("api.server.execute", execute_mock):
+        resp = client.post("/api/auth/entra-callback", json={"id_token": "valid.jwt.token"})
+
+    assert resp.status_code == 200
+    # Email in response is lowercased.
+    assert resp.json()["email"] == "jane.doe@juniperlandscaping.com"
+    # Email in INSERT params is lowercased.
+    insert_params = [p.value for p in execute_mock.await_args[0][1]]
+    assert "jane.doe@juniperlandscaping.com" in insert_params
+
+
+def test_entra_callback_matches_email_case_insensitively():
+    # Entra token casing isn't under our control; the lookup must normalize it
+    # so a mixed-case claim still resolves the (lowercased) crm_users row.
+    claims = {"email": "Carlos.Hernandez@Juniperlandscaping.com"}
+    jwk_patch, decode_patch = _entra_patches(claims)
+    query_mock = AsyncMock(return_value=[_USER_ROW])
+    with jwk_patch, decode_patch, patch("api.server.query", query_mock):
+        resp = client.post("/api/auth/entra-callback", json={"id_token": "valid.jwt.token"})
+
+    assert resp.status_code == 200
+    # The email bound into the lookup is lowercased.
+    bound_email = query_mock.await_args[0][1][0].value
+    assert bound_email == "carlos.hernandez@juniperlandscaping.com"
+
+
+def test_entra_callback_invalid_token_returns_401():
+    jwks_client = MagicMock()
+    jwks_client.get_signing_key_from_jwt.return_value = MagicMock(key="signing-key")
+    with patch("api.server.jwt.PyJWKClient", return_value=jwks_client), patch(
+        "api.server.jwt.decode", side_effect=Exception("bad signature")
+    ):
+        resp = client.post("/api/auth/entra-callback", json={"id_token": "tampered"})
 
     assert resp.status_code == 401
-    assert resp.json()["detail"] == "Invalid credentials"
-
-
-def test_login_unknown_email_returns_401():
-    cur = _make_cursor(fetchone_side=[None])
-    with patch("api.server.get_pool", new_callable=AsyncMock, return_value=_make_pool(cur)):
-        resp = client.post(
-            "/api/auth/login",
-            json={"email": "nobody@nowhere.com", "password": "demo"},
-        )
-
-    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Invalid SSO token"
 
 
 # ── Fixtures for auth-gated endpoint tests ────────────────────────────────────

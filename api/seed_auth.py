@@ -1,74 +1,142 @@
 """
-Provision a password for a CRM user.
+Onboard or update a CRM user (no password — auth is Microsoft Entra SSO only).
+
+Identity is proven by Entra SSO at login. Users are auto-provisioned on first
+login with role=inside_sales and branch_id=NULL. Use this script to change a
+user's role or branch_id (e.g., promote to manager, add branch scoping) after
+they've already signed in.
+
+This writes to the SAME store the SSO callback reads from — the BigQuery
+`users` table (referenced as ``T('users')``), via the shared ``query``/
+``execute`` helpers. That is deliberate: ``entra_callback`` authorizes users by
+reading ``T('users')`` from BigQuery, so updates must write there too.
+(The MySQL password/credential store is gone with manual login.)
 
 Usage:
-    python -m api.seed_auth --email carlos.hernandez@juniperlandscaping.com --password <secret>
+    # Promote a user to manager with a branch:
+    python -m api.seed_auth --email jane.doe@juniperlandscaping.com \
+        --name "Jane Doe" --role manager --branch-id b1
 
-The script inserts or replaces the crm_logins row for the given user.
+    # Assign outside_sales without a branch (branch_id is nullable for this role):
+    python -m api.seed_auth --email pat.lee@juniperlandscaping.com \
+        --name "Pat Lee" --role outside_sales
+
+Running this script again for the same email updates that user's name/role/branch
+(upsert keyed on the normalized email), so it's an "edit role or branch" tool
+that avoids duplicates.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
-import getpass
 import sys
-from datetime import datetime, timezone
+import uuid
+from typing import Optional
 
-import bcrypt
-import aiomysql
+from db import P, T, execute, query
 
-from db import get_pool
+# Roles the frontend routes on (studio LoginPage / AuthCallbackPage).
+# Keep in sync with roleDefaultRoute().
+VALID_ROLES = {"inside_sales", "outside_sales", "manager"}
 
-BCRYPT_ROUNDS = 12
+# Roles that require a branch_id. Managers are scoped to a branch; other roles
+# may be provisioned without one (branch_id is nullable in crm_users).
+BRANCH_REQUIRED_ROLES = {"manager"}
 
 
-async def provision(email: str, password: str) -> None:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute(
-                "SELECT id FROM crm_users WHERE email = %s",
-                (email,),
-            )
-            row = await cur.fetchone()
-            if not row:
-                print(f"ERROR: No user found with email {email!r}", file=sys.stderr)
-                sys.exit(1)
+def _avatar_initials(name: str) -> str:
+    """First letter of the first two words, uppercased (crm_users caps at 5)."""
+    parts = [p for p in name.split() if p]
+    initials = "".join(p[0] for p in parts[:2]).upper()
+    return initials[:5]
 
-            user_id: str = row["id"]
-            password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode()
-            # Scrub from local scope immediately after hashing
-            password = ""  # noqa: F841 — intentional zero-out
 
-            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-            await cur.execute(
-                """
-                INSERT INTO crm_logins (user_id, password_hash, failed_attempts, locked_until, last_login, updated_at)
-                VALUES (%s, %s, 0, NULL, NULL, %s) AS new_vals
-                ON DUPLICATE KEY UPDATE
-                    password_hash   = new_vals.password_hash,
-                    failed_attempts = 0,
-                    locked_until    = NULL,
-                    updated_at      = new_vals.updated_at
-                """,
-                (user_id, password_hash, now_utc),
-            )
+async def provision(email: str, name: str, role: str, branch_id: Optional[str] = None) -> None:
+    if role not in VALID_ROLES:
+        raise ValueError(
+            f"Unknown role {role!r}. Valid roles: {', '.join(sorted(VALID_ROLES))}."
+        )
+    if role in BRANCH_REQUIRED_ROLES and not branch_id:
+        raise ValueError(f"role {role!r} requires a branch_id.")
 
-    print(f"Password set for {email} (user_id={user_id})")
+    # Emails are the join key between Entra claims and crm_users. Entra token
+    # casing is not something we control, so normalize to lowercase on write to
+    # match the lowercased lookup in entra_callback — otherwise a casing
+    # mismatch 403s a user who was in fact onboarded.
+    email = email.strip().lower()
+    name = name.strip()
+    if not name:
+        raise ValueError("name cannot be empty.")
+
+    avatar_initials = _avatar_initials(name) or name[:1].upper()
+
+    # SELECT-then-INSERT/UPDATE mirrors the upsert helpers in db.py (upsert_lead,
+    # upsert_hoa_property). Keyed on the normalized email so a re-run updates the
+    # existing row (keeping its original id) instead of inserting a duplicate.
+    existing = await query(
+        f"SELECT id FROM {T('users')} WHERE LOWER(email) = @email LIMIT 1",
+        [P("email", "STRING", email)],
+    )
+
+    if existing:
+        affected = await execute(
+            f"""
+            UPDATE {T('users')} SET
+                name            = @name,
+                role            = @role,
+                branch_id       = @branch_id,
+                avatar_initials = @avatar_initials
+            WHERE id = @id
+            """,
+            [
+                P("name", "STRING", name),
+                P("role", "STRING", role),
+                P("branch_id", "STRING", branch_id),
+                P("avatar_initials", "STRING", avatar_initials),
+                P("id", "STRING", existing[0]["id"]),
+            ],
+        )
+        action = "Updated"
+    else:
+        affected = await execute(
+            f"""
+            INSERT INTO {T('users')}
+                (id, name, email, role, branch_id, avatar_initials, created_at)
+            VALUES
+                (@id, @name, @email, @role, @branch_id, @avatar_initials, CURRENT_TIMESTAMP())
+            """,
+            [
+                P("id", "STRING", str(uuid.uuid4())),
+                P("name", "STRING", name),
+                P("email", "STRING", email),
+                P("role", "STRING", role),
+                P("branch_id", "STRING", branch_id),
+                P("avatar_initials", "STRING", avatar_initials),
+            ],
+        )
+        action = "Created"
+
+    if not affected:
+        raise RuntimeError(
+            f"Onboarding {email} affected 0 rows — the crm_users write did not land."
+        )
+
+    print(f"{action} {email} (name={name!r}, role={role}, branch_id={branch_id})")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Provision a CRM user password")
-    parser.add_argument("--email", required=True, help="User email address")
-    parser.add_argument("--password", default=None, help="Password (omit to prompt securely)")
+    parser = argparse.ArgumentParser(description="Onboard a CRM user (role + branch)")
+    parser.add_argument("--email", required=True, help="User email (must match their Microsoft account)")
+    parser.add_argument("--name", required=True, help='Display name, e.g. "Jane Doe"')
+    parser.add_argument("--role", required=True, help=f"One of: {', '.join(sorted(VALID_ROLES))}")
+    parser.add_argument("--branch-id", default=None, help="Branch id (required for managers)")
     args = parser.parse_args()
 
-    password = args.password or getpass.getpass("Password: ")
-    if not password:
-        print("ERROR: Password cannot be empty", file=sys.stderr)
+    try:
+        asyncio.run(provision(args.email, args.name, args.role, args.branch_id))
+    except (ValueError, RuntimeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
-
-    asyncio.run(provision(args.email, password))
 
 
 if __name__ == "__main__":

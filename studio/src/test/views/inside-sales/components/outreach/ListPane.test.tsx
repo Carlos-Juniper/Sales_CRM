@@ -137,8 +137,6 @@ describe('ListPane', () => {
       await user.click(screen.getByRole('button', { name: /drafts/i }))
       await screen.findByText('Drafts')
 
-      // Click the X button on the chip
-      const closeBtn = screen.getByRole('button', { name: '' })
       // The X button is inside the chip — find by querying within the chip text
       const chip = screen.getByText('Drafts').closest('span')!
       const xBtn = chip.querySelector('button')!

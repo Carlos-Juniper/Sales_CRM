@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useLead, useSendOutreach } from '@/hooks/useLeads'
+import { useAuthStore } from '@/store/authStore'
 import { cn } from '@/lib/utils'
 
 interface ComposerProps {
@@ -26,6 +27,7 @@ function chipInitials(name: string) {
 export function Composer({ leadId, initialRecipients, onClose }: ComposerProps) {
   const { data: lead } = useLead(leadId)
   const sendOutreach = useSendOutreach()
+  const currentUser = useAuthStore((s) => s.user)
 
   const [channel, setChannel] = useState<'email' | 'sms'>('email')
   const [recipients, setRecipients] = useState<{ id: string; name: string }[]>(() => initialRecipients ?? [])
@@ -161,7 +163,7 @@ export function Composer({ leadId, initialRecipients, onClose }: ComposerProps) 
               <div className="flex items-center gap-2.5 px-5 py-3 border-b border-[hsl(var(--border))]">
                 <label className="text-[12.5px] font-semibold text-[hsl(var(--muted-fg))] w-14 flex-shrink-0">From</label>
                 <span className="inline-flex items-center gap-1.5 text-[12.5px] px-2.5 py-1 rounded-lg bg-[hsl(var(--muted))] text-[hsl(var(--fg))] font-semibold">
-                  dana@juniperlandscaping.com <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                  {currentUser?.email ?? ''} <ChevronDown className="h-3.5 w-3.5 opacity-60" />
                 </span>
               </div>
 

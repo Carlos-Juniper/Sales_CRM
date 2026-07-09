@@ -583,7 +583,7 @@ async def send_outreach(body: OutreachSendBody, user: dict = Depends(require_aut
             contact_email = lead_rows[0].get("contact_email") if lead_rows else None
             # Compliance guard applies to the RECIPIENT (the lead being emailed),
             # not the sender — check the contact's email, not performed_by.
-            assert_can_contact("email", email=contact_email, contact_id=body.lead_id)
+            await assert_can_contact("email", email=contact_email, contact_id=body.lead_id)
             to_addrs = [contact_email] if contact_email else []
             if to_addrs:
                 # The Graph token belongs to the authenticated user making the
@@ -607,32 +607,36 @@ async def send_outreach(body: OutreachSendBody, user: dict = Depends(require_aut
             logger.error("Graph send_mail failed: %s", exc)
             raise HTTPException(status_code=502, detail="Email send via Microsoft Graph failed")
 
-    await _record_lead_action(
-        lead_id=body.lead_id,
-        action_type=action_type,
-        detail=body.message,
-        performed_by=body.performed_by,
-        external_message_id=external_message_id,
-    )
-    await execute(
-        f"""
-        UPDATE {T('leads')} SET status = 'contacted', updated_at = CURRENT_TIMESTAMP()
-        WHERE id = @id AND status = 'new'
-        """,
-        [P("id", "STRING", body.lead_id)],
-    )
+    try:
+        await _record_lead_action(
+            lead_id=body.lead_id,
+            action_type=action_type,
+            detail=body.message,
+            performed_by=body.performed_by,
+            external_message_id=external_message_id,
+        )
+        await execute(
+            f"""
+            UPDATE {T('leads')} SET status = 'contacted', updated_at = CURRENT_TIMESTAMP()
+            WHERE id = @id AND status = 'new'
+            """,
+            [P("id", "STRING", body.lead_id)],
+        )
 
-    # Auto-flip the linked HOA property's contact_status when outreach is sent
-    from api.pipeline import set_property_contacted
+        # Auto-flip the linked HOA property's contact_status when outreach is sent
+        from api.pipeline import set_property_contacted
 
-    lead_rows = await query(
-        f"SELECT hoa_property_id FROM {T('leads')} WHERE id = @id",
-        [P("id", "STRING", body.lead_id)],
-    )
-    if lead_rows:
-        hoa_prop_id = lead_rows[0].get("hoa_property_id")
-        if hoa_prop_id:
-            await set_property_contacted(hoa_prop_id)
+        lead_rows = await query(
+            f"SELECT hoa_property_id FROM {T('leads')} WHERE id = @id",
+            [P("id", "STRING", body.lead_id)],
+        )
+        if lead_rows:
+            hoa_prop_id = lead_rows[0].get("hoa_property_id")
+            if hoa_prop_id:
+                await set_property_contacted(hoa_prop_id)
+    except Exception as exc:
+        logger.error("send_outreach post-send DB update failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Message sent but failed to record activity. Please refresh.")
 
     return {
         "success": True,

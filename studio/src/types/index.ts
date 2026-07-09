@@ -206,6 +206,7 @@ export interface OutreachSendPayload {
   lead_id: string
   channel: OutreachChannel
   message: string
+  contact_phone?: string
 }
 
 export interface AuthUser {

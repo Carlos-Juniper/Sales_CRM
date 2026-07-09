@@ -98,7 +98,10 @@ export function useSendOutreach() {
       qc.invalidateQueries({ queryKey: [LEAD_KEY, variables.lead_id] })
       toast('Message sent', { variant: 'success' })
     },
-    onError: () => toast('Send failed', { variant: 'error', description: 'Could not send message. Try again.' }),
+    onError: (err: unknown) => {
+      const detail = err instanceof Error ? err.message : undefined
+      toast('Send failed', { variant: 'error', description: detail ?? 'Could not send message. Try again.' })
+    },
   })
 }
 

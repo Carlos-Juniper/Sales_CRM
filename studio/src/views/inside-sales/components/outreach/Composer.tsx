@@ -34,6 +34,7 @@ export function Composer({ leadId, initialRecipients, onClose }: ComposerProps) 
   const [subject, setSubject] = useState('')
   const [emailBody, setEmailBody] = useState('')
   const [smsBody, setSmsBody] = useState('')
+  const [smsPhone, setSmsPhone] = useState('')
   const [scheduleLabel, setScheduleLabel] = useState<string | null>(null)
   const [schedOpen, setSchedOpen] = useState(false)
   const editorRef = useRef<HTMLDivElement>(null)
@@ -58,7 +59,7 @@ export function Composer({ leadId, initialRecipients, onClose }: ComposerProps) 
   const MOCK_HOUR = new Date().getHours()
   const quietHours = MOCK_HOUR >= 21 || MOCK_HOUR < 8
   const smsSegs = Math.max(1, Math.ceil(smsBody.length / 160))
-  const canSend = recipients.length > 0 && (channel === 'email' ? subject.trim() : smsBody.trim())
+  const canSend = recipients.length > 0 && (channel === 'email' ? subject.trim() : (smsBody.trim() && smsPhone.trim()))
   const smsBlocked = channel === 'sms' && quietHours && !scheduleLabel
 
   async function handleSend() {
@@ -70,6 +71,7 @@ export function Composer({ leadId, initialRecipients, onClose }: ComposerProps) 
         lead_id: leadId ?? '',
         channel,
         message: body,
+        ...(channel === 'sms' ? { contact_phone: smsPhone } : {}),
       })
       onClose()
     } catch {
@@ -171,6 +173,8 @@ export function Composer({ leadId, initialRecipients, onClose }: ComposerProps) 
               <div className="flex items-center gap-2.5 px-5 py-3 border-b border-[hsl(var(--border))]">
                 <label className="text-[12.5px] font-semibold text-[hsl(var(--muted-fg))] w-14 flex-shrink-0">Subject</label>
                 <input
+                  id="outreach-subject"
+                  name="subject"
                   className="flex-1 border-none outline-none text-sm bg-transparent text-[hsl(var(--fg))] placeholder:text-[hsl(var(--muted-fg))]"
                   placeholder="Add a subject"
                   value={subject}
@@ -217,6 +221,7 @@ export function Composer({ leadId, initialRecipients, onClose }: ComposerProps) 
                 ref={editorRef}
                 contentEditable
                 suppressContentEditableWarning
+                aria-label="Email body"
                 data-ph="Write your message…"
                 className="px-5 py-[18px] min-h-[200px] text-sm leading-[1.65] outline-none text-[hsl(var(--fg))] empty:before:content-[attr(data-ph)] empty:before:text-[hsl(var(--muted-fg))]"
               />
@@ -226,7 +231,21 @@ export function Composer({ leadId, initialRecipients, onClose }: ComposerProps) 
           {/* SMS composer */}
           {channel === 'sms' && (
             <div className="p-5">
+              <div className="flex items-center gap-2.5 mb-4 border border-[hsl(var(--border))] rounded-xl px-3.5 py-2.5 bg-[hsl(var(--card))] focus-within:border-[#2E7D52]">
+                <label htmlFor="outreach-sms-phone" className="text-[12px] font-semibold text-[hsl(var(--muted-fg))] flex-shrink-0">To</label>
+                <input
+                  id="outreach-sms-phone"
+                  name="sms-phone"
+                  type="tel"
+                  className="flex-1 border-none outline-none text-sm bg-transparent text-[hsl(var(--fg))] placeholder:text-[hsl(var(--muted-fg))]"
+                  placeholder="+1 (555) 000-0000"
+                  value={smsPhone}
+                  onChange={(e) => setSmsPhone(e.target.value)}
+                />
+              </div>
               <textarea
+                id="outreach-sms-body"
+                name="sms-body"
                 className="w-full border border-[hsl(var(--border))] rounded-xl p-3.5 text-sm leading-snug resize-none outline-none bg-[hsl(var(--card))] text-[hsl(var(--fg))] min-h-[130px] focus:border-[#2E7D52]"
                 placeholder="Write a text message… Keep it short and personal."
                 value={smsBody}

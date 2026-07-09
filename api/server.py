@@ -164,6 +164,7 @@ class OutreachSendBody(BaseModel):
     channel: str
     message: str
     performed_by: Optional[str] = None
+    contact_phone: Optional[str] = None
 
 
 class MsGraphTokenBody(BaseModel):
@@ -606,6 +607,30 @@ async def send_outreach(body: OutreachSendBody, user: dict = Depends(require_aut
         except Exception as exc:
             logger.error("Graph send_mail failed: %s", exc)
             raise HTTPException(status_code=502, detail="Email send via Microsoft Graph failed")
+
+    elif body.channel == "sms":
+        phone = body.contact_phone
+        if not phone:
+            raise HTTPException(status_code=400, detail="No phone number provided for SMS.")
+        await assert_can_contact("sms", phone=phone, contact_id=body.lead_id)
+        telnyx_key = os.environ.get("TELNYX_API_KEY")
+        from_number = os.environ.get("TELNYX_MESSAGING_FROM")
+        if not telnyx_key or not from_number:
+            raise HTTPException(status_code=400, detail="SMS not configured: missing Telnyx credentials.")
+        try:
+            import httpx as _httpx
+            async with _httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://api.telnyx.com/v2/messages",
+                    headers={"Authorization": f"Bearer {telnyx_key}", "Content-Type": "application/json"},
+                    json={"from": from_number, "to": phone, "text": body.message},
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                external_message_id = resp.json().get("data", {}).get("id")
+        except Exception as exc:
+            logger.error("Telnyx send_sms failed: %s", exc)
+            raise HTTPException(status_code=502, detail="SMS send via Telnyx failed")
 
     try:
         await _record_lead_action(

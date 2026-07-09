@@ -462,7 +462,7 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
                 (@id, @lead_id, 'status_change', @prev_status, @new_status, @performed_by, CURRENT_TIMESTAMP())
             """,
             [
-                P("id", "STRING", str(uuid.uuid4())),
+                P("id", "INT64", secrets.randbelow(2**63 - 1) + 1),
                 P("lead_id", "STRING", lead_id),
                 P("prev_status", "STRING", current.get("status")),
                 P("new_status", "STRING", new_status),
@@ -521,7 +521,7 @@ async def _record_lead_action(
             (@id, @lead_id, @action_type, @detail, @performed_by, CURRENT_TIMESTAMP(), @external_message_id)
         """,
         [
-            P("id", "STRING", str(uuid.uuid4())),
+            P("id", "INT64", secrets.randbelow(2**63 - 1) + 1),
             P("lead_id", "STRING", lead_id),
             P("action_type", "STRING", action_type),
             P("detail", "STRING", detail),

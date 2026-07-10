@@ -1,5 +1,5 @@
 import { http, HttpResponse, delay } from 'msw'
-import { mockLeads, mockBids, mockUsers, mockOutreach, mockSummary, mockMonthlyRevenue, mockContacts, mockActivityItems, mockConsent, mockConnections } from './data'
+import { mockLeads, mockBids, mockUsers, mockOutreach, mockSummary, mockMonthlyRevenue, mockActivityItems, mockConsent, mockConnections } from './data'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid } from '@/types'
 
@@ -210,12 +210,6 @@ const allHandlers = [
   http.get(`${API}/dashboard/inside-sales`, async () => {
     await delay(200)
     return HttpResponse.json(mockSummary)
-  }),
-
-  // GET /api/contacts
-  http.get(`${API}/contacts`, async () => {
-    await delay(200)
-    return HttpResponse.json(mockContacts)
   }),
 
   // GET /api/leads/:id/activity

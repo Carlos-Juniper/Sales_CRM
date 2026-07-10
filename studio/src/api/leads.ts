@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { Lead, OutreachHistory, OutreachSendPayload, HandoffPayload, OutreachContact } from '@/types'
+import type { Lead, OutreachHistory, HandoffPayload } from '@/types'
 
 export interface LeadsResponse {
   data: Lead[]
@@ -58,9 +58,4 @@ export const leadsApi = {
 
 export const outreachApi = {
   history: (leadId: string) => apiClient.get<OutreachHistory[]>(`/outreach/${leadId}`),
-  send: (payload: OutreachSendPayload) => apiClient.post<{ success: boolean; message_id: string }>('/outreach/send', payload),
-}
-
-export const contactsApi = {
-  list: () => apiClient.get<OutreachContact[]>('/contacts'),
 }

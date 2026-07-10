@@ -39,8 +39,6 @@ from db import (
     count_active_leads_for_property,
     has_won_lead_for_property,
 )
-from api.compliance import assert_can_contact
-
 SESSION_DURATION = 28800  # 8 hours in seconds
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
@@ -157,14 +155,6 @@ class PatchLeadBody(BaseModel):
     handoff_notes: Optional[str] = None
     division_id: Optional[int] = None
     performed_by: Optional[str] = None
-
-
-class OutreachSendBody(BaseModel):
-    lead_id: str
-    channel: str
-    message: str
-    performed_by: Optional[str] = None
-    contact_phone: Optional[str] = None
 
 
 class MsGraphTokenBody(BaseModel):
@@ -486,15 +476,6 @@ async def delete_lead(lead_id: str, _user: dict = Depends(require_auth)) -> None
 
 # ── Outreach ─────────────────────────────────────────────────────────────────
 
-_CHANNEL_TO_ACTION: dict[str, str] = {
-    "email": "email_sent",
-    "phone": "call_logged",
-    "call": "call_logged",
-    "linkedin": "email_sent",
-    "sms": "sms_sent",
-    "note": "note_added",
-    "meeting": "meeting_scheduled",
-}
 _ACTION_TO_CHANNEL: dict[str, str] = {
     "email_sent": "email",
     "call_logged": "call",
@@ -568,105 +549,6 @@ async def get_outreach(lead_id: str, _user: dict = Depends(require_auth)) -> lis
         for r in rows
     ]
 
-
-@app.post("/api/outreach/send")
-async def send_outreach(body: OutreachSendBody, user: dict = Depends(require_auth)) -> dict:
-    action_type = _CHANNEL_TO_ACTION.get(body.channel, "email_sent")
-    external_message_id: Optional[str] = None
-
-    if body.channel == "email":
-        try:
-            from api import graph as _graph
-            lead_rows = await query(
-                f"SELECT contact_email FROM {T('leads')} WHERE id = @id",
-                [P("id", "STRING", body.lead_id)],
-            )
-            contact_email = lead_rows[0].get("contact_email") if lead_rows else None
-            # Compliance guard applies to the RECIPIENT (the lead being emailed),
-            # not the sender — check the contact's email, not performed_by.
-            await assert_can_contact("email", email=contact_email, contact_id=body.lead_id)
-            to_addrs = [contact_email] if contact_email else []
-            if to_addrs:
-                # The Graph token belongs to the authenticated user making the
-                # request; performed_by is only an audit label and may not be a
-                # user id, so never use it as the token-lookup key.
-                external_message_id = await _graph.send_mail(
-                    user["id"],
-                    to=to_addrs,
-                    subject="Outreach from Juniper Landscaping",
-                    body_html=body.message,
-                )
-        except ValueError as exc:
-            # User hasn't granted Graph scopes — surface a friendly error
-            raise HTTPException(
-                status_code=400,
-                detail=f"Microsoft Graph not connected: {exc}. Please reconnect your Microsoft account.",
-            )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.error("Graph send_mail failed: %s", exc)
-            raise HTTPException(status_code=502, detail="Email send via Microsoft Graph failed")
-
-    elif body.channel == "sms":
-        phone = body.contact_phone
-        if not phone:
-            raise HTTPException(status_code=400, detail="No phone number provided for SMS.")
-        await assert_can_contact("sms", phone=phone, contact_id=body.lead_id)
-        telnyx_key = os.environ.get("TELNYX_API_KEY")
-        from_number = os.environ.get("TELNYX_MESSAGING_FROM")
-        if not telnyx_key or not from_number:
-            raise HTTPException(status_code=400, detail="SMS not configured: missing Telnyx credentials.")
-        try:
-            import httpx as _httpx
-            async with _httpx.AsyncClient() as client:
-                resp = await client.post(
-                    "https://api.telnyx.com/v2/messages",
-                    headers={"Authorization": f"Bearer {telnyx_key}", "Content-Type": "application/json"},
-                    json={"from": from_number, "to": phone, "text": body.message},
-                    timeout=15,
-                )
-                resp.raise_for_status()
-                external_message_id = resp.json().get("data", {}).get("id")
-        except Exception as exc:
-            logger.error("Telnyx send_sms failed: %s", exc)
-            raise HTTPException(status_code=502, detail="SMS send via Telnyx failed")
-
-    try:
-        await _record_lead_action(
-            lead_id=body.lead_id,
-            action_type=action_type,
-            detail=body.message,
-            performed_by=body.performed_by,
-            external_message_id=external_message_id,
-        )
-        await execute(
-            f"""
-            UPDATE {T('leads')} SET status = 'contacted', updated_at = CURRENT_TIMESTAMP()
-            WHERE id = @id AND status = 'new'
-            """,
-            [P("id", "STRING", body.lead_id)],
-        )
-
-        # Auto-flip the linked HOA property's contact_status when outreach is sent
-        from api.pipeline import set_property_contacted
-
-        lead_rows = await query(
-            f"SELECT hoa_property_id FROM {T('leads')} WHERE id = @id",
-            [P("id", "STRING", body.lead_id)],
-        )
-        if lead_rows:
-            hoa_prop_id = lead_rows[0].get("hoa_property_id")
-            if hoa_prop_id:
-                await set_property_contacted(hoa_prop_id)
-    except Exception as exc:
-        logger.error("send_outreach post-send DB update failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Message sent but failed to record activity. Please refresh.")
-
-    return {
-        "success": True,
-        "message_id": external_message_id or f"msg_{uuid.uuid4().hex[:12]}",
-    }
 
 
 # ── Activity feed ────────────────────────────────────────────────────────────
@@ -808,24 +690,6 @@ async def patch_contact_consent(
 
     return await get_contact_consent(contact_id, _user)
 
-
-# ── Compliance check ──────────────────────────────────────────────────────────
-
-
-@app.get("/api/compliance/check")
-async def compliance_check(
-    channel: str = Query(...),
-    to: str = Query(...),
-    contact_id: Optional[str] = Query(None),
-    _user: dict = Depends(require_auth),
-) -> dict:
-    try:
-        phone = to if channel in ("call", "sms") else None
-        email = to if channel == "email" else None
-        await assert_can_contact(channel, phone=phone, email=email, contact_id=contact_id)
-        return {"allowed": True}
-    except HTTPException as e:
-        return {"allowed": False, "reason": e.detail}
 
 
 # ── HOA Properties ───────────────────────────────────────────────────────────

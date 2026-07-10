@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, Users, Inbox, FileText, GitBranch,
+  LayoutDashboard, Inbox, FileText, GitBranch,
   ChevronLeft, ChevronRight, LogOut, Leaf, Settings,
   Map, Calculator, Building,
 } from 'lucide-react'
@@ -20,21 +20,14 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  // Inside Sales section
   { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: ['inside_sales', 'manager'] },
   { label: 'Lead Feed', icon: Inbox, href: '/inside-sales/leads', roles: ['inside_sales', 'manager'] },
-  { label: 'Outreach', icon: Users, href: '/inside-sales/outreach', roles: ['inside_sales', 'manager'] },
   { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: ['inside_sales', 'manager'] },
   { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: ['inside_sales', 'manager'] },
   { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: ['inside_sales', 'manager'] },
   { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: ['inside_sales', 'manager'] },
   { label: 'Estimating', icon: Calculator, href: '/inside-sales/estimating', roles: ['inside_sales', 'manager'] },
-  // Outside Sales section
-  { label: 'Field View', icon: Map, href: '/outside-sales', roles: ['outside_sales', 'manager'] },
 ]
-
-// Section dividers: show a separator before outside-sales and before branch-manager items
-const SECTION_BREAKS = new Set(['/outside-sales'])
 
 function NavItemComp({ item, collapsed, overdueBadge }: { item: NavItem; collapsed: boolean; overdueBadge?: number }) {
   const location = useLocation()
@@ -113,18 +106,9 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
-        {visibleItems.map((item, idx) => {
-          const prevItem = visibleItems[idx - 1]
-          const showDivider = prevItem && SECTION_BREAKS.has(item.href)
-          return (
-            <div key={item.href}>
-              {showDivider && (
-                <div className={cn('border-t border-[var(--sidebar-border)] my-1.5', collapsed ? 'mx-1' : 'mx-2')} />
-              )}
-              <NavItemComp item={item} collapsed={collapsed} />
-            </div>
-          )
-        })}
+        {visibleItems.map((item) => (
+          <NavItemComp key={item.href} item={item} collapsed={collapsed} />
+        ))}
       </nav>
 
       {/* Bottom */}

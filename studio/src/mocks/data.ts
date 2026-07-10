@@ -1,4 +1,4 @@
-import type { Lead, Bid, User, OutreachHistory, InsideSalesSummary, MonthlyRevenue, OutreachContact, ActivityItem, ContactConsent, ConnectionsStatus } from '@/types'
+import type { Lead, Bid, User, OutreachHistory, InsideSalesSummary, MonthlyRevenue, ActivityItem, ContactConsent, ConnectionsStatus } from '@/types'
 
 export const mockUsers: User[] = [
   { id: 'u1', name: 'Alex Rivera', email: 'alex.rivera@example.com', role: 'inside_sales', branch_id: 'b1', avatar_initials: 'AR' },
@@ -291,16 +291,6 @@ export const mockSummary: InsideSalesSummary = {
   won_this_month: 2,
   won_value_this_month: 735000,
 }
-
-export const mockContacts: OutreachContact[] = [
-  { id: 'c1', name: 'Jennifer Walsh', title: 'HOA Board President', email: 'jwalsh@silverleafhoa.org', company: 'Silverleaf HOA', city: 'Phoenix', state: 'AZ', type: 'HOA' },
-  { id: 'c2', name: 'Mark Benson', title: 'Procurement Manager', email: 'mbenson@tempe.gov', company: 'City of Tempe', city: 'Tempe', state: 'AZ', type: 'commercial' },
-  { id: 'c3', name: 'Chris Abbott', title: 'Property Manager', email: 'cabbott@kierland.com', company: 'Kierland Commons', city: 'Scottsdale', state: 'AZ', type: 'commercial' },
-  { id: 'c4', name: 'Patricia Morales', title: 'Community Manager', email: 'pmorales@dobsonranch.org', company: 'Dobson Ranch HOA', city: 'Mesa', state: 'AZ', type: 'HOA' },
-  { id: 'c5', name: 'Tom Hicks', title: 'Facilities Director', email: 'thicks@chandlercorp.com', company: 'Chandler Corporate Park', city: 'Chandler', state: 'AZ', type: 'commercial' },
-  { id: 'c6', name: 'Nicole Foster', title: 'Property Operations', email: 'nfoster@desertridge.com', company: 'Desert Ridge Marketplace', city: 'Phoenix', state: 'AZ', type: 'commercial' },
-  { id: 'c7', name: 'Susan Park', title: 'Director of Operations', email: 'spark@susd.k12.az.us', company: 'Scottsdale Unified School District', city: 'Phoenix', state: 'AZ', type: 'commercial' },
-]
 
 export const mockActivityItems: Record<string, ActivityItem[]> = {
   'l2': [

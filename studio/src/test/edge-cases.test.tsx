@@ -74,61 +74,6 @@ describe('Toast auto-dismiss', () => {
   })
 })
 
-// ─── HTML special chars render as text ───────────────────────────────────────
-
-describe('XSS: HTML special chars in lead name render as text', () => {
-  beforeEach(() => {
-    useAuthStore.setState({ user: makeUser() })
-    useUIStore.setState({ selectedLeadId: null })
-  })
-
-  it('HTML special chars in property name are escaped in OutreachQueue', async () => {
-    const xssName = '<script>alert("xss")</script> Malicious HOA'
-
-    server.use(
-      http.get('/api/leads', () => {
-        return HttpResponse.json({
-          data: [
-            {
-              id: 'l-xss',
-              property_name: xssName,
-              city: 'Phoenix', state: 'AZ', zip: '', address: '',
-              lat: 0, lng: 0,
-              lead_type: 'HOA',
-              score: 70, score_factors: [],
-              estimated_acreage: 10, estimated_contract_value: 50000,
-              contact_name: null, contact_email: null, contact_linkedin: null,
-              current_provider: null,
-              source: 'manual', source_url: null, bid_deadline: null,
-              status: 'contacted', // so it appears in outreach queue
-              assigned_to: null, handoff_notes: null,
-              ai_email_draft: null, ai_linkedin_draft: null,
-              branch_id: 'b1', distance_miles: 5,
-              created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-            }
-          ],
-          total: 1, page: 1, page_size: 25,
-        })
-      })
-    )
-
-    // Import dynamically to avoid circular in module scope
-    const { default: OutreachQueuePage } = await import('@/views/inside-sales/OutreachQueuePage')
-    render(<OutreachQueuePage />)
-
-    // The text should appear as visible text, not as executed script
-    await screen.findByText(/Malicious HOA/)
-
-    // No script elements injected
-    expect(document.querySelector('script[data-injected]')).toBeNull()
-
-    // The raw script tag should NOT be injected into the DOM as an element
-    const scripts = Array.from(document.querySelectorAll('script'))
-    const injectedScripts = scripts.filter((s) => s.innerHTML.includes('alert("xss")'))
-    expect(injectedScripts.length).toBe(0)
-  })
-})
-
 // ─── Theme toggle ─────────────────────────────────────────────────────────────
 
 describe('Theme toggle', () => {

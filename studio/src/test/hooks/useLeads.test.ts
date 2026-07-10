@@ -8,7 +8,6 @@ import {
   useOutreachHistory,
   useCreateLead,
   useUpdateLead,
-  useSendOutreach,
   useDeleteLead,
 } from '@/hooks/useLeads'
 import { useLeadsStore } from '@/store/leadsStore'
@@ -297,29 +296,6 @@ describe('useUpdateLead', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect((capturedBody as Record<string, unknown>)?.status).toBe('contacted')
-  })
-})
-
-describe('useSendOutreach', () => {
-  it('fires POST /api/outreach/send with the payload', async () => {
-    let capturedBody: unknown
-    server.use(
-      http.post('/api/outreach/send', async ({ request }) => {
-        capturedBody = await request.json()
-        return HttpResponse.json({ success: true, message_id: 'msg_1' })
-      })
-    )
-    server.use(http.get('/api/leads', () => HttpResponse.json(defaultLeadsResponse)))
-    server.use(http.get('/api/outreach/:id', () => HttpResponse.json([])))
-
-    const { wrapper } = createWrapper()
-    const { result } = renderHook(() => useSendOutreach(), { wrapper })
-
-    result.current.mutate({ lead_id: 'l1', channel: 'email', message: 'Hello!' })
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect((capturedBody as Record<string, unknown>)?.lead_id).toBe('l1')
-    expect((capturedBody as Record<string, unknown>)?.channel).toBe('email')
   })
 })
 

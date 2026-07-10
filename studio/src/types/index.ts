@@ -148,17 +148,6 @@ export interface OutreachHistory {
   next_follow_up: string | null
 }
 
-export interface OutreachContact {
-  id: string
-  name: string
-  title: string
-  email: string
-  company: string
-  city: string
-  state: string
-  type: 'HOA' | 'commercial' | 'deathcare' | 'resort'
-}
-
 export interface OutreachQueueSummary {
   lead_id: string
   last_message: string
@@ -200,13 +189,6 @@ export interface HandoffPayload {
   handoff_notes: string
   last_outreach_message?: string
   division_id?: number | null
-}
-
-export interface OutreachSendPayload {
-  lead_id: string
-  channel: OutreachChannel
-  message: string
-  contact_phone?: string
 }
 
 export interface AuthUser {

@@ -17,7 +17,6 @@ import { useLead, useOutreachHistory, useUpdateLead, useDeleteLead } from '@/hoo
 import { useLeadPanelKeyboard } from '@/hooks/useLeadPanelKeyboard'
 import type { LeadStatus } from '@/types'
 import { OverviewTab } from './OverviewTab'
-import { OutreachTab } from './OutreachTab'
 import { HistoryTab } from './HistoryTab'
 import { BidTab } from './BidTab'
 import { CalendarTab } from './CalendarTab'
@@ -183,7 +182,6 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                     <TabsList className="w-auto bg-transparent p-0 gap-0 h-auto rounded-none">
                       {[
                         { value: 'overview', label: 'Overview' },
-                        { value: 'outreach', label: 'Outreach' },
                         { value: 'calendar', label: 'Calendar' },
                         { value: 'history', label: 'History' },
                         { value: 'bid', label: 'Bid' },
@@ -201,10 +199,6 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
 
                   <TabsContent value="overview" className="mt-0">
                     <OverviewTab lead={lead} />
-                  </TabsContent>
-
-                  <TabsContent value="outreach" className="mt-0">
-                    <OutreachTab lead={lead} />
                   </TabsContent>
 
                   <TabsContent value="calendar" className="mt-0">

@@ -1,6 +1,12 @@
 """
 Dev startup wrapper: injects a fresh gcloud access token into the BigQuery
 client before launching uvicorn, working around expired ADC credentials.
+
+Run with the venv Python (not system python3):
+    venv/bin/python3 run_dev.py
+
+If gcloud auth fails, refresh credentials first:
+    gcloud auth login
 """
 import subprocess
 import sys

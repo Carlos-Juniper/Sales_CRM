@@ -3,7 +3,7 @@ import { leadsApi, outreachApi, type CreateLeadPayload } from '@/api/leads'
 import { useLeadsStore } from '@/store/leadsStore'
 import { useUIStore } from '@/store/uiStore'
 import { PAGE_SIZE } from '@/lib/constants'
-import type { Lead, OutreachSendPayload } from '@/types'
+import type { Lead } from '@/types'
 
 export const LEADS_KEY = 'leads'
 export const LEAD_KEY = 'lead'
@@ -86,25 +86,6 @@ export function useUpdateLead() {
   })
 }
 
-export function useSendOutreach() {
-  const qc = useQueryClient()
-  const toast = useUIStore((s) => s.toast)
-
-  return useMutation({
-    mutationFn: (payload: OutreachSendPayload) => outreachApi.send(payload),
-    onSuccess: (_data, variables) => {
-      qc.invalidateQueries({ queryKey: [OUTREACH_KEY, variables.lead_id] })
-      qc.invalidateQueries({ queryKey: [LEADS_KEY] })
-      qc.invalidateQueries({ queryKey: [LEAD_KEY, variables.lead_id] })
-      toast('Message sent', { variant: 'success' })
-    },
-    onError: (err: unknown) => {
-      const detail = err instanceof Error ? err.message : undefined
-      toast('Send failed', { variant: 'error', description: detail ?? 'Could not send message. Try again.' })
-    },
-  })
-}
-
 export function useAllLeads() {
   return useQuery({
     queryKey: [LEADS_KEY, 'all'],
@@ -132,23 +113,6 @@ export function useDeleteLead() {
   })
 }
 
-export function useOutreachQueue() {
-  const { data, isLoading } = useLeads()
-  // Include 'new' leads that have been drafted/outreached alongside contacted/qualified
-  const queue = (data?.data ?? []).filter((l: Lead) =>
-    l.status === 'contacted' || l.status === 'qualified' || l.status === 'new'
-  ).filter((l: Lead) =>
-    // Only include 'new' leads that have an AI draft (i.e., have been prepared for outreach)
-    l.status !== 'new' || l.ai_email_draft !== null || l.ai_linkedin_draft !== null
-  )
-  return {
-    queue,
-    isLoading,
-    overdueCount: queue.length,
-    unreadCount: 0,  // will be derived from thread data in a future iteration
-  }
-}
-
 export function useHandoffLead() {
   const qc = useQueryClient()
   const toast = useUIStore((s) => s.toast)
@@ -164,12 +128,3 @@ export function useHandoffLead() {
   })
 }
 
-export const CONTACTS_KEY = 'contacts'
-
-export function useOutreachContacts() {
-  return useQuery({
-    queryKey: [CONTACTS_KEY],
-    queryFn: () => import('@/api/leads').then(m => m.contactsApi.list()),
-    staleTime: 300_000,
-  })
-}

@@ -1,6 +1,5 @@
 export { default as DashboardPage } from './DashboardPage'
 export { default as LeadFeedPage } from './LeadFeedPage'
-export { default as OutreachQueuePage } from './OutreachQueuePage'
 export { default as BidTrackerPage } from './BidTrackerPage'
 export { default as PipelinePage } from './PipelinePage'
 export { default as MapPage } from './MapPage'

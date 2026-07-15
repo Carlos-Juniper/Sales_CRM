@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { Lead, OutreachHistory, HandoffPayload } from '@/types'
+import type { Lead, HandoffPayload } from '@/types'
 
 export interface LeadsResponse {
   data: Lead[]
@@ -56,6 +56,3 @@ export const leadsApi = {
     }),
 }
 
-export const outreachApi = {
-  history: (leadId: string) => apiClient.get<OutreachHistory[]>(`/outreach/${leadId}`),
-}

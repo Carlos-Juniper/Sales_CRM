@@ -1,10 +1,9 @@
 """
-Tests for the new Graph-related server endpoints:
+Tests for the Graph-related server endpoints:
   POST /api/auth/ms-graph-token
   GET  /api/calendar/events
   POST /api/calendar/events
   POST /api/leads/{lead_id}/schedule-meeting
-  POST /api/outreach/send (email channel — real Graph send)
 
 DB and Graph HTTP are fully mocked.
 Run with:  PYTHONPATH=. pytest tests/test_graph_endpoints.py -v
@@ -170,8 +169,7 @@ def test_schedule_meeting_creates_event_and_logs_action():
     insert_sql = mock_exec.call_args[0][0]
     insert_params = mock_exec.call_args[0][1]
     assert "lead_actions" in insert_sql
-    param_values = [p.value for p in insert_params]
-    assert "meeting_scheduled" in param_values
+    assert "meeting_scheduled" in insert_params
 
 
 def test_schedule_meeting_returns_400_when_no_graph_token():
@@ -187,59 +185,3 @@ def test_schedule_meeting_returns_400_when_no_graph_token():
         )
 
     assert resp.status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# POST /api/outreach/send — email channel (Graph integration)
-# ---------------------------------------------------------------------------
-
-_LEAD_WITH_EMAIL = [{"hoa_property_id": None, "contact_email": "jennifer@silverleafhoa.org"}]
-
-
-def test_send_outreach_email_calls_graph_send_mail():
-    """AC-server-10: email channel invokes graph.send_mail and stores external_message_id."""
-    with (
-        patch("api.graph.send_mail", new_callable=AsyncMock, return_value="graph-msg-id") as mock_send,
-        patch("api.server.query", new_callable=AsyncMock, return_value=_LEAD_WITH_EMAIL),
-        patch("api.server.execute", new_callable=AsyncMock),
-    ):
-        resp = client.post(
-            "/api/outreach/send",
-            json={"lead_id": "lead-uuid-1", "channel": "email", "message": "Hi Jennifer"},
-        )
-
-    assert resp.status_code == 200
-    assert resp.json()["success"] is True
-    assert resp.json()["message_id"] == "graph-msg-id"
-    mock_send.assert_called_once()
-
-
-def test_send_outreach_email_returns_400_when_no_graph_token():
-    """AC-server-11: email channel, user has no Graph token → 400."""
-    with (
-        patch("api.graph.send_mail", new_callable=AsyncMock, side_effect=ValueError("no Graph token")),
-        patch("api.server.query", new_callable=AsyncMock, return_value=_LEAD_WITH_EMAIL),
-    ):
-        resp = client.post(
-            "/api/outreach/send",
-            json={"lead_id": "lead-uuid-1", "channel": "email", "message": "Hi Jennifer"},
-        )
-
-    assert resp.status_code == 400
-    assert "Microsoft Graph not connected" in resp.json()["detail"]
-
-
-def test_send_outreach_non_email_channel_skips_graph():
-    """AC-server-12: phone channel does NOT call graph.send_mail."""
-    with (
-        patch("api.graph.send_mail", new_callable=AsyncMock) as mock_send,
-        patch("api.server.query", new_callable=AsyncMock, return_value=[{"hoa_property_id": None}]),
-        patch("api.server.execute", new_callable=AsyncMock),
-    ):
-        resp = client.post(
-            "/api/outreach/send",
-            json={"lead_id": "lead-uuid-1", "channel": "phone", "message": "Called."},
-        )
-
-    assert resp.status_code == 200
-    mock_send.assert_not_called()

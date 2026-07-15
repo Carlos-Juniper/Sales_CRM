@@ -1,6 +1,6 @@
 """
 FastAPI server for the Juniper Landscaping CRM.
-Serves the studio/ frontend; reads/writes BigQuery via google-cloud-bigquery.
+Serves the studio/ frontend; reads/writes GCP Cloud SQL (MySQL) via aiomysql.
 Auth uses JWT cookies (no session table).
 
 Run with:
@@ -13,7 +13,6 @@ import json
 import logging
 import math
 import os
-import secrets
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -27,28 +26,37 @@ from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from google.cloud import bigquery
 from pydantic import BaseModel
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+from contextlib import asynccontextmanager
+
 from db import (
-    T, P, PA, query, execute,
+    query, execute, _in_clause,
     set_hoa_property_status,
     count_active_leads_for_property,
     has_won_lead_for_property,
+    close_pool, run_migrations,
 )
 SESSION_DURATION = 28800  # 8 hours in seconds
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
 
-_ALLOWED_ORIGINS = {"http://localhost:5173", "http://localhost:5174"}
+_ALLOWED_ORIGINS = {"http://localhost:5174", "http://localhost:5173"}
 _extra_origins = os.environ.get("CORS_EXTRA_ORIGINS", "")
 if _extra_origins:
     _ALLOWED_ORIGINS.update(o.strip() for o in _extra_origins.split(",") if o.strip())
 
-app = FastAPI(title="Juniper CRM API")
+@asynccontextmanager
+async def lifespan(app):
+    await run_migrations()
+    yield
+    await close_pool()
+
+
+app = FastAPI(title="Juniper CRM API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,7 +87,7 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
 _JSON_COLS = frozenset({"score_factors", "raw_data"})
 _ALLOWED_SORT = frozenset({"score", "created_at", "estimated_contract_value", "bid_deadline"})
 
-_LEAD_BQ_TYPES: dict[str, str] = {
+_LEAD_TYPES: dict[str, str] = {
     "status": "STRING", "assigned_to": "STRING", "notes": "STRING",
     "priority": "INT64", "property_name": "STRING", "lead_type": "STRING",
     "address": "STRING", "city": "STRING", "state": "STRING", "zip": "STRING",
@@ -112,8 +120,8 @@ def _coerce_row(row: dict) -> dict:
 
 async def _fetch_lead(lead_id: str) -> dict:
     rows = await query(
-        f"SELECT * FROM {T('leads')} WHERE id = @id AND deleted_at IS NULL",
-        [P("id", "STRING", lead_id)],
+        "SELECT * FROM leads WHERE id = %s AND deleted_at IS NULL",
+        [lead_id],
     )
     if not rows:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -322,41 +330,43 @@ async def list_leads(
     params: list[Any] = []
 
     if status:
-        conditions.append("status = @status")
-        params.append(P("status", "STRING", status))
+        conditions.append("status = %s")
+        params.append(status)
 
     if lead_types:
         types = [t.strip() for t in lead_types.split(",") if t.strip()]
         if types:
-            conditions.append("lead_type IN UNNEST(@lead_types)")
-            params.append(PA("lead_types", "STRING", types))
+            placeholders, vals = _in_clause(types)
+            conditions.append(f"lead_type IN ({placeholders})")
+            params.extend(vals)
     elif lead_type:
-        conditions.append("lead_type = @lead_type")
-        params.append(P("lead_type", "STRING", lead_type))
+        conditions.append("lead_type = %s")
+        params.append(lead_type)
 
     if search:
-        conditions.append("LOWER(property_name) LIKE LOWER(@search)")
-        params.append(P("search", "STRING", f"%{search}%"))
+        conditions.append("LOWER(property_name) LIKE LOWER(%s)")
+        params.append(f"%{search}%")
 
     if states:
         state_list = [s.strip() for s in states.split(",") if s.strip()]
         if state_list:
-            conditions.append("state IN UNNEST(@states)")
-            params.append(PA("states", "STRING", state_list))
+            placeholders, vals = _in_clause(state_list)
+            conditions.append(f"state IN ({placeholders})")
+            params.extend(vals)
 
     if min_score is not None:
-        conditions.append("score >= @min_score")
-        params.append(P("min_score", "INT64", min_score))
+        conditions.append("score >= %s")
+        params.append(min_score)
 
     where = f"WHERE {' AND '.join(conditions)}"
     offset = (page - 1) * page_size
 
-    count_rows = await query(f"SELECT COUNT(*) AS cnt FROM {T('leads')} {where}", list(params))
+    count_rows = await query(f"SELECT COUNT(*) AS cnt FROM leads {where}", list(params))
     total = int(count_rows[0]["cnt"]) if count_rows else 0
 
-    data_params = list(params) + [P("lim", "INT64", page_size), P("off", "INT64", offset)]
+    data_params = list(params) + [page_size, offset]
     rows = await query(
-        f"SELECT * FROM {T('leads')} {where} ORDER BY {sort_by} {sort_dir} LIMIT @lim OFFSET @off",
+        f"SELECT * FROM leads {where} ORDER BY {sort_by} {sort_dir} LIMIT %s OFFSET %s",
         data_params,
     )
 
@@ -378,28 +388,28 @@ async def get_lead(lead_id: str, _user: dict = Depends(require_auth)) -> dict:
 async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth)) -> dict:
     new_id = str(uuid.uuid4())
     await execute(
-        f"""
-        INSERT INTO {T('leads')}
+        """
+        INSERT INTO leads
             (id, source, lead_type, property_name, city, state,
              estimated_contract_value, estimated_acreage, units, status,
              contact_name, contact_email, created_at, updated_at)
         VALUES
-            (@id, 'manual', @lead_type, @property_name, @city, @state,
-             @estimated_contract_value, @estimated_acreage, @units, @status,
-             @contact_name, @contact_email, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+            (%s, 'manual', %s, %s, %s, %s,
+             %s, %s, %s, %s,
+             %s, %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
-            P("id", "STRING", new_id),
-            P("lead_type", "STRING", body.lead_type),
-            P("property_name", "STRING", body.property_name),
-            P("city", "STRING", body.city),
-            P("state", "STRING", body.state),
-            P("estimated_contract_value", "FLOAT64", body.estimated_contract_value),
-            P("estimated_acreage", "FLOAT64", body.estimated_acreage),
-            P("units", "INT64", body.units),
-            P("status", "STRING", body.status),
-            P("contact_name", "STRING", body.contact_name),
-            P("contact_email", "STRING", body.contact_email),
+            new_id,
+            body.lead_type,
+            body.property_name,
+            body.city,
+            body.state,
+            body.estimated_contract_value,
+            body.estimated_acreage,
+            body.units,
+            body.status,
+            body.contact_name,
+            body.contact_email,
         ],
     )
     return await _fetch_lead(new_id)
@@ -429,13 +439,22 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
         except ValueError:
             pass
 
-    set_clause = ", ".join(f"{f} = @{f}" for f, _ in updates)
-    bq_params = [P(f, _LEAD_BQ_TYPES.get(f, "STRING"), v) for f, v in updates]
-    bq_params.append(P("lead_id", "STRING", lead_id))
+    set_clause = ", ".join(f"{f} = %s" for f, _ in updates)
+    # Coerce values to correct Python types for aiomysql
+    coerced_vals: list[Any] = []
+    for f, v in updates:
+        t = _LEAD_TYPES.get(f, "STRING")
+        if t == "INT64":
+            coerced_vals.append(int(v) if v is not None else None)
+        elif t == "FLOAT64":
+            coerced_vals.append(float(v) if v is not None else None)
+        else:
+            coerced_vals.append(v)
+    coerced_vals.append(lead_id)
 
     await execute(
-        f"UPDATE {T('leads')} SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = @lead_id",
-        bq_params,
+        f"UPDATE leads SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = %s",
+        coerced_vals,
     )
 
     new_status = data.get("status")
@@ -446,18 +465,17 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
                 await set_hoa_property_status(hoa_prop_id, "won")
             # "lost" no longer auto-downgrades the property — status is managed manually
         await execute(
-            f"""
-            INSERT INTO {T('lead_actions')}
-                (id, lead_id, action_type, prev_status, new_status, performed_by, performed_at)
+            """
+            INSERT INTO lead_actions
+                (lead_id, action_type, prev_status, new_status, performed_by, performed_at)
             VALUES
-                (@id, @lead_id, 'status_change', @prev_status, @new_status, @performed_by, CURRENT_TIMESTAMP())
+                (%s, 'status_change', %s, %s, %s, CURRENT_TIMESTAMP())
             """,
             [
-                P("id", "INT64", secrets.randbelow(2**63 - 1) + 1),
-                P("lead_id", "STRING", lead_id),
-                P("prev_status", "STRING", current.get("status")),
-                P("new_status", "STRING", new_status),
-                P("performed_by", "STRING", performed_by),
+                lead_id,
+                current.get("status"),
+                new_status,
+                performed_by,
             ],
         )
 
@@ -468,23 +486,13 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
 async def delete_lead(lead_id: str, _user: dict = Depends(require_auth)) -> None:
     await _fetch_lead(lead_id)
     await execute(
-        f"UPDATE {T('leads')} SET deleted_at = CURRENT_TIMESTAMP() WHERE id = @id AND deleted_at IS NULL",
-        [P("id", "STRING", lead_id)],
+        "UPDATE leads SET deleted_at = CURRENT_TIMESTAMP() WHERE id = %s AND deleted_at IS NULL",
+        [lead_id],
     )
     # Property status is managed manually — deleting a lead does not auto-downgrade it
 
 
 # ── Outreach ─────────────────────────────────────────────────────────────────
-
-_ACTION_TO_CHANNEL: dict[str, str] = {
-    "email_sent": "email",
-    "call_logged": "call",
-    "sms_sent": "sms",
-    "sms_received": "sms",
-    "note_added": "note",
-    "meeting_scheduled": "meeting",
-}
-
 
 async def _record_lead_action(
     *,
@@ -494,70 +502,28 @@ async def _record_lead_action(
     performed_by: Optional[str],
     external_message_id: Optional[str],
 ) -> None:
-    """Insert a row into lead_actions (id generated internally)."""
+    """Insert a row into lead_actions (id auto-assigned by MySQL)."""
     await execute(
-        f"""
-        INSERT INTO {T('lead_actions')}
-            (id, lead_id, action_type, detail, performed_by, performed_at, external_message_id)
+        """
+        INSERT INTO lead_actions
+            (lead_id, action_type, detail, performed_by, performed_at, external_message_id)
         VALUES
-            (@id, @lead_id, @action_type, @detail, @performed_by, CURRENT_TIMESTAMP(), @external_message_id)
+            (%s, %s, %s, %s, CURRENT_TIMESTAMP(), %s)
         """,
         [
-            P("id", "INT64", secrets.randbelow(2**63 - 1) + 1),
-            P("lead_id", "STRING", lead_id),
-            P("action_type", "STRING", action_type),
-            P("detail", "STRING", detail),
-            P("performed_by", "STRING", performed_by),
-            P("external_message_id", "STRING", external_message_id),
+            lead_id,
+            action_type,
+            detail,
+            performed_by,
+            external_message_id,
         ],
     )
-
-
-@app.get("/api/outreach/{lead_id}")
-async def get_outreach(lead_id: str, _user: dict = Depends(require_auth)) -> list:
-    rows = await query(
-        f"""
-        SELECT * FROM {T('lead_actions')}
-        WHERE lead_id = @lead_id
-          AND action_type IN UNNEST(@types)
-        ORDER BY performed_at DESC
-        """,
-        [
-            P("lead_id", "STRING", lead_id),
-            PA("types", "STRING", list(_ACTION_TO_CHANNEL.keys())),
-        ],
-    )
-    return [
-        {
-            "id": str(r["id"]),
-            "lead_id": r["lead_id"],
-            "channel": _ACTION_TO_CHANNEL.get(r["action_type"], r["action_type"]),
-            "message": r.get("detail") or "",
-            "sent_at": (
-                r["performed_at"].isoformat()
-                if isinstance(r["performed_at"], datetime)
-                else str(r["performed_at"])
-            ),
-            "direction": "out",
-            "sender_name": r.get("performed_by") or "",
-            "response_received": False,
-            "response_at": None,
-            "sequence_step": 1,
-            "next_follow_up": None,
-            "external_message_id": r.get("external_message_id"),
-        }
-        for r in rows
-    ]
 
 
 
 # ── Activity feed ────────────────────────────────────────────────────────────
 
 _ACTION_TO_CHANNEL_FULL: dict[str, str] = {
-    "email_sent": "email",
-    "call_logged": "call",
-    "sms_sent": "sms",
-    "sms_received": "sms",
     "note_added": "note",
     "meeting_scheduled": "meeting",
 }
@@ -567,18 +533,18 @@ _ACTION_TO_CHANNEL_FULL: dict[str, str] = {
 async def get_lead_activity(lead_id: str, _user: dict = Depends(require_auth)) -> list:
     """Unified activity feed across all channels."""
     rows = await query(
-        f"""
-        SELECT * FROM {T('lead_actions')}
-        WHERE lead_id = @lead_id
+        """
+        SELECT * FROM lead_actions
+        WHERE lead_id = %s
         ORDER BY performed_at DESC
         """,
-        [P("lead_id", "STRING", lead_id)],
+        [lead_id],
     )
     return [
         {
             "id": str(r["id"]),
             "channel": _ACTION_TO_CHANNEL_FULL.get(r["action_type"], r["action_type"]),
-            "direction": "in" if r["action_type"] == "sms_received" else "out",
+            "direction": "out",
             "body": r.get("detail") or "",
             "performed_by": r.get("performed_by") or "",
             "performed_at": (
@@ -586,9 +552,6 @@ async def get_lead_activity(lead_id: str, _user: dict = Depends(require_auth)) -
                 if isinstance(r["performed_at"], datetime)
                 else str(r["performed_at"])
             ),
-            "recording_url": r.get("recording_url"),
-            "duration_seconds": r.get("duration_seconds"),
-            "transcript_summary": None,
             "external_message_id": r.get("external_message_id"),
         }
         for r in rows
@@ -601,94 +564,18 @@ async def get_lead_activity(lead_id: str, _user: dict = Depends(require_auth)) -
 
 @app.get("/api/settings/connections")
 async def get_connections(_user: dict = Depends(require_auth)) -> dict:
-    """Returns Microsoft Graph and Twilio connection status."""
+    """Returns Microsoft Graph connection status."""
     user_id = _user.get("id", "")
     try:
         graph_rows = await query(
-            f"SELECT user_id FROM {T('user_graph_tokens')} WHERE user_id = @user_id LIMIT 1",
-            [P("user_id", "STRING", user_id)],
+            "SELECT user_id FROM user_graph_tokens WHERE user_id = %s LIMIT 1",
+            [user_id],
         )
         graph_connected = bool(graph_rows)
     except Exception:
         graph_connected = False
 
-    twilio_configured = bool(os.environ.get("TWILIO_ACCOUNT_SID"))
-    return {
-        "graph": {"connected": graph_connected},
-        "telephony": {
-            "configured": twilio_configured,
-            "provider": "twilio" if twilio_configured else "",
-        },
-    }
-
-
-# ── Contact consent ───────────────────────────────────────────────────────────
-
-_DEFAULT_CONSENT = {
-    "do_not_call": False,
-    "do_not_text": False,
-    "do_not_email": False,
-    "consent_call": False,
-    "consent_text": False,
-    "consent_captured_at": None,
-    "consent_source": None,
-    "consent_by": None,
-    "updated_at": None,
-}
-
-
-@app.get("/api/contacts/{contact_id}/consent")
-async def get_contact_consent(contact_id: str, _user: dict = Depends(require_auth)) -> dict:
-    rows = await query(
-        f"SELECT * FROM {T('contact_consent')} WHERE contact_id = @contact_id LIMIT 1",
-        [P("contact_id", "STRING", contact_id)],
-    )
-    if rows:
-        return dict(rows[0])
-    return {"contact_id": contact_id, **_DEFAULT_CONSENT}
-
-
-@app.patch("/api/contacts/{contact_id}/consent")
-async def patch_contact_consent(
-    contact_id: str,
-    body: dict,
-    _user: dict = Depends(require_auth),
-) -> dict:
-    existing = await query(
-        f"SELECT contact_id FROM {T('contact_consent')} WHERE contact_id = @contact_id LIMIT 1",
-        [P("contact_id", "STRING", contact_id)],
-    )
-    allowed_fields = {
-        "do_not_call", "do_not_text", "do_not_email",
-        "consent_call", "consent_text",
-        "consent_captured_at", "consent_source", "consent_by",
-    }
-    updates = {k: v for k, v in body.items() if k in allowed_fields}
-
-    def _bq_type(v: Any) -> str:
-        return "BOOL" if isinstance(v, bool) else "STRING"
-
-    if not existing:
-        if updates:
-            await execute(
-                f"""
-                INSERT INTO {T('contact_consent')} (contact_id, {', '.join(updates.keys())}, updated_at)
-                VALUES (@contact_id, {', '.join('@' + k for k in updates.keys())}, CURRENT_TIMESTAMP())
-                """,
-                [P("contact_id", "STRING", contact_id)]
-                + [P(k, _bq_type(v), v) for k, v in updates.items()],
-            )
-    else:
-        if updates:
-            set_clause = ", ".join(f"{k} = @{k}" for k in updates)
-            await execute(
-                f"UPDATE {T('contact_consent')} SET {set_clause}, updated_at = CURRENT_TIMESTAMP() "
-                f"WHERE contact_id = @contact_id",
-                [P(k, _bq_type(v), v) for k, v in updates.items()]
-                + [P("contact_id", "STRING", contact_id)],
-            )
-
-    return await get_contact_consent(contact_id, _user)
+    return {"graph": {"connected": graph_connected}}
 
 
 
@@ -698,7 +585,7 @@ _HOA_JSON_COLS = frozenset({"raw_data"})
 
 
 def _shape_hoa_row(row: dict) -> dict:
-    """Coerce BigQuery types and rename DB columns to frontend-expected names."""
+    """Coerce types and rename DB columns to frontend-expected names."""
     out: dict[str, Any] = {}
     for k, v in row.items():
         if isinstance(v, Decimal):
@@ -724,8 +611,8 @@ def _shape_hoa_row(row: dict) -> dict:
 
 async def _fetch_hoa_property(hoa_property_id: str) -> dict:
     rows = await query(
-        f"SELECT * FROM {T('hoa_properties')} WHERE id = @id",
-        [P("id", "STRING", hoa_property_id)],
+        "SELECT * FROM hoa_properties WHERE id = %s",
+        [hoa_property_id],
     )
     if not rows:
         raise HTTPException(status_code=404, detail="HOA property not found")
@@ -735,7 +622,7 @@ async def _fetch_hoa_property(hoa_property_id: str) -> dict:
 @app.get("/api/hoa-properties/filter-options")
 async def hoa_filter_options(_user: dict = Depends(require_auth)) -> dict:
     rows = await query(
-        f"SELECT DISTINCT city, branch_id FROM {T('hoa_properties')} WHERE city IS NOT NULL ORDER BY city"
+        "SELECT DISTINCT city, branch_id FROM hoa_properties WHERE city IS NOT NULL ORDER BY city"
     )
     cities = sorted({r["city"] for r in rows if r.get("city")})
     branches = sorted({r["branch_id"] for r in rows if r.get("branch_id")})
@@ -758,43 +645,46 @@ async def list_hoa_properties(
     params: list[Any] = []
 
     if state:
-        conditions.append("state = @state")
-        params.append(P("state", "STRING", state.upper()))
+        conditions.append("state = %s")
+        params.append(state.upper())
     if status:
         vals = [s.strip() for s in status.split(",") if s.strip()]
         if vals:
-            conditions.append("status IN UNNEST(@hoa_statuses)")
-            params.append(PA("hoa_statuses", "STRING", vals))
+            placeholders, pvals = _in_clause(vals)
+            conditions.append(f"status IN ({placeholders})")
+            params.extend(pvals)
     if branch_id:
         vals = [s.strip() for s in branch_id.split(",") if s.strip()]
         if vals:
-            conditions.append("branch_id IN UNNEST(@branch_ids)")
-            params.append(PA("branch_ids", "STRING", vals))
+            placeholders, pvals = _in_clause(vals)
+            conditions.append(f"branch_id IN ({placeholders})")
+            params.extend(pvals)
     if city:
         vals = [s.strip() for s in city.split(",") if s.strip()]
         if vals:
-            conditions.append("city IN UNNEST(@cities)")
-            params.append(PA("cities", "STRING", vals))
+            placeholders, pvals = _in_clause(vals)
+            conditions.append(f"city IN ({placeholders})")
+            params.extend(pvals)
     if search:
         conditions.append(
-            "(LOWER(property_name) LIKE LOWER(@search)"
-            " OR LOWER(COALESCE(association_name,'')) LIKE LOWER(@search)"
-            " OR LOWER(COALESCE(city,'')) LIKE LOWER(@search))"
+            "(LOWER(property_name) LIKE LOWER(%s)"
+            " OR LOWER(COALESCE(association_name,'')) LIKE LOWER(%s)"
+            " OR LOWER(COALESCE(city,'')) LIKE LOWER(%s))"
         )
-        params.append(P("search", "STRING", f"%{search}%"))
+        params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
     if min_acreage is not None:
-        conditions.append("estimated_acreage >= @min_acreage")
-        params.append(P("min_acreage", "FLOAT64", min_acreage))
+        conditions.append("estimated_acreage >= %s")
+        params.append(min_acreage)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     offset = (page - 1) * page_size
 
-    count_rows = await query(f"SELECT COUNT(*) AS cnt FROM {T('hoa_properties')} {where}", list(params))
+    count_rows = await query(f"SELECT COUNT(*) AS cnt FROM hoa_properties {where}", list(params))
     total = int(count_rows[0]["cnt"]) if count_rows else 0
 
-    data_params = list(params) + [P("lim", "INT64", page_size), P("off", "INT64", offset)]
+    data_params = list(params) + [page_size, offset]
     rows = await query(
-        f"SELECT * FROM {T('hoa_properties')} {where} ORDER BY created_at DESC LIMIT @lim OFFSET @off",
+        f"SELECT * FROM hoa_properties {where} ORDER BY created_at DESC LIMIT %s OFFSET %s",
         data_params,
     )
 
@@ -823,34 +713,34 @@ async def create_hoa_property(
     new_id = str(uuid.uuid4())
     # parcel_id and arcgis_source are NOT NULL in schema — use sentinel values for manual entries
     await execute(
-        f"""
-        INSERT INTO {T('hoa_properties')}
+        """
+        INSERT INTO hoa_properties
             (id, property_name, association_name, address, city, state, zip, county,
              estimated_acreage, units, status, branch_id, management_company_id,
              assigned_to, contact_status, parcel_id, arcgis_source,
              created_at, updated_at)
         VALUES
-            (@id, @property_name, @association_name, @address, @city, @state, @zip, @county,
-             @estimated_acreage, @units, @status, @branch_id, @management_company_id,
-             @assigned_to, 'uncontacted', @parcel_id, 'manual',
+            (%s, %s, %s, %s, %s, %s, %s, %s,
+             %s, %s, %s, %s, %s,
+             %s, 'uncontacted', %s, 'manual',
              CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
-            P("id", "STRING", new_id),
-            P("property_name", "STRING", body.property_name),
-            P("association_name", "STRING", body.association_name),
-            P("address", "STRING", body.address),
-            P("city", "STRING", body.city),
-            P("state", "STRING", body.state),
-            P("zip", "STRING", body.zip),
-            P("county", "STRING", body.county),
-            P("estimated_acreage", "FLOAT64", body.acreage),
-            P("units", "INT64", body.units),
-            P("status", "STRING", body.status),
-            P("branch_id", "STRING", body.branch_id),
-            P("management_company_id", "STRING", body.management_company_id),
-            P("assigned_to", "STRING", user_id),
-            P("parcel_id", "STRING", f"manual-{new_id}"),
+            new_id,
+            body.property_name,
+            body.association_name,
+            body.address,
+            body.city,
+            body.state,
+            body.zip,
+            body.county,
+            body.acreage,
+            body.units,
+            body.status,
+            body.branch_id,
+            body.management_company_id,
+            user_id,
+            f"manual-{new_id}",
         ],
     )
     return await _fetch_hoa_property(new_id)
@@ -877,7 +767,7 @@ _HOA_PATCHABLE = frozenset({
     "address", "city", "state", "zip", "county",
     "estimated_acreage", "units",
 })
-_HOA_BQ_TYPES: dict[str, str] = {
+_HOA_TYPES: dict[str, str] = {
     "status": "STRING",
     "management_company_id": "STRING",
     "assigned_to": "STRING",
@@ -917,19 +807,27 @@ async def patch_hoa_property(
             raise HTTPException(status_code=400, detail="last_contacted must be a valid ISO date (YYYY-MM-DD)")
 
     existing = await query(
-        f"SELECT id FROM {T('hoa_properties')} WHERE id = @id",
-        [P("id", "STRING", hoa_property_id)],
+        "SELECT id FROM hoa_properties WHERE id = %s",
+        [hoa_property_id],
     )
     if not existing:
         raise HTTPException(status_code=404, detail="HOA property not found")
 
-    set_clause = ", ".join(f"{f} = @{f}" for f, _ in updates)
-    bq_params = [P(f, _HOA_BQ_TYPES.get(f, "STRING"), v) for f, v in updates]
-    bq_params.append(P("hoa_id", "STRING", hoa_property_id))
+    set_clause = ", ".join(f"{f} = %s" for f, _ in updates)
+    coerced_vals: list[Any] = []
+    for f, v in updates:
+        t = _HOA_TYPES.get(f, "STRING")
+        if t == "INT64":
+            coerced_vals.append(int(v) if v is not None else None)
+        elif t in ("NUMERIC", "FLOAT64"):
+            coerced_vals.append(float(v) if v is not None else None)
+        else:
+            coerced_vals.append(v)
+    coerced_vals.append(hoa_property_id)
 
     await execute(
-        f"UPDATE {T('hoa_properties')} SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = @hoa_id",
-        bq_params,
+        f"UPDATE hoa_properties SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = %s",
+        coerced_vals,
     )
     return await _fetch_hoa_property(hoa_property_id)
 
@@ -946,7 +844,7 @@ _MGMT_FIELD_TO_COL: dict[str, str] = {
     "primary_email": "contact_email",
 }
 
-_MGMT_COL_BQ_TYPES: dict[str, str] = {
+_MGMT_COL_TYPES: dict[str, str] = {
     "name": "STRING",
     "website": "STRING",
     "phone": "STRING",
@@ -1010,30 +908,30 @@ async def list_management_companies(
     params: list[Any] = []
 
     if search:
-        conditions.append("LOWER(name) LIKE LOWER(@search)")
-        params.append(P("search", "STRING", f"%{search}%"))
+        conditions.append("LOWER(name) LIKE LOWER(%s)")
+        params.append(f"%{search}%")
     if branch_id:
-        conditions.append("branch_id = @branch_id")
-        params.append(P("branch_id", "STRING", branch_id))
+        conditions.append("branch_id = %s")
+        params.append(branch_id)
     if status:
-        conditions.append("status = @mgmt_status")
-        params.append(P("mgmt_status", "STRING", status))
+        conditions.append("status = %s")
+        params.append(status)
     if assigned_to:
-        conditions.append("assigned_to = @assigned_to")
-        params.append(P("assigned_to", "STRING", assigned_to))
+        conditions.append("assigned_to = %s")
+        params.append(assigned_to)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     offset = (page - 1) * page_size
 
     count_rows = await query(
-        f"SELECT COUNT(*) AS cnt FROM {T('property_management_companies')} {where}",
+        f"SELECT COUNT(*) AS cnt FROM property_management_companies {where}",
         list(params),
     )
     total = int(count_rows[0]["cnt"]) if count_rows else 0
 
-    data_params = list(params) + [P("lim", "INT64", page_size), P("off", "INT64", offset)]
+    data_params = list(params) + [page_size, offset]
     rows = await query(
-        f"SELECT * FROM {T('property_management_companies')} {where} ORDER BY created_at DESC LIMIT @lim OFFSET @off",
+        f"SELECT * FROM property_management_companies {where} ORDER BY created_at DESC LIMIT %s OFFSET %s",
         data_params,
     )
 
@@ -1041,13 +939,14 @@ async def list_management_companies(
     contacts_by_company: dict[str, list[dict]] = {}
     if rows:
         company_ids = [r["id"] for r in rows]
+        placeholders, pvals = _in_clause(company_ids)
         contact_rows = await query(
             f"""
-            SELECT * FROM {T('hoa_contact_information')}
-            WHERE management_company_id IN UNNEST(@ids)
+            SELECT * FROM hoa_contact_information
+            WHERE management_company_id IN ({placeholders})
             ORDER BY id ASC
             """,
-            [PA("ids", "STRING", company_ids)],
+            pvals,
         )
         for cr in contact_rows:
             cid = cr["management_company_id"]
@@ -1074,28 +973,28 @@ async def create_management_company(
         raise HTTPException(status_code=401, detail="Token missing user id")
     new_id = str(uuid.uuid4())
     await execute(
-        f"""
-        INSERT INTO {T('property_management_companies')}
+        """
+        INSERT INTO property_management_companies
             (id, name, website, phone, mailing_address, mailing_city, mailing_state,
              mailing_zip, contact_email, branch_id, assigned_to, status, contact_status,
              created_at, updated_at)
         VALUES
-            (@id, @name, @website, @phone, @mailing_address, @mailing_city, @mailing_state,
-             @mailing_zip, @contact_email, @branch_id, @assigned_to, 'Target', 'uncontacted',
+            (%s, %s, %s, %s, %s, %s, %s,
+             %s, %s, %s, %s, 'Target', 'uncontacted',
              CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
-            P("id", "STRING", new_id),
-            P("name", "STRING", body.company_name),
-            P("website", "STRING", body.website),
-            P("phone", "STRING", body.phone),
-            P("mailing_address", "STRING", body.street),
-            P("mailing_city", "STRING", body.city),
-            P("mailing_state", "STRING", body.state),
-            P("mailing_zip", "STRING", body.zip),
-            P("contact_email", "STRING", body.primary_email),
-            P("branch_id", "STRING", body.branch_id),
-            P("assigned_to", "STRING", user_id),
+            new_id,
+            body.company_name,
+            body.website,
+            body.phone,
+            body.street,
+            body.city,
+            body.state,
+            body.zip,
+            body.primary_email,
+            body.branch_id,
+            user_id,
         ],
     )
 
@@ -1103,35 +1002,33 @@ async def create_management_company(
     for contact in body.contacts:
         if not (contact.name or "").strip() and not (contact.email or "").strip():
             continue
-        contact_id = uuid.uuid4().int % (2**62) + 1
         await execute(
-            f"""
-            INSERT INTO {T('hoa_contact_information')}
-                (id, management_company_id, contact_name, role, email, phone, source, created_at)
+            """
+            INSERT INTO hoa_contact_information
+                (management_company_id, contact_name, role, email, phone, source, created_at)
             VALUES
-                (@id, @mgmt_id, @contact_name, @role, @email, @phone, 'manual', CURRENT_TIMESTAMP())
+                (%s, %s, %s, %s, %s, 'manual', CURRENT_TIMESTAMP())
             """,
             [
-                P("id", "INT64", contact_id),
-                P("mgmt_id", "STRING", new_id),
-                P("contact_name", "STRING", contact.name),
-                P("role", "STRING", contact.title),
-                P("email", "STRING", contact.email or None),
-                P("phone", "STRING", contact.phone),
+                new_id,
+                contact.name,
+                contact.title,
+                contact.email or None,
+                contact.phone,
             ],
         )
 
     # Fetch the newly created company row
     company_rows = await query(
-        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
-        [P("id", "STRING", new_id)],
+        "SELECT * FROM property_management_companies WHERE id = %s",
+        [new_id],
     )
     contact_rows = await query(
-        f"""
-        SELECT * FROM {T('hoa_contact_information')}
-        WHERE management_company_id = @id ORDER BY id ASC
+        """
+        SELECT * FROM hoa_contact_information
+        WHERE management_company_id = %s ORDER BY id ASC
         """,
-        [P("id", "STRING", new_id)],
+        [new_id],
     )
     contacts = [_shape_contact_row(cr) for cr in contact_rows]
     return _shape_mgmt_row(company_rows[0], contacts)
@@ -1163,8 +1060,8 @@ async def patch_management_company(
             raise HTTPException(status_code=400, detail="last_contacted must be a valid ISO date (YYYY-MM-DD)")
 
     existing = await query(
-        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
-        [P("id", "STRING", company_id)],
+        "SELECT id FROM property_management_companies WHERE id = %s",
+        [company_id],
     )
     if not existing:
         raise HTTPException(status_code=404, detail="Management company not found")
@@ -1172,25 +1069,25 @@ async def patch_management_company(
     # Translate body field names to DB column names
     updates_db = [(_MGMT_FIELD_TO_COL.get(f, f), v) for f, v in updates_raw]
 
-    set_clause = ", ".join(f"{col} = @{col}" for col, _ in updates_db)
-    bq_params = [P(col, _MGMT_COL_BQ_TYPES.get(col, "STRING"), v) for col, v in updates_db]
-    bq_params.append(P("company_id", "STRING", company_id))
+    set_clause = ", ".join(f"{col} = %s" for col, _ in updates_db)
+    db_vals = [v for _, v in updates_db]
+    db_vals.append(company_id)
 
     await execute(
-        f"UPDATE {T('property_management_companies')} SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = @company_id",
-        bq_params,
+        f"UPDATE property_management_companies SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = %s",
+        db_vals,
     )
 
     company_rows = await query(
-        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
-        [P("id", "STRING", company_id)],
+        "SELECT * FROM property_management_companies WHERE id = %s",
+        [company_id],
     )
     contact_rows = await query(
-        f"""
-        SELECT * FROM {T('hoa_contact_information')}
-        WHERE management_company_id = @id ORDER BY id ASC
+        """
+        SELECT * FROM hoa_contact_information
+        WHERE management_company_id = %s ORDER BY id ASC
         """,
-        [P("id", "STRING", company_id)],
+        [company_id],
     )
     contacts = [_shape_contact_row(cr) for cr in contact_rows]
     return _shape_mgmt_row(company_rows[0], contacts)
@@ -1203,40 +1100,38 @@ async def add_management_company_contact(
     _user: dict = Depends(require_auth),
 ) -> dict:
     existing = await query(
-        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
-        [P("id", "STRING", company_id)],
+        "SELECT id FROM property_management_companies WHERE id = %s",
+        [company_id],
     )
     if not existing:
         raise HTTPException(status_code=404, detail="Management company not found")
 
-    contact_id = uuid.uuid4().int % (2**62) + 1
     await execute(
-        f"""
-        INSERT INTO {T('hoa_contact_information')}
-            (id, management_company_id, contact_name, role, email, phone, source, created_at)
+        """
+        INSERT INTO hoa_contact_information
+            (management_company_id, contact_name, role, email, phone, source, created_at)
         VALUES
-            (@id, @mgmt_id, @contact_name, @role, @email, @phone, 'manual', CURRENT_TIMESTAMP())
+            (%s, %s, %s, %s, %s, 'manual', CURRENT_TIMESTAMP())
         """,
         [
-            P("id", "INT64", contact_id),
-            P("mgmt_id", "STRING", company_id),
-            P("contact_name", "STRING", body.name),
-            P("role", "STRING", body.title),
-            P("email", "STRING", body.email),
-            P("phone", "STRING", body.phone),
+            company_id,
+            body.name,
+            body.title,
+            body.email,
+            body.phone,
         ],
     )
 
     company_rows = await query(
-        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
-        [P("id", "STRING", company_id)],
+        "SELECT * FROM property_management_companies WHERE id = %s",
+        [company_id],
     )
     contact_rows = await query(
-        f"""
-        SELECT * FROM {T('hoa_contact_information')}
-        WHERE management_company_id = @id ORDER BY id ASC
+        """
+        SELECT * FROM hoa_contact_information
+        WHERE management_company_id = %s ORDER BY id ASC
         """,
-        [P("id", "STRING", company_id)],
+        [company_id],
     )
     contacts = [_shape_contact_row(cr) for cr in contact_rows]
     return _shape_mgmt_row(company_rows[0], contacts)
@@ -1250,18 +1145,18 @@ async def patch_management_company_contact(
     _user: dict = Depends(require_auth),
 ) -> dict:
     existing_company = await query(
-        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
-        [P("id", "STRING", company_id)],
+        "SELECT id FROM property_management_companies WHERE id = %s",
+        [company_id],
     )
     if not existing_company:
         raise HTTPException(status_code=404, detail="Management company not found")
 
     existing_contact = await query(
-        f"""
-        SELECT id FROM {T('hoa_contact_information')}
-        WHERE id = @id AND management_company_id = @mgmt_id
+        """
+        SELECT id FROM hoa_contact_information
+        WHERE id = %s AND management_company_id = %s
         """,
-        [P("id", "INT64", contact_id), P("mgmt_id", "STRING", company_id)],
+        [contact_id, company_id],
     )
     if not existing_contact:
         raise HTTPException(status_code=404, detail="Contact not found")
@@ -1274,30 +1169,29 @@ async def patch_management_company_contact(
     _CONTACT_FIELD_TO_COL = {"name": "contact_name", "title": "role"}
     updates = [(_CONTACT_FIELD_TO_COL.get(f, f), v) for f, v in data.items()]
 
-    set_clause = ", ".join(f"{col} = @{col}" for col, _ in updates)
-    bq_params = [P(col, "STRING", v) for col, v in updates]
-    bq_params.append(P("contact_id", "INT64", contact_id))
-    bq_params.append(P("mgmt_id", "STRING", company_id))
+    set_clause = ", ".join(f"{col} = %s" for col, _ in updates)
+    db_vals = [v for _, v in updates]
+    db_vals.extend([contact_id, company_id])
 
     await execute(
         f"""
-        UPDATE {T('hoa_contact_information')}
+        UPDATE hoa_contact_information
         SET {set_clause}
-        WHERE id = @contact_id AND management_company_id = @mgmt_id
+        WHERE id = %s AND management_company_id = %s
         """,
-        bq_params,
+        db_vals,
     )
 
     company_rows = await query(
-        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
-        [P("id", "STRING", company_id)],
+        "SELECT * FROM property_management_companies WHERE id = %s",
+        [company_id],
     )
     contact_rows = await query(
-        f"""
-        SELECT * FROM {T('hoa_contact_information')}
-        WHERE management_company_id = @id ORDER BY id ASC
+        """
+        SELECT * FROM hoa_contact_information
+        WHERE management_company_id = %s ORDER BY id ASC
         """,
-        [P("id", "STRING", company_id)],
+        [company_id],
     )
     contacts = [_shape_contact_row(cr) for cr in contact_rows]
     return _shape_mgmt_row(company_rows[0], contacts)
@@ -1310,40 +1204,40 @@ async def delete_management_company_contact(
     _user: dict = Depends(require_auth),
 ) -> dict:
     existing_company = await query(
-        f"SELECT id FROM {T('property_management_companies')} WHERE id = @id",
-        [P("id", "STRING", company_id)],
+        "SELECT id FROM property_management_companies WHERE id = %s",
+        [company_id],
     )
     if not existing_company:
         raise HTTPException(status_code=404, detail="Management company not found")
 
     existing_contact = await query(
-        f"""
-        SELECT id FROM {T('hoa_contact_information')}
-        WHERE id = @id AND management_company_id = @mgmt_id
+        """
+        SELECT id FROM hoa_contact_information
+        WHERE id = %s AND management_company_id = %s
         """,
-        [P("id", "INT64", contact_id), P("mgmt_id", "STRING", company_id)],
+        [contact_id, company_id],
     )
     if not existing_contact:
         raise HTTPException(status_code=404, detail="Contact not found")
 
     await execute(
-        f"""
-        DELETE FROM {T('hoa_contact_information')}
-        WHERE id = @contact_id AND management_company_id = @mgmt_id
+        """
+        DELETE FROM hoa_contact_information
+        WHERE id = %s AND management_company_id = %s
         """,
-        [P("contact_id", "INT64", contact_id), P("mgmt_id", "STRING", company_id)],
+        [contact_id, company_id],
     )
 
     company_rows = await query(
-        f"SELECT * FROM {T('property_management_companies')} WHERE id = @id",
-        [P("id", "STRING", company_id)],
+        "SELECT * FROM property_management_companies WHERE id = %s",
+        [company_id],
     )
     contact_rows = await query(
-        f"""
-        SELECT * FROM {T('hoa_contact_information')}
-        WHERE management_company_id = @id ORDER BY id ASC
+        """
+        SELECT * FROM hoa_contact_information
+        WHERE management_company_id = %s ORDER BY id ASC
         """,
-        [P("id", "STRING", company_id)],
+        [company_id],
     )
     contacts = [_shape_contact_row(cr) for cr in contact_rows]
     return _shape_mgmt_row(company_rows[0], contacts)
@@ -1352,7 +1246,7 @@ async def delete_management_company_contact(
 @app.get("/api/contacts")
 async def list_contacts(_user: dict = Depends(require_auth)) -> list:
     rows = await query(
-        f"""
+        """
         SELECT
             c.id,
             c.contact_name,
@@ -1361,8 +1255,8 @@ async def list_contacts(_user: dict = Depends(require_auth)) -> list:
             m.name          AS company_name,
             m.mailing_city  AS city,
             m.mailing_state AS state
-        FROM {T('hoa_contact_information')} c
-        JOIN {T('property_management_companies')} m
+        FROM hoa_contact_information c
+        JOIN property_management_companies m
           ON c.management_company_id = m.id
         WHERE c.email IS NOT NULL
         ORDER BY c.contact_name
@@ -1395,14 +1289,14 @@ async def list_bids(
     conditions: list[str] = []
     params: list[Any] = []
     if lead_id:
-        conditions.append("lead_id = @lead_id")
-        params.append(P("lead_id", "STRING", lead_id))
+        conditions.append("lead_id = %s")
+        params.append(lead_id)
     if status:
-        conditions.append("status = @bid_status")
-        params.append(P("bid_status", "STRING", status))
+        conditions.append("status = %s")
+        params.append(status)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    rows = await query(f"SELECT * FROM {T('bids')} {where}", params or None)
+    rows = await query(f"SELECT * FROM bids {where}", params or ())
     return [_coerce_row(r) for r in rows]
 
 
@@ -1410,25 +1304,25 @@ async def list_bids(
 async def create_bid(body: CreateBidBody, _user: dict = Depends(require_auth)) -> dict:
     new_id = str(uuid.uuid4())
     await execute(
-        f"""
-        INSERT INTO {T('bids')}
+        """
+        INSERT INTO bids
             (id, lead_id, estimated_value, status, title, agency, branch_id, notes,
              created_at, updated_at)
         VALUES
-            (@id, @lead_id, @estimated_value, 'pending', @title, @agency, @branch_id, @notes,
+            (%s, %s, %s, 'pending', %s, %s, %s, %s,
              CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
-            P("id", "STRING", new_id),
-            P("lead_id", "STRING", body.lead_id),
-            P("estimated_value", "FLOAT64", body.estimated_value),
-            P("title", "STRING", body.title),
-            P("agency", "STRING", body.agency),
-            P("branch_id", "STRING", body.branch_id),
-            P("notes", "STRING", body.notes),
+            new_id,
+            body.lead_id,
+            body.estimated_value,
+            body.title,
+            body.agency,
+            body.branch_id,
+            body.notes,
         ],
     )
-    rows = await query(f"SELECT * FROM {T('bids')} WHERE id = @id", [P("id", "STRING", new_id)])
+    rows = await query("SELECT * FROM bids WHERE id = %s", [new_id])
     return _coerce_row(rows[0])
 
 
@@ -1438,18 +1332,24 @@ async def patch_bid(bid_id: str, body: PatchBidBody, _user: dict = Depends(requi
     if not data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    existing = await query(f"SELECT id FROM {T('bids')} WHERE id = @id", [P("id", "STRING", bid_id)])
+    existing = await query("SELECT id FROM bids WHERE id = %s", [bid_id])
     if not existing:
         raise HTTPException(status_code=404, detail="Bid not found")
 
-    _BID_BQ_TYPES = {"status": "STRING", "estimated_value": "FLOAT64", "notes": "STRING"}
-    set_clause = ", ".join(f"{f} = @{f}" for f in data)
-    bq_params = [P(f, _BID_BQ_TYPES.get(f, "STRING"), v) for f, v in data.items()]
-    bq_params.append(P("bid_id", "STRING", bid_id))
+    _BID_TYPES = {"status": "STRING", "estimated_value": "FLOAT64", "notes": "STRING"}
+    set_clause = ", ".join(f"{f} = %s" for f in data)
+    coerced_vals: list[Any] = []
+    for f, v in data.items():
+        t = _BID_TYPES.get(f, "STRING")
+        if t == "FLOAT64":
+            coerced_vals.append(float(v) if v is not None else None)
+        else:
+            coerced_vals.append(v)
+    coerced_vals.append(bid_id)
 
     await execute(
-        f"UPDATE {T('bids')} SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = @bid_id",
-        bq_params,
+        f"UPDATE bids SET {set_clause}, updated_at = CURRENT_TIMESTAMP() WHERE id = %s",
+        coerced_vals,
     )
 
     # When a bid moves to 'pursuing', mark the linked HOA property as contacted
@@ -1458,22 +1358,22 @@ async def patch_bid(bid_id: str, body: PatchBidBody, _user: dict = Depends(requi
     new_bid_status = data.get("status")
     if new_bid_status == "pursuing":
         bid_rows = await query(
-            f"SELECT lead_id FROM {T('bids')} WHERE id = @id",
-            [P("id", "STRING", bid_id)],
+            "SELECT lead_id FROM bids WHERE id = %s",
+            [bid_id],
         )
         if bid_rows:
             lead_id_for_bid = bid_rows[0].get("lead_id")
             if lead_id_for_bid:
                 lead_rows = await query(
-                    f"SELECT hoa_property_id FROM {T('leads')} WHERE id = @id",
-                    [P("id", "STRING", lead_id_for_bid)],
+                    "SELECT hoa_property_id FROM leads WHERE id = %s",
+                    [lead_id_for_bid],
                 )
                 if lead_rows:
                     hoa_prop_id = lead_rows[0].get("hoa_property_id")
                     if hoa_prop_id:
                         await set_property_contacted(hoa_prop_id)
 
-    rows = await query(f"SELECT * FROM {T('bids')} WHERE id = @id", [P("id", "STRING", bid_id)])
+    rows = await query("SELECT * FROM bids WHERE id = %s", [bid_id])
     return _coerce_row(rows[0])
 
 
@@ -1488,15 +1388,15 @@ async def list_users(
     conditions: list[str] = []
     params: list[Any] = []
     if role:
-        conditions.append("role = @role")
-        params.append(P("role", "STRING", role))
+        conditions.append("role = %s")
+        params.append(role)
     if branch_id:
-        conditions.append("branch_id = @branch_id")
-        params.append(P("branch_id", "STRING", branch_id))
+        conditions.append("branch_id = %s")
+        params.append(branch_id)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     rows = await query(
-        f"SELECT id, name, email, role, branch_id, avatar_initials FROM {T('users')} {where}",
+        f"SELECT id, name, email, role, branch_id, avatar_initials FROM users {where}",
         params or None,
     )
     return list(rows)
@@ -1507,11 +1407,11 @@ async def list_users(
 @app.get("/api/dashboard/inside-sales")
 async def dashboard_inside_sales(_user: dict = Depends(require_auth)) -> dict:
     total_rows, new_rows, status_rows, avg_rows, state_rows = await asyncio.gather(
-        query(f"SELECT COUNT(*) AS cnt FROM {T('leads')} WHERE deleted_at IS NULL"),
-        query(f"SELECT COUNT(*) AS cnt FROM {T('leads')} WHERE status = 'new' AND deleted_at IS NULL"),
-        query(f"SELECT status, COUNT(*) AS cnt FROM {T('leads')} WHERE deleted_at IS NULL GROUP BY status"),
-        query(f"SELECT AVG(score) AS avg_score FROM {T('leads')} WHERE score IS NOT NULL AND deleted_at IS NULL"),
-        query(f"SELECT state, COUNT(*) AS cnt FROM {T('leads')} WHERE deleted_at IS NULL GROUP BY state ORDER BY cnt DESC"),
+        query("SELECT COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL"),
+        query("SELECT COUNT(*) AS cnt FROM leads WHERE status = 'new' AND deleted_at IS NULL"),
+        query("SELECT status, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY status"),
+        query("SELECT AVG(score) AS avg_score FROM leads WHERE score IS NOT NULL AND deleted_at IS NULL"),
+        query("SELECT state, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY state ORDER BY cnt DESC"),
     )
     avg_val = avg_rows[0]["avg_score"] if avg_rows and avg_rows[0]["avg_score"] is not None else 0.0
     return {
@@ -1553,42 +1453,6 @@ def _avatar_initials(name: str) -> str:
     return initials[:5]
 
 
-async def _auto_provision_user(email: str, name: str) -> dict:
-    """Auto-provision a new user on first SSO login with inside_sales role and no branch."""
-    name = name.strip()
-    if not name:
-        name = email.split("@")[0]  # Fallback to email prefix if Entra has no name
-
-    avatar_initials = _avatar_initials(name) or name[:1].upper()
-    user_id = str(uuid.uuid4())
-
-    await execute(
-        f"""
-        INSERT INTO {T('users')}
-            (id, name, email, role, branch_id, avatar_initials, created_at)
-        VALUES
-            (@id, @name, @email, @role, @branch_id, @avatar_initials, CURRENT_TIMESTAMP())
-        """,
-        [
-            P("id", "STRING", user_id),
-            P("name", "STRING", name),
-            P("email", "STRING", email),
-            P("role", "STRING", "inside_sales"),
-            P("branch_id", "STRING", None),
-            P("avatar_initials", "STRING", avatar_initials),
-        ],
-    )
-
-    return {
-        "id": user_id,
-        "name": name,
-        "email": email,
-        "role": "inside_sales",
-        "branch_id": None,
-        "avatar_initials": avatar_initials,
-    }
-
-
 class EntraCallbackBody(BaseModel):
     id_token: str
 
@@ -1620,18 +1484,14 @@ async def entra_callback(body: EntraCallbackBody, response: Response) -> dict:
 
     # Match case-insensitively: Entra token casing isn't under our control.
     user_rows = await query(
-        f"SELECT id, name, email, role, branch_id, avatar_initials FROM {T('users')} WHERE LOWER(email) = @email",
-        [P("email", "STRING", email)],
+        "SELECT id, name, email, role, branch_id, avatar_initials FROM users WHERE LOWER(email) = %s",
+        [email],
     )
 
-    if user_rows:
-        user = user_rows[0]
-    else:
-        # Auto-provision on first login: inside_sales role, no branch assigned yet.
-        # Admin can update role/branch_id later via admin panel or seed_auth.
-        name = (claims.get("name") or email.split("@")[0]).strip()
-        user = await _auto_provision_user(email, name)
+    if not user_rows:
+        raise HTTPException(status_code=403, detail="User not provisioned. Contact your administrator.")
 
+    user = user_rows[0]
     return _issue_jwt(user, response)
 
 

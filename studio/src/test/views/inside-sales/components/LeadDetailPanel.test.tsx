@@ -7,7 +7,7 @@ import { render } from '@/test/utils'
 import { LeadDetailPanel } from '@/views/inside-sales/components/LeadDetailPanel'
 import { useAuthStore } from '@/store/authStore'
 import { makeUser } from '@/test/utils'
-import type { Lead, OutreachHistory } from '@/types'
+import type { Lead } from '@/types'
 
 const onClose = vi.fn()
 
@@ -37,7 +37,6 @@ function makeLead(overrides: Partial<Lead> = {}): Lead {
     assigned_to: null,
     notes: null,
     handoff_notes: null,
-    ai_email_draft: 'Hi Jennifer, intro email content here.',
     ai_linkedin_draft: 'Hi Jennifer, LinkedIn message here.',
     branch_id: 'b1',
     distance_miles: 8.4,
@@ -49,32 +48,15 @@ function makeLead(overrides: Partial<Lead> = {}): Lead {
   }
 }
 
-const mockOutreachItem: OutreachHistory = {
-  id: 'o1',
-  lead_id: 'l1',
-  channel: 'email',
-  direction: 'out',
-  message: 'Sent intro email',
-  sent_at: '2024-01-02T10:00:00.000Z',
-  response_received: false,
-  response_at: null,
-  sequence_step: 1,
-  next_follow_up: null,
-}
-
-function setupHandlers(lead: Lead, outreach: OutreachHistory[] = []) {
+function setupHandlers(lead: Lead) {
   server.use(
     http.get('/api/leads/l1', () => HttpResponse.json(lead)),
-    http.get('/api/outreach/l1', () => HttpResponse.json(outreach)),
     http.get('/api/bids', () => HttpResponse.json([])),
     http.patch('/api/leads/l1', async ({ request }) => {
       const body = (await request.json()) as Partial<Lead>
       return HttpResponse.json({ ...lead, ...body })
     }),
     http.delete('/api/leads/l1', () => new HttpResponse(null, { status: 204 })),
-    http.post('/api/outreach/send', () =>
-      HttpResponse.json({ success: true, message_id: 'msg_1' }),
-    ),
     http.get('/api/users', () =>
       HttpResponse.json([
         { id: 'u2', name: 'Maria Garcia', email: 'maria.garcia@juniperlandscaping.com', role: 'outside_sales', branch_id: 'b1', avatar_initials: 'MG' },
@@ -104,7 +86,6 @@ describe('LeadDetailPanel — panel lifecycle', () => {
     setupHandlers(makeLead())
     const user = userEvent.setup()
     render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
-    // Close button only renders after lead data loads
     await user.click(await screen.findByRole('button', { name: 'Close' }))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
@@ -207,81 +188,6 @@ describe('LeadDetailPanel — stage progression', () => {
     await screen.findByText('Silverleaf HOA')
     await user.click(screen.getByRole('button', { name: 'Contacted' }))
     await waitFor(() => expect(patchBody?.status).toBe('contacted'))
-  })
-})
-
-describe('LeadDetailPanel — outreach tab', () => {
-  beforeEach(() => {
-    setupHandlers(makeLead(), [])
-  })
-
-  it('shows email draft textarea after switching to outreach tab', async () => {
-    const user = userEvent.setup()
-    render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
-    await screen.findByText('Silverleaf HOA')
-    await user.click(screen.getByRole('tab', { name: /outreach/i }))
-    // The textarea is not labelled with htmlFor so we find it by display value
-    await waitFor(() => {
-      const textareas = screen.getAllByRole('textbox')
-      expect(textareas.some((t) => (t as HTMLTextAreaElement).value.includes('Hi Jennifer'))).toBe(true)
-    })
-  })
-
-  it('Send Email button fires POST /api/outreach/send', async () => {
-    let outreachBody: Record<string, unknown> | null = null
-    server.use(
-      http.post('/api/outreach/send', async ({ request }) => {
-        outreachBody = (await request.json()) as Record<string, unknown>
-        return HttpResponse.json({ success: true, message_id: 'msg_1' })
-      }),
-    )
-    const user = userEvent.setup()
-    render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
-    await screen.findByText('Silverleaf HOA')
-    await user.click(screen.getByRole('tab', { name: /outreach/i }))
-    const sendBtn = await screen.findByRole('button', { name: /send email/i })
-    await user.click(sendBtn)
-    await waitFor(() => {
-      expect(outreachBody?.channel).toBe('email')
-      expect(outreachBody?.lead_id).toBe('l1')
-    })
-  })
-
-  it('Send LinkedIn button fires POST /api/outreach/send with channel=linkedin', async () => {
-    let outreachBody: Record<string, unknown> | null = null
-    server.use(
-      http.post('/api/outreach/send', async ({ request }) => {
-        outreachBody = (await request.json()) as Record<string, unknown>
-        return HttpResponse.json({ success: true, message_id: 'msg_2' })
-      }),
-    )
-    const user = userEvent.setup()
-    render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
-    await screen.findByText('Silverleaf HOA')
-    await user.click(screen.getByRole('tab', { name: /outreach/i }))
-    const linkedinBtn = await screen.findByRole('button', { name: /send linkedin/i })
-    await user.click(linkedinBtn)
-    await waitFor(() => expect(outreachBody?.channel).toBe('linkedin'))
-  })
-})
-
-describe('LeadDetailPanel — outreach history tab', () => {
-  it('shows "No outreach history yet" when outreach is empty', async () => {
-    setupHandlers(makeLead(), [])
-    const user = userEvent.setup()
-    render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
-    await screen.findByText('Silverleaf HOA')
-    await user.click(screen.getByRole('tab', { name: /history/i }))
-    expect(await screen.findByText(/no outreach history yet/i)).toBeInTheDocument()
-  })
-
-  it('renders history items when outreach exists', async () => {
-    setupHandlers(makeLead(), [mockOutreachItem])
-    const user = userEvent.setup()
-    render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
-    await screen.findByText('Silverleaf HOA')
-    await user.click(screen.getByRole('tab', { name: /history/i }))
-    expect(await screen.findByText('Sent intro email')).toBeInTheDocument()
   })
 })
 

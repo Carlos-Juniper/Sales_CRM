@@ -15,9 +15,4 @@ describe('ConnectionsPage', () => {
     expect(screen.getByText(/not connected/i)).toBeInTheDocument()
   })
 
-  it('renders Twilio connection status', async () => {
-    render(<ConnectionsPage />)
-    await screen.findByText(/Twilio/i)
-    expect(screen.getByText(/not configured/i)).toBeInTheDocument()
-  })
 })

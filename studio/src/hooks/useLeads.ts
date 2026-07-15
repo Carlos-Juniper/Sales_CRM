@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { leadsApi, outreachApi, type CreateLeadPayload } from '@/api/leads'
+import { leadsApi, type CreateLeadPayload } from '@/api/leads'
 import { useLeadsStore } from '@/store/leadsStore'
 import { useUIStore } from '@/store/uiStore'
 import { PAGE_SIZE } from '@/lib/constants'
@@ -7,7 +7,6 @@ import type { Lead } from '@/types'
 
 export const LEADS_KEY = 'leads'
 export const LEAD_KEY = 'lead'
-export const OUTREACH_KEY = 'outreach'
 
 function normalizeLeads(response: import('@/api/leads').LeadsResponse) {
   return {
@@ -46,15 +45,6 @@ export function useLead(id: string | null) {
     queryFn: () => leadsApi.get(id!),
     enabled: !!id,
     staleTime: 30_000,
-  })
-}
-
-export function useOutreachHistory(leadId: string | null) {
-  return useQuery({
-    queryKey: [OUTREACH_KEY, leadId],
-    queryFn: () => outreachApi.history(leadId!),
-    enabled: !!leadId,
-    staleTime: 60_000,
   })
 }
 

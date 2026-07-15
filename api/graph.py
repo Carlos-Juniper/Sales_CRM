@@ -4,7 +4,7 @@ Microsoft Graph API helpers — token management + mail + calendar.
 Token lifecycle:
   1. Frontend exchanges the PKCE auth code with Graph scopes and POSTs the
      resulting access_token + refresh_token to POST /api/auth/ms-graph-token.
-  2. Backend stores them in user_graph_tokens (BigQuery).
+  2. Backend stores them in user_graph_tokens (MySQL).
   3. Every outbound Graph call goes through get_valid_token(), which refreshes
      via MSAL PublicClientApplication when the stored token is within 5 min of
      expiry (or already expired).
@@ -24,7 +24,7 @@ import httpx
 import msal
 from fastapi import HTTPException
 
-from db import P, T, execute, query
+from db import execute, query
 
 logger = logging.getLogger(__name__)
 
@@ -63,37 +63,28 @@ async def _upsert_tokens(
     expires_at: datetime,
     scope: str,
 ) -> None:
-    """MERGE-upsert a user's Graph token row (updates all fields incl. scope)."""
+    """Upsert a user's Graph token row (updates all fields incl. scope)."""
     await execute(
-        f"""
-        MERGE {T('user_graph_tokens')} AS t
-        USING (SELECT @user_id AS user_id) AS s ON t.user_id = s.user_id
-        WHEN MATCHED THEN
-          UPDATE SET
-            access_token  = @access_token,
-            refresh_token = @refresh_token,
-            scope         = @scope,
-            expires_at    = @expires_at,
-            updated_at    = CURRENT_TIMESTAMP()
-        WHEN NOT MATCHED THEN
-          INSERT (user_id, access_token, refresh_token, scope, expires_at, updated_at)
-          VALUES (@user_id, @access_token, @refresh_token, @scope, @expires_at, CURRENT_TIMESTAMP())
+        """
+        INSERT INTO user_graph_tokens
+            (user_id, access_token, refresh_token, scope, expires_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, NOW())
+        ON DUPLICATE KEY UPDATE
+            access_token  = VALUES(access_token),
+            refresh_token = VALUES(refresh_token),
+            scope         = VALUES(scope),
+            expires_at    = VALUES(expires_at),
+            updated_at    = NOW()
         """,
-        [
-            P("user_id", "STRING", user_id),
-            P("access_token", "STRING", access_token),
-            P("refresh_token", "STRING", refresh_token),
-            P("scope", "STRING", scope),
-            P("expires_at", "TIMESTAMP", expires_at),
-        ],
+        [user_id, access_token, refresh_token, scope, expires_at],
     )
 
 
 async def get_valid_token(user_id: str) -> str:
     """Return a non-expired access token, refreshing + persisting when needed."""
     rows = await query(
-        f"SELECT * FROM {T('user_graph_tokens')} WHERE user_id = @user_id LIMIT 1",
-        [P("user_id", "STRING", user_id)],
+        "SELECT * FROM user_graph_tokens WHERE user_id = %s LIMIT 1",
+        [user_id],
     )
     if not rows:
         raise GraphNotConnected(

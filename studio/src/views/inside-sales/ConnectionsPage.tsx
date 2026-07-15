@@ -27,20 +27,6 @@ export default function ConnectionsPage() {
         )}
       </div>
 
-      <div className="border rounded-lg p-4">
-        <div className="flex items-center gap-2">
-          {data?.telephony.configured
-            ? <CheckCircle className="text-green-600" />
-            : <XCircle className="text-gray-400" />}
-          <span className="font-medium">Twilio</span>
-          <span className="text-sm text-gray-500">
-            {data?.telephony.configured ? `Configured (${data.telephony.provider})` : 'Not configured'}
-          </span>
-        </div>
-        {!data?.telephony.configured && (
-          <p className="mt-2 text-sm text-gray-500">Contact admin to configure telephony.</p>
-        )}
-      </div>
     </div>
   )
 }

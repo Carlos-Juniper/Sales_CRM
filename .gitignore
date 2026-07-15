@@ -1,8 +1,6 @@
-# Migrations
-migrations/
-
 # Python
 venv/
+.venv/
 __pycache__/
 *.py[cod]
 *.pyo
@@ -10,6 +8,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.pytest_cache/
 
 # Node
 node_modules/
@@ -28,3 +27,20 @@ studio/coverage/
 
 # Agents
 docs/
+
+# One-time Azure→GCP data migration — kept local, never committed/pushed
+migrations/
+migration_loader.py
+migration_runner.py
+inspect_azure_schema.py
+COMPLETE_MIGRATION_SYSTEM.md
+MIGRATION_EXECUTION_PLAN.md
+MIGRATION_SYSTEM.md
+MIGRATION_TEST_GUIDE.md
+MIGRATION_TEST_QUICK_REFERENCE.sh
+tests/conftest.py
+tests/test_data_loss_verification.py
+tests/test_data_migration.py
+tests/test_migration_loader.py
+tests/test_migration_runner.py
+tests/test_schema_validator.py

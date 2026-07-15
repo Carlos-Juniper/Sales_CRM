@@ -6,7 +6,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from db import T, P, PA, query, execute, count_active_leads_for_property
+from db import query, execute, count_active_leads_for_property
 from models import Lead
 
 
@@ -17,8 +17,8 @@ async def promote_hoa_to_lead(hoa_property_id: str) -> Lead:
     the existing lead is returned instead of creating a duplicate.
     """
     rows = await query(
-        f"SELECT * FROM {T('hoa_properties')} WHERE id = @id",
-        [P("id", "STRING", hoa_property_id)],
+        "SELECT * FROM hoa_properties WHERE id = %s",
+        [hoa_property_id],
     )
     if not rows:
         raise ValueError(f"HOA property {hoa_property_id} not found")
@@ -28,18 +28,15 @@ async def promote_hoa_to_lead(hoa_property_id: str) -> Lead:
     # Guard: return the existing active lead instead of creating a duplicate
     if await count_active_leads_for_property(hoa_property_id) > 0:
         existing_rows = await query(
-            f"""
-            SELECT * FROM {T('leads')}
-            WHERE hoa_property_id = @id
-              AND status NOT IN UNNEST(@statuses)
+            """
+            SELECT * FROM leads
+            WHERE hoa_property_id = %s
+              AND status NOT IN ('won', 'lost')
               AND deleted_at IS NULL
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            [
-                P("id", "STRING", hoa_property_id),
-                PA("statuses", "STRING", ["won", "lost"]),
-            ],
+            [hoa_property_id],
         )
         if existing_rows:
             existing = existing_rows[0]
@@ -80,35 +77,35 @@ async def promote_hoa_to_lead(hoa_property_id: str) -> Lead:
     )
 
     await execute(
-        f"""
-        INSERT INTO {T('leads')}
+        """
+        INSERT INTO leads
             (id, source, lead_type, property_name, city, state,
              estimated_contract_value, estimated_acreage, status,
              contact_name, contact_email, address, zip, bid_deadline,
              hoa_property_id, branch_id, created_at, updated_at)
         VALUES
-            (@id, @source, @lead_type, @property_name, @city, @state,
-             @estimated_contract_value, @estimated_acreage, @status,
-             @contact_name, @contact_email, @address, @zip, @bid_deadline,
-             @hoa_property_id, @branch_id, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+            (%s, %s, %s, %s, %s, %s,
+             %s, %s, %s,
+             %s, %s, %s, %s, %s,
+             %s, %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
-            P("id", "STRING", lead.id),
-            P("source", "STRING", lead.source),
-            P("lead_type", "STRING", lead.lead_type),
-            P("property_name", "STRING", lead.property_name),
-            P("city", "STRING", lead.city),
-            P("state", "STRING", lead.state),
-            P("estimated_contract_value", "FLOAT64", None),
-            P("estimated_acreage", "FLOAT64", lead.estimated_acreage),
-            P("status", "STRING", lead.status),
-            P("contact_name", "STRING", lead.contact_name),
-            P("contact_email", "STRING", lead.contact_email),
-            P("address", "STRING", lead.address),
-            P("zip", "STRING", lead.zip),
-            P("bid_deadline", "DATE", lead.bid_deadline),
-            P("hoa_property_id", "STRING", lead.hoa_property_id),
-            P("branch_id", "STRING", lead.branch_id),
+            lead.id,
+            lead.source,
+            lead.lead_type,
+            lead.property_name,
+            lead.city,
+            lead.state,
+            None,
+            lead.estimated_acreage,
+            lead.status,
+            lead.contact_name,
+            lead.contact_email,
+            lead.address,
+            lead.zip,
+            lead.bid_deadline,
+            lead.hoa_property_id,
+            lead.branch_id,
         ],
     )
 
@@ -120,10 +117,10 @@ async def promote_hoa_to_lead(hoa_property_id: str) -> Lead:
 async def set_property_contacted(hoa_property_id: str) -> None:
     """Mark an HOA property as contacted.
 
-    Called when outreach is sent or a bid moves to pursuing — the first real
-    contact event. Idempotent: safe to call if already contacted.
+    Called when a bid moves to pursuing — the first real contact event.
+    Idempotent: safe to call if already contacted.
     """
     await execute(
-        f"UPDATE {T('hoa_properties')} SET contact_status = 'contacted', updated_at = CURRENT_TIMESTAMP() WHERE id = @id",
-        [P("id", "STRING", hoa_property_id)],
+        "UPDATE hoa_properties SET contact_status = 'contacted', updated_at = CURRENT_TIMESTAMP() WHERE id = %s",
+        [hoa_property_id],
     )

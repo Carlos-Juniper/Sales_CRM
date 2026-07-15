@@ -1,42 +1,23 @@
 export const LEAD_TYPES = ['HOA', 'commercial', 'deathcare', 'resort'] as const
 export type LeadType = (typeof LEAD_TYPES)[number]
 
-// Unified communication channel type (source of truth for all three slices)
-export type CommChannel = 'email' | 'call' | 'sms' | 'linkedin' | 'note' | 'meeting'
+// Unified communication channel type (calendar/notes only)
+export type CommChannel = 'note' | 'meeting'
 
 // Unified activity item from /api/leads/{id}/activity
 export interface ActivityItem {
   id: string
   channel: CommChannel
-  direction: 'in' | 'out'
+  direction: 'out'
   body: string
   performed_by: string
   performed_at: string
-  subject?: string
-  recording_url?: string | null
-  duration_seconds?: number | null
-  transcript_summary?: string | null
   external_message_id?: string | null
-}
-
-// Contact consent record
-export interface ContactConsent {
-  contact_id: string
-  do_not_call: boolean
-  do_not_text: boolean
-  do_not_email: boolean
-  consent_call: boolean
-  consent_text: boolean
-  consent_captured_at: string | null
-  consent_source: string | null
-  consent_by: string | null
-  updated_at: string | null
 }
 
 // Connections status
 export interface ConnectionsStatus {
   graph: { connected: boolean }
-  telephony: { configured: boolean; provider: string }
 }
 
 export type LeadStatus =
@@ -62,8 +43,6 @@ export type BidStatus =
   | 'no_bid'
   | 'won'
   | 'lost'
-
-export type OutreachChannel = 'email' | 'call' | 'sms' | 'linkedin' | 'note' | 'meeting'
 
 export interface ScoreFactor {
   name: string
@@ -99,7 +78,6 @@ export interface Lead {
   assigned_to: string | null
   notes: string | null
   handoff_notes: string | null
-  ai_email_draft: string | null
   ai_linkedin_draft: string | null
   branch_id: string | null
   distance_miles: number | null
@@ -134,30 +112,6 @@ export interface User {
   avatar_initials: string
 }
 
-export interface OutreachHistory {
-  id: string
-  lead_id: string
-  channel: OutreachChannel
-  message: string
-  sent_at: string
-  direction: 'in' | 'out'           // 'out' = we sent, 'in' = they replied
-  sender_name?: string               // for inbound messages, the contact's name
-  response_received: boolean
-  response_at: string | null
-  sequence_step: number
-  next_follow_up: string | null
-}
-
-export interface OutreachQueueSummary {
-  lead_id: string
-  last_message: string
-  last_message_direction: 'in' | 'out'
-  last_message_at: string
-  last_message_channel: OutreachChannel
-  unread: boolean
-  overdue: boolean
-}
-
 export interface InsideSalesSummary {
   new_leads_today: number
   leads_contacted_this_week: number
@@ -187,7 +141,6 @@ export interface HandoffPayload {
   lead_id: string
   assigned_to: string
   handoff_notes: string
-  last_outreach_message?: string
   division_id?: number | null
 }
 

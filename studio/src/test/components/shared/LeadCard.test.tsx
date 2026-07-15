@@ -31,7 +31,6 @@ function makeLead(overrides: Partial<Lead> = {}): Lead {
     assigned_to: null,
     notes: null,
     handoff_notes: null,
-    ai_email_draft: null,
     ai_linkedin_draft: null,
     branch_id: 'b1',
     distance_miles: 5.0,

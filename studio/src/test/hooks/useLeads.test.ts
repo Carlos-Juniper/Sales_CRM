@@ -5,7 +5,6 @@ import { server } from '@/mocks/server'
 import {
   useLeads,
   useLead,
-  useOutreachHistory,
   useCreateLead,
   useUpdateLead,
   useDeleteLead,
@@ -13,7 +12,7 @@ import {
 import { useLeadsStore } from '@/store/leadsStore'
 import { useAuthStore } from '@/store/authStore'
 import { createWrapper, makeUser } from '../utils'
-import type { Lead, OutreachHistory } from '@/types'
+import type { Lead } from '@/types'
 
 const defaultLeadsResponse = {
   data: [
@@ -23,7 +22,7 @@ const defaultLeadsResponse = {
       score_factors: [], estimated_acreage: 45, estimated_contract_value: 185000,
       contact_name: 'Jennifer Walsh', contact_email: 'jwalsh@test.com', contact_linkedin: null,
       current_provider: null, source: 'hoa_usa', source_url: null, bid_deadline: null,
-      status: 'new', assigned_to: null, notes: null, handoff_notes: null, ai_email_draft: null,
+      status: 'new', assigned_to: null, notes: null, handoff_notes: null,
       ai_linkedin_draft: null, branch_id: 'b1', distance_miles: 8.4,
       aspire_opportunity_id: null, division_id: null,
       created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z',
@@ -222,30 +221,6 @@ describe('useLead', () => {
     const { result } = renderHook(() => useLead(null), { wrapper })
     expect(result.current.fetchStatus).toBe('idle')
     expect(result.current.data).toBeUndefined()
-  })
-})
-
-describe('useOutreachHistory', () => {
-  it('fetches outreach history for a lead', async () => {
-    const history: OutreachHistory[] = [
-      {
-        id: 'o1', lead_id: 'l1', channel: 'email', direction: 'out', message: 'Hello',
-        sent_at: '2025-01-01T00:00:00Z', response_received: false,
-        response_at: null, sequence_step: 1, next_follow_up: null,
-      },
-    ]
-    server.use(http.get('/api/outreach/l1', () => HttpResponse.json(history)))
-    const { wrapper } = createWrapper()
-    const { result } = renderHook(() => useOutreachHistory('l1'), { wrapper })
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(result.current.data).toHaveLength(1)
-    expect(result.current.data?.[0].channel).toBe('email')
-  })
-
-  it('is disabled when leadId is null', () => {
-    const { wrapper } = createWrapper()
-    const { result } = renderHook(() => useOutreachHistory(null), { wrapper })
-    expect(result.current.fetchStatus).toBe('idle')
   })
 })
 

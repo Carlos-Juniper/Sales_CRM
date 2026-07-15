@@ -43,7 +43,7 @@ export function useScheduleMeeting(leadId: string) {
     mutationFn: (payload: ScheduleMeetingPayload) => graphApi.scheduleMeeting(leadId, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [CALENDAR_KEY] })
-      qc.invalidateQueries({ queryKey: ['outreach', leadId] })
+      qc.invalidateQueries({ queryKey: ['activity', leadId] })
       toast('Meeting scheduled', { variant: 'success' })
     },
     onError: (err: Error) => {

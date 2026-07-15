@@ -39,7 +39,6 @@ export function HandoffModal({ lead, isOpen, onClose }: HandoffModalProps) {
         lead_id: lead!.id,
         assigned_to: selectedRepId,
         handoff_notes: notes,
-        last_outreach_message: lead!.ai_email_draft ?? undefined,
         division_id: divisionId,
       })
       setSuccess(true)
@@ -141,14 +140,7 @@ export function HandoffModal({ lead, isOpen, onClose }: HandoffModalProps) {
                 <p className="text-xs text-[hsl(var(--muted-fg))]">Pre-filled from AI lead summary. Edit as needed.</p>
               </div>
 
-              {lead.ai_email_draft && (
-                <div className="space-y-1.5">
-                  <Label className="text-[hsl(var(--muted-fg))]">Last outreach message (will be attached)</Label>
-                  <div className="text-xs text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))] rounded-md p-3 max-h-24 overflow-y-auto">
-                    {lead.ai_email_draft.split('\n').slice(0, 3).join(' ')}…
-                  </div>
-                </div>
-              )}
+
             </div>
 
             <DialogFooter>

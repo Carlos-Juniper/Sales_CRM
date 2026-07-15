@@ -13,11 +13,10 @@ import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { StageTracker } from './StageTracker'
 import { LeadMetricsGrid } from './LeadMetricsGrid'
 import { DeleteLeadDialog } from './DeleteLeadDialog'
-import { useLead, useOutreachHistory, useUpdateLead, useDeleteLead } from '@/hooks/useLeads'
+import { useLead, useUpdateLead, useDeleteLead } from '@/hooks/useLeads'
 import { useLeadPanelKeyboard } from '@/hooks/useLeadPanelKeyboard'
 import type { LeadStatus } from '@/types'
 import { OverviewTab } from './OverviewTab'
-import { HistoryTab } from './HistoryTab'
 import { BidTab } from './BidTab'
 import { CalendarTab } from './CalendarTab'
 
@@ -31,7 +30,6 @@ interface LeadDetailPanelProps {
 export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailPanelProps) {
   const navigate = useNavigate()
   const { data: lead, isLoading } = useLead(leadId)
-  const { data: outreach = [] } = useOutreachHistory(leadId)
   const updateLead = useUpdateLead()
   const deleteLead = useDeleteLead()
   const [handoffOpen, setHandoffOpen] = useState(false)
@@ -183,7 +181,6 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                       {[
                         { value: 'overview', label: 'Overview' },
                         { value: 'calendar', label: 'Calendar' },
-                        { value: 'history', label: 'History' },
                         { value: 'bid', label: 'Bid' },
                       ].map(tab => (
                         <TabsTrigger
@@ -203,10 +200,6 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
 
                   <TabsContent value="calendar" className="mt-0">
                     <CalendarTab lead={lead} />
-                  </TabsContent>
-
-                  <TabsContent value="history" className="mt-0">
-                    <HistoryTab outreach={outreach} />
                   </TabsContent>
 
                   <TabsContent value="bid" className="mt-0">

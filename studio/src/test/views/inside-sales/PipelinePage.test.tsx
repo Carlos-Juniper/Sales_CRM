@@ -152,7 +152,6 @@ describe('PipelinePage', () => {
           status: 'new',
           assigned_to: null,
           handoff_notes: null,
-          ai_email_draft: null,
           ai_linkedin_draft: null,
           branch_id: 'b1',
           distance_miles: 0,

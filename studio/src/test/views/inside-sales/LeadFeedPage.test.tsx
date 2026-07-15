@@ -54,7 +54,6 @@ function makeLead(id: string, overrides: Partial<Lead> = {}): Lead {
     assigned_to: null,
     notes: null,
     handoff_notes: null,
-    ai_email_draft: null,
     ai_linkedin_draft: null,
     branch_id: 'b1',
     distance_miles: 5,
@@ -245,14 +244,13 @@ describe('LeadFeedPage — selection', () => {
         HttpResponse.json({ data: tenLeads, total: 10, page: 1, page_size: 25 }),
       ),
     )
-    // Handle lead detail + outreach calls from LeadDetailPanel
+    // Handle lead detail + activity calls from LeadDetailPanel
     server.use(
       http.get('/api/leads/:id', ({ params }) => {
         const lead = tenLeads.find((l) => l.id === params.id)
         if (!lead) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
         return HttpResponse.json(lead)
       }),
-      http.get('/api/outreach/:leadId', () => HttpResponse.json([])),
       http.get('/api/bids', () => HttpResponse.json([])),
       http.get('/api/dashboard/inside-sales', () =>
         HttpResponse.json({

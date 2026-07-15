@@ -1,4 +1,4 @@
-import type { Lead, Bid, User, OutreachHistory, InsideSalesSummary, MonthlyRevenue, ActivityItem, ContactConsent, ConnectionsStatus } from '@/types'
+import type { Lead, Bid, User, InsideSalesSummary, MonthlyRevenue, ConnectionsStatus } from '@/types'
 
 export const mockUsers: User[] = [
   { id: 'u1', name: 'Alex Rivera', email: 'alex.rivera@example.com', role: 'inside_sales', branch_id: 'b1', avatar_initials: 'AR' },
@@ -29,7 +29,6 @@ export const mockLeads: Lead[] = [
     contact_email: 'jwalsh@silverleafhoa.org', contact_linkedin: 'https://linkedin.com/in/jwalsh',
     current_provider: 'TruGreen', source: 'hoa_usa', source_url: 'https://hoa-usa.com/silverleaf',
     bid_deadline: null, status: 'new', assigned_to: null, handoff_notes: null, notes: null,
-    ai_email_draft: `Hi Jennifer,\n\nI came across Silverleaf HOA and wanted to introduce Juniper Landscaping. We specialize in large HOA communities across the Phoenix metro and currently maintain 40+ communities in your area.\n\nI noticed your current landscaping may be up for renewal and we'd love the opportunity to provide a no-cost comparison proposal. Our clients typically see 12–18% cost savings with improved service levels.\n\nWould you have 15 minutes this week to connect?\n\nBest,\nAlex Rivera\nJuniper Landscaping`,
     ai_linkedin_draft: `Hi Jennifer — I head up business development at Juniper Landscaping. We manage 40+ HOA communities in Phoenix and I think there may be a great fit with Silverleaf. Would love to share what we're doing differently. Open to a quick call?`,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 8.4, created_at: new Date(Date.now() - 2 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -42,7 +41,6 @@ export const mockLeads: Lead[] = [
     bid_deadline: new Date(Date.now() + 9 * 24 * 3600000).toISOString(), status: 'contacted',
     assigned_to: 'u2', handoff_notes: null,
     notes: null,
-    ai_email_draft: `Dear Mr. Benson,\n\nJuniper Landscaping is pleased to express our intent to submit a proposal for the City of Tempe Parks maintenance RFP (Solicitation #2024-PARKS-003).\n\nWe have successfully maintained municipal park systems across 6 Arizona cities and are confident our team can meet and exceed your service specifications.\n\nCould you confirm the pre-bid meeting schedule?\n\nRespectfully,\nAlex Rivera`,
     ai_linkedin_draft: null,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 5.2, created_at: new Date(Date.now() - 18 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -54,7 +52,6 @@ export const mockLeads: Lead[] = [
     current_provider: 'ValleyGreen Services', source: 'google_maps', source_url: null,
     bid_deadline: null, status: 'new', assigned_to: null, handoff_notes: null,
     notes: null,
-    ai_email_draft: `Hi Chris,\n\nI'm reaching out because Juniper Landscaping serves several neighboring commercial properties in Kierland and we'd love to explore whether we might be a fit for your grounds maintenance.\n\nWe noticed ValleyGreen has been managing the property — we typically offer a free landscape audit that helps identify cost savings and service improvements.\n\nWould you be open to a quick intro call?\n\nBest,\nAlex`,
     ai_linkedin_draft: `Hi Chris — Juniper Landscaping here. We manage landscape maintenance for several Kierland-area properties and I think there could be real value in comparing what you're currently getting. Would love 10 minutes to introduce ourselves.`,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 11.1, created_at: new Date(Date.now() - 3 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -66,7 +63,6 @@ export const mockLeads: Lead[] = [
     current_provider: 'Desert Blooms Landscaping', source: 'county_assessor', source_url: null,
     bid_deadline: null, status: 'qualified', assigned_to: 'u2', handoff_notes: null,
     notes: null,
-    ai_email_draft: `Hi Patricia,\n\nFollowing up on my earlier note about Juniper's services for Dobson Ranch. I'd love to schedule a site walk at your convenience — we have availability Tuesday or Thursday next week.\n\nBest,\nAlex`,
     ai_linkedin_draft: null,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 14.7, created_at: new Date(Date.now() - 5 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -78,7 +74,6 @@ export const mockLeads: Lead[] = [
     current_provider: null, source: 'google_maps', source_url: null,
     bid_deadline: null, status: 'contacted', assigned_to: null, handoff_notes: null,
     notes: null,
-    ai_email_draft: `Hi Tom,\n\nJuniper Landscaping manages grounds for several Chandler-area corporate parks. I wanted to reach out because we're expanding in this corridor and have capacity to take on new accounts.\n\nWould you have time for a brief call next week?\n\nBest,\nAlex`,
     ai_linkedin_draft: `Hi Tom — quick note from Juniper Landscaping. We've recently expanded our commercial portfolio in Chandler and I'd love to learn more about your property's maintenance needs. Open to a quick conversation?`,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 19.3, created_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -91,7 +86,6 @@ export const mockLeads: Lead[] = [
     bid_deadline: new Date(Date.now() + 5 * 24 * 3600000).toISOString(), status: 'proposal_sent',
     assigned_to: 'u5', handoff_notes: 'Estimator assigned. Proposal prepared for school grounds maintenance across 12 campuses.',
     notes: null,
-    ai_email_draft: `Dear Ms. Park,\n\nJuniper Landscaping has submitted our proposal for SUSD's grounds maintenance contract. Please find attached our full bid package including references from similar K-12 districts.\n\nWe remain available to answer any questions during your evaluation period.\n\nRespectfully,\nAlex Rivera`,
     ai_linkedin_draft: null,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 6.8, created_at: new Date(Date.now() - 12 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -103,7 +97,6 @@ export const mockLeads: Lead[] = [
     current_provider: 'Southwest Grounds', source: 'google_maps', source_url: null,
     bid_deadline: null, status: 'new', assigned_to: null, handoff_notes: null,
     notes: null,
-    ai_email_draft: `Hi Nicole,\n\nI'm reaching out about Desert Ridge Marketplace's grounds maintenance. Juniper Landscaping has experience with large retail centers in the Phoenix area and I'd love to explore how we compare to your current provider.\n\nWould you be interested in a no-commitment landscape review?\n\nBest,\nAlex`,
     ai_linkedin_draft: `Hi Nicole — Juniper Landscaping here. We maintain several major retail properties in north Phoenix and I think we could offer Desert Ridge better value than Southwest Grounds. Open to a quick chat?`,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 9.0, created_at: new Date(Date.now() - 1 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -116,7 +109,6 @@ export const mockLeads: Lead[] = [
     bid_deadline: new Date(Date.now() + 21 * 24 * 3600000).toISOString(), status: 'new',
     assigned_to: null, handoff_notes: null,
     notes: null,
-    ai_email_draft: `Dear Mr. Walsh,\n\nJuniper Landscaping is preparing a response to Maricopa County's grounds maintenance RFP. We have extensive experience with county-scale facilities and maintain over 50 government properties across Arizona.\n\nWould you be able to share the pre-qualification requirements?\n\nRespectfully,\nAlex Rivera`,
     ai_linkedin_draft: null,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 3.1, created_at: new Date(Date.now() - 4 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -129,7 +121,7 @@ export const mockLeads: Lead[] = [
     bid_deadline: null, status: 'disqualified', assigned_to: null,
     handoff_notes: 'Contract renewed for 3 years. Follow up in Q1 2027.',
     notes: null,
-    ai_email_draft: null, ai_linkedin_draft: null,
+    ai_linkedin_draft: null,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 22.8, created_at: new Date(Date.now() - 30 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
   {
@@ -140,7 +132,6 @@ export const mockLeads: Lead[] = [
     current_provider: 'GreenScape Pro', source: 'hoa_usa', source_url: null,
     bid_deadline: null, status: 'contacted', assigned_to: null, handoff_notes: null,
     notes: null,
-    ai_email_draft: `Hi Amy,\n\nFollowing up on my email from earlier this week about Juniper Landscaping. We've had great success working with HOA communities of Legacy's size across Peoria and Surprise.\n\nI'd love to put together a proposal — would Thursday morning work for a call?\n\nBest,\nAlex`,
     ai_linkedin_draft: `Hi Amy — Juniper Landscaping here, following up from my earlier message. We serve several HOAs in Peoria and think we could be a great fit for Legacy. Would love to connect!`,
     branch_id: 'b2', aspire_opportunity_id: null, division_id: null, distance_miles: 18.5, created_at: new Date(Date.now() - 4 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -152,7 +143,6 @@ export const mockLeads: Lead[] = [
     current_provider: null, source: 'google_maps', source_url: null,
     bid_deadline: null, status: 'new', assigned_to: null, handoff_notes: null,
     notes: null,
-    ai_email_draft: `Hello,\n\nJuniper Landscaping is expanding its commercial portfolio in Buckeye and Verrado. We'd love to discuss grounds maintenance for Verrado Village Center.\n\nBest,\nAlex`,
     ai_linkedin_draft: null,
     branch_id: 'b2', aspire_opportunity_id: null, division_id: null, distance_miles: 31.4, created_at: new Date(Date.now() - 6 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -165,7 +155,7 @@ export const mockLeads: Lead[] = [
     bid_deadline: new Date(Date.now() + 14 * 24 * 3600000).toISOString(), status: 'won',
     assigned_to: 'u3', handoff_notes: 'Awarded contract. Kick-off scheduled for next month.',
     notes: null,
-    ai_email_draft: null, ai_linkedin_draft: null,
+    ai_linkedin_draft: null,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 16.3, created_at: new Date(Date.now() - 45 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
   {
@@ -176,7 +166,6 @@ export const mockLeads: Lead[] = [
     current_provider: 'Desert Sky Landscape', source: 'hoa_usa', source_url: null,
     bid_deadline: null, status: 'new', assigned_to: null, handoff_notes: null,
     notes: null,
-    ai_email_draft: `Hi Linda,\n\nJuniper Landscaping is reaching out about Surprise Farms HOA. We've recently expanded our West Valley operations and have capacity to take on larger HOA accounts.\n\nWould you be interested in a free comparative landscape assessment?\n\nBest,\nAlex`,
     ai_linkedin_draft: null,
     branch_id: 'b2', aspire_opportunity_id: null, division_id: null, distance_miles: 24.1, created_at: new Date(Date.now() - 2 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
@@ -188,7 +177,7 @@ export const mockLeads: Lead[] = [
     current_provider: null, source: 'google_maps', source_url: null,
     bid_deadline: null, status: 'lost', assigned_to: null, handoff_notes: 'Selected local competitor. Price too high.',
     notes: null,
-    ai_email_draft: null, ai_linkedin_draft: null,
+    ai_linkedin_draft: null,
     branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 13.6, created_at: new Date(Date.now() - 60 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
 ]
@@ -243,33 +232,6 @@ export const mockBids: Bid[] = [
   },
 ]
 
-export const mockOutreach: Record<string, OutreachHistory[]> = {
-  l1: [
-    { id: 'o1', lead_id: 'l1', channel: 'email', direction: 'out', message: 'Initial intro email sent.', sent_at: new Date(Date.now() - 2 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: new Date(Date.now() + 3 * 24 * 3600000).toISOString() },
-  ],
-  l2: [
-    { id: 'o2', lead_id: 'l2', channel: 'email', direction: 'out', message: 'Intent to bid submitted.', sent_at: new Date(Date.now() - 18 * 3600000).toISOString(), response_received: true, response_at: new Date(Date.now() - 12 * 3600000).toISOString(), sequence_step: 1, next_follow_up: null },
-    { id: 'o3', lead_id: 'l2', channel: 'email', direction: 'out', message: 'Pre-bid questions submitted.', sent_at: new Date(Date.now() - 10 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 2, next_follow_up: new Date(Date.now() + 2 * 24 * 3600000).toISOString() },
-  ],
-  l5: [
-    { id: 'o4', lead_id: 'l5', channel: 'email', direction: 'out', message: 'Cold intro email.', sent_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: new Date(Date.now() - 1 * 24 * 3600000).toISOString() },
-  ],
-  l10: [
-    { id: 'o5', lead_id: 'l10', channel: 'email', direction: 'out', message: 'Initial outreach.', sent_at: new Date(Date.now() - 4 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: new Date(Date.now() - 1 * 24 * 3600000).toISOString() },
-    { id: 'o6', lead_id: 'l10', channel: 'linkedin', direction: 'out', message: 'LinkedIn connection request + note.', sent_at: new Date(Date.now() - 3 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 2, next_follow_up: new Date(Date.now()).toISOString() },
-  ],
-  l3: [
-    { id: 'o7', lead_id: 'l3', channel: 'email', direction: 'out', message: 'Hi Chris, reaching out about Juniper\'s services for Kierland Commons. We manage several neighboring commercial properties...', sent_at: new Date(Date.now() - 8 * 24 * 3600000).toISOString(), response_received: true, response_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(), sequence_step: 1, next_follow_up: null, sender_name: undefined },
-    { id: 'o8', lead_id: 'l3', channel: 'email', direction: 'in', message: 'Thanks for reaching out. We\'re happy with our current provider but I\'d be open to a comparison proposal.', sent_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: null, sender_name: 'Chris Abbott' },
-    { id: 'o9', lead_id: 'l3', channel: 'linkedin', direction: 'out', message: 'Hi Chris — thanks for the email reply! Happy to put together a side-by-side comparison. Does next Tuesday work for a quick call?', sent_at: new Date(Date.now() - 5 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 2, next_follow_up: new Date(Date.now() + 2 * 24 * 3600000).toISOString(), sender_name: undefined },
-  ],
-  l7: [
-    { id: 'o10', lead_id: 'l7', channel: 'email', direction: 'out', message: 'Hi Nicole, Juniper Landscaping maintains several Desert Ridge area properties and I wanted to introduce our services.', sent_at: new Date(Date.now() - 14 * 24 * 3600000).toISOString(), response_received: true, response_at: new Date(Date.now() - 13 * 24 * 3600000).toISOString(), sequence_step: 1, next_follow_up: null, sender_name: undefined },
-    { id: 'o11', lead_id: 'l7', channel: 'email', direction: 'in', message: 'Hi, thanks. Our contract is up in 4 months. Can you send over your service overview?', sent_at: new Date(Date.now() - 13 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 1, next_follow_up: null, sender_name: 'Nicole Foster' },
-    { id: 'o12', lead_id: 'l7', channel: 'email', direction: 'out', message: 'Nicole, attaching our service overview and a few case studies from similar retail centers we maintain in the Phoenix metro.', sent_at: new Date(Date.now() - 11 * 24 * 3600000).toISOString(), response_received: false, response_at: null, sequence_step: 2, next_follow_up: new Date(Date.now() - 4 * 24 * 3600000).toISOString(), sender_name: undefined },
-  ],
-}
-
 export const mockMonthlyRevenue: MonthlyRevenue[] = [
   { month: 'Oct', won: 495000,  forecast: 0,       pipeline: 810000 },
   { month: 'Nov', won: 580000,  forecast: 0,       pipeline: 920000 },
@@ -292,140 +254,6 @@ export const mockSummary: InsideSalesSummary = {
   won_value_this_month: 735000,
 }
 
-export const mockActivityItems: Record<string, ActivityItem[]> = {
-  'l2': [
-    {
-      id: 'a1',
-      channel: 'email',
-      direction: 'out',
-      body: 'Intent to bid submitted.',
-      performed_by: 'Alex Rivera',
-      performed_at: new Date(Date.now() - 2 * 3600000).toISOString(),
-      recording_url: null,
-      duration_seconds: null,
-      transcript_summary: null,
-      external_message_id: null,
-    },
-    {
-      id: 'a2',
-      channel: 'email',
-      direction: 'out',
-      body: 'Pre-bid questions submitted.',
-      performed_by: 'Alex Rivera',
-      performed_at: new Date(Date.now() - 4 * 3600000).toISOString(),
-      recording_url: null,
-      duration_seconds: null,
-      transcript_summary: null,
-      external_message_id: null,
-    },
-  ],
-  'l3': [
-    {
-      id: 'a3',
-      channel: 'email',
-      direction: 'out',
-      body: 'Hi Chris, reaching out about Juniper Landscaping.',
-      performed_by: 'Alex Rivera',
-      performed_at: new Date(Date.now() - 6 * 3600000).toISOString(),
-      recording_url: null,
-      duration_seconds: null,
-      transcript_summary: null,
-      external_message_id: null,
-    },
-    {
-      id: 'a4',
-      channel: 'email',
-      direction: 'in',
-      body: 'Thanks for reaching out, interested to learn more.',
-      performed_by: 'Chris Abbott',
-      performed_at: new Date(Date.now() - 5 * 3600000).toISOString(),
-      recording_url: null,
-      duration_seconds: null,
-      transcript_summary: null,
-      external_message_id: null,
-    },
-    {
-      id: 'a5',
-      channel: 'call',
-      direction: 'out',
-      body: 'Call logged: discussed proposal timeline.',
-      performed_by: 'Alex Rivera',
-      performed_at: new Date(Date.now() - 3 * 3600000).toISOString(),
-      recording_url: 'https://recordings.twilio.com/sample-recording',
-      duration_seconds: 183,
-      transcript_summary: 'Discussed proposal timeline. Contact interested in Q3 start.',
-      external_message_id: 'CA_mock_123',
-    },
-    {
-      id: 'a6',
-      channel: 'sms',
-      direction: 'out',
-      body: 'Following up re: our call today.',
-      performed_by: 'Alex Rivera',
-      performed_at: new Date(Date.now() - 1 * 3600000).toISOString(),
-      recording_url: null,
-      duration_seconds: null,
-      transcript_summary: null,
-      external_message_id: 'SM_mock_456',
-    },
-    {
-      id: 'a8',
-      channel: 'linkedin',
-      direction: 'out',
-      body: 'Hi Chris — thanks for the email reply! Happy to put together a side-by-side comparison. Does next Tuesday work for a quick call?',
-      performed_by: 'Alex Rivera',
-      performed_at: new Date(Date.now() - 5 * 24 * 3600000).toISOString(),
-      recording_url: null,
-      duration_seconds: null,
-      transcript_summary: null,
-      external_message_id: null,
-    },
-  ],
-  'l4': [],
-  'l5': [
-    {
-      id: 'a7',
-      channel: 'call',
-      direction: 'out',
-      body: 'Left voicemail.',
-      performed_by: 'Alex Rivera',
-      performed_at: new Date(Date.now() - 25 * 3600000).toISOString(),
-      recording_url: null,
-      duration_seconds: 45,
-      transcript_summary: null,
-      external_message_id: null,
-    },
-  ],
-}
-
-export const mockConsent: Record<string, ContactConsent> = {
-  'c1': {
-    contact_id: 'c1',
-    do_not_call: false,
-    do_not_text: false,
-    do_not_email: false,
-    consent_call: true,
-    consent_text: true,
-    consent_captured_at: null,
-    consent_source: null,
-    consent_by: null,
-    updated_at: null,
-  },
-  'c-blocked': {
-    contact_id: 'c-blocked',
-    do_not_call: true,
-    do_not_text: true,
-    do_not_email: true,
-    consent_call: false,
-    consent_text: false,
-    consent_captured_at: null,
-    consent_source: null,
-    consent_by: null,
-    updated_at: null,
-  },
-}
-
 export const mockConnections: ConnectionsStatus = {
   graph: { connected: false },
-  telephony: { configured: false, provider: '' },
 }

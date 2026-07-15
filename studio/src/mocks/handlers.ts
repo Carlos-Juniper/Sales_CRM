@@ -1,5 +1,5 @@
 import { http, HttpResponse, delay } from 'msw'
-import { mockLeads, mockBids, mockUsers, mockOutreach, mockSummary, mockMonthlyRevenue, mockActivityItems, mockConsent, mockConnections } from './data'
+import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockConnections } from './data'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid } from '@/types'
 
@@ -84,7 +84,6 @@ const allHandlers = [
       assigned_to: null,
       notes: null,
       handoff_notes: null,
-      ai_email_draft: null,
       ai_linkedin_draft: null,
       branch_id: 'b1',
       distance_miles: 0,
@@ -122,25 +121,6 @@ const allHandlers = [
     if (idx === -1) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
     leads[idx] = { ...leads[idx], ...body, updated_at: new Date().toISOString() }
     return HttpResponse.json(leads[idx])
-  }),
-
-  // GET /api/outreach/:lead_id
-  http.get(`${API}/outreach/:lead_id`, async ({ params }) => {
-    await delay(200)
-    const history = mockOutreach[params.lead_id as string] ?? []
-    return HttpResponse.json(history)
-  }),
-
-  // POST /api/outreach/send
-  http.post(`${API}/outreach/send`, async ({ request }) => {
-    await delay(400)
-    const body = await request.json() as { lead_id: string; channel: string; message: string }
-    // Update lead status to contacted if it's new
-    const idx = leads.findIndex(l => l.id === body.lead_id)
-    if (idx !== -1 && leads[idx].status === 'new') {
-      leads[idx] = { ...leads[idx], status: 'contacted', updated_at: new Date().toISOString() }
-    }
-    return HttpResponse.json({ success: true, message_id: `msg_${Date.now()}` })
   }),
 
   // GET /api/bids
@@ -210,59 +190,6 @@ const allHandlers = [
   http.get(`${API}/dashboard/inside-sales`, async () => {
     await delay(200)
     return HttpResponse.json(mockSummary)
-  }),
-
-  // GET /api/leads/:id/activity
-  http.get(`${API}/leads/:lead_id/activity`, async ({ params }) => {
-    await delay(200)
-    const activity = mockActivityItems[params.lead_id as string] ?? []
-    return HttpResponse.json(activity)
-  }),
-
-  // GET /api/contacts/:id/consent
-  http.get(`${API}/contacts/:contact_id/consent`, async ({ params }) => {
-    await delay(150)
-    const consent = mockConsent[params.contact_id as string] ?? {
-      contact_id: params.contact_id,
-      do_not_call: false, do_not_text: false, do_not_email: false,
-      consent_call: false, consent_text: false,
-      consent_captured_at: null, consent_source: null, consent_by: null, updated_at: null,
-    }
-    return HttpResponse.json(consent)
-  }),
-
-  // PATCH /api/contacts/:id/consent
-  http.patch(`${API}/contacts/:contact_id/consent`, async ({ params, request }) => {
-    await delay(200)
-    const body = await request.json() as Record<string, unknown>
-    const existing = mockConsent[params.contact_id as string] ?? { contact_id: params.contact_id }
-    mockConsent[params.contact_id as string] = { ...existing, ...body } as typeof mockConsent[string]
-    return HttpResponse.json(mockConsent[params.contact_id as string])
-  }),
-
-  // GET /api/compliance/check
-  http.get(`${API}/compliance/check`, async ({ request }) => {
-    await delay(100)
-    const url = new URL(request.url)
-    const to = url.searchParams.get('to')
-    const channel = url.searchParams.get('channel') ?? ''
-    const contactId = url.searchParams.get('contact_id')
-    if (to?.startsWith('+1555BLOCKED')) {
-      return HttpResponse.json({ allowed: false, reason: 'DNC list' })
-    }
-    if (contactId) {
-      const consent = mockConsent[contactId]
-      if (consent) {
-        const dnc =
-          (channel === 'call' && consent.do_not_call) ||
-          (channel === 'sms' && consent.do_not_text) ||
-          (channel === 'email' && consent.do_not_email)
-        if (dnc) {
-          return HttpResponse.json({ allowed: false, reason: `Contact has opted out of ${channel} communications` })
-        }
-      }
-    }
-    return HttpResponse.json({ allowed: true })
   }),
 
   // GET /api/settings/connections

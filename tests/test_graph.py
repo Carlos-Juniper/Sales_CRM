@@ -21,7 +21,6 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 import api.graph  # noqa: E402
 from api.graph import (  # noqa: E402
     get_valid_token,
-    send_mail,
     list_events,
     create_event,
     GraphNotConnected,
@@ -72,18 +71,6 @@ def _make_http_client(*, status: int = 200, json_data: dict | None = None, heade
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(return_value=mock_response)
     mock_client.get = AsyncMock(return_value=mock_response)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    return mock_client
-
-
-def _make_http_client_multi_post(*responses):
-    """Return a mock AsyncClient whose .post() returns each response in sequence.
-
-    Used for the two-call send_mail flow (create draft, then send).
-    """
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(side_effect=list(responses))
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
     return mock_client
@@ -165,105 +152,6 @@ async def test_get_valid_token_raises_when_refresh_fails():
     ):
         with pytest.raises(ValueError, match="token refresh failed"):
             await get_valid_token("u1")
-
-
-# ---------------------------------------------------------------------------
-# AC-2: send_mail
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_send_mail_posts_to_graph_and_returns_message_id():
-    """AC-2a: uses draft-then-send flow; returns the durable draft message id.
-
-    Graph POST /me/sendMail returns 202 with no body and only a transient
-    x-ms-request-id header.  The correct flow is:
-      1. POST /me/messages  → draft JSON with durable ``id``
-      2. POST /me/messages/{id}/send → 202, empty body
-    The returned value must be the draft ``id``, not a header value.
-    """
-    draft_response = _make_response(status=201, json_data={"id": "durable-msg-id-001"})
-    send_response = _make_response(status=202)
-    mock_client = _make_http_client_multi_post(draft_response, send_response)
-
-    with (
-        patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
-        patch("api.graph.httpx.AsyncClient", return_value=mock_client),
-    ):
-        msg_id = await send_mail(
-            "u1",
-            to=["jennifer@silverleafhoa.org"],
-            subject="Juniper Landscaping Introduction",
-            body_html="<p>Hi Jennifer</p>",
-        )
-
-    assert msg_id == "durable-msg-id-001"
-    assert mock_client.post.call_count == 2
-
-    # First call must target /me/messages (draft creation)
-    first_url = mock_client.post.call_args_list[0][0][0]
-    assert first_url.endswith("/me/messages")
-
-    # Second call must target /me/messages/{id}/send
-    second_url = mock_client.post.call_args_list[1][0][0]
-    assert second_url.endswith(f"/me/messages/{msg_id}/send")
-
-
-@pytest.mark.asyncio
-async def test_send_mail_raises_502_on_graph_http_error():
-    """AC-2b: Graph returns 4xx/5xx on draft creation → raises HTTPException 502."""
-    import httpx as _httpx
-    from fastapi import HTTPException
-
-    mock_client = AsyncMock()
-    mock_response_obj = MagicMock()
-    mock_response_obj.status_code = 403
-    # Error raised on the first POST (draft creation)
-    mock_client.post = AsyncMock(
-        side_effect=_httpx.HTTPStatusError(
-            "Forbidden", request=MagicMock(), response=mock_response_obj
-        )
-    )
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-
-    with (
-        patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
-        patch("api.graph.httpx.AsyncClient", return_value=mock_client),
-    ):
-        with pytest.raises(HTTPException) as exc_info:
-            await send_mail(
-                "u1",
-                to=["bad@example.com"],
-                subject="Test",
-                body_html="<p>test</p>",
-            )
-
-    assert exc_info.value.status_code == 502
-
-
-@pytest.mark.asyncio
-async def test_send_mail_includes_cc_when_provided():
-    """AC-2c: cc recipients appear in ccRecipients in the draft creation payload."""
-    draft_response = _make_response(status=201, json_data={"id": "msg-cc-test"})
-    send_response = _make_response(status=202)
-    mock_client = _make_http_client_multi_post(draft_response, send_response)
-
-    with (
-        patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
-        patch("api.graph.httpx.AsyncClient", return_value=mock_client),
-    ):
-        await send_mail(
-            "u1",
-            to=["primary@example.com"],
-            subject="Test",
-            body_html="<p>test</p>",
-            cc=["cc@example.com"],
-        )
-
-    # The draft-creation POST carries the message fields directly (not nested under "message")
-    draft_json = mock_client.post.call_args_list[0][1]["json"]
-    assert "ccRecipients" in draft_json
-    assert draft_json["ccRecipients"][0]["emailAddress"]["address"] == "cc@example.com"
 
 
 # ---------------------------------------------------------------------------

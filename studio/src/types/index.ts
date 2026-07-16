@@ -175,6 +175,19 @@ export interface CalendarEvent {
   onlineMeeting?: { joinUrl: string } | null
   bodyPreview?: string
   webLink?: string
+  isOrganizer?: boolean
+  type?: 'singleInstance' | 'occurrence' | 'exception' | 'seriesMaster'
+  seriesMasterId?: string | null
+  showAs?: 'free' | 'tentative' | 'busy' | 'oof' | 'workingElsewhere' | 'unknown'
+  isCancelled?: boolean
+}
+
+export interface CalendarEventUpdatePayload {
+  subject?: string
+  start_iso?: string
+  end_iso?: string
+  attendees?: string[]
+  body?: string
 }
 
 export interface CalendarEventCreatePayload {

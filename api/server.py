@@ -181,6 +181,14 @@ class CalendarEventCreateBody(BaseModel):
     online_meeting: bool = True
 
 
+class CalendarEventUpdateBody(BaseModel):
+    subject: Optional[str] = None
+    start_iso: Optional[str] = None
+    end_iso: Optional[str] = None
+    attendees: Optional[list[str]] = None
+    body: Optional[str] = None
+
+
 class ScheduleMeetingBody(BaseModel):
     subject: str
     start_iso: str
@@ -526,6 +534,7 @@ async def _record_lead_action(
 _ACTION_TO_CHANNEL_FULL: dict[str, str] = {
     "note_added": "note",
     "meeting_scheduled": "meeting",
+    "meeting_cancelled": "meeting",
 }
 
 
@@ -1562,6 +1571,52 @@ async def calendar_create_event(
             online_meeting=body.online_meeting,
         )
     )
+
+
+@app.patch("/api/calendar/events/{event_id}")
+async def calendar_update_event(
+    event_id: str,
+    body: CalendarEventUpdateBody,
+    user: dict = Depends(require_auth),
+) -> dict:
+    from api import graph as _graph
+    return await _graph_call(
+        _graph.update_event(
+            user["id"],
+            event_id,
+            subject=body.subject,
+            start_iso=body.start_iso,
+            end_iso=body.end_iso,
+            attendees=body.attendees,
+            body=body.body,
+        )
+    )
+
+
+@app.delete("/api/calendar/events/{event_id}", status_code=204)
+async def calendar_delete_event(
+    event_id: str,
+    user: dict = Depends(require_auth),
+) -> None:
+    from api import graph as _graph
+    await _graph_call(_graph.delete_event(user["id"], event_id))
+
+    rows = await query(
+        """
+        SELECT lead_id, detail FROM lead_actions
+        WHERE action_type = 'meeting_scheduled' AND external_message_id = %s
+        LIMIT 1
+        """,
+        [event_id],
+    )
+    if rows:
+        await _record_lead_action(
+            lead_id=rows[0]["lead_id"],
+            action_type="meeting_cancelled",
+            detail=rows[0]["detail"],
+            performed_by=user["id"],
+            external_message_id=event_id,
+        )
 
 
 @app.post("/api/leads/{lead_id}/schedule-meeting")

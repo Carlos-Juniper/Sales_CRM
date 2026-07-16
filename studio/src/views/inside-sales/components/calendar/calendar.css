@@ -1,0 +1,65 @@
+/* FullCalendar theme overrides via --fc-* CSS custom properties */
+
+:root {
+  --fc-border-color: hsl(var(--border));
+  --fc-page-bg-color: hsl(var(--bg));
+  --fc-neutral-bg-color: hsl(var(--muted));
+  --fc-neutral-text-color: hsl(var(--muted-fg));
+  --fc-today-bg-color: rgba(46, 125, 82, 0.06);
+  --fc-now-indicator-color: #2E7D52;
+  --fc-event-bg-color: #2E7D52;
+  --fc-event-border-color: #256644;
+  --fc-event-text-color: #ffffff;
+}
+
+/* Organizer events — Juniper brand green */
+.fc-event-organizer {
+  background-color: #2E7D52 !important;
+  border-color: #256644 !important;
+  color: #ffffff !important;
+}
+
+.fc-event-organizer:hover {
+  background-color: #256644 !important;
+}
+
+/* Timegrid slot lines */
+.fc .fc-timegrid-slot {
+  height: 2.5rem;
+}
+
+/* Column header — day names */
+.fc .fc-col-header-cell-cushion {
+  color: hsl(var(--muted-fg));
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+}
+
+/* Today column header highlight */
+.fc .fc-day-today .fc-col-header-cell-cushion {
+  color: #2E7D52;
+}
+
+/* Event inner text */
+.fc-event-title {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* Now indicator line */
+.fc .fc-timegrid-now-indicator-line {
+  border-color: #2E7D52;
+}
+
+.fc .fc-timegrid-now-indicator-arrow {
+  border-color: #2E7D52;
+  color: #2E7D52;
+}
+
+/* Selection highlight when dragging to create */
+.fc .fc-highlight {
+  background-color: rgba(46, 125, 82, 0.15);
+}

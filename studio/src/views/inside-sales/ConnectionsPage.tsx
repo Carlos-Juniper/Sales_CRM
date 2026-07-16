@@ -1,10 +1,21 @@
 import { useConnections } from '@/hooks/useConnections'
 import { CheckCircle, XCircle } from 'lucide-react'
+import { redirectToAzureLogin } from '@/lib/azureAuth'
+import { useUIStore } from '@/store/uiStore'
 
 export default function ConnectionsPage() {
   const { data, isLoading } = useConnections()
+  const toast = useUIStore((s) => s.toast)
 
   if (isLoading) return <div>Loading...</div>
+
+  async function handleConnectClick() {
+    try {
+      await redirectToAzureLogin()
+    } catch {
+      toast('Could not reach Microsoft sign-in. Try again.', { variant: 'error' })
+    }
+  }
 
   return (
     <div className="p-6 space-y-4">
@@ -21,7 +32,11 @@ export default function ConnectionsPage() {
           </span>
         </div>
         {!data?.graph.connected && (
-          <button className="mt-2 text-sm text-blue-600 hover:underline">
+          <button
+            type="button"
+            onClick={handleConnectClick}
+            className="mt-2 text-sm text-blue-600 hover:underline"
+          >
             Connect Microsoft 365
           </button>
         )}

@@ -2,10 +2,10 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // Absolute paths are required because the project directory contains a colon
-// (feat:graph-integration). Vite's isFileLoadingAllowed rejects paths with ':'
+// (feat:calendar). Vite's isFileLoadingAllowed rejects paths with ':'
 // on non-Windows systems, causing Cannot find module '/src/test/setup.ts'.
 // Fix: hard-code the absolute root + set server.fs.strict = false.
-const ROOT = '/Users/carloshernandez/Desktop/feat:graph-integration/studio'
+const ROOT = '/Users/carloshernandez/Desktop/feat:calendar/feat:server/juniper-crm-app/studio'
 const SETUP_FILE = ROOT + '/src/test/setup.ts'
 
 export default defineConfig({

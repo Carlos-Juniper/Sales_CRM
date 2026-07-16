@@ -2,7 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Inbox, FileText, GitBranch,
   ChevronLeft, ChevronRight, LogOut, Leaf, Settings,
-  Map, Calculator, Building,
+  Map, Calculator, Building, Calendar,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
@@ -24,6 +24,7 @@ const navItems: NavItem[] = [
   { label: 'Lead Feed', icon: Inbox, href: '/inside-sales/leads', roles: ['inside_sales', 'manager'] },
   { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: ['inside_sales', 'manager'] },
   { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: ['inside_sales', 'manager'] },
+  { label: 'Calendar', icon: Calendar, href: '/inside-sales/calendar', roles: ['inside_sales', 'manager'] },
   { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: ['inside_sales', 'manager'] },
   { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: ['inside_sales', 'manager'] },
   { label: 'Estimating', icon: Calculator, href: '/inside-sales/estimating', roles: ['inside_sales', 'manager'] },

@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { CalendarEvent, CalendarEventCreatePayload, ScheduleMeetingPayload } from '@/types'
+import type { CalendarEvent, CalendarEventCreatePayload, CalendarEventUpdatePayload, ScheduleMeetingPayload } from '@/types'
 
 export const graphApi = {
   listEvents(start: string, end: string) {
@@ -9,6 +9,14 @@ export const graphApi = {
 
   createEvent(payload: CalendarEventCreatePayload) {
     return apiClient.post<CalendarEvent>('/calendar/events', payload)
+  },
+
+  updateEvent(eventId: string, payload: CalendarEventUpdatePayload) {
+    return apiClient.patch<CalendarEvent>(`/calendar/events/${eventId}`, payload)
+  },
+
+  deleteEvent(eventId: string) {
+    return apiClient.delete(`/calendar/events/${eventId}`)
   },
 
   scheduleMeeting(leadId: string, payload: ScheduleMeetingPayload) {

@@ -107,7 +107,7 @@ async def get_valid_token(user_id: str) -> str:
     msal_app = msal.PublicClientApplication(client_id=client_id, authority=authority)
     result = msal_app.acquire_token_by_refresh_token(
         row["refresh_token"],
-        scopes=["Mail.Send", "Mail.Read", "Calendars.ReadWrite", "offline_access"],
+        scopes=["Mail.Send", "Mail.Read", "Calendars.ReadWrite"],
     )
 
     if "error" in result:
@@ -276,3 +276,73 @@ async def create_event(
         raise HTTPException(status_code=502, detail="Microsoft Graph unreachable")
 
     return resp.json()
+
+
+async def update_event(
+    user_id: str,
+    event_id: str,
+    *,
+    subject: Optional[str] = None,
+    start_iso: Optional[str] = None,
+    end_iso: Optional[str] = None,
+    attendees: Optional[list[str]] = None,
+    body: Optional[str] = None,
+) -> dict:
+    """PATCH /me/events/{event_id} to update a calendar event. Only provided fields are sent."""
+    token = await get_valid_token(user_id)
+
+    payload: dict = {}
+    if subject is not None:
+        payload["subject"] = subject
+    if start_iso is not None:
+        payload["start"] = {"dateTime": start_iso, "timeZone": "UTC"}
+    if end_iso is not None:
+        payload["end"] = {"dateTime": end_iso, "timeZone": "UTC"}
+    if attendees is not None:
+        payload["attendees"] = [
+            {"emailAddress": {"address": addr}, "type": "required"}
+            for addr in attendees
+        ]
+    if body is not None:
+        payload["body"] = {"contentType": "HTML", "content": body}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{_GRAPH_BASE}/me/events/{event_id}",
+                json=payload,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        logger.error("Graph update event failed: %s", exc.response.status_code)
+        raise HTTPException(status_code=502, detail=f"Microsoft Graph event update failed: {exc.response.status_code}")
+    except httpx.RequestError as exc:
+        logger.error("Graph update event network error: %s", exc)
+        raise HTTPException(status_code=502, detail="Microsoft Graph unreachable")
+
+    return resp.json()
+
+
+async def delete_event(user_id: str, event_id: str) -> None:
+    """DELETE /me/events/{event_id} to delete a calendar event."""
+    token = await get_valid_token(user_id)
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(
+                f"{_GRAPH_BASE}/me/events/{event_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            # Event already gone (e.g. deleted from another client) — deletion is idempotent.
+            return
+        logger.error("Graph delete event failed: %s", exc.response.status_code)
+        raise HTTPException(status_code=502, detail=f"Microsoft Graph event deletion failed: {exc.response.status_code}")
+    except httpx.RequestError as exc:
+        logger.error("Graph delete event network error: %s", exc)
+        raise HTTPException(status_code=502, detail="Microsoft Graph unreachable")

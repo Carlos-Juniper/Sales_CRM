@@ -8,7 +8,6 @@ import {
   PipelinePage, MapPage, EstimatingPage, CalendarPage,
 } from '@/views/inside-sales'
 import AccountsPage from '@/views/inside-sales/AccountsPage'
-import CalendarPage from '@/views/inside-sales/CalendarPage'
 import ConnectionsPage from '@/views/inside-sales/ConnectionsPage'
 import BranchManagerPage from '@/views/branch-manager'
 import { InsideSalesGuard } from '@/guards'

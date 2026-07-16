@@ -48,7 +48,10 @@ def override_auth():
 
 def test_store_ms_graph_token_returns_ok():
     """AC-server-1: storing tokens returns {ok: true}."""
-    with patch("api.graph.execute", new_callable=AsyncMock):
+    with (
+        patch("api.graph._encrypt", side_effect=lambda x: x),
+        patch("api.graph.execute", new_callable=AsyncMock),
+    ):
         resp = client.post(
             "/api/auth/ms-graph-token",
             json={

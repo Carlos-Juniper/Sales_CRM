@@ -15,6 +15,7 @@ Env vars required:
 """
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,7 @@ from typing import Optional
 import httpx
 import msal
 from fastapi import HTTPException
+from google.cloud import kms
 
 from db import execute, query
 
@@ -30,9 +32,50 @@ logger = logging.getLogger(__name__)
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 _REFRESH_BUFFER = timedelta(minutes=5)
+_KMS_KEY_NAME = os.environ.get("KMS_GRAPH_TOKEN_KEY", "")
 
 # Maximum pages to follow via @odata.nextLink in list_events to avoid infinite loops.
 _LIST_EVENTS_MAX_PAGES = 10
+
+
+# ── KMS envelope encryption helpers ──────────────────────────────────────────
+
+# Version prefix written before the base64 ciphertext.
+# Lets _decrypt distinguish encrypted rows from pre-migration plaintext rows,
+# and lets the migration script skip rows that are already encrypted.
+_CIPHERTEXT_PREFIX = "v1:"
+
+
+def _encrypt(plaintext: str) -> str:
+    """KMS-encrypt a plaintext string; returns 'v1:<base64-ciphertext>' for DB storage."""
+    client = kms.KeyManagementServiceClient()
+    response = client.encrypt(
+        request={"name": _KMS_KEY_NAME, "plaintext": plaintext.encode()}
+    )
+    return _CIPHERTEXT_PREFIX + base64.b64encode(response.ciphertext).decode()
+
+
+def _decrypt(value: str) -> str:
+    """KMS-decrypt a 'v1:<base64-ciphertext>' DB value back to plaintext.
+
+    If the value lacks the 'v1:' prefix it is a pre-migration plaintext row.
+    In that case a warning is logged and the value is returned as-is so the
+    service stays operational until migrate_encrypt_tokens.py is run.
+    """
+    if not value.startswith(_CIPHERTEXT_PREFIX):
+        logger.warning(
+            "Token value is not KMS-encrypted (missing %r prefix) — "
+            "run scripts/migrate_encrypt_tokens.py before deploying",
+            _CIPHERTEXT_PREFIX,
+        )
+        return value
+    ciphertext_b64 = value[len(_CIPHERTEXT_PREFIX):]
+    client = kms.KeyManagementServiceClient()
+    ciphertext = base64.b64decode(ciphertext_b64.encode())
+    response = client.decrypt(
+        request={"name": _KMS_KEY_NAME, "ciphertext": ciphertext}
+    )
+    return response.plaintext.decode()
 
 
 # ── Custom error types (FIX #10a) ────────────────────────────────────────────
@@ -63,7 +106,10 @@ async def _upsert_tokens(
     expires_at: datetime,
     scope: str,
 ) -> None:
-    """Upsert a user's Graph token row (updates all fields incl. scope)."""
+    """Upsert a user's Graph token row (updates all fields incl. scope).
+
+    Callers pass plaintext tokens; this function KMS-encrypts them before writing.
+    """
     await execute(
         """
         INSERT INTO user_graph_tokens
@@ -76,7 +122,7 @@ async def _upsert_tokens(
             expires_at    = VALUES(expires_at),
             updated_at    = NOW()
         """,
-        [user_id, access_token, refresh_token, scope, expires_at],
+        [user_id, _encrypt(access_token), _encrypt(refresh_token), scope, expires_at],
     )
 
 
@@ -92,12 +138,15 @@ async def get_valid_token(user_id: str) -> str:
         )
 
     row = rows[0]
+    access_token = _decrypt(row["access_token"])
+    refresh_token = _decrypt(row["refresh_token"])
+
     expires_at: datetime = row["expires_at"]
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
 
     if expires_at - _REFRESH_BUFFER > datetime.now(tz=timezone.utc):
-        return row["access_token"]
+        return access_token
 
     # Token is expired or close to expiry — refresh via MSAL
     client_id = os.environ["ENTRA_CLIENT_ID"]
@@ -106,8 +155,8 @@ async def get_valid_token(user_id: str) -> str:
 
     msal_app = msal.PublicClientApplication(client_id=client_id, authority=authority)
     result = msal_app.acquire_token_by_refresh_token(
-        row["refresh_token"],
-        scopes=["Mail.Send", "Mail.Read", "Calendars.ReadWrite"],
+        refresh_token,
+        scopes=["Mail.Send", "Mail.Read", "Calendars.ReadWrite", "offline_access"],
     )
 
     if "error" in result:
@@ -117,7 +166,7 @@ async def get_valid_token(user_id: str) -> str:
         )
 
     new_access = result["access_token"]
-    new_refresh = result.get("refresh_token", row["refresh_token"])
+    new_refresh = result.get("refresh_token", refresh_token)
     new_expires = datetime.now(tz=timezone.utc) + timedelta(seconds=result.get("expires_in", 3600))
 
     await _upsert_tokens(

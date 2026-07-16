@@ -6,6 +6,7 @@ Run with:  PYTHONPATH=. pytest tests/test_graph.py -v
 """
 from __future__ import annotations
 
+import base64
 import os
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,6 +17,7 @@ import pytest
 os.environ.setdefault("ENTRA_CLIENT_ID", "test-client-id")
 os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
 os.environ.setdefault("JWT_SECRET", "test-secret")
+os.environ.setdefault("KMS_GRAPH_TOKEN_KEY", "projects/test/locations/us-central1/keyRings/test/cryptoKeys/test")
 
 # Import the module under test once at module level so patches apply consistently
 import api.graph  # noqa: E402
@@ -23,6 +25,8 @@ from api.graph import (  # noqa: E402
     get_valid_token,
     list_events,
     create_event,
+    _encrypt,
+    _decrypt,
     GraphNotConnected,
     GraphTokenRefreshFailed,
 )
@@ -77,13 +81,154 @@ def _make_http_client(*, status: int = 200, json_data: dict | None = None, heade
 
 
 # ---------------------------------------------------------------------------
+# KMS helpers — AC-KMS-1: _encrypt / _decrypt
+# ---------------------------------------------------------------------------
+
+def test_encrypt_decrypt_roundtrip():
+    """AC-KMS-1a: _decrypt(_encrypt(plaintext)) returns the original plaintext."""
+    plaintext = "super-secret-bearer-token-abc123"
+    ciphertext_bytes = b"fake-ciphertext-bytes"
+    ciphertext_b64 = base64.b64encode(ciphertext_bytes).decode()
+
+    mock_kms_client = MagicMock()
+    mock_kms_client.encrypt.return_value = MagicMock(ciphertext=ciphertext_bytes)
+    mock_kms_client.decrypt.return_value = MagicMock(plaintext=plaintext.encode())
+
+    with patch("api.graph.kms.KeyManagementServiceClient", return_value=mock_kms_client):
+        encrypted = _encrypt(plaintext)
+        decrypted = _decrypt(encrypted)
+
+    assert decrypted == plaintext
+    mock_kms_client.encrypt.assert_called_once()
+    mock_kms_client.decrypt.assert_called_once()
+    assert encrypted.startswith("v1:")
+    assert encrypted != plaintext
+    assert encrypted == "v1:" + ciphertext_b64
+
+
+def test_encrypt_calls_kms_with_key_name():
+    """AC-KMS-1b: _encrypt uses the configured KMS key name."""
+    import api.graph as graph_module
+
+    mock_kms_client = MagicMock()
+    mock_kms_client.encrypt.return_value = MagicMock(ciphertext=b"cipher")
+
+    with patch("api.graph.kms.KeyManagementServiceClient", return_value=mock_kms_client):
+        result = _encrypt("token-value")
+
+    call_request = mock_kms_client.encrypt.call_args[1]["request"]
+    assert call_request["name"] == graph_module._KMS_KEY_NAME
+    assert call_request["plaintext"] == b"token-value"
+    assert result.startswith("v1:")
+
+
+def test_decrypt_calls_kms_with_key_name():
+    """AC-KMS-1c: _decrypt strips the v1: prefix, base64-decodes, and passes raw bytes to KMS."""
+    import api.graph as graph_module
+
+    plaintext_bytes = b"decoded-token"
+    ciphertext_bytes = b"raw-cipher"
+    ciphertext_b64 = base64.b64encode(ciphertext_bytes).decode()
+    stored_value = "v1:" + ciphertext_b64
+
+    mock_kms_client = MagicMock()
+    mock_kms_client.decrypt.return_value = MagicMock(plaintext=plaintext_bytes)
+
+    with patch("api.graph.kms.KeyManagementServiceClient", return_value=mock_kms_client):
+        result = _decrypt(stored_value)
+
+    call_request = mock_kms_client.decrypt.call_args[1]["request"]
+    assert call_request["name"] == graph_module._KMS_KEY_NAME
+    assert call_request["ciphertext"] == ciphertext_bytes
+    assert result == "decoded-token"
+
+
+def test_decrypt_passthrough_for_plaintext_rows():
+    """AC-KMS-1d: _decrypt returns the value as-is (with a warning) for pre-migration plaintext rows."""
+    import api.graph as graph_module
+
+    plaintext_value = "eyJhbGciOiJSUzI1NiJ9.plain-bearer-token"  # no v1: prefix
+
+    with patch.object(graph_module.logger, "warning") as mock_warning:
+        result = _decrypt(plaintext_value)
+
+    assert result == plaintext_value
+    mock_warning.assert_called_once()
+    assert "v1:" in str(mock_warning.call_args)
+
+
+# ---------------------------------------------------------------------------
+# AC-KMS-2: _upsert_tokens encrypts before writing to DB
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_upsert_tokens_encrypts_before_writing():
+    """AC-KMS-2: plaintext tokens passed to _upsert_tokens are encrypted before the DB INSERT."""
+    from api.graph import _upsert_tokens
+
+    def fake_encrypt(plaintext: str) -> str:
+        return f"v1:ENCRYPTED_{plaintext.split('-')[0].upper()}"
+
+    with (
+        patch("api.graph._encrypt", side_effect=fake_encrypt) as mock_encrypt,
+        patch("api.graph.execute", new_callable=AsyncMock) as mock_execute,
+    ):
+        await _upsert_tokens(
+            "u1",
+            access_token="access-plain",
+            refresh_token="refresh-plain",
+            expires_at=_FUTURE,
+            scope="Calendars.ReadWrite",
+        )
+
+    assert mock_encrypt.call_count == 2
+    encrypt_calls = [c[0][0] for c in mock_encrypt.call_args_list]
+    assert "access-plain" in encrypt_calls
+    assert "refresh-plain" in encrypt_calls
+
+    execute_params = mock_execute.call_args[0][1]
+    assert "access-plain" not in execute_params
+    assert "refresh-plain" not in execute_params
+    assert any(str(p).startswith("v1:") for p in execute_params)
+
+
+# ---------------------------------------------------------------------------
+# AC-KMS-3: get_valid_token decrypts after reading from DB
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_valid_token_decrypts_after_reading():
+    """AC-KMS-3: get_valid_token decrypts the ciphertext from the DB before returning."""
+    ciphertext_row = {
+        **_VALID_TOKEN_ROW,
+        "access_token": "CIPHERTEXT_access",
+        "refresh_token": "CIPHERTEXT_refresh",
+    }
+    decrypt_map = {
+        "CIPHERTEXT_access": "plaintext-access-token",
+        "CIPHERTEXT_refresh": "plaintext-refresh-token",
+    }
+
+    with (
+        patch("api.graph.query", new_callable=AsyncMock, return_value=[ciphertext_row]),
+        patch("api.graph._decrypt", side_effect=lambda x: decrypt_map[x]),
+    ):
+        token = await get_valid_token("u1")
+
+    assert token == "plaintext-access-token"
+
+
+# ---------------------------------------------------------------------------
 # AC-1: get_valid_token — happy path (token not expired)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_get_valid_token_returns_access_token_when_not_expired():
     """AC-1a: non-expired token is returned directly without refresh."""
-    with patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]):
+    with (
+        patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
+    ):
         token = await get_valid_token("u1")
 
     assert token == "valid-access-token"
@@ -93,8 +238,6 @@ async def test_get_valid_token_returns_access_token_when_not_expired():
 async def test_get_valid_token_raises_when_no_token_stored():
     """AC-1b: user has never granted Graph scopes → raises GraphNotConnected (a ValueError subclass)."""
     with patch("api.graph.query", new_callable=AsyncMock, return_value=[]):
-        # GraphNotConnected must be catchable as a plain ValueError so server.py
-        # handlers continue to work without modification.
         with pytest.raises(GraphNotConnected, match="no Graph token"):
             await get_valid_token("u1")
         with patch("api.graph.query", new_callable=AsyncMock, return_value=[]):
@@ -121,6 +264,8 @@ async def test_get_valid_token_refreshes_expired_token():
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_EXPIRED_TOKEN_ROW]),
         patch("api.graph.execute", new_callable=AsyncMock) as mock_execute,
         patch("api.graph.msal.PublicClientApplication", return_value=mock_msal_app),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
+        patch("api.graph._encrypt", side_effect=lambda x: x),
     ):
         token = await get_valid_token("u1")
 
@@ -141,14 +286,15 @@ async def test_get_valid_token_raises_when_refresh_fails():
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_EXPIRED_TOKEN_ROW]),
         patch("api.graph.msal.PublicClientApplication", return_value=mock_msal_app),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
     ):
-        # Must be catchable as both the specific subclass and plain ValueError.
         with pytest.raises(GraphTokenRefreshFailed, match="token refresh failed"):
             await get_valid_token("u1")
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_EXPIRED_TOKEN_ROW]),
         patch("api.graph.msal.PublicClientApplication", return_value=mock_msal_app),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
     ):
         with pytest.raises(ValueError, match="token refresh failed"):
             await get_valid_token("u1")
@@ -174,6 +320,7 @@ async def test_list_events_returns_list_of_dicts():
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
         patch("api.graph.httpx.AsyncClient", return_value=mock_client),
     ):
         events = await list_events("u1", "2026-06-26T00:00:00Z", "2026-06-27T00:00:00Z")
@@ -191,6 +338,7 @@ async def test_list_events_returns_empty_list_when_none():
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
         patch("api.graph.httpx.AsyncClient", return_value=mock_client),
     ):
         events = await list_events("u1", "2026-06-26T00:00:00Z", "2026-06-26T01:00:00Z")
@@ -205,6 +353,7 @@ async def test_list_events_sends_correct_query_params():
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
         patch("api.graph.httpx.AsyncClient", return_value=mock_client),
     ):
         await list_events("u1", "2026-06-26T00:00:00Z", "2026-06-27T00:00:00Z")
@@ -221,6 +370,7 @@ async def test_list_events_sends_prefer_utc_header():
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
         patch("api.graph.httpx.AsyncClient", return_value=mock_client),
     ):
         await list_events("u1", "2026-06-26T00:00:00Z", "2026-06-27T00:00:00Z")
@@ -245,7 +395,7 @@ async def test_list_events_follows_next_link_pagination():
     )
     page2_response = _make_response(
         status=200,
-        json_data={"value": [page2_event]},  # no nextLink → last page
+        json_data={"value": [page2_event]},
     )
 
     mock_client = AsyncMock()
@@ -255,6 +405,7 @@ async def test_list_events_follows_next_link_pagination():
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
         patch("api.graph.httpx.AsyncClient", return_value=mock_client),
     ):
         events = await list_events("u1", "2026-06-26T00:00:00Z", "2026-06-27T00:00:00Z")
@@ -264,7 +415,6 @@ async def test_list_events_follows_next_link_pagination():
     assert events[1]["id"] == "evt-page2"
     assert mock_client.get.call_count == 2
 
-    # Second GET must use the absolute nextLink URL directly, not a re-composed URL
     second_call_url = mock_client.get.call_args_list[1][0][0]
     assert second_call_url == "https://graph.microsoft.com/v1.0/me/calendarView?$skiptoken=abc"
 
@@ -283,13 +433,13 @@ async def test_list_events_stops_at_page_cap_and_logs_warning():
     )
 
     mock_client = AsyncMock()
-    # Return the same response every time (infinite next links)
     mock_client.get = AsyncMock(return_value=always_next)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
         patch("api.graph.httpx.AsyncClient", return_value=mock_client),
         patch.object(graph_module.logger, "warning") as mock_warning,
     ):
@@ -298,7 +448,6 @@ async def test_list_events_stops_at_page_cap_and_logs_warning():
     assert mock_client.get.call_count == graph_module._LIST_EVENTS_MAX_PAGES
     assert len(events) == graph_module._LIST_EVENTS_MAX_PAGES
     mock_warning.assert_called_once()
-    # Warning message must mention the cap so it's actionable in logs
     assert "cap" in mock_warning.call_args[0][0].lower() or "cap" in str(mock_warning.call_args)
 
 
@@ -320,6 +469,7 @@ async def test_create_event_posts_to_graph_and_returns_event():
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
         patch("api.graph.httpx.AsyncClient", return_value=mock_client),
     ):
         event = await create_event(
@@ -344,6 +494,7 @@ async def test_create_event_sets_online_meeting_flag():
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
         patch("api.graph.httpx.AsyncClient", return_value=mock_client),
     ):
         await create_event(
@@ -367,6 +518,7 @@ async def test_create_event_includes_attendees():
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_VALID_TOKEN_ROW]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
         patch("api.graph.httpx.AsyncClient", return_value=mock_client),
     ):
         await create_event(

@@ -38,7 +38,7 @@ steps:
       - --region=us-central1
       - --platform=managed
       - --allow-unauthenticated
-      - --add-cloudsql-instances=juniper-crm-498215-p5:us-central1:juniper-crm-mysql-staging
-      - --set-env-vars=MYSQL_SOCKET_PATH=/cloudsql/juniper-crm-498215-p5:us-central1:juniper-crm-mysql-staging,ENVIRONMENT=staging
+      - --add-cloudsql-instances=juniper-crm-498215-p5:us-central1:juniper-dev
+      - --set-env-vars=MYSQL_SOCKET_PATH=/cloudsql/juniper-crm-498215-p5:us-central1:juniper-dev,ENVIRONMENT=staging
       - --set-secrets=JWT_SECRET=JWT_SECRET:latest,ENTRA_CLIENT_ID=ENTRA_CLIENT_ID:latest,ENTRA_TENANT_ID=ENTRA_TENANT_ID:latest,ENTRA_CLIENT_SECRET=ENTRA_CLIENT_SECRET:latest,MYSQL_USER=MYSQL_USER_STAGING:latest,MYSQL_PASSWORD=MYSQL_PASSWORD_STAGING:latest,MYSQL_DB=MYSQL_DB_STAGING:latest
       - --project=juniper-crm-498215-p5

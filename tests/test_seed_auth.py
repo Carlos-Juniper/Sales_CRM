@@ -2,9 +2,9 @@
 Tests for api/seed_auth.py — the no-password crm_users onboarding tool.
 
 Manual login was removed, so seed_auth no longer provisions passwords into
-crm_logins. It now upserts rows into the BigQuery `users` table (the same store
-entra_callback reads for authorization), via the shared query()/execute()
-helpers — email, name, role, branch_id.
+crm_logins. It now upserts rows into the GCP Cloud SQL MySQL `users` table
+(the same store entra_callback reads for authorization), via the shared
+query()/execute() helpers — email, name, role, branch_id.
 
 DB is fully mocked — no real datastore required.
 Run with:  pytest tests/test_seed_auth.py -v
@@ -44,8 +44,8 @@ def test_provision_inserts_new_user():
     assert execute_mock.await_count == 1
     sql, params = execute_mock.await_args[0]
     assert "INSERT" in sql.upper()
-    assert ".users`" in sql  # BigQuery T('users') reference — same table the callback reads
-    values = [p.value for p in params]
+    assert "users" in sql  # same table entra_callback reads for authorization
+    values = list(params)
     assert "new.rep@juniperlandscaping.com" in values
     assert "New Rep" in values
     assert "inside_sales" in values
@@ -65,7 +65,7 @@ def test_provision_updates_existing_user_keyed_on_email():
     assert query_mock.await_count == 1
     sql, params = execute_mock.await_args[0]
     assert "UPDATE" in sql.upper()
-    assert "existing-id" in [p.value for p in params]
+    assert "existing-id" in list(params)
 
 
 def test_provision_lowercases_email_on_lookup_and_write():
@@ -77,8 +77,8 @@ def test_provision_lowercases_email_on_lookup_and_write():
         branch_id=None,
     )
 
-    lookup_params = [p.value for p in query_mock.await_args[0][1]]
-    insert_params = [p.value for p in execute_mock.await_args[0][1]]
+    lookup_params = list(query_mock.await_args[0][1])
+    insert_params = list(execute_mock.await_args[0][1])
     assert "jane.doe@juniperlandscaping.com" in lookup_params
     assert "jane.doe@juniperlandscaping.com" in insert_params
 
@@ -114,7 +114,7 @@ def test_provision_allows_null_branch_for_non_manager():
         branch_id=None,
     )
 
-    values = [p.value for p in execute_mock.await_args[0][1]]
+    values = list(execute_mock.await_args[0][1])
     assert None in values  # branch_id written as NULL
 
 

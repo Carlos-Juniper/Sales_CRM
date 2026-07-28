@@ -28,7 +28,6 @@ const navItems: NavItem[] = [
   { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: ['inside_sales', 'manager'] },
   { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: ['inside_sales', 'manager'] },
   { label: 'Estimating', icon: Calculator, href: '/inside-sales/estimating', roles: ['inside_sales', 'manager'] },
-  { label: 'Calendar', icon: Calendar, href: '/inside-sales/calendar', roles: ['inside_sales', 'manager'] },
 ]
 
 function NavItemComp({ item, collapsed, overdueBadge }: { item: NavItem; collapsed: boolean; overdueBadge?: number }) {

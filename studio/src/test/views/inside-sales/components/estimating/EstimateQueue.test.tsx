@@ -1,0 +1,452 @@
+// ---------------------------------------------------------------------------
+// Handoff 02 — Estimate Queue tests (Acceptance Criteria §3).
+//
+// The queue is the estimator's landing view: live stat cards, filter/sort bar
+// with the branch-scope lock-chip, the two intake CTAs (Handoffs 11/12 seams),
+// and clickable estimate cards that open the Line-Item Editor with the engine
+// keyed off `estimateType` (no mode prompt, ever).
+// ---------------------------------------------------------------------------
+
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
+import { render, makeUser } from '@/test/utils'
+import { server } from '@/mocks/server'
+import { useAuthStore } from '@/store/authStore'
+import { buildMaintenanceEstimate, buildInstallEstimate } from '@/mocks/estimatingData'
+import { EstimateQueue } from '@/views/inside-sales/components/estimating/EstimateQueue'
+import { EstimatingToastProvider } from '@/views/inside-sales/components/estimating/EstimatingToast'
+import {
+  EstimatingShellContext,
+  type EstimatingShellApi,
+} from '@/views/inside-sales/components/estimating/useEstimatingShell'
+import EstimatingPage from '@/views/inside-sales/EstimatingPage'
+import type { Estimate } from '@/types/estimating'
+
+// Radix Select needs these DOM APIs that jsdom does not implement.
+window.HTMLElement.prototype.hasPointerCapture = vi.fn()
+window.HTMLElement.prototype.releasePointerCapture = vi.fn()
+window.HTMLElement.prototype.scrollIntoView = vi.fn()
+
+const DAY = 86400000
+const inDays = (n: number) => new Date(Date.now() + n * DAY).toISOString()
+
+/**
+ * Four estimates spanning both types, all four §3.2 queue statuses shown on
+ * cards, and all three SLA states (threshold-config default is 4 days):
+ *   Alpha   maintenance · in_progress · 10d left (ok)      · $600K · medium
+ *   Bravo   maintenance · queued      ·  2d left (at risk) · $400K · high
+ *   Charlie install     · review      ·  1d overdue        · $900K · urgent
+ *   Delta   install     · new_from_sales · 14d left (ok)   · $600K · medium
+ */
+function fixtures(): Estimate[] {
+  return [
+    buildMaintenanceEstimate({
+      id: 'q-m1',
+      name: 'Alpha Ranch HOA',
+      status: 'in_progress',
+      priority: 'medium',
+      dueBackDate: inDays(10),
+      contractValueCents: 60_000_000,
+    }),
+    buildMaintenanceEstimate({
+      id: 'q-m2',
+      name: 'Bravo Gardens HOA',
+      status: 'queued',
+      priority: 'high',
+      dueBackDate: inDays(2),
+      contractValueCents: 40_000_000,
+      notes: 'Board meets monthly — service visibility is high.',
+    }),
+    buildInstallEstimate({
+      id: 'q-i1',
+      name: 'Charlie Streetscape',
+      status: 'review',
+      priority: 'urgent',
+      dueBackDate: inDays(-1),
+      contractValueCents: 90_000_000,
+    }),
+    buildInstallEstimate({
+      id: 'q-i2',
+      name: 'Delta Amenity Center',
+      status: 'new_from_sales',
+      priority: 'medium',
+      dueBackDate: inDays(14),
+      contractValueCents: 60_000_000,
+    }),
+  ]
+}
+
+/** Scoped-query mock: the server applies row-level branch scope (BRD I-9.5). */
+function seedScopedList(estimates: Estimate[]) {
+  const requests: URL[] = []
+  server.use(
+    http.get('/api/estimating/estimates', ({ request }) => {
+      const url = new URL(request.url)
+      requests.push(url)
+      const branch = url.searchParams.get('branch')
+      return HttpResponse.json(
+        branch ? estimates.filter((e) => e.branch === branch) : estimates,
+      )
+    }),
+  )
+  return requests
+}
+
+interface RenderQueueOptions {
+  estimates?: Estimate[]
+  onMaintenanceIntake?: () => void
+  onInstallIntake?: () => void
+}
+
+function renderQueue({ estimates = fixtures(), ...props }: RenderQueueOptions = {}) {
+  const requests = seedScopedList(estimates)
+  const shell: EstimatingShellApi = {
+    activeTab: 'queue',
+    setActiveTab: vi.fn(),
+    openEstimate: null,
+    setOpenEstimate: vi.fn(),
+  }
+  render(
+    <EstimatingToastProvider>
+      <EstimatingShellContext.Provider value={shell}>
+        <EstimateQueue {...props} />
+      </EstimatingShellContext.Provider>
+    </EstimatingToastProvider>,
+  )
+  return { shell, requests }
+}
+
+async function cardNames(): Promise<string[]> {
+  const cards = await screen.findAllByTestId('queue-card')
+  return cards.map((c) => within(c).getByTestId('queue-card-name').textContent ?? '')
+}
+
+beforeEach(() => {
+  useAuthStore.setState({ user: makeUser({ branch_id: 'b1' }) })
+})
+
+// ----- Stat cards (AC 1) -----------------------------------------------------
+
+describe('EstimateQueue — summary stat cards', () => {
+  it('computes all four stats from the live queried estimate set', async () => {
+    renderQueue()
+
+    const total = await screen.findByTestId('stat-total-queue')
+    expect(within(total).getByText('Total Queue')).toBeInTheDocument()
+    expect(within(total).getByText('4')).toBeInTheDocument()
+
+    // At risk = within the config threshold OR past due (Bravo + Charlie).
+    const sla = screen.getByTestId('stat-sla-at-risk')
+    expect(within(sla).getByText('SLA at Risk')).toBeInTheDocument()
+    expect(within(sla).getByText('2')).toBeInTheDocument()
+    expect(within(sla).getByText(/14-day window/)).toBeInTheDocument()
+
+    // Active = in build or review (Alpha in_progress + Charlie review).
+    const active = screen.getByTestId('stat-active')
+    expect(within(active).getByText('Active')).toBeInTheDocument()
+    expect(within(active).getByText('2')).toBeInTheDocument()
+
+    // Aggregate value: 600K + 400K + 900K + 600K = $2.5M.
+    const value = screen.getByTestId('stat-queue-value')
+    expect(within(value).getByText('Queue Value')).toBeInTheDocument()
+    expect(within(value).getByText('$2.5M')).toBeInTheDocument()
+  })
+
+  it('SLA-at-risk excludes estimates comfortably outside the config threshold', async () => {
+    renderQueue({
+      estimates: [
+        buildMaintenanceEstimate({ name: 'Far Out', dueBackDate: inDays(30) }),
+      ],
+    })
+    const sla = await screen.findByTestId('stat-sla-at-risk')
+    expect(within(sla).getByText('0')).toBeInTheDocument()
+  })
+})
+
+// ----- Filter & sort (AC 2) ---------------------------------------------------
+
+describe('EstimateQueue — status filter', () => {
+  it('filters the card list by status', async () => {
+    const user = userEvent.setup()
+    renderQueue()
+    await screen.findAllByTestId('queue-card')
+
+    await user.click(screen.getByRole('combobox', { name: /status/i }))
+    await user.click(screen.getByRole('option', { name: 'Review' }))
+
+    expect(await cardNames()).toEqual(['Charlie Streetscape'])
+
+    await user.click(screen.getByRole('combobox', { name: /status/i }))
+    await user.click(screen.getByRole('option', { name: 'All Statuses' }))
+    expect(await cardNames()).toHaveLength(4)
+  })
+})
+
+describe('EstimateQueue — sorting', () => {
+  it('sorts by priority by default (urgent → high → medium)', async () => {
+    renderQueue()
+    expect(await cardNames()).toEqual([
+      'Charlie Streetscape',
+      'Bravo Gardens HOA',
+      'Alpha Ranch HOA',
+      'Delta Amenity Center',
+    ])
+  })
+
+  it('sorts by deadline (soonest due-back first)', async () => {
+    const user = userEvent.setup()
+    renderQueue()
+    await screen.findAllByTestId('queue-card')
+    await user.click(screen.getByRole('button', { name: /deadline/i }))
+    expect(await cardNames()).toEqual([
+      'Charlie Streetscape',
+      'Bravo Gardens HOA',
+      'Alpha Ranch HOA',
+      'Delta Amenity Center',
+    ])
+  })
+
+  it('sorts by value (largest first)', async () => {
+    const user = userEvent.setup()
+    renderQueue()
+    await screen.findAllByTestId('queue-card')
+    await user.click(screen.getByRole('button', { name: /value/i }))
+    expect(await cardNames()).toEqual([
+      'Charlie Streetscape',
+      'Alpha Ranch HOA',
+      'Delta Amenity Center',
+      'Bravo Gardens HOA',
+    ])
+  })
+
+  it('sorts by acreage (largest first; derived from sections when not stored)', async () => {
+    const user = userEvent.setup()
+    renderQueue()
+    await screen.findAllByTestId('queue-card')
+    await user.click(screen.getByRole('button', { name: /acreage/i }))
+    // Maintenance fixtures derive 165,000 sqft ≈ 3.8 ac; installs store 2.1 ac.
+    expect(await cardNames()).toEqual([
+      'Alpha Ranch HOA',
+      'Bravo Gardens HOA',
+      'Charlie Streetscape',
+      'Delta Amenity Center',
+    ])
+  })
+
+  it('re-clicking the active sort chip flips its direction', async () => {
+    const user = userEvent.setup()
+    renderQueue()
+    await screen.findAllByTestId('queue-card')
+    await user.click(screen.getByRole('button', { name: /priority/i }))
+    expect(await cardNames()).toEqual([
+      'Alpha Ranch HOA',
+      'Delta Amenity Center',
+      'Bravo Gardens HOA',
+      'Charlie Streetscape',
+    ])
+  })
+})
+
+// ----- Intake CTAs (AC 3) — Handoff 11/12 seams -------------------------------
+
+describe('EstimateQueue — intake CTAs', () => {
+  it('invokes the Maintenance intake seam (Handoff 11 modal opener)', async () => {
+    const user = userEvent.setup()
+    const onMaintenanceIntake = vi.fn()
+    renderQueue({ onMaintenanceIntake })
+    await screen.findAllByTestId('queue-card')
+
+    await user.click(screen.getByRole('button', { name: /maintenance intake/i }))
+    expect(onMaintenanceIntake).toHaveBeenCalledTimes(1)
+  })
+
+  it('invokes the Install Intake seam (Handoff 12 modal opener)', async () => {
+    const user = userEvent.setup()
+    const onInstallIntake = vi.fn()
+    renderQueue({ onInstallIntake })
+    await screen.findAllByTestId('queue-card')
+
+    await user.click(screen.getByRole('button', { name: /install intake/i }))
+    expect(onInstallIntake).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls back to a clearly-marked stub toast until the modals land', async () => {
+    const user = userEvent.setup()
+    renderQueue()
+    await screen.findAllByTestId('queue-card')
+
+    await user.click(screen.getByRole('button', { name: /maintenance intake/i }))
+    expect(await screen.findByText(/Maintenance intake .*Handoff 11/i)).toBeInTheDocument()
+  })
+})
+
+// ----- Card rendering (AC 4) ---------------------------------------------------
+
+describe('EstimateQueue — card fields', () => {
+  it('renders priority, status, type tag, name, acreage, value, walk date, SLA and rep', async () => {
+    renderQueue()
+    const cards = await screen.findAllByTestId('queue-card')
+    const bravo = cards.find((c) => within(c).queryByText('Bravo Gardens HOA'))!
+
+    expect(within(bravo).getByText('High')).toBeInTheDocument()
+    expect(within(bravo).getByText('Queued')).toBeInTheDocument()
+    expect(within(bravo).getByText('HOA')).toBeInTheDocument()
+    expect(within(bravo).getByText('3.8 ac')).toBeInTheDocument()
+    expect(within(bravo).getByText('$400K')).toBeInTheDocument()
+    expect(within(bravo).getByText(/^Walk:/)).toBeInTheDocument()
+    expect(within(bravo).getByText('2d left — SLA risk')).toBeInTheDocument()
+    // Assigned rep: fixture assigns u5 → Casey Nguyen (CN).
+    expect(within(bravo).getByText('CN')).toBeInTheDocument()
+    expect(within(bravo).getByText(/Casey/)).toBeInTheDocument()
+    // Optional italic notes line.
+    expect(within(bravo).getByText(/Board meets monthly/)).toBeInTheDocument()
+  })
+
+  it('shows the "New — from Sales" status badge for Handoff-12 submissions', async () => {
+    renderQueue()
+    const cards = await screen.findAllByTestId('queue-card')
+    const delta = cards.find((c) => within(c).queryByText('Delta Amenity Center'))!
+    expect(within(delta).getByText('New — from Sales')).toBeInTheDocument()
+    expect(within(delta).getByText('install')).toBeInTheDocument()
+  })
+
+  it('shows an overdue SLA label and escalates the card border when breached', async () => {
+    renderQueue()
+    const cards = await screen.findAllByTestId('queue-card')
+    const charlie = cards.find((c) => within(c).queryByText('Charlie Streetscape'))!
+    expect(within(charlie).getByText('1d overdue — SLA breached')).toBeInTheDocument()
+    expect(charlie.className).toMatch(/border-red/)
+
+    const alpha = cards.find((c) => within(c).queryByText('Alpha Ranch HOA'))!
+    expect(within(alpha).getByText('10d left')).toBeInTheDocument()
+    expect(alpha.className).not.toMatch(/border-red/)
+  })
+})
+
+// ----- Card → editor routing (AC 5) ---------------------------------------------
+
+describe('EstimateQueue — opening an estimate', () => {
+  it('clicking a maintenance card opens it in the editor with no mode prompt', async () => {
+    const user = userEvent.setup()
+    const { shell } = renderQueue()
+    await screen.findAllByTestId('queue-card')
+    await user.click(screen.getByText('Alpha Ranch HOA'))
+
+    expect(shell.setOpenEstimate).toHaveBeenCalledTimes(1)
+    const opened = vi.mocked(shell.setOpenEstimate).mock.calls[0][0]!
+    expect(opened.id).toBe('q-m1')
+    expect(opened.estimateType).toBe('maintenance')
+    expect(shell.setActiveTab).toHaveBeenCalledWith('editor')
+    // The queue never asks the user to pick an engine/mode.
+    expect(screen.queryByText(/select .*mode|choose .*mode|editor mode/i)).not.toBeInTheDocument()
+  })
+
+  it('clicking an install card opens it in the editor keyed off estimateType', async () => {
+    const user = userEvent.setup()
+    const { shell } = renderQueue()
+    await screen.findAllByTestId('queue-card')
+    await user.click(screen.getByText('Charlie Streetscape'))
+
+    const opened = vi.mocked(shell.setOpenEstimate).mock.calls[0][0]!
+    expect(opened.id).toBe('q-i1')
+    expect(opened.estimateType).toBe('install')
+    expect(shell.setActiveTab).toHaveBeenCalledWith('editor')
+  })
+})
+
+// ----- Branch scoping (AC 6) -----------------------------------------------------
+
+describe('EstimateQueue — role & branch scoping (BRD I-9.5)', () => {
+  it('queries with the user branch scope and renders only in-scope estimates', async () => {
+    const outOfScope = buildInstallEstimate({
+      name: 'Echo Raleigh Campus',
+      branch: 'Raleigh',
+    })
+    const { requests } = renderQueue({ estimates: [...fixtures(), outOfScope] })
+
+    await screen.findAllByTestId('queue-card')
+    expect(requests[0].searchParams.get('branch')).toBe('Phoenix-Desert')
+    expect(screen.queryByText('Echo Raleigh Campus')).not.toBeInTheDocument()
+    expect(await cardNames()).toHaveLength(4)
+  })
+
+  it('shows the lock-chip reflecting the applied scope', async () => {
+    renderQueue()
+    expect(
+      await screen.findByText('Role & branch scoped — Phoenix-Desert'),
+    ).toBeInTheDocument()
+  })
+})
+
+// ----- Shell integration (AC 5, end to end through EstimatingPage) ---------------
+
+describe('EstimateQueue — EstimatingPage integration', () => {
+  it('opening a maintenance estimate from the queue lands on the Line-Item Editor tab', async () => {
+    const user = userEvent.setup()
+    render(<EstimatingPage />)
+
+    // Default MSW seed: one maintenance + one install estimate (Phoenix-Desert).
+    const card = await screen.findByText('Dobson Ranch HOA — Grounds Maintenance')
+    await user.click(card)
+
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Line-Item Editor' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      ),
+    )
+    expect(screen.queryByTestId('editor-empty')).not.toBeInTheDocument()
+  })
+
+  it('opening an install estimate routes to the editor without any mode prompt', async () => {
+    const user = userEvent.setup()
+    render(<EstimatingPage />)
+
+    const card = await screen.findByText('Silverleaf — Phase 2 Installation')
+    await user.click(card)
+
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Line-Item Editor' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      ),
+    )
+    expect(screen.queryByTestId('editor-empty')).not.toBeInTheDocument()
+    expect(screen.queryByText(/select .*mode|choose .*mode|editor mode/i)).not.toBeInTheDocument()
+  })
+})
+
+// ----- Aspire sync status on the card (Phase 2 wiring) -----------------------
+
+describe('EstimateQueue — Aspire sync status', () => {
+  it('surfaces the Aspire identifier on the card via displayRef', async () => {
+    renderQueue({
+      estimates: [
+        buildMaintenanceEstimate({
+          id: 'q-sync',
+          name: 'Sync Identifier',
+          aspireNumber: 'ASP-99999',
+          aspireSyncStatus: 'synced',
+        }),
+      ],
+    })
+    expect(await screen.findByText('ASP-99999')).toBeInTheDocument()
+  })
+
+  it('offers a retry affordance on a failed estimate', async () => {
+    renderQueue({
+      estimates: [
+        buildMaintenanceEstimate({
+          id: 'q-failed',
+          name: 'Failed Sync',
+          aspireNumber: null,
+          aspireSyncStatus: 'failed',
+        }),
+      ],
+    })
+    expect(await screen.findByText(/sync failed/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /retry sync/i })).toBeInTheDocument()
+  })
+})

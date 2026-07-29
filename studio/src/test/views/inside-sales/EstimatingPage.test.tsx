@@ -3,209 +3,171 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render, makeUser } from '@/test/utils'
 import { useAuthStore } from '@/store/authStore'
+import { buildMaintenanceEstimate, buildInstallEstimate } from '@/mocks/estimatingData'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 
 function seedUser() {
   useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'inside_sales' }) })
 }
 
-describe('EstimatingPage', () => {
+const ALL_TAB_LABELS = [
+  'Estimate Queue',
+  'Line-Item Editor',
+  'Takeoff Insert',
+  'Materials Calculator',
+  'Margin Analysis',
+  'Discrepancy Review',
+  'Approval & Handoff',
+  'Approval Queue',
+  'ITB Tracker',
+]
+
+describe('EstimatingPage shell', () => {
   beforeEach(() => {
     seedUser()
   })
 
-  it('renders the Estimating TopNav title', () => {
+  it('renders the Estimating header title and redesign subtitle', () => {
     render(<EstimatingPage />)
-    expect(screen.getByText('Estimating')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Estimating' })).toBeInTheDocument()
+    expect(
+      screen.getByText('Intake-driven · manual takeoff · hours-driven kits · value-tiered approval'),
+    ).toBeInTheDocument()
   })
 
-  it('renders all 4 tab buttons', () => {
+  it('renders all 9 config-driven tabs when no estimate is open', () => {
     render(<EstimatingPage />)
-    expect(screen.getByRole('button', { name: /estimate queue/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /line-item editor/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /proposal export/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /margin analysis/i })).toBeInTheDocument()
-  })
-
-  it('shows Estimate Queue tab content by default', () => {
-    render(<EstimatingPage />)
-    // EstimateQueue renders queue items — check for its content
-    // It should show the queue section
-    expect(screen.queryByText(/Maricopa County/i) !== null || screen.queryByText(/queue/i) !== null).toBe(true)
-  })
-
-  it('switches to Line-Item Editor tab on click', async () => {
-    const user = userEvent.setup()
-    render(<EstimatingPage />)
-
-    const editorTab = screen.getByRole('button', { name: /line-item editor/i })
-    await user.click(editorTab)
-
-    // LineItemEditor should show Estimate Summary card
-    await screen.findByText('Estimate Summary')
-    expect(screen.getByText('Estimate Summary')).toBeInTheDocument()
-  })
-
-  it('switches to Margin Analysis tab on click', async () => {
-    const user = userEvent.setup()
-    render(<EstimatingPage />)
-
-    const marginsTab = screen.getByRole('button', { name: /margin analysis/i })
-    await user.click(marginsTab)
-
-    // MarginAnalysis shows Overall Margin card
-    await screen.findByText('Overall Margin')
-    expect(screen.getByText('Overall Margin')).toBeInTheDocument()
-  })
-
-  it('switches to Proposal Export tab on click', async () => {
-    const user = userEvent.setup()
-    render(<EstimatingPage />)
-
-    const proposalTab = screen.getByRole('button', { name: /proposal export/i })
-    await user.click(proposalTab)
-
-    // ProposalExport shows Generate PDF button and Proposal Details
-    await screen.findByRole('button', { name: /generate pdf/i })
-    expect(screen.getByRole('button', { name: /generate pdf/i })).toBeInTheDocument()
-  })
-
-  it('LineItemEditor: displays category sections', async () => {
-    const user = userEvent.setup()
-    render(<EstimatingPage />)
-
-    await user.click(screen.getByRole('button', { name: /line-item editor/i }))
-    await screen.findByText('Estimate Summary')
-
-    // Category sections should be present — some may appear multiple times
-    expect(screen.getAllByText('Labor').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Materials').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Equipment').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Overhead').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Subcontractor').length).toBeGreaterThan(0)
-  })
-
-  it('LineItemEditor: add a line item via Add button', async () => {
-    const user = userEvent.setup()
-    render(<EstimatingPage />)
-
-    await user.click(screen.getByRole('button', { name: /line-item editor/i }))
-    await screen.findByText('Estimate Summary')
-
-    // Find "Add labor item" button and click it
-    const addLaborBtn = screen.getByRole('button', { name: /add labor item/i })
-
-    // Count items before
-    const initialItems = screen.getAllByPlaceholderText('Description…')
-    const beforeCount = initialItems.length
-
-    await user.click(addLaborBtn)
-
-    // After adding, should have one more description input
-    const afterItems = screen.getAllByPlaceholderText('Description…')
-    expect(afterItems.length).toBe(beforeCount + 1)
-  })
-
-  it('LineItemEditor: delete a line item via delete button', async () => {
-    const user = userEvent.setup()
-    render(<EstimatingPage />)
-
-    await user.click(screen.getByRole('button', { name: /line-item editor/i }))
-    await screen.findByText('Estimate Summary')
-
-    // Get initial count of delete buttons
-    const deleteButtons = screen.getAllByRole('button', { name: /delete item/i })
-    const initialCount = deleteButtons.length
-    expect(initialCount).toBeGreaterThan(0)
-
-    // Click first delete
-    await user.click(deleteButtons[0])
-
-    // Should have one fewer
-    const afterDelete = screen.getAllByRole('button', { name: /delete item/i })
-    expect(afterDelete.length).toBe(initialCount - 1)
-  })
-
-  it('LineItemEditor: totals recalculate when qty changes', async () => {
-    const user = userEvent.setup()
-    render(<EstimatingPage />)
-
-    await user.click(screen.getByRole('button', { name: /line-item editor/i }))
-    await screen.findByText('Estimate Summary')
-
-    // Get a quantity input (first one)
-    const qtyInputs = screen.getAllByDisplayValue('52') // First line item has qty 52
-    if (qtyInputs.length > 0) {
-      await user.clear(qtyInputs[0])
-      await user.type(qtyInputs[0], '100')
-      // The total should have updated
-      const afterTotal = screen.getAllByText(/\$[\d,]+/)
-      expect(afterTotal.length).toBeGreaterThan(0)
+    for (const label of ALL_TAB_LABELS) {
+      expect(screen.getByRole('tab', { name: label })).toBeInTheDocument()
     }
   })
 
-  it('LineItemEditor: Save button renders', async () => {
-    const user = userEvent.setup()
+  it('shows Estimate Queue tab content by default, with the queue tab active', () => {
     render(<EstimatingPage />)
-
-    await user.click(screen.getByRole('button', { name: /line-item editor/i }))
-    await screen.findByText('Estimate Summary')
-
-    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Estimate Queue' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(screen.getByRole('tab', { name: 'Margin Analysis' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
   })
 
-  it('LineItemEditor: Save button changes to Saved after click', async () => {
+  it('switching tabs updates the active state and gives the active tab the brand-green highlight', async () => {
     const user = userEvent.setup()
     render(<EstimatingPage />)
 
-    await user.click(screen.getByRole('button', { name: /line-item editor/i }))
-    await screen.findByText('Estimate Summary')
+    const editorTab = screen.getByRole('tab', { name: 'Line-Item Editor' })
+    await user.click(editorTab)
 
-    const saveBtn = screen.getByRole('button', { name: /^save$/i })
-    await user.click(saveBtn)
-
-    await screen.findByText(/saved/i)
-    expect(screen.getByText(/saved/i)).toBeInTheDocument()
+    expect(editorTab).toHaveAttribute('aria-selected', 'true')
+    expect(editorTab.className).toContain('2E7D52')
+    expect(screen.getByRole('tab', { name: 'Estimate Queue' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
   })
 
-  it('MarginAnalysis renders cost breakdown cards', async () => {
-    const user = userEvent.setup()
+  it('does not render the "Not visible to Sales" pill', () => {
     render(<EstimatingPage />)
-
-    await user.click(screen.getByRole('button', { name: /margin analysis/i }))
-    await screen.findByText('Total Bid Price')
-
-    expect(screen.getByText('Total Bid Price')).toBeInTheDocument()
-    expect(screen.getByText('Total Cost')).toBeInTheDocument()
-    expect(screen.getByText('Overall Margin')).toBeInTheDocument()
-    expect(screen.getByText('Target Margin')).toBeInTheDocument()
+    expect(screen.queryByText('Not visible to Sales')).not.toBeInTheDocument()
   })
 
-  it('MarginAnalysis renders Margin by Category section', async () => {
-    const user = userEvent.setup()
+  it('renders the notifications bell', () => {
     render(<EstimatingPage />)
-
-    await user.click(screen.getByRole('button', { name: /margin analysis/i }))
-    await screen.findByText('Margin by Category')
-    expect(screen.getByText('Margin by Category')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /notifications/i })).toBeInTheDocument()
   })
 
-  it('ProposalExport Generate PDF button renders', async () => {
-    const user = userEvent.setup()
-    render(<EstimatingPage />)
+  describe('estimateType-aware tab visibility', () => {
+    it('an open maintenance estimate hides Materials Calculator and Discrepancy Review', () => {
+      render(<EstimatingPage initialOpenEstimate={buildMaintenanceEstimate()} />)
+      expect(screen.queryByRole('tab', { name: 'Materials Calculator' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('tab', { name: 'Discrepancy Review' })).not.toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Takeoff Insert' })).toBeInTheDocument()
+    })
 
-    await user.click(screen.getByRole('button', { name: /proposal export/i }))
-    await screen.findByRole('button', { name: /generate pdf/i })
-    expect(screen.getByRole('button', { name: /generate pdf/i })).toBeInTheDocument()
+    it('an open install estimate hides Takeoff Insert', () => {
+      render(<EstimatingPage initialOpenEstimate={buildInstallEstimate()} />)
+      expect(screen.queryByRole('tab', { name: 'Takeoff Insert' })).not.toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Materials Calculator' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Discrepancy Review' })).toBeInTheDocument()
+    })
   })
 
-  it('ProposalExport Preview button renders', async () => {
+  // Placeholder tab tests are removed as each feature is implemented:
+  // - Materials Calculator — Handoff 05 (MaterialsCalculator)
+  // - Discrepancy Review — Handoff 06 (DiscrepancyFlag)
+  // - Approval & Handoff — Handoff 08 (ApprovalHandoff)
+  // - Approval Queue — Handoff 09 (ApprovalQueue)
+  // - ITB Tracker — Handoff 13 (ItbTracker)
+  // All feature tabs are now implemented; no placeholder tabs remain.
+})
+
+describe('EstimatingPage feature tabs (existing components)', () => {
+  beforeEach(() => {
+    seedUser()
+  })
+
+  // Handoff 07 — Margin Analysis reads the OPEN estimate from the shell.
+  it('switches to Margin Analysis tab on click (empty state while browsing)', async () => {
     const user = userEvent.setup()
     render(<EstimatingPage />)
 
-    await user.click(screen.getByRole('button', { name: /proposal export/i }))
-    // Multiple "Preview" buttons may exist (tab button + preview control)
-    const previewButtons = await screen.findAllByRole('button', { name: /preview/i })
-    expect(previewButtons.length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('tab', { name: 'Margin Analysis' }))
+    expect(await screen.findByTestId('margin-empty')).toBeInTheDocument()
+  })
+
+  // Handoff 03 — Line-Item Editor mounted through the shell.
+  it('Line-Item Editor: shows an empty state when no estimate is open', async () => {
+    const user = userEvent.setup()
+    render(<EstimatingPage />)
+
+    await user.click(screen.getByRole('tab', { name: 'Line-Item Editor' }))
+    expect(screen.getByTestId('editor-empty')).toBeInTheDocument()
+    expect(screen.getByText(/no estimate open/i)).toBeInTheDocument()
+  })
+
+  it('Line-Item Editor: an open maintenance estimate renders the maintenance engine (no mode toggle)', async () => {
+    const user = userEvent.setup()
+    render(<EstimatingPage initialOpenEstimate={buildMaintenanceEstimate()} />)
+
+    await user.click(screen.getByRole('tab', { name: 'Line-Item Editor' }))
+    expect(screen.getByTestId('maintenance-editor')).toBeInTheDocument()
+    expect(screen.getAllByTestId('section-card').length).toBeGreaterThan(0)
+    expect(screen.queryByTestId('install-editor')).not.toBeInTheDocument()
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+  })
+
+  it('Line-Item Editor: an open install estimate never renders the maintenance engine', async () => {
+    const user = userEvent.setup()
+    render(<EstimatingPage initialOpenEstimate={buildInstallEstimate()} />)
+
+    await user.click(screen.getByRole('tab', { name: 'Line-Item Editor' }))
+    expect(screen.getByTestId('install-editor')).toBeInTheDocument()
+    expect(screen.queryByTestId('maintenance-editor')).not.toBeInTheDocument()
+  })
+
+  it('MarginAnalysis renders KPI cards for the open estimate', async () => {
+    const user = userEvent.setup()
+    render(<EstimatingPage initialOpenEstimate={buildMaintenanceEstimate()} />)
+
+    await user.click(screen.getByRole('tab', { name: 'Margin Analysis' }))
+    await screen.findByTestId('margin-kpi-contract')
+
+    expect(screen.getByText('Total contract value')).toBeInTheDocument()
+    expect(screen.getByText('Total cost')).toBeInTheDocument()
+    expect(screen.getByText('Overall gross margin')).toBeInTheDocument()
+    expect(screen.getByText('Target margin')).toBeInTheDocument()
+  })
+
+  it('MarginAnalysis renders the service-group panel and benchmark check', async () => {
+    const user = userEvent.setup()
+    render(<EstimatingPage initialOpenEstimate={buildMaintenanceEstimate()} />)
+
+    await user.click(screen.getByRole('tab', { name: 'Margin Analysis' }))
+    expect(await screen.findByText('Margin by service group')).toBeInTheDocument()
+    expect(screen.getByTestId('margin-groups-maintenance')).toBeInTheDocument()
+    expect(screen.getByTestId('benchmark-panel')).toBeInTheDocument()
   })
 })

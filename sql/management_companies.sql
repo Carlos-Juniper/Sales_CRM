@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS `juniper`.`management_companies` (
     `maps_place_id`    VARCHAR(255)  DEFAULT NULL,
     `contact_email`    VARCHAR(255)  DEFAULT NULL,
     `last_enriched_at` DATETIME      DEFAULT NULL,
+    -- Aspire external reference + async-sync bookkeeping (see properties.sql).
+    `aspire_company_id`  INT         DEFAULT NULL,
+    `aspire_sync_status` ENUM('pending','synced','failed') NOT NULL DEFAULT 'pending',
+    `aspire_sync_error`  TEXT        DEFAULT NULL,
+    `aspire_synced_at`   DATETIME    DEFAULT NULL,
     `created_at`       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),

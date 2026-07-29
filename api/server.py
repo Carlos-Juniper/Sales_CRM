@@ -52,8 +52,18 @@ if _extra_origins:
 @asynccontextmanager
 async def lifespan(app):
     await run_migrations()
-    yield
-    await close_pool()
+    sweep_task = None
+    # Durability sweep for best-effort Aspire pushes — only when sync is enabled,
+    # so tests and standalone runs never spawn it.
+    if os.environ.get("ASPIRE_SYNC_ENABLED", "false").strip().lower() in ("1", "true", "yes"):
+        from api.estimating import sweep_loop
+        sweep_task = asyncio.create_task(sweep_loop())
+    try:
+        yield
+    finally:
+        if sweep_task is not None:
+            sweep_task.cancel()
+        await close_pool()
 
 
 app = FastAPI(title="Juniper CRM API", lifespan=lifespan)
@@ -311,6 +321,15 @@ async def require_auth(session: Optional[str] = Cookie(default=None)) -> dict:
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Session expired or invalid")
     return payload
+
+
+# ── Estimating (Handoff 00 + 08) ───────────────────────────────────────────────
+# Routes live in api/estimating.py; registered here so they share require_auth.
+from api import estimating as _estimating  # noqa: E402
+from api import properties as _properties  # noqa: E402
+
+_estimating.register(app, require_auth)
+_properties.register(app, require_auth)
 
 
 # ── Leads ────────────────────────────────────────────────────────────────────
@@ -1442,6 +1461,9 @@ def _issue_jwt(user: dict, response: Response) -> dict:
         "role": user["role"],
         "branch_id": user["branch_id"],
         "avatar_initials": user["avatar_initials"],
+        # Aspire ContactID for defaulting an opportunity's SalesRepContactID; may be
+        # null until the one-time backfill runs. .get keeps pre-backfill rows working.
+        "aspire_rep_id": user.get("aspire_rep_id"),
         "exp": datetime.now(timezone.utc) + timedelta(seconds=SESSION_DURATION),
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)

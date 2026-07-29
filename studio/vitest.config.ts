@@ -1,11 +1,12 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import path from 'path'
 
 // Absolute paths are required because the project directory contains a colon
-// (feat:calendar). Vite's isFileLoadingAllowed rejects paths with ':'
+// (feat:estimating). Vite's isFileLoadingAllowed rejects paths with ':'
 // on non-Windows systems, causing Cannot find module '/src/test/setup.ts'.
-// Fix: hard-code the absolute root + set server.fs.strict = false.
-const ROOT = '/Users/carloshernandez/Desktop/feat:calendar/feat:server/juniper-crm-app/studio'
+// Fix: resolve the absolute root at config time + set server.fs.strict = false.
+const ROOT = path.resolve(__dirname)
 const SETUP_FILE = ROOT + '/src/test/setup.ts'
 
 export default defineConfig({

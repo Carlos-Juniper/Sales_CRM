@@ -15,6 +15,12 @@ export default defineConfig(({ mode: _mode }) => ({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+    // Force a single React instance — prevents Rolldown/Vite 8 CJS-interop from
+    // creating mismatched React copies across pre-bundled deps (zustand, radix, etc.)
+    dedupe: ['react', 'react-dom'],
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-dom/client'],
   },
   server: {
     port: 5174,

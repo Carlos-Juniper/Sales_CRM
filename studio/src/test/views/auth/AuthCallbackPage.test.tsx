@@ -109,9 +109,9 @@ describe('AuthCallbackPage — Entra token exchange', () => {
 
     await vi.waitFor(() => {
       expect(mockExchangeCodeForTokens).toHaveBeenCalledWith('auth-code', 'st-123')
+      expect(mockEntraCallback).toHaveBeenCalledWith(GOOD_TOKENS.id_token)
+      expect(useAuthStore.getState().user).toEqual(user)
     })
-    expect(mockEntraCallback).toHaveBeenCalledWith(GOOD_TOKENS.id_token)
-    expect(useAuthStore.getState().user).toEqual(user)
   })
 
   it('stores Graph tokens server-side after a successful exchange', async () => {

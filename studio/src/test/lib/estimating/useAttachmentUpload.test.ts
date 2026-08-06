@@ -177,6 +177,55 @@ describe('useAttachmentUpload', () => {
     expect(result.current.state.status).toBe('error')
   })
 
+  // ── Handoff 27 — takeoff_scan kind (scanned map images, estimate-scoped) ──
+
+  it('uploads a PNG takeoff scan and returns the estimate-scoped attachment', async () => {
+    const estimateId = await createEstimateWithIntake()
+    const png = new File([new Uint8Array(2048)], 'boundary.png', { type: 'image/png' })
+    const { result } = renderHook(() => useAttachmentUpload())
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let attachment: any = null
+    await act(async () => {
+      attachment = await result.current.upload(estimateId, png, 'takeoff_scan')
+    })
+
+    expect(result.current.state.status).toBe('done')
+    expect(attachment?.kind).toBe('takeoff_scan')
+    expect(attachment?.status).toBe('stored')
+    expect(attachment?.contentType).toBe('image/png')
+    expect(attachment?.objectKey).toMatch(/\.png$/)
+  })
+
+  it('still rejects image files for intake kinds (PDF-only)', async () => {
+    const estimateId = await createEstimateWithIntake()
+    const png = new File([new Uint8Array(512)], 'map.png', { type: 'image/png' })
+    const { result } = renderHook(() => useAttachmentUpload())
+
+    let ret: Awaited<ReturnType<typeof result.current.upload>> = null
+    await act(async () => {
+      ret = await result.current.upload(estimateId, png, 'property_map')
+    })
+
+    expect(ret).toBeNull()
+    expect(result.current.state.status).toBe('error')
+    expect(result.current.state.error).toMatch(/pdf/i)
+  })
+
+  it('rejects unsupported types for takeoff_scan before hitting the network', async () => {
+    const estimateId = await createEstimateWithIntake()
+    const txt = new File([new Uint8Array(64)], 'notes.txt', { type: 'text/plain' })
+    const { result } = renderHook(() => useAttachmentUpload())
+
+    let ret: Awaited<ReturnType<typeof result.current.upload>> = null
+    await act(async () => {
+      ret = await result.current.upload(estimateId, txt, 'takeoff_scan')
+    })
+
+    expect(ret).toBeNull()
+    expect(result.current.state.status).toBe('error')
+  })
+
   it('reset() brings state back to idle', async () => {
     const estimateId = await createEstimateWithIntake()
     const { result } = renderHook(() => useAttachmentUpload())

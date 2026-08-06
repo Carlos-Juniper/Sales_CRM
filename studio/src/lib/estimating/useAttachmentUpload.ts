@@ -13,6 +13,11 @@ import type { AttachmentKind, IntakeAttachment } from '@/types/estimating'
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024 // 2 GiB — mirrors GCS_MAX_UPLOAD_BYTES
 
+// Per-kind content-type allowlist (mirrors the backend presign validation).
+// Intake docs stay PDF-only; the takeoff scan (Handoff 27) is a scanned map
+// image, so it also accepts common image types.
+const SCAN_CONTENT_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp']
+
 export type UploadStatus = 'idle' | 'presigning' | 'uploading' | 'confirming' | 'done' | 'error'
 
 export interface UploadState {
@@ -36,8 +41,14 @@ const INITIAL: UploadState = {
   attachment: null,
 }
 
-function clientValidate(file: File): string | null {
-  if (file.type !== 'application/pdf') return 'Only PDF files are supported'
+function clientValidate(file: File, kind: AttachmentKind): string | null {
+  if (kind === 'takeoff_scan') {
+    if (!SCAN_CONTENT_TYPES.includes(file.type)) {
+      return 'Takeoff scans must be PNG, JPEG, WebP, or PDF'
+    }
+  } else if (file.type !== 'application/pdf') {
+    return 'Only PDF files are supported'
+  }
   if (file.size > MAX_FILE_BYTES) return 'File exceeds the 2 GiB limit'
   return null
 }
@@ -46,7 +57,8 @@ function xhrPut(url: string, file: File, onProgress: (pct: number) => void): Pro
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('PUT', url, true)
-    xhr.setRequestHeader('Content-Type', 'application/pdf')
+    // Must match the content type the presign authorized (and GCS expects).
+    xhr.setRequestHeader('Content-Type', file.type)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
     }
@@ -66,7 +78,7 @@ export function useAttachmentUpload(): UseAttachmentUpload {
 
   const upload = useCallback(
     async (estimateId: string, file: File, kind: AttachmentKind): Promise<IntakeAttachment | null> => {
-      const validationError = clientValidate(file)
+      const validationError = clientValidate(file, kind)
       if (validationError) {
         setState({ ...INITIAL, status: 'error', error: validationError })
         return null
@@ -78,7 +90,7 @@ export function useAttachmentUpload(): UseAttachmentUpload {
         const { attachmentId, uploadUrl } = await estimatingApi.presignAttachment(estimateId, {
           kind,
           fileName: file.name,
-          contentType: 'application/pdf',
+          contentType: file.type,
           sizeBytes: file.size,
         })
 

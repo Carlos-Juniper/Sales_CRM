@@ -21,6 +21,7 @@ function buildAtt(overrides?: Partial<IntakeAttachment>): IntakeAttachment {
   return {
     id: 'att-1',
     intakeSubmissionId: 'ins-1',
+    estimateId: null,
     fileName: 'site_plan.pdf',
     contentType: 'application/pdf',
     sizeBytes: 512_000,

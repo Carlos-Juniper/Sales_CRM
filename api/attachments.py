@@ -15,6 +15,7 @@ Env vars:
 from __future__ import annotations
 
 import os
+import urllib.parse
 from datetime import timedelta
 from typing import Optional
 
@@ -51,9 +52,23 @@ def _gcs() -> storage.Client:
     return _client
 
 
-def object_key_for(estimate_id: str, attachment_id: str) -> str:
+# Extension derived from the VALIDATED content type — never from the user
+# filename. Handoff 27 adds image types for the takeoff_scan kind; intake
+# kinds remain PDF-only at the endpoint layer.
+_EXT_BY_CONTENT_TYPE = {
+    "application/pdf": "pdf",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+}
+
+
+def object_key_for(
+    estimate_id: str, attachment_id: str, content_type: str = "application/pdf"
+) -> str:
     """Deterministic object key — never uses the user filename (path-traversal guard)."""
-    return f"estimating/{estimate_id}/{attachment_id}.pdf"
+    ext = _EXT_BY_CONTENT_TYPE.get(content_type, "bin")
+    return f"estimating/{estimate_id}/{attachment_id}.{ext}"
 
 
 def begin_resumable_session(key: str, content_type: str, origin: str) -> str:
@@ -73,6 +88,22 @@ def head(key: str) -> storage.Blob:
     return blob
 
 
+def content_disposition(original_name: str) -> str:
+    """Build a safe `attachment` Content-Disposition from a client filename.
+
+    The name is attacker-controlled (L2): strip CR/LF (header injection) and
+    keep the quoted-string fallback to printable ASCII with quotes/backslashes
+    removed; the full original name travels percent-encoded in the RFC 5987
+    `filename*` parameter, which conforming browsers prefer.
+    """
+    name = (original_name or "").replace("\r", "").replace("\n", "")
+    fallback = "".join(
+        c for c in name if c not in '"\\' and 32 <= ord(c) < 127
+    ).strip() or "download"
+    encoded = urllib.parse.quote(name, safe="")
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+
+
 def signed_get_url(key: str, original_name: str) -> str:
     """Return a short-lived v4 signed GET URL that forces Save-As with the original filename.
 
@@ -88,7 +119,7 @@ def signed_get_url(key: str, original_name: str) -> str:
         version="v4",
         expiration=timedelta(minutes=GCS_SIGNED_URL_TTL_MIN),
         method="GET",
-        response_disposition=f'attachment; filename="{original_name}"',
+        response_disposition=content_disposition(original_name),
         service_account_email=GCS_SIGNER_SA_EMAIL,
         access_token=creds.token,
     )

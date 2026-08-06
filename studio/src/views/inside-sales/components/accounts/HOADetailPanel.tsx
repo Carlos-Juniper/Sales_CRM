@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { MapPin, Building2, ArrowRight, Pencil } from 'lucide-react'
+import { MapPin, Building2, ArrowRight, Pencil, UserPlus, Calculator } from 'lucide-react'
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel'
 import { Button } from '@/components/ui/button'
 import { AccountStatusBadge } from './AccountStatusBadge'
@@ -14,6 +14,10 @@ interface HOADetailPanelProps {
   isOpen: boolean
   onClose: () => void
   onCreateBid: (property: HOAProperty) => void
+  /** Handoff 15 — promote to a canonical property + lead (create-lead-from-property). */
+  onCreateLead: (property: HOAProperty) => void
+  /** Handoff 15 — launch the estimate intake pre-filled with this property. */
+  onRequestEstimate: (property: HOAProperty) => void
 }
 
 function MetricBox({ label, value }: { label: string; value: string | number }) {
@@ -35,7 +39,7 @@ function InfoRow({ label, value }: { label: string; value: string | null | undef
   )
 }
 
-export function HOADetailPanel({ property, company, managementCompanies, isOpen, onClose, onCreateBid }: HOADetailPanelProps) {
+export function HOADetailPanel({ property, company, managementCompanies, isOpen, onClose, onCreateBid, onCreateLead, onRequestEstimate }: HOADetailPanelProps) {
   const [editOpen, setEditOpen] = useState(false)
   const patchHOAProperty = usePatchHOAProperty()
 
@@ -123,8 +127,17 @@ export function HOADetailPanel({ property, company, managementCompanies, isOpen,
         </section>
       </div>
 
-      {/* Footer */}
+      {/* Footer — engagement actions (Handoff 15: promoting creates the
+          canonical property; the estimate intake is pre-filled from it) */}
       <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => onCreateLead(property)}>
+          <UserPlus className="h-3.5 w-3.5 mr-1" />
+          Create lead
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => onRequestEstimate(property)}>
+          <Calculator className="h-3.5 w-3.5 mr-1" />
+          Request estimate
+        </Button>
         <Button size="sm" onClick={() => onCreateBid(property)} className="ml-auto">
           Create bid
           <ArrowRight className="h-3.5 w-3.5 ml-1" />

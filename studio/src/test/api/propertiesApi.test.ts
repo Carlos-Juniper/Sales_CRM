@@ -21,21 +21,58 @@ describe('propertiesApi', () => {
     expect(seenUrl).toContain('search=sun')
   })
 
-  it('creates a property and returns it with pending sync status', async () => {
+  it('creates a property locally and returns it unsynced (no Aspire push until estimate submission)', async () => {
     let body: unknown
     server.use(
       http.post(`${API}/properties`, async ({ request }) => {
         body = await request.json()
         return HttpResponse.json(
-          { id: 'prop-9', name: 'New HOA', aspireSyncStatus: 'pending', aspirePropertyId: null },
+          { id: 'prop-9', name: 'New HOA', aspireSyncStatus: 'unsynced', aspirePropertyId: null },
           { status: 201 },
         )
       }),
     )
     const created = await propertiesApi.create({ name: 'New HOA', branchCity: 'Orlando, FL' })
     expect(created.id).toBe('prop-9')
-    expect(created.aspireSyncStatus).toBe('pending')
+    expect(created.aspireSyncStatus).toBe('unsynced')
     expect(body).toMatchObject({ name: 'New HOA', branchCity: 'Orlando, FL' })
+  })
+
+  it('passes canonical origin fields (propertyType/sourceType/sourceId) on create', async () => {
+    let body: unknown
+    server.use(
+      http.post(`${API}/properties`, async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json(
+          {
+            id: 'prop-10', name: 'Sunny HOA', aspireSyncStatus: 'unsynced',
+            propertyType: 'hoa', sourceType: 'hoa', sourceId: 'hoa-1',
+          },
+          { status: 201 },
+        )
+      }),
+    )
+    const created = await propertiesApi.create({
+      name: 'Sunny HOA', propertyType: 'hoa', sourceType: 'hoa', sourceId: 'hoa-1',
+    })
+    expect(created.sourceId).toBe('hoa-1')
+    expect(body).toMatchObject({ propertyType: 'hoa', sourceType: 'hoa', sourceId: 'hoa-1' })
+  })
+
+  it('creates a lead from a property (generalized promote)', async () => {
+    let called = false
+    server.use(
+      http.post(`${API}/properties/prop-1/promote`, () => {
+        called = true
+        return HttpResponse.json(
+          { id: 'lead-1', property_id: 'prop-1', status: 'new' },
+          { status: 201 },
+        )
+      }),
+    )
+    const lead = await propertiesApi.promote('prop-1')
+    expect(called).toBe(true)
+    expect(lead.property_id).toBe('prop-1')
   })
 
   it('fetches a property’s prior Aspire opportunities (dedup panel)', async () => {

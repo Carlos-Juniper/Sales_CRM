@@ -73,6 +73,8 @@ function renderPanel({
   managementCompanies = [sampleCompany],
   onClose = vi.fn(),
   onCreateBid = vi.fn(),
+  onCreateLead = vi.fn(),
+  onRequestEstimate = vi.fn(),
 } = {}) {
   render(
     <HOADetailPanel
@@ -82,9 +84,11 @@ function renderPanel({
       isOpen={true}
       onClose={onClose}
       onCreateBid={onCreateBid}
+      onCreateLead={onCreateLead}
+      onRequestEstimate={onRequestEstimate}
     />,
   )
-  return { onClose, onCreateBid }
+  return { onClose, onCreateBid, onCreateLead, onRequestEstimate }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────
@@ -110,6 +114,28 @@ describe('HOADetailPanel — property details', () => {
     expect(screen.getByText('570 ac')).toBeInTheDocument()
     expect(screen.getByText('6,800')).toBeInTheDocument()
     expect(screen.getByText('Collier')).toBeInTheDocument()
+  })
+})
+
+describe('HOADetailPanel — property engagement actions (Handoff 15)', () => {
+  it('renders "Create lead" and "Request estimate" actions in the footer', () => {
+    renderPanel()
+    expect(screen.getByRole('button', { name: /create lead/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /request estimate/i })).toBeInTheDocument()
+  })
+
+  it('clicking "Create lead" reports the HOA property to the parent', async () => {
+    const user = userEvent.setup()
+    const { onCreateLead } = renderPanel()
+    await user.click(screen.getByRole('button', { name: /create lead/i }))
+    expect(onCreateLead).toHaveBeenCalledWith(expect.objectContaining({ id: 'h1' }))
+  })
+
+  it('clicking "Request estimate" reports the HOA property to the parent', async () => {
+    const user = userEvent.setup()
+    const { onRequestEstimate } = renderPanel()
+    await user.click(screen.getByRole('button', { name: /request estimate/i }))
+    expect(onRequestEstimate).toHaveBeenCalledWith(expect.objectContaining({ id: 'h1' }))
   })
 })
 

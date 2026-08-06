@@ -70,6 +70,58 @@ describe('PropertySelector', () => {
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'prop-new' })))
   })
 
+  it('defaults new properties to manual origin (propertyType/sourceType manual, no sourceId)', async () => {
+    const user = userEvent.setup()
+    let body: Record<string, unknown> = {}
+    server.use(
+      http.get(`${API}/properties`, () => HttpResponse.json([])),
+      http.post(`${API}/properties`, async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(prop({ id: 'prop-new' }), { status: 201 })
+      }),
+    )
+    render(<PropertySelector value={null} onSelect={vi.fn()} />)
+    await user.type(screen.getByLabelText(/search properties/i), 'x')
+    await user.click(screen.getByRole('button', { name: /^search$/i }))
+    await user.click(await screen.findByRole('button', { name: /create new property/i }))
+    await user.clear(screen.getByLabelText(/property name/i))
+    await user.type(screen.getByLabelText(/property name/i), 'X HOA')
+    await user.click(screen.getByRole('button', { name: /create property/i }))
+    await waitFor(() => expect(body.name).toBe('X HOA'))
+    expect(body.propertyType).toBe('manual')
+    expect(body.sourceType).toBe('manual')
+    expect(body.sourceId ?? null).toBeNull()
+  })
+
+  it('passes HOA origin fields when the property originates from an HOA prospect', async () => {
+    const user = userEvent.setup()
+    let body: Record<string, unknown> = {}
+    server.use(
+      http.get(`${API}/properties`, () => HttpResponse.json([])),
+      http.post(`${API}/properties`, async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(prop({ id: 'prop-new' }), { status: 201 })
+      }),
+    )
+    render(
+      <PropertySelector
+        value={null}
+        onSelect={vi.fn()}
+        origin={{ propertyType: 'hoa', sourceType: 'hoa', sourceId: 'hoa-9' }}
+      />,
+    )
+    await user.type(screen.getByLabelText(/search properties/i), 'sunny')
+    await user.click(screen.getByRole('button', { name: /^search$/i }))
+    await user.click(await screen.findByRole('button', { name: /create new property/i }))
+    await user.clear(screen.getByLabelText(/property name/i))
+    await user.type(screen.getByLabelText(/property name/i), 'Sunny HOA')
+    await user.click(screen.getByRole('button', { name: /create property/i }))
+    await waitFor(() => expect(body.name).toBe('Sunny HOA'))
+    expect(body.propertyType).toBe('hoa')
+    expect(body.sourceType).toBe('hoa')
+    expect(body.sourceId).toBe('hoa-9')
+  })
+
   it('surfaces an inline error when create fails and does not select', async () => {
     const user = userEvent.setup()
     server.use(

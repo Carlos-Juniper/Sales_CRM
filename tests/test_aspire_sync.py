@@ -300,3 +300,89 @@ class TestPushProperty:
         client.raise_on["post"] = AspireUnreachable("down")
         res = await sync.push_property(_prop(), client=client)
         assert res.status == "failed"
+
+
+# ── Handoff 20 §4.2 — one-way takeoff qty push ───────────────────────────────
+#
+# push_opportunity_service_item_qty writes our locally-owned opportunity_qty
+# into OpportunityServiceItem.ItemQuantity, joined OpportunityServiceID →
+# OpportunityService.OpportunityID, matched by CatalogItemID with the UOM
+# checked against AllocationUnitTypeName. Best-effort, batched, never raises.
+
+def _qty_lines():
+    return [
+        sync.TakeoffQtyLine(catalog_item_id="501", qty=110, uom="ea"),
+        sync.TakeoffQtyLine(catalog_item_id="502", qty=1640, uom="FT"),
+    ]
+
+
+class TestPushOpportunityServiceItemQty:
+    async def test_disabled_short_circuits(self, monkeypatch):
+        monkeypatch.setenv("ASPIRE_SYNC_ENABLED", "false")
+        client = FakeClient()
+        res = await sync.push_opportunity_service_item_qty(9001, _qty_lines(), client=client)
+        assert res.status == "disabled"
+        assert client.calls == []
+
+    async def test_unsynced_opportunity_is_pending(self):
+        client = FakeClient()
+        res = await sync.push_opportunity_service_item_qty(None, _qty_lines(), client=client)
+        assert res.status == "pending"
+        assert client.calls == []
+
+    async def test_no_lines_is_a_synced_noop(self):
+        client = FakeClient()
+        res = await sync.push_opportunity_service_item_qty(9001, [], client=client)
+        assert res.status == "synced"
+        assert res.pushed == 0
+        assert client.calls == []
+
+    async def test_batched_push_matches_catalog_item_and_writes_item_quantity(self):
+        client = FakeClient()
+        client.get_returns = [
+            # OpportunityServices for the opportunity (the §2 join).
+            [{"OpportunityServiceID": 71}, {"OpportunityServiceID": 72}],
+            # Items per service, matched by CatalogItemID.
+            [{"OpportunityServiceItemID": 811, "CatalogItemID": 501,
+              "AllocationUnitTypeName": "ea"}],
+            [{"OpportunityServiceItemID": 822, "CatalogItemID": 502,
+              "AllocationUnitTypeName": "FT"}],
+        ]
+        res = await sync.push_opportunity_service_item_qty(9001, _qty_lines(), client=client)
+        assert res.status == "synced"
+        assert res.pushed == 2
+        assert res.skipped == 0
+
+        get_calls = [c for c in client.calls if c[0] == "get"]
+        assert get_calls[0][1] == "/OpportunityServices"
+        assert get_calls[0][2] == {"$filter": "OpportunityID eq 9001"}
+        assert get_calls[1][1] == "/OpportunityServiceItems"
+
+        writes = {c[1]: c[2] for c in client.calls if c[0] in ("patch", "put")}
+        assert writes["/OpportunityServiceItem/811"] == {"ItemQuantity": 110}
+        assert writes["/OpportunityServiceItem/822"] == {"ItemQuantity": 1640}
+
+    async def test_uom_mismatch_and_unmatched_lines_are_skipped_not_failed(self):
+        client = FakeClient()
+        client.get_returns = [
+            [{"OpportunityServiceID": 71}],
+            # CatalogItemID 501 exists but the Aspire UOM disagrees with ours.
+            [{"OpportunityServiceItemID": 811, "CatalogItemID": 501,
+              "AllocationUnitTypeName": "FT"}],
+        ]
+        lines = [
+            sync.TakeoffQtyLine(catalog_item_id="501", qty=110, uom="ea"),   # uom mismatch
+            sync.TakeoffQtyLine(catalog_item_id="999", qty=5, uom="ea"),     # no match
+        ]
+        res = await sync.push_opportunity_service_item_qty(9001, lines, client=client)
+        assert res.status == "synced"
+        assert res.pushed == 0
+        assert res.skipped == 2
+        assert [c for c in client.calls if c[0] in ("patch", "put")] == []
+
+    async def test_aspire_error_returns_failed_never_raises(self):
+        client = FakeClient()
+        client.raise_on["get"] = AspireUnreachable("down")
+        res = await sync.push_opportunity_service_item_qty(9001, _qty_lines(), client=client)
+        assert res.status == "failed"
+        assert "down" in (res.error or "")

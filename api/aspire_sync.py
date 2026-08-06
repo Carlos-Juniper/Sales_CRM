@@ -72,6 +72,29 @@ class PropertySyncResult:
     error: Optional[str] = None
 
 
+# ── Takeoff qty push (Handoff 20 §4.2) ───────────────────────────────────────
+
+@dataclass
+class TakeoffQtyLine:
+    """One takeoff line's locally-owned opportunity qty, keyed by catalog item.
+
+    catalog_item_id is OUR takeoff_lines.catalog_item_id value; it is compared
+    (string-tolerant) against Aspire's OpportunityServiceItem.CatalogItemID —
+    the kit-migration workstream keeps the two aligned.
+    """
+    catalog_item_id: str
+    qty: float
+    uom: Optional[str] = None
+
+
+@dataclass
+class QtyPushResult:
+    status: str
+    pushed: int = 0
+    skipped: int = 0            # unmatched CatalogItemID or UOM disagreement
+    error: Optional[str] = None
+
+
 # ── Gate ─────────────────────────────────────────────────────────────────────
 
 def sync_enabled() -> bool:
@@ -230,6 +253,83 @@ async def push_status(
         return SyncResult(status="synced", aspire_opportunity_id=aspire_opportunity_id)
     except AspireError as exc:
         return SyncResult(status="failed", error=str(exc))
+    finally:
+        if owns:
+            await client.close()
+
+
+def _records(data) -> list[dict]:
+    """Normalize an Aspire collection response (list or OData {value: [...]})."""
+    if isinstance(data, list):
+        return data
+    return data.get("value", []) if isinstance(data, dict) else []
+
+
+async def push_opportunity_service_item_qty(
+    aspire_opportunity_id: Optional[int],
+    lines: list[TakeoffQtyLine],
+    client: Optional[AspireClient] = None,
+) -> QtyPushResult:
+    """One-way, batched, best-effort push of takeoff qtys (Handoff 20 §4.2).
+
+    Writes each line's locally-owned opportunity qty to
+    OpportunityServiceItem.ItemQuantity via the §2 join
+    (OpportunityServiceID → OpportunityService.OpportunityID), matched by
+    CatalogItemID with the UOM sanity-checked against AllocationUnitTypeName.
+
+    Same shape as push_status: never raises — transient failures return
+    status="failed" and are logged by the caller; unmatched/UOM-mismatched
+    lines are counted in `skipped`, never treated as an error. This module
+    never READS a quantity back — opportunity_qty stays locally owned.
+    """
+    if not sync_enabled():
+        return QtyPushResult(status="disabled")
+    if aspire_opportunity_id is None:
+        return QtyPushResult(status="pending", error="opportunity not yet synced")
+    if not lines:
+        return QtyPushResult(status="synced")
+
+    owns, client = _resolve_client(client)
+    try:
+        services = _records(await client.get(
+            "/OpportunityServices",
+            params={"$filter": f"OpportunityID eq {aspire_opportunity_id}"},
+        ))
+        items_by_catalog: dict[str, dict] = {}
+        for svc in services:
+            svc_id = svc.get("OpportunityServiceID")
+            if svc_id is None:
+                continue
+            items = _records(await client.get(
+                "/OpportunityServiceItems",
+                params={"$filter": f"OpportunityServiceID eq {svc_id}"},
+            ))
+            for item in items:
+                cat = item.get("CatalogItemID")
+                if cat is not None:
+                    items_by_catalog.setdefault(str(cat), item)
+
+        pushed = skipped = 0
+        for line in lines:
+            item = items_by_catalog.get(str(line.catalog_item_id))
+            item_id = None if item is None else item.get("OpportunityServiceItemID")
+            aspire_uom = None if item is None else item.get("AllocationUnitTypeName")
+            if item is None or item_id is None:
+                skipped += 1
+                continue
+            if line.uom and aspire_uom and line.uom != aspire_uom:
+                skipped += 1  # UOM disagreement — never write a mismatched qty
+                continue
+            path = f"/OpportunityServiceItem/{item_id}"
+            body = {"ItemQuantity": line.qty}
+            if cfg.ASPIRE_STATUS_WRITE_VERB == "PUT":
+                await client.put(path, body)
+            else:
+                await client.patch(path, body)
+            pushed += 1
+        return QtyPushResult(status="synced", pushed=pushed, skipped=skipped)
+    except AspireError as exc:
+        return QtyPushResult(status="failed", error=str(exc))
     finally:
         if owns:
             await client.close()

@@ -22,15 +22,15 @@ describe('async Aspire sync simulation (MSW)', () => {
     })
   })
 
-  it('property create returns pending, then flips to synced with an Aspire id', async () => {
+  it('property create is local-only: returns unsynced and never auto-pushes (Handoff 15)', async () => {
     const created = await propertiesApi.create({ name: 'Async Prop', branchCity: 'Orlando, FL' })
-    expect(created.aspireSyncStatus).toBe('pending')
+    expect(created.aspireSyncStatus).toBe('unsynced')
     expect(created.aspirePropertyId).toBeNull()
 
-    await waitFor(async () => {
-      const [row] = await propertiesApi.list('Async Prop')
-      expect(row.aspireSyncStatus).toBe('synced')
-      expect(row.aspirePropertyId).not.toBeNull()
-    })
+    // No background flip — the only Aspire trigger is estimate submission.
+    await new Promise((r) => setTimeout(r, 400))
+    const [row] = await propertiesApi.list('Async Prop')
+    expect(row.aspireSyncStatus).toBe('unsynced')
+    expect(row.aspirePropertyId).toBeNull()
   })
 })

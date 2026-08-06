@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `juniper`.`hoa_properties` (
+CREATE TABLE IF NOT EXISTS `crm`.`hoa_properties` (
     `id`                    VARCHAR(36)    NOT NULL,
     `parcel_id`             VARCHAR(100)   NOT NULL,
     `arcgis_source`         VARCHAR(50)    NOT NULL,

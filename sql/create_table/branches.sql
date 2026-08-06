@@ -5,9 +5,9 @@
 -- the Aspire branches export. sales_territories routes each "City, ST" unit to
 -- one of these BranchIDs per service line (maintenance/install).
 --
--- ⚠️ The live database is `crm`, NOT `juniper` — apply via the unprefixed
--- migration sql/migrations/004_users_and_branches.sql. This juniper-prefixed
--- file keeps the create_table DDL set complete (recreate-from-scratch source).
+-- The live database is `crm` (schema-qualified here as `crm.`). The applied
+-- change history lives in sql/migrations/004_users_and_branches.sql; this
+-- CREATE keeps the create_table DDL set complete (recreate-from-scratch source).
 --
 -- Seed block below is the 2025-10-22 Aspire snapshot (refreshed through
 -- 2026-07). Inactive + "DO NOT USE" rows are kept for fidelity; the live
@@ -15,7 +15,7 @@
 -- Idempotent (ON DUPLICATE KEY UPDATE on the BranchID PK) — safe to re-run.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS `juniper`.`branches` (
+CREATE TABLE IF NOT EXISTS `crm`.`branches` (
     aspire_branch_id   INT          NOT NULL,           -- Aspire BranchID (the real PK)
     branch_name        VARCHAR(255) NOT NULL,
     active             TINYINT(1)   NOT NULL DEFAULT 1,
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS `juniper`.`branches` (
 -- operating roster is: WHERE active = 1 AND branch_name NOT LIKE '%DO NOT USE%'.
 -- Idempotent (ON DUPLICATE KEY UPDATE on the BranchID PK) — safe to re-run to
 -- refresh from a newer export.
-INSERT INTO `juniper`.`branches`
+INSERT INTO `crm`.`branches`
     (aspire_branch_id, branch_name, active, branch_code, address1, city, state, zip,
      phone, manager_contact_id, manager_name, legal_name, time_zone) VALUES
     (1374, 'Bradenton Install', 1, 'BRI', '2504 64th Street Court East', 'Bradenton', 'FL', '34208', '(239) 561-5980', 716118, 'MICHAEL LARSEN', 'Juniper Landscaping of Floridca LLC', 'Eastern Standard Time'),

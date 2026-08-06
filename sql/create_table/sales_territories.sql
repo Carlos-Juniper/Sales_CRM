@@ -9,16 +9,16 @@
 -- branches.aspire_branch_id; no FK, per this set's convention). Territory→branch
 -- is many-to-one and can cross cities, so it is NOT derivable from branch data.
 --
--- ⚠️ The live database is `crm`, NOT `juniper` — apply via the unprefixed
--- migration sql/migrations/004_users_and_branches.sql. This juniper-prefixed
--- file keeps the create_table DDL set complete (recreate-from-scratch source).
+-- The live database is `crm` (schema-qualified here as `crm.`). The applied
+-- change history lives in sql/migrations/004_users_and_branches.sql; this
+-- CREATE keeps the create_table DDL set complete (recreate-from-scratch source).
 --
 -- Seed block below sourced from ASPIRE_BRANCH_MAP (api/aspire_config.py, captured
 -- 2026-07-27); maintenance == install for cities with no dedicated install
 -- branch (install falls back to maintenance at push time). Idempotent.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS `juniper`.`sales_territories` (
+CREATE TABLE IF NOT EXISTS `crm`.`sales_territories` (
     id     VARCHAR(100) NOT NULL,           -- "City, ST" (== users.branch_id, estimates.branch, properties.branch_city)
     name   VARCHAR(255) NOT NULL,           -- same "City, ST" value
     state  CHAR(2)      NULL DEFAULT NULL,
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS `juniper`.`sales_territories` (
 -- (territory, service-line) routings resolve to an ACTIVE branch, none to a
 -- "DO NOT USE"/inactive row. maintenance == install for the 13 cities with no
 -- dedicated install branch (install falls back to maintenance at push time).
-INSERT INTO `juniper`.`sales_territories` (id, name, state, aspire_branch_id_maintenance, aspire_branch_id_install) VALUES
+INSERT INTO `crm`.`sales_territories` (id, name, state, aspire_branch_id_maintenance, aspire_branch_id_install) VALUES
     ('Bonita Springs, FL', 'Bonita Springs, FL', 'FL', 1412, 1412),
     ('Bradenton, FL', 'Bradenton, FL', 'FL', 3684, 1374),
     ('Fort Lauderdale, FL', 'Fort Lauderdale, FL', 'FL', 3636, 3636),

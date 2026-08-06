@@ -78,16 +78,19 @@ function fixtures(): Estimate[] {
   ]
 }
 
-/** Scoped-query mock: the server applies row-level branch scope (BRD I-9.5). */
-function seedScopedList(estimates: Estimate[]) {
+/**
+ * Scoped-query mock: the SERVER applies row-level branch scope from the
+ * session (BRD I-9.5, Handoff 18) — pass `serverScope` to simulate it. The
+ * client sends no branch param.
+ */
+function seedScopedList(estimates: Estimate[], serverScope?: string) {
   const requests: URL[] = []
   server.use(
     http.get('/api/estimating/estimates', ({ request }) => {
       const url = new URL(request.url)
       requests.push(url)
-      const branch = url.searchParams.get('branch')
       return HttpResponse.json(
-        branch ? estimates.filter((e) => e.branch === branch) : estimates,
+        serverScope ? estimates.filter((e) => e.branch === serverScope) : estimates,
       )
     }),
   )
@@ -96,12 +99,13 @@ function seedScopedList(estimates: Estimate[]) {
 
 interface RenderQueueOptions {
   estimates?: Estimate[]
+  serverScope?: string
   onMaintenanceIntake?: () => void
   onInstallIntake?: () => void
 }
 
-function renderQueue({ estimates = fixtures(), ...props }: RenderQueueOptions = {}) {
-  const requests = seedScopedList(estimates)
+function renderQueue({ estimates = fixtures(), serverScope, ...props }: RenderQueueOptions = {}) {
+  const requests = seedScopedList(estimates, serverScope)
   const shell: EstimatingShellApi = {
     activeTab: 'queue',
     setActiveTab: vi.fn(),
@@ -358,24 +362,40 @@ describe('EstimateQueue — opening an estimate', () => {
 
 // ----- Branch scoping (AC 6) -----------------------------------------------------
 
-describe('EstimateQueue — role & branch scoping (BRD I-9.5)', () => {
-  it('queries with the user branch scope and renders only in-scope estimates', async () => {
+describe('EstimateQueue — role & branch scoping (BRD I-9.5 / Handoff 18)', () => {
+  it('sends NO branch param — scope is derived server-side from the session', async () => {
+    const { requests } = renderQueue()
+    await screen.findAllByTestId('queue-card')
+    expect(requests[0].searchParams.get('branch')).toBeNull()
+  })
+
+  it('renders only what the server-scoped query returns', async () => {
     const outOfScope = buildInstallEstimate({
       name: 'Echo Raleigh Campus',
       branch: 'Raleigh',
     })
-    const { requests } = renderQueue({ estimates: [...fixtures(), outOfScope] })
+    renderQueue({
+      estimates: [...fixtures(), outOfScope],
+      serverScope: 'Phoenix-Desert',
+    })
 
     await screen.findAllByTestId('queue-card')
-    expect(requests[0].searchParams.get('branch')).toBe('Phoenix-Desert')
     expect(screen.queryByText('Echo Raleigh Campus')).not.toBeInTheDocument()
     expect(await cardNames()).toHaveLength(4)
   })
 
-  it('shows the lock-chip reflecting the applied scope', async () => {
+  it('shows the lock-chip reflecting the user branch for scoped roles', async () => {
     renderQueue()
     expect(
-      await screen.findByText('Role & branch scoped — Phoenix-Desert'),
+      await screen.findByText('Role & branch scoped — b1'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows "All branches" for cross-branch exec roles', async () => {
+    useAuthStore.setState({ user: makeUser({ role: 'ceo', branch_id: 'b1' }) })
+    renderQueue()
+    expect(
+      await screen.findByText('Role & branch scoped — All branches'),
     ).toBeInTheDocument()
   })
 })
@@ -448,5 +468,33 @@ describe('EstimateQueue — Aspire sync status', () => {
     })
     expect(await screen.findByText(/sync failed/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /retry sync/i })).toBeInTheDocument()
+  })
+})
+
+// ----- RFI status surfaced on the queue card (Handoff 24 §3.2) ---------------
+
+describe('EstimateQueue — RFI status surfaced (Handoff 24 §3.2)', () => {
+  it('shows the tracked RFI status on the queue card when present', async () => {
+    renderQueue({
+      estimates: [
+        buildInstallEstimate({
+          id: 'q-rfi',
+          name: 'RFI Job',
+          rfiStatus: 'Awaiting GC response on storm drain details',
+        }),
+      ],
+    })
+    const card = await screen.findByTestId('queue-card')
+    expect(within(card).getByTestId('queue-rfi-status')).toHaveTextContent(
+      /awaiting gc response/i,
+    )
+  })
+
+  it('renders no RFI chip when rfiStatus is absent', async () => {
+    renderQueue({
+      estimates: [buildInstallEstimate({ id: 'q-no-rfi', name: 'No RFI Job' })],
+    })
+    await screen.findByTestId('queue-card')
+    expect(screen.queryByTestId('queue-rfi-status')).not.toBeInTheDocument()
   })
 })

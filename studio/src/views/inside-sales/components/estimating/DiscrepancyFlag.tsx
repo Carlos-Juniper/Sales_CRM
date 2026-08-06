@@ -11,12 +11,12 @@
 // the service can run headless later.
 // ---------------------------------------------------------------------------
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, Check, Send, TriangleAlert } from 'lucide-react'
 import type { TakeoffLine } from '@/types/estimating'
 import { reviewTakeoff, type DerivedTakeoffLine } from '@/lib/estimating/discrepancy'
 import { DISCREPANCY_THRESHOLD } from '@/lib/estimating/config'
-import { buildTakeoffLines, mockTakeoffLines } from '@/mocks/estimatingData'
+import { estimatingApi, type UpdateTakeoffLinePayload } from '@/api/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
 import { cn } from '@/lib/utils'
@@ -65,11 +65,28 @@ export function DiscrepancyFlag({ initialLines }: DiscrepancyFlagProps) {
   const { openEstimate } = useEstimatingShell()
   const { show } = useToast()
 
-  // TODO(api): replace fixture seeding with GET /estimating/estimates/:id/
-  // takeoff-lines once the takeoff endpoints land; edits should PATCH back.
-  const [lines, setLines] = useState<TakeoffLine[]>(
-    () => initialLines ?? (openEstimate ? buildTakeoffLines(openEstimate.id) : mockTakeoffLines),
-  )
+  // Handoff 20 — lines load from GET …/takeoff-lines and edits PATCH back, so
+  // state survives a reload. `initialLines` stays a test/deep-link seam that
+  // skips the fetch. The live recompute below stays local (threshold slider);
+  // the server independently recomputes derived fields it returns.
+  const [lines, setLines] = useState<TakeoffLine[]>(() => initialLines ?? [])
+  const estimateId = initialLines ? null : (openEstimate?.id ?? null)
+
+  useEffect(() => {
+    if (!estimateId) return
+    let cancelled = false
+    estimatingApi
+      .listTakeoffLines(estimateId)
+      .then((rows) => {
+        if (!cancelled) setLines(rows)
+      })
+      .catch(() => {
+        /* keep whatever we have — the tab degrades to an empty table */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [estimateId])
   // Whole-percent slider value (config-backed: default 10, range 1–25).
   const [thresholdPct, setThresholdPct] = useState(
     () => toWholePct(DISCREPANCY_THRESHOLD.defaultPct),
@@ -78,8 +95,14 @@ export function DiscrepancyFlag({ initialLines }: DiscrepancyFlagProps) {
   const review = useMemo(() => reviewTakeoff(lines, thresholdPct / 100), [lines, thresholdPct])
   const { anyFlagged, flaggedCount } = review
 
-  function updateLine(id: string, patch: Partial<TakeoffLine>) {
+  function updateLine(id: string, patch: UpdateTakeoffLinePayload) {
+    // Optimistic local recompute (live), then persist the edit (Handoff 20).
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+    if (openEstimate) {
+      estimatingApi.updateTakeoffLine(openEstimate.id, id, patch).catch(() => {
+        /* best-effort — the next load re-syncs from the server */
+      })
+    }
   }
 
   function surfaceToCrm() {
@@ -290,7 +313,7 @@ export function DiscrepancyFlag({ initialLines }: DiscrepancyFlagProps) {
       </div>
 
       <p className="text-[10.5px] leading-normal text-[hsl(var(--muted-fg))]">
-        Bid QTY = <span className="font-mono">ceil(Plan × (1 + Add%))</span> · Flag ={' '}
+        Bid QTY = <span className="font-mono">round(Plan × (1 + Add%))</span> · Flag ={' '}
         <span className="font-mono">|Measured − Plan| / Plan &gt; threshold</span> · human review
         stays in the loop — the CRM makes the qualifying-notes decision.
       </p>

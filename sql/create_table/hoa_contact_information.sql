@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `juniper`.`hoa_contact_information` (
+CREATE TABLE IF NOT EXISTS `crm`.`hoa_contact_information` (
     `id`                    BIGINT       NOT NULL AUTO_INCREMENT,
     `management_company_id` VARCHAR(36)  DEFAULT NULL,
     `hoa_property_id`       VARCHAR(36)  DEFAULT NULL,
@@ -14,5 +14,5 @@ CREATE TABLE IF NOT EXISTS `juniper`.`hoa_contact_information` (
     INDEX `idx_hoa_contact_property` (`hoa_property_id`),
     INDEX `idx_hoa_contact_mgmt_co`  (`management_company_id`),
     CONSTRAINT `fk_hoa_contact_property`
-        FOREIGN KEY (`hoa_property_id`) REFERENCES `juniper`.`hoa_properties` (`id`) ON DELETE SET NULL
+        FOREIGN KEY (`hoa_property_id`) REFERENCES `crm`.`hoa_properties` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

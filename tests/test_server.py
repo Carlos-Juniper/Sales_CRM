@@ -59,7 +59,7 @@ _LEAD_ROW = {
     "priority": 0,
     "branch_id": "b1",
     "distance_miles": 8.4,
-    "hoa_property_id": None,
+    "property_id": None,
     "division_id": None,
     "aspire_opportunity_id": None,
     "deleted_at": None,
@@ -131,6 +131,23 @@ def test_list_leads_returns_paginated_structure(authed):
     assert body["total_pages"] == 1
     assert len(body["data"]) == 1
     assert body["data"][0]["property_name"] == "Silverleaf HOA"
+
+
+def test_list_leads_filters_by_property_id(authed):
+    """Handoff 23 — leads are queryable by canonical property_id so the
+    property engagement UI can gate "Request estimate" on a lead existing
+    and source real CRM lead context for the intake."""
+    with patch("api.server.query", new_callable=AsyncMock) as mock_query:
+        mock_query.side_effect = [[{"cnt": 1}], [_LEAD_ROW]]
+        resp = client.get("/api/leads?property_id=prop-1")
+
+    assert resp.status_code == 200
+    count_sql, count_params = mock_query.call_args_list[0].args
+    assert "property_id = %s" in count_sql
+    assert "prop-1" in count_params
+    data_sql, data_params = mock_query.call_args_list[1].args
+    assert "property_id = %s" in data_sql
+    assert "prop-1" in data_params
 
 
 def test_list_leads_score_factors_parsed_from_json_string(authed):
@@ -243,6 +260,56 @@ def test_patch_lead_status_change_logs_action(authed):
     assert "status_change" in action_sql  # hardcoded literal in SQL
 
 
+def test_patch_lead_won_updates_hoa_source_property_via_reverse_lookup(authed):
+    """Handoff 15: lead → properties.source_type/source_id → hoa_properties."""
+    lead_row = {**_LEAD_ROW, "status": "qualified", "property_id": "prop-1"}
+    updated_row = {**lead_row, "status": "won"}
+    with patch("api.server.set_hoa_property_status", new_callable=AsyncMock) as mock_set, \
+         patch("api.server.query", new_callable=AsyncMock) as mock_query, \
+         patch("api.server.execute", new_callable=AsyncMock, return_value=1):
+        mock_query.side_effect = [
+            [lead_row],                                          # _fetch_lead
+            [{"source_type": "hoa", "source_id": "hoa-9"}],      # property reverse-lookup
+            [updated_row],                                       # reload
+        ]
+        resp = client.patch("/api/leads/lead-uuid-1", json={"status": "won"})
+
+    assert resp.status_code == 200
+    mock_set.assert_awaited_once_with("hoa-9", "won")
+
+
+def test_patch_lead_won_skips_non_hoa_source(authed):
+    lead_row = {**_LEAD_ROW, "status": "qualified", "property_id": "prop-1"}
+    updated_row = {**lead_row, "status": "won"}
+    with patch("api.server.set_hoa_property_status", new_callable=AsyncMock) as mock_set, \
+         patch("api.server.query", new_callable=AsyncMock) as mock_query, \
+         patch("api.server.execute", new_callable=AsyncMock, return_value=1):
+        mock_query.side_effect = [
+            [lead_row],
+            [{"source_type": "manual", "source_id": None}],
+            [updated_row],
+        ]
+        resp = client.patch("/api/leads/lead-uuid-1", json={"status": "won"})
+
+    assert resp.status_code == 200
+    mock_set.assert_not_awaited()
+
+
+def test_create_lead_accepts_property_id(authed):
+    created = {**_LEAD_ROW, "property_id": "prop-1"}
+    with patch("api.server.query", new_callable=AsyncMock, return_value=[created]), \
+         patch("api.server.execute", new_callable=AsyncMock, return_value=1) as mock_execute:
+        resp = client.post("/api/leads", json={
+            "property_name": "Silverleaf HOA", "city": "Phoenix", "state": "AZ",
+            "lead_type": "HOA", "property_id": "prop-1",
+        })
+
+    assert resp.status_code == 201
+    insert_sql, insert_params = mock_execute.await_args_list[0][0]
+    assert "property_id" in insert_sql
+    assert "prop-1" in insert_params
+
+
 def test_patch_lead_no_patchable_fields_returns_current(authed):
     with patch("api.server.query", new_callable=AsyncMock, return_value=[_LEAD_ROW]):
         resp = client.patch(
@@ -317,6 +384,43 @@ def test_patch_bid_returns_updated_bid(authed):
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "submitted"
+
+
+def test_patch_bid_pursuing_marks_hoa_contacted_via_reverse_lookup(authed):
+    """Handoff 15: bid → lead.property_id → properties.source_id → hoa_properties."""
+    updated_bid = {**_BID_ROW, "status": "pursuing"}
+    with patch("api.pipeline.set_property_contacted", new_callable=AsyncMock) as mock_contacted, \
+         patch("api.server.query", new_callable=AsyncMock) as mock_query, \
+         patch("api.server.execute", new_callable=AsyncMock, return_value=1):
+        mock_query.side_effect = [
+            [_BID_ROW],                                         # existence check
+            [{"lead_id": "lead-uuid-1"}],                       # bid → lead
+            [{"property_id": "prop-1"}],                        # lead → property
+            [{"source_type": "hoa", "source_id": "hoa-9"}],     # property → source
+            [updated_bid],                                      # reload
+        ]
+        resp = client.patch("/api/bids/bid-uuid-1", json={"status": "pursuing"})
+
+    assert resp.status_code == 200
+    mock_contacted.assert_awaited_once_with("hoa-9")
+
+
+def test_patch_bid_pursuing_skips_manual_source(authed):
+    updated_bid = {**_BID_ROW, "status": "pursuing"}
+    with patch("api.pipeline.set_property_contacted", new_callable=AsyncMock) as mock_contacted, \
+         patch("api.server.query", new_callable=AsyncMock) as mock_query, \
+         patch("api.server.execute", new_callable=AsyncMock, return_value=1):
+        mock_query.side_effect = [
+            [_BID_ROW],
+            [{"lead_id": "lead-uuid-1"}],
+            [{"property_id": "prop-1"}],
+            [{"source_type": "manual", "source_id": None}],
+            [updated_bid],
+        ]
+        resp = client.patch("/api/bids/bid-uuid-1", json={"status": "pursuing"})
+
+    assert resp.status_code == 200
+    mock_contacted.assert_not_awaited()
 
 
 def test_patch_bid_returns_404_when_not_found(authed):

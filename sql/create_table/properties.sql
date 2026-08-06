@@ -8,9 +8,9 @@
 -- and prospecting workflow columns stay on the vertical tables; join back via
 -- (source_type, source_id) when detail is needed.
 --
--- ⚠️ The live database is `crm`, NOT `juniper` — apply via the unprefixed
--- migration sql/migrations/001_canonical_properties.sql (this juniper-prefixed
--- file exists to keep the legacy DDL set complete). db.run_migrations() is a
+-- The live database is `crm` (schema-qualified here as `crm.`). This CREATE is
+-- the recreate-from-scratch source; the applied change history lives in
+-- sql/migrations/001_canonical_properties.sql. db.run_migrations() is a
 -- no-op; all migrations are hand-run (see sql/migrations/README.md).
 --
 -- Conventions match hoa_properties.sql / management_companies.sql:
@@ -24,7 +24,7 @@
 -- trigger. The push flips 'pending' → 'synced' (+ id + timestamp) or →
 -- 'failed' (+ error).
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `juniper`.`properties` (
+CREATE TABLE IF NOT EXISTS `crm`.`properties` (
     `id`                    VARCHAR(36)   NOT NULL,
     -- business category (hoa, hospital, cemetery, park, gov, manual, …);
     -- VARCHAR not ENUM so new verticals never require an ALTER TABLE.

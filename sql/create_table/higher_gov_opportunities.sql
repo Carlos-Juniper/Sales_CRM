@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `juniper`.`higher_gov_opportunities` (
+CREATE TABLE IF NOT EXISTS `crm`.`higher_gov_opportunities` (
     `opp_key`             VARCHAR(255)  NOT NULL,
     `version_key`         VARCHAR(255)  DEFAULT NULL,
     `source_id`           VARCHAR(255)  DEFAULT NULL,

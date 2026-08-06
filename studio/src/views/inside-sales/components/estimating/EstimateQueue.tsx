@@ -49,6 +49,7 @@ import { SyncStatusBadge } from './SyncStatusBadge'
 import { acresFromSqft } from '@/lib/estimating/calc'
 import { SLA_CONFIG, slaCountdownLabel, slaDaysLeft, slaStateFor, type SlaState } from '@/lib/estimating/sla'
 import { useAuthStore } from '@/store/authStore'
+import { useRole } from '@/hooks/useRole'
 import { mockUsers } from '@/mocks/data'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import type { Estimate, EstimatePriority, EstimateStatus } from '@/types/estimating'
@@ -56,18 +57,16 @@ import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
 
 // ----- Branch scope ----------------------------------------------------------
-// The scope itself is enforced SERVER-side (BRD I-9.5); the client only passes
-// the user's branch so the mock/dev query mirrors the row-level scope, and
-// displays it in the lock-chip. TODO(carlos): replace this mapping with the
-// auth-layer scope claim once the GCP user/role table is wired up.
-const BRANCH_SCOPE_BY_ID: Record<string, string> = {
-  b1: 'Phoenix-Desert',
-  b2: 'Raleigh',
-}
-const DEFAULT_BRANCH_SCOPE = 'Phoenix-Desert'
-
-function branchScopeFor(branchId: string | null | undefined): string {
-  return (branchId && BRANCH_SCOPE_BY_ID[branchId]) || DEFAULT_BRANCH_SCOPE
+// The scope is enforced SERVER-side from the JWT (BRD I-9.5, Handoff 18): the
+// API derives the branch from the authenticated user and ignores any client
+// `branch` param for non-exec roles, so the client sends nothing. The
+// lock-chip only *displays* the applied scope.
+function branchScopeLabel(
+  seesAllBranches: boolean,
+  branchId: string | null | undefined,
+): string {
+  if (seesAllBranches) return 'All branches'
+  return branchId || 'your branch'
 }
 
 // ----- Badge configs (§3.2 status enum + priority) ----------------------------
@@ -158,25 +157,26 @@ export function EstimateQueue({
   const { setOpenEstimate, setActiveTab } = useEstimatingShell()
   const { show } = useToast()
   const user = useAuthStore((s) => s.user)
-  const branchScope = branchScopeFor(user?.branch_id)
+  const { seesAllBranches } = useRole()
+  const branchScope = branchScopeLabel(seesAllBranches, user?.branch_id)
 
   const [estimates, setEstimates] = useState<Estimate[] | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortKey, setSortKey] = useState<SortKey>('priority')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
-  // Scoped query — the branch param mirrors the server-enforced row scope.
+  // Branch scope is applied server-side from the session — no branch param.
   const reload = useCallback(() => {
     return estimatingApi
-      .list({ branch: branchScope })
+      .list()
       .then(setEstimates)
       .catch(() => setEstimates([]))
-  }, [branchScope])
+  }, [])
 
   useEffect(() => {
     let cancelled = false
     estimatingApi
-      .list({ branch: branchScope })
+      .list()
       .then((data) => {
         if (!cancelled) setEstimates(data)
       })
@@ -186,7 +186,7 @@ export function EstimateQueue({
     return () => {
       cancelled = true
     }
-  }, [branchScope])
+  }, [])
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -458,6 +458,17 @@ function QueueCard({
             )}
           </div>
         </div>
+
+        {/* Handoff 24 §3.2 — tracked RFI status, surfaced for visibility only
+            (nothing gates approval on it). */}
+        {estimate.rfiStatus && (
+          <p
+            data-testid="queue-rfi-status"
+            className="mt-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 inline-block"
+          >
+            <span className="font-semibold">RFI:</span> {estimate.rfiStatus}
+          </p>
+        )}
 
         {estimate.notes && (
           <p className="mt-2 text-xs text-[hsl(var(--muted-fg))] line-clamp-2 italic">

@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS juniper.leads (
+CREATE TABLE IF NOT EXISTS crm.leads (
     id                       VARCHAR(36)    NOT NULL,
     source                   VARCHAR(50)    NOT NULL,
     source_ref               VARCHAR(255)   DEFAULT NULL,

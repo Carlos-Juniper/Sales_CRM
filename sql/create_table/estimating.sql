@@ -15,7 +15,7 @@
 -- ---------------------------------------------------------------------------
 
 -- §3.1 estimates -------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS juniper.estimates (
+CREATE TABLE IF NOT EXISTS crm.estimates (
     id                      VARCHAR(36)   NOT NULL,
     -- IMMUTABLE after insert (see trigger). maintenance = hours-driven engine;
     -- install = quantity-driven kit engine. Adding a third type is a config
@@ -81,10 +81,10 @@ CREATE TABLE IF NOT EXISTS juniper.estimates (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §2 estimate_type immutability guard (DB-level; mirrored in the app layer).
-DROP TRIGGER IF EXISTS juniper.trg_estimates_type_immutable;
+DROP TRIGGER IF EXISTS crm.trg_estimates_type_immutable;
 DELIMITER $$
-CREATE TRIGGER juniper.trg_estimates_type_immutable
-BEFORE UPDATE ON juniper.estimates
+CREATE TRIGGER crm.trg_estimates_type_immutable
+BEFORE UPDATE ON crm.estimates
 FOR EACH ROW
 BEGIN
     IF NEW.estimate_type <> OLD.estimate_type THEN
@@ -98,7 +98,7 @@ DELIMITER ;
 -- Handoff 08: every status change is persisted here so the queue/approval views
 -- can render an auditable history. Written by the transition machine, never by
 -- the UI directly.
-CREATE TABLE IF NOT EXISTS juniper.estimate_status_transitions (
+CREATE TABLE IF NOT EXISTS crm.estimate_status_transitions (
     id           VARCHAR(36)  NOT NULL,
     estimate_id  VARCHAR(36)  NOT NULL,
     from_status  VARCHAR(30)  NOT NULL,
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS juniper.estimate_status_transitions (
     at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     CONSTRAINT fk_transitions_estimate
-        FOREIGN KEY (estimate_id) REFERENCES juniper.estimates (id) ON DELETE CASCADE,
+        FOREIGN KEY (estimate_id) REFERENCES crm.estimates (id) ON DELETE CASCADE,
     INDEX idx_transitions_estimate (estimate_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS juniper.estimate_status_transitions (
 -- Sections exist for BOTH types; the pricing engine is keyed off the parent
 -- estimate's estimate_type, never a per-section mode. Acreage is derived
 -- (square_feet / 43560), never stored.
-CREATE TABLE IF NOT EXISTS juniper.estimate_sections (
+CREATE TABLE IF NOT EXISTS crm.estimate_sections (
     id           VARCHAR(36)   NOT NULL,
     estimate_id  VARCHAR(36)   NOT NULL,
     name         VARCHAR(255)  NOT NULL,                          -- editable, e.g. "Common Area"
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS juniper.estimate_sections (
     sort_order   INT           NOT NULL DEFAULT 0,                -- duplicate inserts after source
     PRIMARY KEY (id),
     CONSTRAINT fk_sections_estimate
-        FOREIGN KEY (estimate_id) REFERENCES juniper.estimates (id) ON DELETE CASCADE,
+        FOREIGN KEY (estimate_id) REFERENCES crm.estimates (id) ON DELETE CASCADE,
     INDEX idx_sections_estimate (estimate_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS juniper.estimate_sections (
 -- (Handoff 22 — generated from business docs/Juniper_Aspire_Kit_Review.xlsx
 -- by scripts/load_catalog_items.py: 80 install kits + 48 maintenance
 -- takeoff-item kits with observed production rates).
-CREATE TABLE IF NOT EXISTS juniper.catalog_items (
+CREATE TABLE IF NOT EXISTS crm.catalog_items (
     id               VARCHAR(36)   NOT NULL,
     description      VARCHAR(255)  NOT NULL,
     uom              VARCHAR(20)   NOT NULL,
@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS juniper.catalog_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §3.4 section_services (line items within a section) ---------------------------
-CREATE TABLE IF NOT EXISTS juniper.section_services (
+CREATE TABLE IF NOT EXISTS crm.section_services (
     id                  VARCHAR(36)   NOT NULL,
     section_id          VARCHAR(36)   NOT NULL,
     catalog_item_id     VARCHAR(36)   DEFAULT NULL,               -- link to catalog_items / kit
@@ -169,14 +169,14 @@ CREATE TABLE IF NOT EXISTS juniper.section_services (
     sort_order          INT           NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     CONSTRAINT fk_services_section
-        FOREIGN KEY (section_id) REFERENCES juniper.estimate_sections (id) ON DELETE CASCADE,
+        FOREIGN KEY (section_id) REFERENCES crm.estimate_sections (id) ON DELETE CASCADE,
     CONSTRAINT fk_services_catalog_item
-        FOREIGN KEY (catalog_item_id) REFERENCES juniper.catalog_items (id) ON DELETE SET NULL,
+        FOREIGN KEY (catalog_item_id) REFERENCES crm.catalog_items (id) ON DELETE SET NULL,
     INDEX idx_services_section (section_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §3.5 section_service_components (install kit breakdown — expandable rows) -----
-CREATE TABLE IF NOT EXISTS juniper.section_service_components (
+CREATE TABLE IF NOT EXISTS crm.section_service_components (
     id                 VARCHAR(36)   NOT NULL,
     section_service_id VARCHAR(36)   NOT NULL,
     kind               ENUM('labor','material') NOT NULL,
@@ -187,7 +187,7 @@ CREATE TABLE IF NOT EXISTS juniper.section_service_components (
     sort_order         INT           NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     CONSTRAINT fk_components_service
-        FOREIGN KEY (section_service_id) REFERENCES juniper.section_services (id) ON DELETE CASCADE,
+        FOREIGN KEY (section_service_id) REFERENCES crm.section_services (id) ON DELETE CASCADE,
     INDEX idx_components_service (section_service_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS juniper.section_service_components (
 -- The formula engine reads compute_type + factors; adding a material is a row
 -- insert, never a code deploy. Freight tables / volume-price thresholds
 -- (44,000 SF+ → exact quote) get the volume_quote_threshold_sf slot.
-CREATE TABLE IF NOT EXISTS juniper.material_calcs (
+CREATE TABLE IF NOT EXISTS crm.material_calcs (
     id                        VARCHAR(36)  NOT NULL,
     material_key              VARCHAR(50)  NOT NULL,              -- edging, weed_barrier, aggregate, sod, mulch, fert, backfill, root_barrier
     label                     VARCHAR(255) NOT NULL,
@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS juniper.material_calcs (
 -- manually-editable value (no Aspire read, ever); catalog_item_id links a
 -- line to a kit so estimate Save can push the qty to Aspire's
 -- OpportunityServiceItem.ItemQuantity (Handoff 20 §4.2 / migration 008).
-CREATE TABLE IF NOT EXISTS juniper.takeoff_lines (
+CREATE TABLE IF NOT EXISTS crm.takeoff_lines (
     id              VARCHAR(36)   NOT NULL,
     estimate_id     VARCHAR(36)   NOT NULL,
     description     VARCHAR(255)  NOT NULL,
@@ -230,9 +230,9 @@ CREATE TABLE IF NOT EXISTS juniper.takeoff_lines (
     created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     CONSTRAINT fk_takeoff_estimate
-        FOREIGN KEY (estimate_id) REFERENCES juniper.estimates (id) ON DELETE CASCADE,
+        FOREIGN KEY (estimate_id) REFERENCES crm.estimates (id) ON DELETE CASCADE,
     CONSTRAINT fk_takeoff_catalog_item
-        FOREIGN KEY (catalog_item_id) REFERENCES juniper.catalog_items (id) ON DELETE SET NULL,
+        FOREIGN KEY (catalog_item_id) REFERENCES crm.catalog_items (id) ON DELETE SET NULL,
     INDEX idx_takeoff_estimate (estimate_id),
     INDEX idx_takeoff_catalog_item (catalog_item_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -242,7 +242,7 @@ CREATE TABLE IF NOT EXISTS juniper.takeoff_lines (
 -- Handoff 19: role_key equals the canonical auth roles (Handoff 18), so the
 -- JWT role checks directly against the routed tier. Install uses the SAME
 -- ladder as maintenance (its own rows, mirrored $ bands).
-CREATE TABLE IF NOT EXISTS juniper.approval_tiers (
+CREATE TABLE IF NOT EXISTS crm.approval_tiers (
     id              VARCHAR(36)  NOT NULL,
     role_key        ENUM('manager','regional_director','vice_president','ceo') NOT NULL,
     label           VARCHAR(100) NOT NULL,
@@ -256,7 +256,7 @@ CREATE TABLE IF NOT EXISTS juniper.approval_tiers (
 
 -- §3.10 ITB tracker --------------------------------------------------------------------
 -- Config-driven scope definitions — admin-extensible without migration (BRD §2.1 / II-9.12).
-CREATE TABLE IF NOT EXISTS juniper.itb_scopes (
+CREATE TABLE IF NOT EXISTS crm.itb_scopes (
     id          VARCHAR(36)  NOT NULL,
     scope_key   VARCHAR(50)  NOT NULL,
     label       VARCHAR(100) NOT NULL,
@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS juniper.itb_scopes (
     UNIQUE KEY uq_scope_key (scope_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS juniper.itb_projects (
+CREATE TABLE IF NOT EXISTS crm.itb_projects (
     id                VARCHAR(36)   NOT NULL,
     -- Handoff 21: the estimate that auto-generated this row (1:1; UNIQUE).
     -- NULLable for pre-auto-gen rows; kept in sync with migrations/006.
@@ -298,15 +298,15 @@ CREATE TABLE IF NOT EXISTS juniper.itb_projects (
 
 -- Confirmed legend (Carlos, 2026-08-06): P Pending · C Created Request ·
 -- S Sent · R Received · U Updated · X 100% Complete · '-' Non-Applicable.
-CREATE TABLE IF NOT EXISTS juniper.itb_scope_status (
+CREATE TABLE IF NOT EXISTS crm.itb_scope_status (
     project_id  VARCHAR(36) NOT NULL,
     scope_id    VARCHAR(36) NOT NULL,
     status_code ENUM('P','C','S','R','U','X','-') NOT NULL DEFAULT 'P',
     PRIMARY KEY (project_id, scope_id),
     CONSTRAINT fk_itb_status_project
-        FOREIGN KEY (project_id) REFERENCES juniper.itb_projects (id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES crm.itb_projects (id) ON DELETE CASCADE,
     CONSTRAINT fk_itb_status_scope
-        FOREIGN KEY (scope_id) REFERENCES juniper.itb_scopes (id) ON DELETE CASCADE
+        FOREIGN KEY (scope_id) REFERENCES crm.itb_scopes (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §3.11 intake_submissions + attachments ---------------------------------------------------
@@ -316,7 +316,7 @@ CREATE TABLE IF NOT EXISTS juniper.itb_scope_status (
 -- rows — a partial intake saved per-user (device-independent) that has NOT
 -- created an estimate yet. Submitting for real writes a normal row
 -- (is_draft=0, estimate_id set).
-CREATE TABLE IF NOT EXISTS juniper.intake_submissions (
+CREATE TABLE IF NOT EXISTS crm.intake_submissions (
     id            VARCHAR(36) NOT NULL,
     estimate_id   VARCHAR(36) NULL,
     estimate_type ENUM('maintenance','install') NOT NULL,
@@ -326,7 +326,7 @@ CREATE TABLE IF NOT EXISTS juniper.intake_submissions (
     created_at    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     CONSTRAINT fk_intake_estimate
-        FOREIGN KEY (estimate_id) REFERENCES juniper.estimates (id) ON DELETE CASCADE,
+        FOREIGN KEY (estimate_id) REFERENCES crm.estimates (id) ON DELETE CASCADE,
     INDEX idx_intake_estimate (estimate_id),
     INDEX idx_intake_drafts (submitted_by, is_draft)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -334,7 +334,7 @@ CREATE TABLE IF NOT EXISTS juniper.intake_submissions (
 -- Handoff 27: intake_submission_id is NULLable and estimate_id links straight
 -- to the estimate — takeoff scans (kind='takeoff_scan') are estimate-scoped
 -- and have no intake submission; intake docs keep the submission link.
-CREATE TABLE IF NOT EXISTS juniper.intake_attachments (
+CREATE TABLE IF NOT EXISTS crm.intake_attachments (
     id                   VARCHAR(36)  NOT NULL,
     intake_submission_id VARCHAR(36)  NULL,
     estimate_id          VARCHAR(36)  NULL,
@@ -349,16 +349,16 @@ CREATE TABLE IF NOT EXISTS juniper.intake_attachments (
     created_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     CONSTRAINT fk_attachments_intake
-        FOREIGN KEY (intake_submission_id) REFERENCES juniper.intake_submissions (id) ON DELETE CASCADE,
+        FOREIGN KEY (intake_submission_id) REFERENCES crm.intake_submissions (id) ON DELETE CASCADE,
     CONSTRAINT fk_attachments_estimate
-        FOREIGN KEY (estimate_id) REFERENCES juniper.estimates (id) ON DELETE CASCADE,
+        FOREIGN KEY (estimate_id) REFERENCES crm.estimates (id) ON DELETE CASCADE,
     INDEX idx_attachments_intake (intake_submission_id),
     INDEX idx_attachments_estimate (estimate_id),
     INDEX idx_attachments_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §3.12 estimate_adjustments (audit — supports revert to original, BRD III-1) ----------------
-CREATE TABLE IF NOT EXISTS juniper.estimate_adjustments (
+CREATE TABLE IF NOT EXISTS crm.estimate_adjustments (
     id          VARCHAR(36)   NOT NULL,
     estimate_id VARCHAR(36)   NOT NULL,
     actor       VARCHAR(255)  NOT NULL,                           -- JWT display name/email (mirrors estimate_status_transitions.actor)
@@ -368,12 +368,12 @@ CREATE TABLE IF NOT EXISTS juniper.estimate_adjustments (
     created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     CONSTRAINT fk_adjustments_estimate
-        FOREIGN KEY (estimate_id) REFERENCES juniper.estimates (id) ON DELETE CASCADE,
+        FOREIGN KEY (estimate_id) REFERENCES crm.estimates (id) ON DELETE CASCADE,
     INDEX idx_adjustments_estimate (estimate_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §3.13 margin_bands (one canonical set, referenced everywhere) -------------------------------
-CREATE TABLE IF NOT EXISTS juniper.margin_bands (
+CREATE TABLE IF NOT EXISTS crm.margin_bands (
     id       VARCHAR(36)  NOT NULL,
     name     VARCHAR(50)  NOT NULL DEFAULT 'default',
     good_min DECIMAL(6,4) NOT NULL,
@@ -388,7 +388,7 @@ CREATE TABLE IF NOT EXISTS juniper.margin_bands (
 -- ---------------------------------------------------------------------------
 
 -- Maintenance approval ladder (BRD I-7). Install ladder intentionally absent (open item).
-INSERT INTO juniper.approval_tiers (id, role_key, label, min_value_cents, max_value_cents, tier_order, estimate_type) VALUES
+INSERT INTO crm.approval_tiers (id, role_key, label, min_value_cents, max_value_cents, tier_order, estimate_type) VALUES
     ('tier-maint-mgr', 'manager',           'Manager',           0,           10000000,  1, 'maintenance'),
     ('tier-maint-rd',  'regional_director', 'Regional Director', 10000000,    25000000,  2, 'maintenance'),
     ('tier-maint-vp',  'vice_president',    'Vice President',    25000000,    100000000, 3, 'maintenance'),
@@ -400,12 +400,12 @@ INSERT INTO juniper.approval_tiers (id, role_key, label, min_value_cents, max_va
 ON DUPLICATE KEY UPDATE label = VALUES(label);
 
 -- Canonical margin bands. TODO(carlos): confirm thresholds before production seed.
-INSERT INTO juniper.margin_bands (id, name, good_min, ok_min) VALUES
+INSERT INTO crm.margin_bands (id, name, good_min, ok_min) VALUES
     ('mb-default', 'default', 0.2000, 0.1200)
 ON DUPLICATE KEY UPDATE good_min = VALUES(good_min), ok_min = VALUES(ok_min);
 
 -- ITB scope columns (admin-extensible; legend/columns pending confirmation).
-INSERT INTO juniper.itb_scopes (id, scope_key, label, scope_group, sort_order) VALUES
+INSERT INTO crm.itb_scopes (id, scope_key, label, scope_group, sort_order) VALUES
     ('scope-landscape',   'landscape',   'Landscape',           'estimating',   1),
     ('scope-irrigation',  'irrigation',  'Irrigation',          'estimating',   2),
     ('scope-trees',       'trees',       'Trees',               'estimating',   3),
@@ -418,7 +418,7 @@ INSERT INTO juniper.itb_scopes (id, scope_key, label, scope_group, sort_order) V
 ON DUPLICATE KEY UPDATE label = VALUES(label);
 
 -- Material formulas (compute_type + factors read by the formula engine).
-INSERT INTO juniper.material_calcs (id, material_key, label, compute_type, factors, unit_sell_cents, unit_cost_cents, uom, volume_quote_threshold_sf) VALUES
+INSERT INTO crm.material_calcs (id, material_key, label, compute_type, factors, unit_sell_cents, unit_cost_cents, uom, volume_quote_threshold_sf) VALUES
     ('mc-edging',       'edging',       'Steel Edging',                'divPiece',  '{"pieceLengthFt": 16}',                                            3200,  1900,  'pcs',     NULL),
     ('mc-weed-barrier', 'weed_barrier', 'Weed Barrier Fabric',         'divRoll',   '{"rollSf": 300}',                                                  8900,  5400,  'rolls',   NULL),
     ('mc-aggregate',    'aggregate',    'Decorative Rock / Aggregate', 'aggregate', '{"sfPerTonAtDepthIn": {"2": 120, "3": 80}, "defaultDepthIn": 2}',  9800,  6200,  'tons',    44000),

@@ -2,11 +2,11 @@
 // Handoff 03 — maintenance engine pure helpers.
 // Business rules under test: sq-ft basis enforcement (BRD I-6.5), company-
 // default complexity + override detection (I-9.7), section CRUD semantics,
-// Bidding↔Won lifecycle transition with ownership flip + audit (BRD §8.1),
+// the pure aspireOwner-from-lifecycle derivation (BRD §8.1),
 // and estimator-vs-approver field ownership (enforced in logic, not UI).
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
   COMPANY_DEFAULT_COMPLEXITY_PCT,
   MAINTENANCE_SERVICE_CATALOG,
@@ -17,14 +17,19 @@ import {
   buildDefaultSection,
   duplicateSection,
   removeSection,
-  transitionLifecycle,
-  lifecycleAuditLog,
-  clearLifecycleAuditLog,
+  aspireOwnerFor,
   canEditField,
   assertCanEdit,
+  estimatingRolesForUser,
+  canUserEditField,
   formatCents,
   lineCentsPerSqft,
+  maintenanceCatalogFromItems,
+  sellRateCentsPer1000Sf,
+  unresolvedProductionRateLabels,
 } from '@/lib/estimating/maintenance'
+import { MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR } from '@/lib/estimating/margins'
+import type { CatalogItem } from '@/types/estimating'
 import { buildMaintenanceEstimate } from '@/mocks/estimatingData'
 
 describe('maintenance service catalog (sq-ft basis, BRD I-6.5)', () => {
@@ -126,49 +131,15 @@ describe('section operations', () => {
   })
 })
 
-describe('lifecycle transition (BRD §8.1) — enforced in the handler', () => {
-  beforeEach(() => clearLifecycleAuditLog())
-
-  it('Bidding→Won flips lifecycle AND aspireOwner to crm and writes an audit record', () => {
-    const est = buildMaintenanceEstimate()
-    expect(est.lifecycle).toBe('bidding')
-    expect(est.aspireOwner).toBe('estimating')
-
-    const result = transitionLifecycle(est, 'won', 'Jennifer Petel')
-    expect(result).not.toBeNull()
-    expect(result!.estimate.lifecycle).toBe('won')
-    expect(result!.estimate.aspireOwner).toBe('crm')
-
-    expect(lifecycleAuditLog).toHaveLength(1)
-    expect(lifecycleAuditLog[0]).toMatchObject({
-      estimateId: est.id,
-      from: 'bidding',
-      to: 'won',
-      aspireOwnerFrom: 'estimating',
-      aspireOwnerTo: 'crm',
-      actor: 'Jennifer Petel',
-    })
+describe('aspireOwner derivation (BRD §8.1)', () => {
+  // The lifecycle flip itself persists server-side (estimatingApi.setLifecycle,
+  // Handoff 17); the pure derivation rule stays client-side as the reference.
+  it('won hands ownership to the CRM', () => {
+    expect(aspireOwnerFor('won')).toBe('crm')
   })
 
-  it('Won→Bidding returns ownership to estimating', () => {
-    const est = buildMaintenanceEstimate({ lifecycle: 'won', aspireOwner: 'crm' })
-    const result = transitionLifecycle(est, 'bidding', 'Jennifer Petel')
-    expect(result!.estimate.aspireOwner).toBe('estimating')
-  })
-
-  it('a no-op transition returns null and writes no audit record', () => {
-    const est = buildMaintenanceEstimate()
-    expect(transitionLifecycle(est, 'bidding', 'x')).toBeNull()
-    expect(lifecycleAuditLog).toHaveLength(0)
-  })
-
-  it('the ownership flip cannot be bypassed: aspireOwner always derives from lifecycle', () => {
-    // Even if the caller hands in an inconsistent estimate, the handler corrects it.
-    const est = buildMaintenanceEstimate({ lifecycle: 'bidding', aspireOwner: 'crm' })
-    const result = transitionLifecycle(est, 'won', 'x')
-    expect(result!.estimate.aspireOwner).toBe('crm')
-    const back = transitionLifecycle(result!.estimate, 'bidding', 'x')
-    expect(back!.estimate.aspireOwner).toBe('estimating')
+  it('bidding keeps ownership with estimating', () => {
+    expect(aspireOwnerFor('bidding')).toBe('estimating')
   })
 })
 
@@ -195,6 +166,39 @@ describe('field ownership (estimator vs approver) — logic-level enforcement', 
   })
 })
 
+describe('canonical auth role → estimating role mapping (Handoff 18 §3)', () => {
+  it('estimators = maintenance/install estimating (+ admin)', () => {
+    expect(estimatingRolesForUser('maintenance_estimating')).toContain('estimator')
+    expect(estimatingRolesForUser('install_estimating')).toContain('estimator')
+    expect(estimatingRolesForUser('admin')).toContain('estimator')
+    expect(estimatingRolesForUser('manager')).not.toContain('estimator')
+    expect(estimatingRolesForUser('sales')).not.toContain('estimator')
+  })
+
+  it('approvers = manager/RD/VP/CEO (+ admin)', () => {
+    for (const r of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin'] as const) {
+      expect(estimatingRolesForUser(r)).toContain('approver')
+    }
+    expect(estimatingRolesForUser('maintenance_estimating')).not.toContain('approver')
+    expect(estimatingRolesForUser('procurement')).toEqual([])
+  })
+
+  it('legacy sales roles have no estimating scope', () => {
+    expect(estimatingRolesForUser('inside_sales')).toEqual([])
+    expect(estimatingRolesForUser('outside_sales')).toEqual([])
+  })
+
+  it('canUserEditField composes the mapping with field ownership', () => {
+    expect(canUserEditField('maintenance_estimating', 'qty')).toBe(true)
+    expect(canUserEditField('maintenance_estimating', 'margin')).toBe(false)
+    expect(canUserEditField('manager', 'margin')).toBe(true)
+    expect(canUserEditField('manager', 'qty')).toBe(false)
+    expect(canUserEditField('admin', 'qty')).toBe(true)
+    expect(canUserEditField('admin', 'margin')).toBe(true)
+    expect(canUserEditField('sales', 'qty')).toBe(false)
+  })
+})
+
 describe('display reads', () => {
   it('formatCents renders exact dollars', () => {
     expect(formatCents(2_494_800)).toBe('$24,948.00')
@@ -205,5 +209,107 @@ describe('display reads', () => {
     // 259,200¢ over 120,000 SF = 2.16¢/SF
     expect(lineCentsPerSqft(259_200, 120_000)).toBeCloseTo(2.16, 5)
     expect(lineCentsPerSqft(100, 0)).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Handoff 22 — the editor reads kits from GET /catalog-items; the literal is
+// only the offline fallback. Plus the client half of the save guard.
+// ---------------------------------------------------------------------------
+
+const kit = (over: Partial<CatalogItem> & Pick<CatalogItem, 'id' | 'description'>): CatalogItem => ({
+  uom: 'Sq. Ft.',
+  unitCostCents: 0,
+  unitSellCents: 0,
+  targetGm: 0.22,
+  kitType: 'maintenance_hours',
+  productionRate: null,
+  branch: 'All Branches',
+  active: true,
+  serviceType: '',
+  ...over,
+})
+
+describe('Handoff 22 — maintenanceCatalogFromItems (API catalog adapter)', () => {
+  const rated = kit({ id: 'kit-1', description: 'Standard Production Mowing', productionRate: 67650 })
+
+  it('falls back to the literal when the API returned no usable kits', () => {
+    expect(maintenanceCatalogFromItems([])).toBe(MAINTENANCE_SERVICE_CATALOG)
+  })
+
+  it('adapts rated sq-ft maintenance kits to editor catalog rows (kit id = key)', () => {
+    const rows = maintenanceCatalogFromItems([rated])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].key).toBe('kit-1')
+    expect(rows[0].label).toBe('Standard Production Mowing')
+    expect(rows[0].basis).toBe('sqft')
+  })
+
+  it('excludes unrated, inactive, non-sqft, and install kits (only guard-passing kits are addable)', () => {
+    const items: CatalogItem[] = [
+      rated,
+      kit({ id: 'kit-unrated', description: 'Prune Easy' }),
+      kit({ id: 'kit-inactive', description: 'Old Kit', productionRate: 100, active: false }),
+      kit({ id: 'kit-count', description: 'Tree Rings', productionRate: 10, uom: 'CT' }),
+      kit({ id: 'kit-install', description: 'Mulch', productionRate: 5, kitType: 'install_quantity' }),
+    ]
+    expect(maintenanceCatalogFromItems(items).map((r) => r.key)).toEqual(['kit-1'])
+  })
+
+  it('derives the sell rate from the production rate + crew rate + target GM when unit sell is 0', () => {
+    const rows = maintenanceCatalogFromItems([rated])
+    expect(rows[0].rateCentsPer1000Sf).toBe(
+      sellRateCentsPer1000Sf(67650, 0.22, MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+    )
+    // and an explicit unit sell wins
+    const priced = kit({ id: 'kit-2', description: 'Priced', productionRate: 5000, unitSellCents: 450 })
+    expect(maintenanceCatalogFromItems([priced])[0].rateCentsPer1000Sf).toBe(450)
+  })
+
+  it('sellRateCentsPer1000Sf = (1000 ÷ rate) × crew rate ÷ (1 − GM)', () => {
+    // 1000/60000 h × 18,000¢ = 300¢ cost → /0.78 = 385¢
+    expect(sellRateCentsPer1000Sf(60_000, 0.22, 18_000)).toBe(385)
+  })
+})
+
+describe('Handoff 22 — unresolvedProductionRateLabels (client save guard)', () => {
+  const rated = kit({ id: 'kit-1', description: 'Mow', productionRate: 67650 })
+  const unrated = kit({ id: 'kit-2', description: 'Prune Easy' })
+
+  function sectionsWith(over: Partial<Parameters<typeof unresolvedProductionRateLabels>[0][number]['services'][number]>) {
+    const est = buildMaintenanceEstimate()
+    est.sections[0].services[0] = { ...est.sections[0].services[0], ...over }
+    return est.sections
+  }
+
+  it('a line with explicit hours always resolves', () => {
+    expect(unresolvedProductionRateLabels(sectionsWith({ hours: 1.6 }), [])).toEqual([])
+  })
+
+  it('flags a line with no hours and no kit — even with the catalog not loaded', () => {
+    expect(
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: null }), []),
+    ).toEqual(['Mowing'])
+  })
+
+  it('resolves through a production-rated kit', () => {
+    expect(
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-1' }), [rated]),
+    ).toEqual([])
+  })
+
+  it('flags an unrated or unknown kit once the catalog is loaded', () => {
+    expect(
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-2' }), [rated, unrated]),
+    ).toEqual(['Mowing'])
+    expect(
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-nope' }), [rated]),
+    ).toEqual(['Mowing'])
+  })
+
+  it('gives a kit-carrying line the benefit of the doubt while the catalog is unknown (server still enforces)', () => {
+    expect(
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-2' }), []),
+    ).toEqual([])
   })
 })

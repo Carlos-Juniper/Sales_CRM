@@ -14,12 +14,15 @@
 
 import type {
   AspireOwner,
-  Estimate,
+  CatalogItem,
   EstimateLifecycle,
   EstimateSection,
   SectionService,
 } from '@/types/estimating'
+import type { LegacyUserRole, UserRole } from '@/types'
+import { normalizeRole } from '@/hooks/useRole'
 import { per1000SfRead } from './calc'
+import { MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR } from './margins'
 
 // ----- Complexity (I-9.7) ----------------------------------------------------
 
@@ -93,6 +96,83 @@ export const MAINTENANCE_SERVICE_CATALOG: MaintenanceCatalogService[] = [
 ]
 
 /**
+ * Handoff 22 — derive a sell rate (integer cents / 1,000 SF) from a kit's
+ * production rate when the catalog row carries no explicit unit sell:
+ * cost/1,000 SF = (1,000 ÷ rate) hours × loaded crew rate, marked up to the
+ * kit's target GM. Keeps hours-driven kits priced from hours, never a guess.
+ */
+export function sellRateCentsPer1000Sf(
+  productionRate: number,
+  targetGm: number,
+  crewRateCents: number = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
+): number {
+  const costPer1000 = (1000 / productionRate) * crewRateCents
+  const gm = targetGm >= 1 || targetGm < 0 ? 0 : targetGm
+  return Math.round(costPer1000 / (1 - gm))
+}
+
+/**
+ * Handoff 22 — the editors read kits from GET /catalog-items (Handoff 16).
+ * Adapts maintenance_hours CatalogItems to the editor's catalog-row shape,
+ * keeping the sq-ft-only basis rule: only ACTIVE, sq-ft, production-rated
+ * kits are addable (a line seeded from one always passes the save guard).
+ * The MAINTENANCE_SERVICE_CATALOG literal survives ONLY as the offline
+ * fallback (API unreachable / not yet loaded ⇒ empty list).
+ */
+export function maintenanceCatalogFromItems(
+  items: CatalogItem[],
+  crewRateCents: number = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
+): MaintenanceCatalogService[] {
+  const kits = items.filter(
+    (k) =>
+      k.kitType === 'maintenance_hours' &&
+      k.active &&
+      k.productionRate !== null &&
+      k.productionRate > 0 &&
+      /sq/i.test(k.uom),
+  )
+  if (kits.length === 0) return MAINTENANCE_SERVICE_CATALOG
+  return kits.map((k) => ({
+    key: k.id,
+    label: k.description,
+    uom: '/yr',
+    basis: 'sqft',
+    rateCentsPer1000Sf:
+      k.unitSellCents > 0
+        ? k.unitSellCents
+        : sellRateCentsPer1000Sf(k.productionRate as number, k.targetGm, crewRateCents),
+    defaultQty: 1,
+  }))
+}
+
+/**
+ * Handoff 22 — client half of the production-rate save guard (the server
+ * enforces the same rule with a 422). Returns the labels of maintenance lines
+ * that resolve NEITHER explicit hours NOR a production-rated kit. With the
+ * catalog not loaded (offline/in-flight) kit-carrying lines get the benefit
+ * of the doubt — the server still has the final say.
+ */
+export function unresolvedProductionRateLabels(
+  sections: EstimateSection[],
+  catalogItems: CatalogItem[],
+): string[] {
+  const labels: string[] = []
+  for (const section of sections) {
+    for (const svc of section.services) {
+      if (svc.hours !== null) continue
+      if (!svc.catalogItemId) {
+        labels.push(svc.label)
+        continue
+      }
+      if (catalogItems.length === 0) continue // catalog unknown — defer to the server
+      const kit = catalogItems.find((k) => k.id === svc.catalogItemId)
+      if (!kit || kit.productionRate === null) labels.push(svc.label)
+    }
+  }
+  return labels
+}
+
+/**
  * Runtime guard mirroring the compile-time `ServiceBasis`: config rows loaded
  * as data (future admin-managed kit config) must still be sq-ft based.
  */
@@ -151,12 +231,22 @@ export function catalogToService(
   }
 }
 
-/** Default new section, seeded with the core region-template services. */
-export function buildDefaultSection(estimateId: string, sortOrder: number): EstimateSection {
+/**
+ * Default new section, seeded with the core region-template services.
+ * `catalog` comes from GET /catalog-items (Handoff 22); the literal is the
+ * offline fallback. API catalogs (whose keys are kit ids, not the literal
+ * seed keys) seed the first three rows.
+ */
+export function buildDefaultSection(
+  estimateId: string,
+  sortOrder: number,
+  catalog: MaintenanceCatalogService[] = MAINTENANCE_SERVICE_CATALOG,
+): EstimateSection {
   const id = newId('sec')
   const seedKeys = ['mow', 'trim', 'fert']
-  const services = MAINTENANCE_SERVICE_CATALOG.filter((r) => seedKeys.includes(r.key)).map(
-    (row, i) => catalogToService(row, id, i),
+  const seedRows = catalog.filter((r) => seedKeys.includes(r.key))
+  const services = (seedRows.length > 0 ? seedRows : catalog.slice(0, 3)).map((row, i) =>
+    catalogToService(row, id, i),
   )
   return { id, estimateId, name: 'New region', squareFeet: 100_000, sortOrder, services }
 }
@@ -192,53 +282,16 @@ export function removeSection(sections: EstimateSection[], sectionId: string): E
 
 // ----- Lifecycle & ownership (BRD §8.1) --------------------------------------------
 
-/** Ownership always DERIVES from lifecycle — it cannot be set independently. */
+/**
+ * Ownership always DERIVES from lifecycle — it cannot be set independently.
+ * Client-side reference implementation of the derivation rule (BRD §8.1); the
+ * lifecycle flip itself persists via `estimatingApi.setLifecycle` (Handoff 17),
+ * and the server records the edge in estimate_status_transitions
+ * (`lifecycle:` prefix). The old in-memory transitionLifecycle/
+ * lifecycleAuditLog helpers were deleted once that path landed.
+ */
 export function aspireOwnerFor(lifecycle: EstimateLifecycle): AspireOwner {
   return lifecycle === 'won' ? 'crm' : 'estimating'
-}
-
-export interface LifecycleAuditRecord {
-  estimateId: string
-  from: EstimateLifecycle
-  to: EstimateLifecycle
-  aspireOwnerFrom: AspireOwner
-  aspireOwnerTo: AspireOwner
-  actor: string
-  at: string
-}
-
-/**
- * In-memory audit log. Open item: persist through a backend audit endpoint
- * once one exists (none is defined in the Handoff 00 API surface yet).
- */
-export const lifecycleAuditLog: LifecycleAuditRecord[] = []
-
-export function clearLifecycleAuditLog(): void {
-  lifecycleAuditLog.length = 0
-}
-
-/**
- * THE status-transition handler. Flips `lifecycle`, derives `aspireOwner`,
- * and writes the audit record. Returns null for a no-op transition. The UI
- * banner merely reflects the state this handler produces.
- */
-export function transitionLifecycle<E extends Estimate>(
-  estimate: E,
-  to: EstimateLifecycle,
-  actor: string,
-): { estimate: E; audit: LifecycleAuditRecord } | null {
-  if (estimate.lifecycle === to) return null
-  const audit: LifecycleAuditRecord = {
-    estimateId: estimate.id,
-    from: estimate.lifecycle,
-    to,
-    aspireOwnerFrom: aspireOwnerFor(estimate.lifecycle),
-    aspireOwnerTo: aspireOwnerFor(to),
-    actor,
-    at: new Date().toISOString(),
-  }
-  lifecycleAuditLog.push(audit)
-  return { estimate: { ...estimate, lifecycle: to, aspireOwner: aspireOwnerFor(to) }, audit }
 }
 
 // ----- Field ownership (estimator vs approver) ---------------------------------------
@@ -272,6 +325,33 @@ export function assertCanEdit(role: EstimatingRole, field: OwnedField): void {
     const owner = FIELD_OWNERSHIP[field].join('/')
     throw new Error(`"${field}" is ${owner}-owned — a ${role} may not edit it.`)
   }
+}
+
+/**
+ * Map the canonical auth roles (Handoff 18, mirrors api/authz.py) onto the
+ * estimating ownership roles. `admin` holds BOTH scopes. This mapping is
+ * advisory for the UI — the server enforces it on every mutation.
+ */
+export function estimatingRolesForUser(
+  userRole: UserRole | LegacyUserRole,
+): EstimatingRole[] {
+  const role = normalizeRole(userRole)
+  const roles: EstimatingRole[] = []
+  if (['maintenance_estimating', 'install_estimating', 'admin'].includes(role)) {
+    roles.push('estimator')
+  }
+  if (['manager', 'regional_director', 'vice_president', 'ceo', 'admin'].includes(role)) {
+    roles.push('approver')
+  }
+  return roles
+}
+
+/** Whether any of the user's estimating roles may edit the field. */
+export function canUserEditField(
+  userRole: UserRole | LegacyUserRole,
+  field: OwnedField,
+): boolean {
+  return estimatingRolesForUser(userRole).some((r) => canEditField(r, field))
 }
 
 // ----- Display reads --------------------------------------------------------------

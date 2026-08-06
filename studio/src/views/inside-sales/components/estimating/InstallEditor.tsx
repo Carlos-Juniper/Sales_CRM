@@ -20,22 +20,25 @@
 // see handleAddComponent below.
 // ---------------------------------------------------------------------------
 
-import { useState, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Info, Merge, Save, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { estimatingApi } from '@/api/estimating'
+import { estimatingApi, type UpdateEstimatePayload } from '@/api/estimating'
+import { ApiError } from '@/api/client'
 import type {
   ComponentKind,
   EstimateSection,
   InstallEstimate,
+  MarginBands,
   SectionService,
   SectionServiceComponent,
 } from '@/types/estimating'
 import { componentCost, marginBand } from '@/lib/estimating/calc'
-import { DEFAULT_MARGIN_BANDS } from '@/lib/estimating/config'
+import { persistEstimateTree } from '@/lib/estimating/persistTree'
+import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import {
-  INSTALL_KIT_CATALOG,
+  type InstallCatalogKit,
   buildComponent,
   coerceNum,
   estimateGm,
@@ -44,6 +47,7 @@ import {
   formatCents,
   formatGmPct,
   groupSameRateLabor,
+  installKitCatalogFromItems,
   kitToService,
   sectionGm,
   sectionHours,
@@ -66,9 +70,9 @@ const cellInput =
 /** Shared 9-column grid: Item | Qty | Comp | Hrs | U/P | TP | Tax | Sub cost | GM % */
 const GRID = 'grid grid-cols-[2.6fr_0.9fr_0.5fr_0.6fr_0.9fr_0.9fr_0.5fr_0.9fr_0.7fr] gap-1.5 items-center'
 
-/** GM% text color from the ONE canonical margin-band config. */
-function gmClass(gm: number): string {
-  const band = marginBand(gm, DEFAULT_MARGIN_BANDS)
+/** GM% text color from the ONE canonical margin-band config (API-fetched, Handoff 16). */
+function gmClass(gm: number, bands: MarginBands): string {
+  const band = marginBand(gm, bands)
   if (band === 'good') return 'text-[#2E7D52]'
   if (band === 'ok') return 'text-amber-600'
   return 'text-red-600'
@@ -143,6 +147,7 @@ function ComponentRow({
 function ServiceRow({
   svc,
   expanded,
+  bands,
   onToggle,
   onChange,
   onComponentChange,
@@ -151,6 +156,7 @@ function ServiceRow({
 }: {
   svc: SectionService
   expanded: boolean
+  bands: MarginBands
   onToggle: () => void
   onChange: (patch: Partial<SectionService>) => void
   onComponentChange: (componentId: string, patch: Partial<SectionServiceComponent>) => void
@@ -220,7 +226,7 @@ function ServiceRow({
         <span className="text-right text-[hsl(var(--muted-fg))] tabular-nums">{formatCents(subCost)}</span>
         <span
           data-testid={`install-gm-${svc.label}`}
-          className={cn('text-right font-semibold tabular-nums', gmClass(gm))}
+          className={cn('text-right font-semibold tabular-nums', gmClass(gm, bands))}
         >
           {formatGmPct(gm)}
         </span>
@@ -269,15 +275,18 @@ function ServiceRow({
 function GroupRows({
   section,
   expanded,
+  bands,
   onToggle,
   onServiceChange,
   onComponentChange,
   onAddComponent,
   onGroupLabor,
   onAddKit,
+  kits,
 }: {
   section: EstimateSection
   expanded: Record<string, boolean>
+  bands: MarginBands
   onToggle: (serviceId: string) => void
   onServiceChange: (serviceId: string, patch: Partial<SectionService>) => void
   onComponentChange: (
@@ -288,6 +297,8 @@ function GroupRows({
   onAddComponent: (serviceId: string, kind: ComponentKind) => void
   onGroupLabor: (serviceId: string) => void
   onAddKit: (kitId: string) => void
+  /** Handoff 22 — kits from GET /catalog-items (literal = offline fallback). */
+  kits: InstallCatalogKit[]
 }) {
   return (
     <>
@@ -312,7 +323,7 @@ function GroupRows({
         <span className="text-right text-[hsl(var(--muted-fg))] tabular-nums">
           {formatCents(sectionSubCostCents(section))}
         </span>
-        <span className={cn('text-right font-semibold tabular-nums', gmClass(sectionGm(section)))}>
+        <span className={cn('text-right font-semibold tabular-nums', gmClass(sectionGm(section), bands))}>
           {formatGmPct(sectionGm(section))}
         </span>
       </div>
@@ -322,6 +333,7 @@ function GroupRows({
           key={svc.id}
           svc={svc}
           expanded={!!expanded[svc.id]}
+          bands={bands}
           onToggle={() => onToggle(svc.id)}
           onChange={(patch) => onServiceChange(svc.id, patch)}
           onComponentChange={(componentId, patch) => onComponentChange(svc.id, componentId, patch)}
@@ -338,7 +350,7 @@ function GroupRows({
           onChange={(e) => e.target.value && onAddKit(e.target.value)}
         >
           <option value="">+ Add line item from catalog…</option>
-          {INSTALL_KIT_CATALOG.filter((k) => k.active).map((k) => (
+          {kits.filter((k) => k.active).map((k) => (
             <option key={k.id} value={k.id}>
               {k.description}
             </option>
@@ -357,6 +369,10 @@ function GroupRows({
 export function InstallEditor({ estimate }: InstallEditorProps) {
   const { setOpenEstimate } = useEstimatingShell()
   const toast = useToast()
+  // The ONE canonical margin-band set + kit catalog — API-fetched config
+  // (Handoffs 16 + 22); the literals are only the offline fallback.
+  const { marginBands, catalogItems } = useEstimatingConfig()
+  const kitCatalog = useMemo(() => installKitCatalogFromItems(catalogItems), [catalogItems])
 
   const [draft, setDraft] = useState<InstallEstimate>(estimate)
   const savedRef = useRef<InstallEstimate>(estimate)
@@ -428,7 +444,7 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
   }
 
   function handleAddKit(sectionId: string, kitId: string) {
-    const kit = INSTALL_KIT_CATALOG.find((k) => k.id === kitId)
+    const kit = kitCatalog.find((k) => k.id === kitId)
     const section = draft.sections.find((s) => s.id === sectionId)
     if (!kit || !section) return
     setDraft((d) => ({
@@ -447,17 +463,32 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
     setSaveError(null)
     const toSave: InstallEstimate = { ...draft, contractValueCents: contractCents }
     try {
-      await estimatingApi.update(toSave.id, {
-        name: toSave.name,
-        contractValueCents: toSave.contractValueCents,
-        targetMargin: toSave.targetMargin,
-      })
-      savedRef.current = toSave
-      setDraft(toSave)
-      setOpenEstimate(toSave)
+      // Handoff 17: persist the FULL tree (diff-and-apply against the last
+      // server-loaded state), then the scalar fields, then reload from the
+      // server so the editor reflects persisted state — never local state.
+      await persistEstimateTree(toSave.id, savedRef.current.sections, toSave.sections)
+      // Handoff 18 ownership split: targetMargin/contractValueCents are
+      // approver-owned levers server-side (an estimator PATCH touching them
+      // 403s). Only send them when this Save actually changed them so the
+      // routine estimator Save never trips the approver guard.
+      const scalars: UpdateEstimatePayload = { name: toSave.name }
+      if (toSave.contractValueCents !== savedRef.current.contractValueCents)
+        scalars.contractValueCents = toSave.contractValueCents
+      if (toSave.targetMargin !== savedRef.current.targetMargin)
+        scalars.targetMargin = toSave.targetMargin
+      await estimatingApi.update(toSave.id, scalars)
+      const fresh = (await estimatingApi.get(toSave.id)) as InstallEstimate
+      savedRef.current = fresh
+      setDraft(fresh)
+      setOpenEstimate(fresh)
       toast.show('Estimate saved')
-    } catch {
-      setSaveError('The estimate couldn’t be saved. Check your connection and retry.')
+    } catch (err) {
+      // 422 = a server-side save guard rejection — surface its specific message.
+      if (err instanceof ApiError && err.status === 422) {
+        setSaveError(err.message)
+      } else {
+        setSaveError('The estimate couldn’t be saved. Check your connection and retry.')
+      }
     } finally {
       setSaving(false)
     }
@@ -479,6 +510,15 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
             <span className="font-medium text-[hsl(var(--fg))]">{formatCents(contractCents)}</span>{' '}
             · {totalHours.toFixed(2)} hrs planned
           </p>
+          {/* Handoff 24 §3.2 — tracked RFI status, display only (no gating). */}
+          {draft.rfiStatus && (
+            <p
+              data-testid="install-rfi-status"
+              className="mt-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 inline-block"
+            >
+              <span className="font-semibold">RFI:</span> {draft.rfiStatus}
+            </p>
+          )}
         </div>
         <Button size="sm" onClick={handleSave} disabled={saving}>
           <Save className="h-3.5 w-3.5" />
@@ -507,19 +547,6 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
           Install kits are <strong>quantity-driven</strong>: line price = QTY × unit sell price,
           each line carrying its own GM% over an embedded sub-cost. Hours are{' '}
           <strong>tracked for production planning only</strong> — they don&rsquo;t move price.
-        </p>
-      </div>
-
-      {/* ---- Approval open item (never the maintenance ladder) ---- */}
-      <div
-        data-testid="install-approval-note"
-        className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2"
-      >
-        <TriangleAlert className="h-4 w-4 flex-shrink-0 text-amber-600 mt-0.5" />
-        <p className="m-0 text-xs text-amber-800">
-          <strong>No approval matrix defined for install.</strong> Install estimates are not routed
-          through the maintenance approval ladder — the internal tier set is an open item pending
-          Carlos&rsquo;s decision, and lands as config rows when defined.
         </p>
       </div>
 
@@ -575,7 +602,7 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
             <span className="text-right text-xs text-[hsl(var(--muted-fg))] tabular-nums">
               {formatCents(estimateSubCostCents(draft))}
             </span>
-            <span className={cn('text-right font-bold tabular-nums', gmClass(blendedGm))}>
+            <span className={cn('text-right font-bold tabular-nums', gmClass(blendedGm, marginBands))}>
               {formatGmPct(blendedGm)}
             </span>
           </div>
@@ -585,6 +612,7 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
               key={section.id}
               section={section}
               expanded={expanded}
+              bands={marginBands}
               onToggle={(serviceId) => setExpanded((e) => ({ ...e, [serviceId]: !e[serviceId] }))}
               onServiceChange={(serviceId, patch) => patchService(section.id, serviceId, patch)}
               onComponentChange={(serviceId, componentId, patch) =>
@@ -593,6 +621,7 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
               onAddComponent={(serviceId, kind) => handleAddComponent(section.id, serviceId, kind)}
               onGroupLabor={(serviceId) => handleGroupLabor(section.id, serviceId)}
               onAddKit={(kitId) => handleAddKit(section.id, kitId)}
+              kits={kitCatalog}
             />
           ))}
         </div>

@@ -6,8 +6,8 @@
 
 | Environment | Connection Name |
 |-------------|----------------|
-| Production  | `juniper-crm-498215-p5:us-central1:juniper-crm-mysql` |
-| Staging     | `juniper-crm-498215-p5:us-central1:juniper-crm-mysql-staging` |
+| Production  | `juniper-crm-498215-p5:us-central1:juniper-prod` |
+| Staging     | `juniper-crm-498215-p5:us-central1:juniper-dev` |
 
 ### Required Secret Manager Secrets
 
@@ -27,10 +27,10 @@ These secrets must be provisioned manually in Secret Manager before deploying. C
 
 The app connects to Cloud SQL via a Unix socket in Cloud Run. For local development, use the Cloud SQL Auth Proxy to expose the instance over TCP on port 3306.
 
-**1. Start the proxy (production instance):**
+**1. Start the proxy (staging/dev instance — do not develop against prod):**
 
 ```bash
-cloud-sql-proxy juniper-crm-498215-p5:us-central1:juniper-crm-mysql --port 3306
+cloud-sql-proxy juniper-crm-498215-p5:us-central1:juniper-dev --port 3306
 ```
 
 **2. Set environment variables in `.env`:**

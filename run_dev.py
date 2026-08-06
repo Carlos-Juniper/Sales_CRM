@@ -37,7 +37,7 @@ if env_file.exists():
 # ── Config ───────────────────────────────────────────────────────────────────
 CLOUD_SQL_INSTANCE = os.environ.get(
     "CLOUD_SQL_INSTANCE",
-    "juniper-crm-498215-p5:us-central1:juniper-crm-mysql-staging",
+    "juniper-crm-498215-p5:us-central1:juniper-dev",
 )
 MYSQL_PORT    = os.environ.get("MYSQL_PORT", "3306")
 

@@ -23,23 +23,22 @@ function renderRoute(initialEntries: string[], user: AuthUser | null = null) {
         <Routes>
           <Route path="/login" element={<div>Login Page</div>} />
           <Route path="/inside-sales" element={<RequireAuth><div>Inside Sales Dashboard</div></RequireAuth>} />
-          <Route path="/outside-sales" element={<RequireAuth><div>Outside Sales</div></RequireAuth>} />
           <Route
-            path="/inside-sales-role"
+            path="/sales-role"
             element={
               <RequireAuth>
-                <RoleGate roles={['inside_sales', 'manager']} redirectTo="/outside-sales">
-                  <div>Inside Sales Role Content</div>
+                <RoleGate roles={['sales', 'manager']} redirectTo="/inside-sales">
+                  <div>Sales Role Content</div>
                 </RoleGate>
               </RequireAuth>
             }
           />
           <Route
-            path="/outside-sales-role"
+            path="/estimating-role"
             element={
               <RequireAuth>
-                <RoleGate roles={['outside_sales', 'manager']} redirectTo="/inside-sales">
-                  <div>Outside Sales Role Content</div>
+                <RoleGate roles={['maintenance_estimating', 'install_estimating']} redirectTo="/inside-sales">
+                  <div>Estimating Role Content</div>
                 </RoleGate>
               </RequireAuth>
             }
@@ -61,7 +60,7 @@ function renderRoute(initialEntries: string[], user: AuthUser | null = null) {
   )
 }
 
-describe('Router - Auth & Role Guards', () => {
+describe('Router - Auth & Role Guards (canonical 9-role model, Handoff 18)', () => {
   beforeEach(() => {
     useAuthStore.setState({ user: null })
   })
@@ -77,38 +76,39 @@ describe('Router - Auth & Role Guards', () => {
   })
 
   it('authenticated user can access /inside-sales', () => {
-    const user = makeUser({ role: 'inside_sales' })
+    const user = makeUser({ role: 'sales' })
     renderRoute(['/inside-sales'], user)
     expect(screen.getByText('Inside Sales Dashboard')).toBeInTheDocument()
   })
 
-  it('inside_sales role can access inside_sales role-gated route', () => {
-    const user = makeUser({ role: 'inside_sales' })
-    renderRoute(['/inside-sales-role'], user)
-    expect(screen.getByText('Inside Sales Role Content')).toBeInTheDocument()
+  it('sales role can access the sales role-gated route', () => {
+    const user = makeUser({ role: 'sales' })
+    renderRoute(['/sales-role'], user)
+    expect(screen.getByText('Sales Role Content')).toBeInTheDocument()
   })
 
-  it('manager can access inside_sales role-gated route', () => {
+  it('legacy inside_sales/outside_sales users normalize to sales and pass sales gates', () => {
+    for (const legacy of ['inside_sales', 'outside_sales'] as const) {
+      const { unmount } = renderRoute(['/sales-role'], makeUser({ role: legacy }))
+      expect(screen.getByText('Sales Role Content')).toBeInTheDocument()
+      unmount()
+    }
+  })
+
+  it('manager can access the sales role-gated route (listed explicitly)', () => {
     const user = makeUser({ role: 'manager' })
-    renderRoute(['/inside-sales-role'], user)
-    expect(screen.getByText('Inside Sales Role Content')).toBeInTheDocument()
+    renderRoute(['/sales-role'], user)
+    expect(screen.getByText('Sales Role Content')).toBeInTheDocument()
   })
 
-  it('outside_sales role is redirected away from inside-sales-role route', () => {
-    const user = makeUser({ role: 'outside_sales' })
-    renderRoute(['/inside-sales-role'], user)
-    expect(screen.getByText('Outside Sales')).toBeInTheDocument()
-  })
+  it('estimating roles pass estimating-gated routes; sales is redirected away', () => {
+    const estimator = makeUser({ role: 'maintenance_estimating' })
+    const { unmount } = renderRoute(['/estimating-role'], estimator)
+    expect(screen.getByText('Estimating Role Content')).toBeInTheDocument()
+    unmount()
 
-  it('outside_sales role can access outside-sales-role route', () => {
-    const user = makeUser({ role: 'outside_sales' })
-    renderRoute(['/outside-sales-role'], user)
-    expect(screen.getByText('Outside Sales Role Content')).toBeInTheDocument()
-  })
-
-  it('inside_sales role is redirected away from outside-sales-role route', () => {
-    const user = makeUser({ role: 'inside_sales' })
-    renderRoute(['/outside-sales-role'], user)
+    renderRoute(['/estimating-role'], makeUser({ role: 'sales' }))
+    expect(screen.queryByText('Estimating Role Content')).not.toBeInTheDocument()
     expect(screen.getByText('Inside Sales Dashboard')).toBeInTheDocument()
   })
 
@@ -118,8 +118,14 @@ describe('Router - Auth & Role Guards', () => {
     expect(screen.getByText('Manager Only Content')).toBeInTheDocument()
   })
 
-  it('inside_sales cannot access manager-only route', () => {
-    const user = makeUser({ role: 'inside_sales' })
+  it('admin (super-role) can access manager-only route', () => {
+    const user = makeUser({ role: 'admin' })
+    renderRoute(['/manager-only'], user)
+    expect(screen.getByText('Manager Only Content')).toBeInTheDocument()
+  })
+
+  it('sales cannot access manager-only route', () => {
+    const user = makeUser({ role: 'sales' })
     renderRoute(['/manager-only'], user)
     expect(screen.queryByText('Manager Only Content')).not.toBeInTheDocument()
     expect(screen.getByText('Inside Sales Dashboard')).toBeInTheDocument()

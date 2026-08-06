@@ -6,8 +6,8 @@
 // consumes it today, and per the open II-9.8 decision it can later run as
 // back-end automation that routes flagged lines to the CRM without the tab.
 //
-// Rules (verbatim from the template):
-//   bidQty     = ceil(planQty × (1 + addPct))
+// Rules (from the template; rounding updated per Handoff 20's locked decision):
+//   bidQty     = round(planQty × (1 + addPct))   // round, not ceil (Handoff 20)
 //   isFlagged  = planQty === 0 ? false : |measured − plan| / plan > threshold
 //   deltaVsOpp = measured − opportunityQty   // independent signal — always
 //                                            // surfaced to the CRM when ≠ 0

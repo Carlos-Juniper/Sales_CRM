@@ -24,9 +24,9 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { Estimate, MarginBandLabel } from '@/types/estimating'
+import type { CatalogItem, Estimate, MarginBandLabel, MarginBands } from '@/types/estimating'
 import { contractTotal, groupMargin, marginBand } from '@/lib/estimating/calc'
-import { DEFAULT_MARGIN_BANDS } from '@/lib/estimating/config'
+import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import { formatCents } from '@/lib/estimating/maintenance'
 import {
   MARGIN_BENCHMARKS,
@@ -69,8 +69,8 @@ function fmtK(cents: number): string {
 
 // ----- Service-group rows ------------------------------------------------------
 
-function GroupHeader({ group, color }: { group: ServiceGroupMargin; color: string }) {
-  const band = marginBand(group.marginPct, DEFAULT_MARGIN_BANDS)
+function GroupHeader({ group, color, bands }: { group: ServiceGroupMargin; color: string; bands: MarginBands }) {
+  const band = marginBand(group.marginPct, bands)
   const meta = BAND_META[band]
   const Icon = meta.Icon
   return (
@@ -91,10 +91,10 @@ function GroupHeader({ group, color }: { group: ServiceGroupMargin; color: strin
 }
 
 /** Maintenance group row — hours-driven cost basis with the margin/40 bar. */
-function MaintenanceGroupRow({ group, color }: { group: ServiceGroupMargin; color: string }) {
+function MaintenanceGroupRow({ group, color, bands }: { group: ServiceGroupMargin; color: string; bands: MarginBands }) {
   return (
     <div className="space-y-1.5" data-testid="margin-group-row">
-      <GroupHeader group={group} color={color} />
+      <GroupHeader group={group} color={color} bands={bands} />
       <div className="h-4 bg-[hsl(var(--muted))] rounded-full overflow-hidden" data-testid="group-margin-bar">
         <div
           className="h-full rounded-full transition-all duration-500 margin-bar-fill"
@@ -111,14 +111,14 @@ function MaintenanceGroupRow({ group, color }: { group: ServiceGroupMargin; colo
 }
 
 /** Install group row — materials-inclusive cost-split graphic (BRD II-9.7). */
-function InstallGroupRow({ group, color }: { group: ServiceGroupMargin; color: string }) {
+function InstallGroupRow({ group, color, bands }: { group: ServiceGroupMargin; color: string; bands: MarginBands }) {
   const cost = group.costCents || 1
   const matPct = (group.materialCostCents / cost) * 100
   const laborPct = (group.laborCostCents / cost) * 100
   const otherPct = (group.unattributedCostCents / cost) * 100
   return (
     <div className="space-y-1.5" data-testid="margin-group-row">
-      <GroupHeader group={group} color={color} />
+      <GroupHeader group={group} color={color} bands={bands} />
       {/* Stacked cost split: materials (dominant driver) · labor · unattributed */}
       <div className="flex h-4 rounded-full overflow-hidden bg-[hsl(var(--muted))]" data-testid="group-cost-split-bar">
         <div className="h-full margin-split-seg" style={{ '--seg-width': `${matPct}%`, '--seg-color': color } as CSSProperties} />
@@ -148,10 +148,13 @@ interface BenchCard {
   status: BenchmarkStatus
 }
 
-function buildBenchCards(estimate: Estimate): { verdict: BenchmarkStatus; perAcre: number; cards: BenchCard[] } {
+function buildBenchCards(
+  estimate: Estimate,
+  catalogItems: CatalogItem[],
+): { verdict: BenchmarkStatus; perAcre: number; cards: BenchCard[] } {
   const perAcre = perAcreCents(estimate)
   const contract = contractTotal(estimate)
-  const mowingOcc = mowingPerOccurrenceCents(estimate)
+  const mowingOcc = mowingPerOccurrenceCents(estimate, catalogItems)
   const cards: BenchCard[] = [
     {
       testId: 'bench-card-per-acre',
@@ -194,6 +197,8 @@ const VERDICT_SUB: Record<BenchmarkStatus, (perAcre: string, band: string) => st
 
 export function MarginAnalysis() {
   const { openEstimate } = useEstimatingShell()
+  // The ONE canonical band set — API-fetched (Handoff 16); literal = fallback.
+  const { marginBands, catalogItems } = useEstimatingConfig()
 
   if (!openEstimate) {
     return (
@@ -213,16 +218,16 @@ export function MarginAnalysis() {
 
   const estimate = openEstimate
   const isMaintenance = estimate.estimateType === 'maintenance'
-  const groups = serviceGroupMargins(estimate)
+  const groups = serviceGroupMargins(estimate, catalogItems)
   const contract = contractTotal(estimate)
   const totalCost = groups.reduce((s, g) => s + g.costCents, 0)
   const overall = groupMargin(contract, totalCost)
-  const overallBand = marginBand(overall, DEFAULT_MARGIN_BANDS)
+  const overallBand = marginBand(overall, marginBands)
   const overallMeta = BAND_META[overallBand]
   const deltaPts = (overall - estimate.targetMargin) * 100
   const aboveTarget = deltaPts >= 0
 
-  const bench = buildBenchCards(estimate)
+  const bench = buildBenchCards(estimate, catalogItems)
   const verdictMeta = STATUS_META[bench.verdict]
   const treeSorted = [...MARGIN_BENCHMARKS.treeWorkSaleCents].sort((a, b) => a - b)
   const treeMedian = medianCents(MARGIN_BENCHMARKS.treeWorkSaleCents)
@@ -297,9 +302,9 @@ export function MarginAnalysis() {
         <CardContent className="pb-4 space-y-5">
           {groups.map((g, i) =>
             isMaintenance ? (
-              <MaintenanceGroupRow key={g.label} group={g} color={GROUP_COLORS[i % GROUP_COLORS.length]} />
+              <MaintenanceGroupRow key={g.label} group={g} color={GROUP_COLORS[i % GROUP_COLORS.length]} bands={marginBands} />
             ) : (
-              <InstallGroupRow key={g.label} group={g} color={GROUP_COLORS[i % GROUP_COLORS.length]} />
+              <InstallGroupRow key={g.label} group={g} color={GROUP_COLORS[i % GROUP_COLORS.length]} bands={marginBands} />
             ),
           )}
         </CardContent>

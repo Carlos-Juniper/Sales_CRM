@@ -3,9 +3,12 @@
 //
 // Estimates in pending_approval are routed to a tier by contract value via
 // the CONFIG approval_tiers ladder (tierForValue) — never a hardcoded matrix.
-// The "Viewing as" switcher (BM / RD / BP / COO) filters the inbox to that
+// The "Viewing as" switcher (MGR / RD / VP / CEO) filters the inbox to that
 // tier. Opening a card raises the Approver Review Drawer where the two
-// audited levers (complexity → hours/cost, margin → price) live.
+// audited levers (complexity → hours/cost, margin → price) live. There is no
+// "Escalate" action: an over-ceiling adjustment simply saves (audited, no
+// approve) and the value-driven tier recompute re-routes the estimate to the
+// correct queue automatically (Handoff 19 §4).
 //
 // Status changes always go through lib/estimating/transitions (approve =
 // approveAndHandBack server-side; send-back = applyTransition → in_progress).
@@ -16,7 +19,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Check, CheckCheck, Clock, CornerUpLeft, Eye, Percent, ArrowUp } from 'lucide-react'
 import { estimatingApi } from '@/api/estimating'
 import { applyTransition } from '@/lib/estimating/transitions'
-import { APPROVAL_TIER_SEED } from '@/lib/estimating/config'
+import { tierForValue } from '@/lib/estimating/calc'
+import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import {
   applyApproverAdjustments,
   escalationNote,
@@ -43,17 +47,17 @@ import { ApproverReviewDrawer } from './ApproverReviewDrawer'
  * the signed-in approver resolved from the user/role table.
  */
 const APPROVER_DIRECTORY: Record<ApprovalRoleKey, { name: string; initials: string }> = {
-  branch_manager: { name: 'Robert Chen', initials: 'RC' },
+  manager: { name: 'Robert Chen', initials: 'RC' },
   regional_director: { name: 'Amanda Torres', initials: 'AT' },
-  bp: { name: 'Marcus Webb', initials: 'MW' },
-  coo: { name: 'Diane Voss', initials: 'DV' },
+  vice_president: { name: 'Marcus Webb', initials: 'MW' },
+  ceo: { name: 'Diane Voss', initials: 'DV' },
 }
 
 const ROLE_TABS: { key: ApprovalRoleKey; label: string }[] = [
-  { key: 'branch_manager', label: 'BM' },
+  { key: 'manager', label: 'MGR' },
   { key: 'regional_director', label: 'RD' },
-  { key: 'bp', label: 'BP' },
-  { key: 'coo', label: 'COO' },
+  { key: 'vice_president', label: 'VP' },
+  { key: 'ceo', label: 'CEO' },
 ]
 
 const SEVERITY_COLOR: Record<ReturnType<typeof waitSeverity>, string> = {
@@ -82,18 +86,23 @@ function estimatorName(estimate: Estimate): string {
 }
 
 export interface ApprovalQueueProps {
-  /** approval_tiers config rows (§3.9); production supplies the config table. */
+  /**
+   * approval_tiers config rows (§3.9). Defaults to the API-fetched config
+   * table (Handoff 16); the config.ts seed is only the offline fallback.
+   */
   tiers?: ApprovalTier[]
   /** Test/deep-link seam; when absent the pending set is fetched. */
   estimates?: Estimate[]
 }
 
-export function ApprovalQueue({ tiers = APPROVAL_TIER_SEED, estimates }: ApprovalQueueProps) {
+export function ApprovalQueue({ tiers: tiersProp, estimates }: ApprovalQueueProps) {
+  const { approvalTiers } = useEstimatingConfig()
+  const tiers = tiersProp ?? approvalTiers
   const { setOpenEstimate, setActiveTab } = useEstimatingShell()
   const { show } = useToast()
   const user = useAuthStore((s) => s.user)
 
-  const [role, setRole] = useState<ApprovalRoleKey>('branch_manager')
+  const [role, setRole] = useState<ApprovalRoleKey>('manager')
   const [items, setItems] = useState<Estimate[]>(estimates ?? [])
   const [selected, setSelected] = useState<{ id: string; sendBack: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -121,6 +130,14 @@ export function ApprovalQueue({ tiers = APPROVAL_TIER_SEED, estimates }: Approva
   const selectedRouted: RoutedEstimate | null = selected
     ? (routed.find((r) => r.estimate.id === selected.id) ?? null)
     : null
+  // The viewer's ceiling in the ladder of the ESTIMATE'S type — maintenance
+  // and install ladders mirror each other today but may diverge as config.
+  const drawerApproverTier = selectedRouted
+    ? (tiers.find(
+        (t) =>
+          t.roleKey === role && t.estimateType === selectedRouted.estimate.estimateType,
+      ) ?? null)
+    : null
 
   function replaceItem(updated: Estimate) {
     setItems((prev) => prev.map((e) => (e.id === updated.id ? updated : e)))
@@ -132,7 +149,7 @@ export function ApprovalQueue({ tiers = APPROVAL_TIER_SEED, estimates }: Approva
   ): Promise<Estimate> {
     const { patch, records } = applyApproverAdjustments(estimate, tiers, live, actor)
     const updated = await estimatingApi.update(estimate.id, patch)
-    recordAdjustments(records) // estimate_adjustments audit (BRD III-1)
+    await recordAdjustments(records) // persisted estimate_adjustments audit (BRD III-1)
     return updated
   }
 
@@ -158,18 +175,25 @@ export function ApprovalQueue({ tiers = APPROVAL_TIER_SEED, estimates }: Approva
     }
   }
 
-  async function handleEscalate(
+  async function handleSaveAdjustment(
     estimate: Estimate,
     live: { compPct: number; marginPct: number },
-    toTier: ApprovalTier,
   ) {
     if (busy) return
     setBusy(true)
     try {
       const updated = await persistAdjustments(estimate, live)
-      replaceItem(updated) // value re-routes it to the higher tier's queue
+      replaceItem(updated) // the value-driven tier recompute re-routes it
       setSelected(null)
-      show(`Escalated to ${toTier.label}`)
+      const routedTier = tierForValue(
+        updated.contractValueCents,
+        tiers.filter((t) => t.estimateType === updated.estimateType),
+      )
+      show(
+        routedTier
+          ? `Adjustment saved — routed to ${routedTier.label}`
+          : 'Adjustment saved',
+      )
     } finally {
       setBusy(false)
     }
@@ -391,13 +415,13 @@ export function ApprovalQueue({ tiers = APPROVAL_TIER_SEED, estimates }: Approva
           key={`${selectedRouted.estimate.id}-${selected?.sendBack ? 'sb' : 'review'}`}
           estimate={selectedRouted.estimate}
           tier={selectedRouted.tier}
-          approverTier={approverTier}
+          approverTier={drawerApproverTier}
           tiers={tiers.filter((t) => t.estimateType === selectedRouted.estimate.estimateType)}
           builtBy={estimatorName(selectedRouted.estimate)}
           initialSendBack={selected?.sendBack ?? false}
           onClose={() => setSelected(null)}
           onApprove={(live, changed) => handleApprove(selectedRouted.estimate, live, changed)}
-          onEscalate={(live, toTier) => handleEscalate(selectedRouted.estimate, live, toTier)}
+          onSaveAdjustment={(live) => handleSaveAdjustment(selectedRouted.estimate, live)}
           onSendBack={(reason, note) => handleSendBack(selectedRouted.estimate, reason, note)}
         />
       )}

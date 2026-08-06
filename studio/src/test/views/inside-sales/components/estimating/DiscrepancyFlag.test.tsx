@@ -12,9 +12,10 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { screen, fireEvent, within } from '@testing-library/react'
+import { screen, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render, makeUser } from '@/test/utils'
+import { estimatingApi } from '@/api/estimating'
 import { useAuthStore } from '@/store/authStore'
 import type { ReactNode } from 'react'
 import type { TakeoffLine } from '@/types/estimating'
@@ -118,8 +119,8 @@ describe('DiscrepancyFlag — table & live recompute', () => {
     renderTab()
     expect(screen.getByText("Mahogany 10'-12'")).toBeInTheDocument()
     expect(screen.getByText('ea')).toBeInTheDocument()
-    // bid = ceil(24 × 1.05) = 26 ; ceil(100 × 1.1) = 110 ; ceil(20 × 1) = 20
-    expect(screen.getByTestId('bid-qty-a')).toHaveTextContent('26')
+    // bid = round(24 × 1.05) = 25 ; round(100 × 1.1) = 110 ; round(20 × 1) = 20
+    expect(screen.getByTestId('bid-qty-a')).toHaveTextContent('25')
     expect(screen.getByTestId('bid-qty-b')).toHaveTextContent('110')
     expect(screen.getByTestId('bid-qty-c')).toHaveTextContent('20')
     expect(screen.getAllByText('OK')).toHaveLength(2)
@@ -132,19 +133,19 @@ describe('DiscrepancyFlag — table & live recompute', () => {
     const plan = screen.getByLabelText("Plan QTY — Mahogany 10'-12'")
     await user.clear(plan)
     await user.type(plan, '12')
-    // bid = ceil(12 × 1.05) = 13 ; measured 24 vs plan 12 = 100% dev → Review
+    // bid = round(12 × 1.05) = 13 ; measured 24 vs plan 12 = 100% dev → Review
     expect(screen.getByTestId('bid-qty-a')).toHaveTextContent('13')
     expect(screen.getByTestId('stat-flagged-count')).toHaveTextContent('2')
     expect(screen.getAllByText('Review')).toHaveLength(2)
   })
 
-  it('editing Add % recomputes Bid QTY (whole-percent input, ceil applied)', async () => {
+  it('editing Add % recomputes Bid QTY (whole-percent input, round applied)', async () => {
     const user = userEvent.setup()
     renderTab()
     const add = screen.getByLabelText("Add % — Mahogany 10'-12'")
     await user.clear(add)
     await user.type(add, '10')
-    expect(screen.getByTestId('bid-qty-a')).toHaveTextContent('27') // ceil(24 × 1.1)
+    expect(screen.getByTestId('bid-qty-a')).toHaveTextContent('26') // round(24 × 1.1) = 26.4 → 26
   })
 
   it('editing Measured re-evaluates the flag and Δ live', async () => {
@@ -231,6 +232,45 @@ describe('DiscrepancyFlag — CRM banner & surface action', () => {
   })
 })
 
+describe('DiscrepancyFlag — API persistence (Handoff 20)', () => {
+  it('loads its lines from GET …/takeoff-lines when no initialLines seam is given', async () => {
+    render(
+      <Wrap>
+        <DiscrepancyFlag />
+      </Wrap>,
+    )
+    // Lines arrive async from the (mock) API — the fixture-seeded store.
+    expect(await screen.findByText('Bermuda sod')).toBeInTheDocument()
+    expect(screen.getByTestId('stat-line-count')).toHaveTextContent('3')
+  })
+
+  it('PATCHes edits back so state survives a reload (remount)', async () => {
+    const user = userEvent.setup()
+    const first = render(
+      <Wrap>
+        <DiscrepancyFlag />
+      </Wrap>,
+    )
+    const measured = await screen.findByLabelText('Measured — Bermuda sod')
+    await user.clear(measured)
+    await user.type(measured, '25000')
+    // Wait for the PATCHes to land, then simulate the reload.
+    await waitFor(async () => {
+      const rows = await estimatingApi.listTakeoffLines(install.id)
+      expect(rows.find((l) => l.description === 'Bermuda sod')?.measuredQty).toBe(25000)
+    })
+    first.unmount()
+
+    render(
+      <Wrap>
+        <DiscrepancyFlag />
+      </Wrap>,
+    )
+    const reloaded = await screen.findByLabelText('Measured — Bermuda sod')
+    expect(reloaded).toHaveValue(25000)
+  })
+})
+
 describe('DiscrepancyFlag — shell integration', () => {
   beforeEach(() => {
     useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'inside_sales' }) })
@@ -242,8 +282,8 @@ describe('DiscrepancyFlag — shell integration', () => {
     await user.click(screen.getByRole('tab', { name: 'Discrepancy Review' }))
     expect(screen.getByText('Takeoff lines')).toBeInTheDocument()
     expect(screen.getByLabelText('Flag threshold')).toBeInTheDocument()
-    // Install fixture seeds the sample takeoff lines.
+    // Lines now load from the takeoff-lines API (fixture-seeded in the mock).
     const table = screen.getByRole('table')
-    expect(within(table).getByText('Bermuda sod')).toBeInTheDocument()
+    expect(await within(table).findByText('Bermuda sod')).toBeInTheDocument()
   })
 })

@@ -245,6 +245,23 @@ export const INSTALL_KIT_CATALOG: InstallCatalogKit[] = [
 ]
 
 /**
+ * Handoff 22 — the editors read kits from GET /catalog-items (Handoff 16).
+ * Adapts install_quantity CatalogItems into the editor's kit shape; the API
+ * row carries a single blended unit cost, which stands in as the one vendor
+ * quote until per-vendor pricing lands. The INSTALL_KIT_CATALOG literal
+ * survives ONLY as the offline fallback (API unreachable / not yet loaded ⇒
+ * empty list).
+ */
+export function installKitCatalogFromItems(items: CatalogItem[]): InstallCatalogKit[] {
+  const kits = items.filter((k) => k.kitType === 'install_quantity' && k.active)
+  if (kits.length === 0) return INSTALL_KIT_CATALOG
+  return kits.map((k) => ({
+    ...k,
+    vendorPricesCents: k.unitCostCents > 0 ? [k.unitCostCents] : [],
+  }))
+}
+
+/**
  * Seed a SectionService from an install kit. The cost basis feeds from the
  * catalog row's averaged vendor prices — the runtime guard keeps the two
  * pricing engines independent (a maintenance_hours kit can never enter here).

@@ -15,7 +15,7 @@ import { screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@/test/utils'
 import type { Estimate, InstallEstimate } from '@/types/estimating'
-import { buildInstallEstimate, buildMaintenanceEstimate } from '@/mocks/estimatingData'
+import { buildInstallEstimate, buildMaintenanceEstimate, toCreatePayload } from '@/mocks/estimatingData'
 import { estimatingApi } from '@/api/estimating'
 import { LineItemEditor } from '@/views/inside-sales/components/estimating/LineItemEditor'
 import { EstimatingToastProvider } from '@/views/inside-sales/components/estimating/EstimatingToast'
@@ -276,13 +276,11 @@ describe('InstallEditor — add kit line from catalog (II-6.5 / II-9.5)', () => 
   })
 })
 
-describe('InstallEditor — approval open item (no maintenance ladder)', () => {
-  it('shows "no approval matrix defined" and never the maintenance BM/RD/BP/COO ladder', () => {
+describe('InstallEditor — install routes through the tier ladder (Handoff 19 §4)', () => {
+  it('no longer shows the "no approval matrix defined" note — install approvals are config-routed', () => {
     renderInstall()
-    expect(screen.getByTestId('install-approval-note')).toHaveTextContent(/no approval matrix defined/i)
-    expect(screen.queryByText(/branch manager/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/regional director/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/\bCOO\b/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('install-approval-note')).not.toBeInTheDocument()
+    expect(screen.queryByText(/no approval matrix/i)).not.toBeInTheDocument()
   })
 })
 
@@ -294,10 +292,12 @@ describe('InstallEditor — empty / saving / save-error states', () => {
 
   it('shows a save error with retry when the API fails, then saves on retry', async () => {
     const user = userEvent.setup()
+    const fixture = buildInstallEstimate() as InstallEstimate
     const spy = vi
       .spyOn(estimatingApi, 'update')
       .mockRejectedValueOnce(new Error('network'))
-      .mockResolvedValueOnce(buildInstallEstimate() as InstallEstimate)
+      .mockResolvedValueOnce(fixture)
+    vi.spyOn(estimatingApi, 'get').mockResolvedValue(fixture)
     renderInstall()
 
     await user.click(screen.getByRole('button', { name: /^save$/i }))
@@ -310,12 +310,86 @@ describe('InstallEditor — empty / saving / save-error states', () => {
 
   it('never sends estimateType in the save payload (immutable discriminant)', async () => {
     const user = userEvent.setup()
-    const spy = vi
-      .spyOn(estimatingApi, 'update')
-      .mockResolvedValue(buildInstallEstimate() as InstallEstimate)
+    const fixture = buildInstallEstimate() as InstallEstimate
+    const spy = vi.spyOn(estimatingApi, 'update').mockResolvedValue(fixture)
+    vi.spyOn(estimatingApi, 'get').mockResolvedValue(fixture)
     renderInstall()
     await user.click(screen.getByRole('button', { name: /^save$/i }))
     await waitFor(() => expect(spy).toHaveBeenCalled())
     expect(spy.mock.calls[0][1]).not.toHaveProperty('estimateType')
+  })
+})
+
+// ----- Save persists the full tree, then reloads (Handoff 17) ----------------
+
+describe('InstallEditor — Save persists line-item and component edits', () => {
+  it('blue-cell component edits survive a reload after Save', async () => {
+    const user = userEvent.setup()
+    const created = (await estimatingApi.create(
+      toCreatePayload(buildInstallEstimate()),
+    )) as InstallEstimate
+    renderInstall(created)
+
+    const svc = created.sections[0].services.find((sv) => sv.components.length > 0)!
+    const comp = svc.components[0]
+    await user.click(screen.getByRole('button', { name: `Toggle components for ${svc.label}` }))
+    const qtyInput = screen.getByLabelText(`Component qty for ${comp.label}`)
+    await user.clear(qtyInput)
+    await user.type(qtyInput, '99')
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    expect(await screen.findByText(/estimate saved/i)).toBeInTheDocument()
+
+    const fetched = await estimatingApi.get(created.id)
+    const freshComp = fetched.sections[0].services
+      .find((sv) => sv.id === svc.id)!
+      .components.find((c) => c.id === comp.id)!
+    expect(freshComp.qty).toBe(99)
+  })
+
+  it('service qty edits + an added kit cost line survive a reload after Save', async () => {
+    const user = userEvent.setup()
+    const created = (await estimatingApi.create(
+      toCreatePayload(buildInstallEstimate()),
+    )) as InstallEstimate
+    renderInstall(created)
+
+    const svc = created.sections[0].services[0]
+    const qtyInput = screen.getByLabelText(`Qty for ${svc.label}`)
+    await user.clear(qtyInput)
+    await user.type(qtyInput, '30')
+
+    // add a labor component line to the same service
+    await user.click(screen.getByRole('button', { name: `Toggle components for ${svc.label}` }))
+    await user.selectOptions(
+      screen.getByLabelText(`Add labor / cost line for ${svc.label}`),
+      'labor',
+    )
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    expect(await screen.findByText(/estimate saved/i)).toBeInTheDocument()
+
+    const fetched = await estimatingApi.get(created.id)
+    const freshSvc = fetched.sections[0].services.find((sv) => sv.id === svc.id)!
+    expect(freshSvc.qty).toBe(30)
+    expect(freshSvc.components.length).toBe(svc.components.length + 1)
+  })
+})
+
+// ----- RFI status surfaced in the editor (Handoff 24 §3.2) -------------------
+
+describe('InstallEditor — RFI status surfaced (Handoff 24 §3.2)', () => {
+  it('shows the tracked RFI status in the header when present', () => {
+    renderInstall(
+      buildInstallEstimate({ rfiStatus: 'Awaiting GC response on storm drain details' }),
+    )
+    expect(screen.getByTestId('install-rfi-status')).toHaveTextContent(
+      /awaiting gc response/i,
+    )
+  })
+
+  it('renders no RFI chip when rfiStatus is empty', () => {
+    renderInstall(buildInstallEstimate())
+    expect(screen.queryByTestId('install-rfi-status')).not.toBeInTheDocument()
   })
 })

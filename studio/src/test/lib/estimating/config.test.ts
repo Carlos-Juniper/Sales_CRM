@@ -35,36 +35,43 @@ describe('discrepancy threshold config', () => {
 })
 
 describe('approval tiers config', () => {
-  it('seeds the maintenance ladder from BRD I-7 (BM <$100K, RD $100K–$250K, BP $250K–$1M, COO >$1M)', () => {
+  it('seeds the maintenance ladder from BRD I-7 with the canonical role keys (Handoff 19): MGR <$100K, RD $100K–$250K, VP $250K–$1M, CEO >$1M', () => {
     const maint = tiersForType(APPROVAL_TIER_SEED, 'maintenance')
-    expect(maint.map((t) => t.roleKey)).toEqual(['branch_manager', 'regional_director', 'bp', 'coo'])
-    expect(tierForValue(9_999_900, maint)?.roleKey).toBe('branch_manager')
+    expect(maint.map((t) => t.roleKey)).toEqual(['manager', 'regional_director', 'vice_president', 'ceo'])
+    expect(tierForValue(9_999_900, maint)?.roleKey).toBe('manager')
     expect(tierForValue(20_000_000, maint)?.roleKey).toBe('regional_director')
-    expect(tierForValue(50_000_000, maint)?.roleKey).toBe('bp')
-    expect(tierForValue(200_000_000, maint)?.roleKey).toBe('coo')
+    expect(tierForValue(50_000_000, maint)?.roleKey).toBe('vice_president')
+    expect(tierForValue(200_000_000, maint)?.roleKey).toBe('ceo')
   })
 
-  it('has no install approval matrix yet (open item) — install resolves to no tier', () => {
+  it('seeds an INSTALL ladder mirroring the maintenance $ bands (Handoff 19 §4)', () => {
+    const maint = tiersForType(APPROVAL_TIER_SEED, 'maintenance')
     const install = tiersForType(APPROVAL_TIER_SEED, 'install')
-    expect(install).toEqual([])
-    expect(tierForValue(50_000_000, install)).toBeNull()
+    expect(install.map((t) => [t.roleKey, t.minValueCents, t.maxValueCents, t.order])).toEqual(
+      maint.map((t) => [t.roleKey, t.minValueCents, t.maxValueCents, t.order]),
+    )
+    expect(tierForValue(50_000_000, install)?.roleKey).toBe('vice_president')
   })
 
-  it('adding a config row changes behavior without code edits', () => {
+  it('editing a config row changes behavior without code edits', () => {
     const installTier: ApprovalTier = {
       id: 'ti1',
-      roleKey: 'branch_manager',
-      label: 'Branch Manager (Install)',
+      roleKey: 'manager',
+      label: 'Manager (Install)',
       minValueCents: 0,
       maxValueCents: null,
       order: 1,
       estimateType: 'install',
     }
-    const withInstall = [...APPROVAL_TIER_SEED, installTier]
+    // Replace the install ladder with a single all-values Manager tier.
+    const withInstall = [
+      ...APPROVAL_TIER_SEED.filter((t) => t.estimateType !== 'install'),
+      installTier,
+    ]
     const install = tiersForType(withInstall, 'install')
-    expect(tierForValue(50_000_000, install)?.label).toBe('Branch Manager (Install)')
+    expect(tierForValue(50_000_000, install)?.label).toBe('Manager (Install)')
     // maintenance ladder unaffected
-    expect(tierForValue(50_000_000, tiersForType(withInstall, 'maintenance'))?.roleKey).toBe('bp')
+    expect(tierForValue(50_000_000, tiersForType(withInstall, 'maintenance'))?.roleKey).toBe('vice_president')
   })
 })
 

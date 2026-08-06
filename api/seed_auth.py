@@ -34,10 +34,11 @@ import uuid
 from typing import Optional
 
 from db import execute, query
+from api.authz import CANONICAL_ROLES, normalize_role
 
-# Roles the frontend routes on (studio LoginPage / AuthCallbackPage).
-# Keep in sync with roleDefaultRoute().
-VALID_ROLES = {"inside_sales", "outside_sales", "manager"}
+# The nine canonical business roles (Handoff 18 — single role vocabulary).
+# Legacy inputs inside_sales/outside_sales are accepted and stored as `sales`.
+VALID_ROLES = CANONICAL_ROLES
 
 # Roles that require a branch_id. Managers are scoped to a branch; other roles
 # may be provisioned without one (branch_id is nullable in crm_users).
@@ -58,6 +59,7 @@ async def provision(
     branch_id: Optional[str] = None,
     avatar_initials: Optional[str] = None,
 ) -> None:
+    role = normalize_role(role)  # legacy inside_sales/outside_sales → sales
     if role not in VALID_ROLES:
         raise ValueError(
             f"Unknown role {role!r}. Valid roles: {', '.join(sorted(VALID_ROLES))}."

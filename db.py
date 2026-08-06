@@ -59,24 +59,30 @@ async def set_hoa_property_status(hoa_property_id: str, status: str) -> None:
     )
 
 
-async def count_active_leads_for_property(hoa_property_id: str) -> int:
+async def count_active_leads_for_property(property_id: str) -> int:
+    """Active (non-won, non-lost) leads for a canonical properties.id."""
     rows = await query(
-        "SELECT COUNT(*) AS cnt FROM leads WHERE hoa_property_id = %s AND status NOT IN ('won', 'lost') AND deleted_at IS NULL",
-        [hoa_property_id],
+        "SELECT COUNT(*) AS cnt FROM leads WHERE property_id = %s AND status NOT IN ('won', 'lost') AND deleted_at IS NULL",
+        [property_id],
     )
     return rows[0]["cnt"] if rows else 0
 
 
-async def has_won_lead_for_property(hoa_property_id: str) -> bool:
+async def has_won_lead_for_property(property_id: str) -> bool:
+    """Whether a won lead exists for a canonical properties.id."""
     rows = await query(
-        "SELECT 1 FROM leads WHERE hoa_property_id = %s AND status = 'won' AND deleted_at IS NULL LIMIT 1",
-        [hoa_property_id],
+        "SELECT 1 FROM leads WHERE property_id = %s AND status = 'won' AND deleted_at IS NULL LIMIT 1",
+        [property_id],
     )
     return bool(rows)
 
 
 async def run_migrations() -> None:
-    """No-op: schema managed via sql/ files applied manually."""
+    """No-op: schema managed via sql/ files applied manually.
+
+    Migrations are hand-run against the `crm` database — see
+    sql/migrations/README.md (numbered .sql files, no `juniper.` prefix).
+    """
 
 
 async def close_pool() -> None:

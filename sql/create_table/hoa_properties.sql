@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `juniper`.`hoa_properties` (
+CREATE TABLE IF NOT EXISTS `crm`.`hoa_properties` (
     `id`                    VARCHAR(36)    NOT NULL,
     `parcel_id`             VARCHAR(100)   NOT NULL,
     `arcgis_source`         VARCHAR(50)    NOT NULL,
@@ -14,6 +14,11 @@ CREATE TABLE IF NOT EXISTS `juniper`.`hoa_properties` (
     `units`                 SMALLINT       DEFAULT NULL,
     `status`                VARCHAR(50)    NOT NULL DEFAULT 'uncontacted',
     `branch_id`             VARCHAR(100)   DEFAULT NULL,
+    -- prospecting workflow columns (Handoff 15 §3.3 drift reconciliation:
+    -- these were live via an out-of-tree migration; now checked in)
+    `assigned_to`           VARCHAR(255)   DEFAULT NULL,
+    `contact_status`        VARCHAR(50)    DEFAULT NULL,
+    `last_contacted`        DATE           DEFAULT NULL,
     `raw_data`              JSON           DEFAULT NULL,
     `arcgis_last_seen_at`   DATETIME       DEFAULT NULL,
     `created_at`            DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,

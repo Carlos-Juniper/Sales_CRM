@@ -39,6 +39,13 @@ steps:
       - --platform=managed
       - --allow-unauthenticated
       - --add-cloudsql-instances=juniper-crm-498215-p5:us-central1:juniper-dev
-      - --set-env-vars=MYSQL_SOCKET_PATH=/cloudsql/juniper-crm-498215-p5:us-central1:juniper-dev,ENVIRONMENT=staging,KMS_GRAPH_TOKEN_KEY=projects/juniper-crm-498215-p5/locations/us-central1/keyRings/juniper-crm/cryptoKeys/graph-tokens,ASPIRE_ENV=sandbox,ASPIRE_SANDBOX_BASE_URL=https://cloudsandbox.youraspire.com,ASPIRE_SYNC_ENABLED=true
+      # GCS intake attachments (handoff 26): bucket + signer must be provisioned
+      # first — see scripts/provision_gcs_attachments.sh. GCS_SIGNER_SA_EMAIL is
+      # the Cloud Run runtime SA (default compute SA — this deploy sets no
+      # --service-account). CORS_EXTRA_ORIGINS is this service's actual Cloud Run
+      # URL (legacy -<hash>-uc.a.run.app form for this project, NOT the
+      # -<project-number>.<region>.run.app form); append any custom domain here
+      # AND in the bucket CORS config.
+      - --set-env-vars=MYSQL_SOCKET_PATH=/cloudsql/juniper-crm-498215-p5:us-central1:juniper-dev,ENVIRONMENT=staging,KMS_GRAPH_TOKEN_KEY=projects/juniper-crm-498215-p5/locations/us-central1/keyRings/juniper-crm/cryptoKeys/graph-tokens,ASPIRE_ENV=sandbox,ASPIRE_SANDBOX_BASE_URL=https://cloudsandbox.youraspire.com,ASPIRE_SYNC_ENABLED=true,GCS_ATTACHMENTS_BUCKET=juniper-crm-attachments-staging,GCS_SIGNER_SA_EMAIL=${PROJECT_NUMBER}-compute@developer.gserviceaccount.com,GCS_MAX_UPLOAD_BYTES=2147483648,GCS_SIGNED_URL_TTL_MIN=10,CORS_EXTRA_ORIGINS=https://juniper-crm-staging-3776pu4ezq-uc.a.run.app
       - --set-secrets=JWT_SECRET=JWT_SECRET:latest,ENTRA_CLIENT_ID=ENTRA_CLIENT_ID:latest,ENTRA_TENANT_ID=ENTRA_TENANT_ID:latest,ENTRA_CLIENT_SECRET=ENTRA_CLIENT_SECRET:latest,MYSQL_USER=MYSQL_USER_STAGING:latest,MYSQL_PASSWORD=MYSQL_PASSWORD_STAGING:latest,MYSQL_DB=MYSQL_DB_STAGING:latest,ASPIRE_SANDBOX_CLIENT_ID=ASPIRE_SANDBOX_CLIENT_ID:latest,ASPIRE_SANDBOX_SECRET=ASPIRE_SANDBOX_SECRET:latest
       - --project=juniper-crm-498215-p5

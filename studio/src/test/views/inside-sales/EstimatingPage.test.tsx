@@ -171,3 +171,69 @@ describe('EstimatingPage feature tabs (existing components)', () => {
     expect(screen.getByTestId('benchmark-panel')).toBeInTheDocument()
   })
 })
+
+// ── Handoff 23 — real CRM lead context (stub removed) ────────────────────────
+
+const requestEstimateProperty = {
+  id: 'prop-1',
+  name: 'Pelican Bay',
+  propertyType: 'hoa',
+  sourceType: 'hoa',
+  sourceId: 'h1',
+  address1: '6620 Pelican Bay Blvd',
+  address2: null,
+  city: 'Naples',
+  state: 'FL',
+  zip: '34108',
+  branchCity: 'Naples',
+  customerType: 'hoa',
+  managementCompanyId: 'pm1',
+  aspirePropertyId: null,
+  aspireSyncStatus: 'unsynced' as const,
+  createdAt: null,
+  updatedAt: null,
+}
+
+const requestEstimateLead = {
+  id: 'lead-77',
+  property_name: 'Pelican Bay',
+  status: 'new',
+  assigned_to: 'Marisol Vega',
+  score: 65,
+  property_id: 'prop-1',
+}
+
+describe('EstimatingPage — property engagement lead context (Handoff 23)', () => {
+  beforeEach(() => {
+    seedUser()
+  })
+
+  it('"Request estimate" arrival opens the intake pre-filled with REAL lead context — never the L-TBD stub', async () => {
+    render(<EstimatingPage />, {
+      initialEntries: [
+        {
+          pathname: '/inside-sales/estimating',
+          state: { requestEstimateProperty, requestEstimateLead },
+        },
+      ],
+    })
+
+    // Intake modal auto-opens with the property; banner reflects the real lead
+    expect(await screen.findByText(/sourced from crm pipeline/i)).toBeInTheDocument()
+    expect(screen.getByText(/lead-77/)).toBeInTheDocument()
+    expect(screen.getByText(/Marisol Vega/)).toBeInTheDocument()
+    expect(screen.getByText(/65%/)).toBeInTheDocument()
+    expect(screen.queryByText(/L-TBD/)).not.toBeInTheDocument()
+  })
+
+  it('queue-CTA intake (no property yet) shows no L-TBD stub anywhere', async () => {
+    const user = userEvent.setup()
+    render(<EstimatingPage />)
+
+    await user.click(await screen.findByRole('button', { name: /maintenance intake/i }))
+
+    expect(await screen.findByText(/maintenance intake/i, { selector: 'h2' })).toBeInTheDocument()
+    expect(screen.queryByText(/L-TBD/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Sales Rep/)).not.toBeInTheDocument()
+  })
+})

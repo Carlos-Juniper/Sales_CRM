@@ -80,12 +80,12 @@ export function per1000SfRead(sectionTotalCents: number, sqft: number): number {
 }
 
 /**
- * Takeoff bid quantity: plan qty inflated by the add %, rounded up.
- * Snaps to 9 decimals before ceiling so float artifacts (100 × 1.1 =
- * 110.00000000000001) don't inflate the bid by a whole unit.
+ * Takeoff bid quantity: plan qty inflated by the add %, rounded to the
+ * NEAREST whole unit (Handoff 20 locked decision: round, not ceil — pending
+ * the Project Summary Template walkthrough confirmation).
  */
 export function bidQty(planQty: number, addPct: number): number {
-  return Math.ceil(Math.round(planQty * (1 + addPct) * 1e9) / 1e9)
+  return Math.round(planQty * (1 + addPct))
 }
 
 /**
@@ -107,7 +107,7 @@ export function groupMargin(priceCents: number, costCents: number): number {
 /**
  * Config-driven approval routing: the first tier (by `order`) where
  * min ≤ value < max (max null = unbounded). Returns null when no tier
- * matches — e.g. install, which has no approval matrix yet.
+ * matches (an empty/misconfigured ladder).
  */
 export function tierForValue(valueCents: number, tiers: ApprovalTier[]): ApprovalTier | null {
   const ordered = [...tiers].sort((a, b) => a.order - b.order)

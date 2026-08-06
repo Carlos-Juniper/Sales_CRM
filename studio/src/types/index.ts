@@ -29,12 +29,38 @@ export type LeadStatus =
   | 'proposal_sent'
   | 'won'
   | 'lost'
-  | 'handed_off'
+  | 'estimating'
+  | 'op_review'
+  | 'approved'
 
+// The nine canonical business roles (Handoff 18 — one role vocabulary,
+// mirrored by backend validation in api/authz.py).
 export type UserRole =
-  | 'inside_sales'
-  | 'outside_sales'
+  | 'procurement'
+  | 'sales'
+  | 'admin'
   | 'manager'
+  | 'regional_director'
+  | 'maintenance_estimating'
+  | 'install_estimating'
+  | 'vice_president'
+  | 'ceo'
+
+export const CANONICAL_ROLES: readonly UserRole[] = [
+  'procurement',
+  'sales',
+  'admin',
+  'manager',
+  'regional_director',
+  'maintenance_estimating',
+  'install_estimating',
+  'vice_president',
+  'ceo',
+] as const
+
+// Legacy auth roles still present in older JWTs / un-migrated rows; they
+// normalize to `sales` (see useRole/normalizeRole and sql/migrations/004).
+export type LegacyUserRole = 'inside_sales' | 'outside_sales'
 
 export type BidStatus =
   | 'pending'
@@ -83,6 +109,8 @@ export interface Lead {
   distance_miles: number | null
   aspire_opportunity_id: string | null
   division_id: number | null
+  /** Canonical properties.id (Handoff 15 — replaces the removed hoa_property_id). */
+  property_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -107,7 +135,8 @@ export interface User {
   id: string
   name: string
   email: string
-  role: UserRole
+  // Canonical role; legacy values may still arrive from un-migrated rows.
+  role: UserRole | LegacyUserRole
   branch_id: string
   avatar_initials: string
 }
@@ -148,7 +177,9 @@ export interface AuthUser {
   id: string
   email: string
   name: string
-  role: UserRole
+  // Canonical role; legacy values may still arrive in pre-migration JWTs and
+  // are normalized in useRole (normalizeRole).
+  role: UserRole | LegacyUserRole
   branch_id: string
   avatar_initials: string
   token?: string

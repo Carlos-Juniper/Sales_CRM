@@ -39,7 +39,7 @@ export default function LeadFeedPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <TopNav title="Lead Feed" subtitle={`${total} total leads`} />
+      <TopNav title="Public Leads" subtitle={`${total} total leads`} />
 
       <div className="flex flex-col flex-1 overflow-hidden">
         <LeadFilters />

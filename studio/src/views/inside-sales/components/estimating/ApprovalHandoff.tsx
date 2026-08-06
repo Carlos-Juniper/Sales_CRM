@@ -4,9 +4,8 @@
 // Value-tiered approval routing for the open estimate:
 //   - Contract value + required tier, computed from the CONFIG approval_tiers
 //     rows via tierForValue (never a hardcoded ladder).
-//   - Install estimates have NO approval matrix yet (BRD II-7 open item) —
-//     the tiered flow is disabled, never silently reusing the maintenance
-//     ladder.
+//   - Install routes through the SAME ladder as maintenance (its own config
+//     rows with mirrored $ bands — Handoff 19 §4).
 //   - "Approve & hand back to Sales" is an in-platform status change (BRD
 //     Steps 6/8) executed by lib/estimating/transitions.ts server-side;
 //     actor + timestamp are audited (BRD III-1). No lifecycle logic here.
@@ -20,14 +19,14 @@ import {
   Check,
   Info,
   ShieldCheck,
-  TriangleAlert,
   UserCheck,
   Users,
 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { estimatingApi } from '@/api/estimating'
 import { tierForValue } from '@/lib/estimating/calc'
-import { APPROVAL_TIER_SEED, tiersForType } from '@/lib/estimating/config'
+import { tiersForType } from '@/lib/estimating/config'
+import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import { canApproveAndHandBack } from '@/lib/estimating/transitions'
 import { useAuthStore } from '@/store/authStore'
 import { mockUsers } from '@/mocks/data'
@@ -64,22 +63,24 @@ function tierRange(tier: ApprovalTier): string {
 }
 
 const TIER_ICONS: Record<ApprovalRoleKey, React.ElementType> = {
-  branch_manager: UserCheck,
+  manager: UserCheck,
   regional_director: Users,
-  bp: Briefcase,
-  coo: Building2,
+  vice_president: Briefcase,
+  ceo: Building2,
 }
 
 export interface ApprovalHandoffProps {
   /**
-   * The approval_tiers config rows (§3.9). Defaults to the seed; in
-   * production these come from the config table — the ladder re-renders from
-   * whatever rows are supplied, with no code change.
+   * The approval_tiers config rows (§3.9). Defaults to the API-fetched config
+   * (Handoff 16) with the config.ts seed as offline fallback — the ladder
+   * re-renders from whatever rows are supplied, with no code change.
    */
   tiers?: ApprovalTier[]
 }
 
-export function ApprovalHandoff({ tiers = APPROVAL_TIER_SEED }: ApprovalHandoffProps) {
+export function ApprovalHandoff({ tiers: tiersProp }: ApprovalHandoffProps) {
+  const { approvalTiers } = useEstimatingConfig()
+  const tiers = tiersProp ?? approvalTiers
   const { openEstimate, setOpenEstimate } = useEstimatingShell()
   const { show } = useToast()
   const user = useAuthStore((s) => s.user)
@@ -102,10 +103,9 @@ export function ApprovalHandoff({ tiers = APPROVAL_TIER_SEED }: ApprovalHandoffP
 
   const ladder = tiersForType(tiers, openEstimate.estimateType)
   const requiredTier = tierForValue(openEstimate.contractValueCents, ladder)
-  const noMatrix = ladder.length === 0
   const salesperson =
     mockUsers.find((u) => u.id === openEstimate.crmRep)?.name ?? 'the salesperson'
-  const eligible = !noMatrix && canApproveAndHandBack(openEstimate.status)
+  const eligible = canApproveAndHandBack(openEstimate.status)
 
   async function handleNotifyChange(checked: boolean) {
     if (!openEstimate) return
@@ -152,77 +152,61 @@ export function ApprovalHandoff({ tiers = APPROVAL_TIER_SEED }: ApprovalHandoffP
           <div className="text-right">
             <p className="text-[11px] text-[hsl(var(--muted-fg))]">Required tier</p>
             <p data-testid="required-tier" className="mt-0.5 text-base font-bold text-[hsl(var(--fg))]">
-              {noMatrix ? '—' : (requiredTier?.label ?? '—')}
+              {requiredTier?.label ?? '—'}
             </p>
           </div>
         </div>
 
-        {noMatrix ? (
-          <div
-            data-testid="no-approval-matrix"
-            className="flex items-start gap-2.5 rounded-[10px] border border-amber-200 bg-amber-50 px-3.5 py-3"
-          >
-            <TriangleAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
-            <p className="text-xs text-amber-800">
-              No approval matrix defined for install estimates; pending confirmation. The tiered
-              approve flow is disabled until the install ladder is configured — the maintenance
-              ladder is never reused silently.
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="flex flex-col gap-2">
-              {[...ladder]
-                .sort((a, b) => a.order - b.order)
-                .map((tier) => {
-                  const Icon = TIER_ICONS[tier.roleKey] ?? ShieldCheck
-                  const active = tier.id === requiredTier?.id
-                  return (
-                    <div
-                      key={tier.id}
-                      data-testid={`tier-row-${tier.roleKey}`}
+        <div className="flex flex-col gap-2">
+          {[...ladder]
+            .sort((a, b) => a.order - b.order)
+            .map((tier) => {
+              const Icon = TIER_ICONS[tier.roleKey] ?? ShieldCheck
+              const active = tier.id === requiredTier?.id
+              return (
+                <div
+                  key={tier.id}
+                  data-testid={`tier-row-${tier.roleKey}`}
+                  className={cn(
+                    'flex items-center gap-3 rounded-[10px] border px-3.5 py-[11px]',
+                    active
+                      ? 'border-[#2E7D52] bg-[#f0faf4]'
+                      : 'border-[hsl(var(--border))] bg-[hsl(var(--card))]',
+                  )}
+                >
+                  <Icon
+                    className={cn(
+                      'h-4 w-4 flex-shrink-0',
+                      active ? 'text-[#2E7D52]' : 'text-[hsl(var(--muted-fg))]',
+                    )}
+                  />
+                  <div className="flex-1">
+                    <p
                       className={cn(
-                        'flex items-center gap-3 rounded-[10px] border px-3.5 py-[11px]',
-                        active
-                          ? 'border-[#2E7D52] bg-[#f0faf4]'
-                          : 'border-[hsl(var(--border))] bg-[hsl(var(--card))]',
+                        'text-[13px] font-semibold',
+                        active ? 'text-[#1d5c3b]' : 'text-[hsl(var(--fg))]',
                       )}
                     >
-                      <Icon
-                        className={cn(
-                          'h-4 w-4 flex-shrink-0',
-                          active ? 'text-[#2E7D52]' : 'text-[hsl(var(--muted-fg))]',
-                        )}
-                      />
-                      <div className="flex-1">
-                        <p
-                          className={cn(
-                            'text-[13px] font-semibold',
-                            active ? 'text-[#1d5c3b]' : 'text-[hsl(var(--fg))]',
-                          )}
-                        >
-                          {tier.label}
-                        </p>
-                        <p className="mt-px text-[11px] text-[hsl(var(--muted-fg))]">
-                          {tierRange(tier)}
-                        </p>
-                      </div>
-                      {active && (
-                        <span className="text-[11px] font-semibold text-[#2E7D52]">
-                          Required for this estimate
-                        </span>
-                      )}
-                    </div>
-                  )
-                })}
-            </div>
-            <p className="mt-3 flex items-center gap-1.5 text-[11px] text-[hsl(var(--muted-fg))]">
-              <Info className="h-3.5 w-3.5 flex-shrink-0" />
-              "BP" senior-ops title and the COO mechanism above $1M are open items — routing here
-              is configurable, not hard-coded.
-            </p>
-          </>
-        )}
+                      {tier.label}
+                    </p>
+                    <p className="mt-px text-[11px] text-[hsl(var(--muted-fg))]">
+                      {tierRange(tier)}
+                    </p>
+                  </div>
+                  {active && (
+                    <span className="text-[11px] font-semibold text-[#2E7D52]">
+                      Required for this estimate
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+        </div>
+        <p className="mt-3 flex items-center gap-1.5 text-[11px] text-[hsl(var(--muted-fg))]">
+          <Info className="h-3.5 w-3.5 flex-shrink-0" />
+          The CEO mechanism above $1M is an open item — routing here is configurable, not
+          hard-coded.
+        </p>
       </div>
 
       {/* On-approval settings + CTA */}

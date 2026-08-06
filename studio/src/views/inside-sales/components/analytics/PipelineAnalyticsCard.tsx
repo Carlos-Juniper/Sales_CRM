@@ -5,19 +5,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { useAllLeads } from '@/hooks/useLeads'
 import { formatCurrency } from '@/lib/utils'
-import type { LeadStatus } from '@/types'
+import { PIPELINE_STAGES, stageForStatus } from '@/lib/pipelineStages'
+import type { Lead } from '@/types'
 
-const STAGES: { status: LeadStatus; label: string; color: string }[] = [
-  { status: 'new',           label: 'New',         color: '#94a3b8' },
-  { status: 'contacted',     label: 'Contacted',   color: '#60a5fa' },
-  { status: 'qualified',     label: 'Qualified',   color: '#818cf8' },
-  { status: 'proposal_sent', label: 'Proposal',    color: '#a78bfa' },
-  { status: 'won',           label: 'Won',         color: '#34d399' },
-]
+// Statuses counted toward "made it past initial qualification" for the win-rate
+// denominator — everything from Qualified onward, including the post-approval
+// proposal_sent/won terminal states.
+const QUALIFIED_OR_LATER = new Set(['qualified', 'estimating', 'op_review', 'approved', 'proposal_sent', 'won'])
 
 interface StageRow {
   label: string
-  status: LeadStatus
+  stageKey: string
   count: number
   value: number
   color: string
@@ -48,29 +46,32 @@ export function PipelineAnalyticsCard() {
   const { data: leadsData, isLoading } = useAllLeads()
 
   const { stages, winRate, avgDealValue } = useMemo(() => {
-    const leads = leadsData?.data ?? []
+    const leads: Lead[] = leadsData?.data ?? []
 
-    const stageCounts: Partial<Record<LeadStatus, { count: number; value: number }>> = {}
+    // Bucket by kanban stage for the visible 4 stages; hidden/terminal
+    // statuses (won/lost/disqualified/proposal_sent) keep their own raw key
+    // so the win-rate calc below can still read them directly.
+    const stageCounts: Record<string, { count: number; value: number }> = {}
     for (const lead of leads) {
-      if (!stageCounts[lead.status]) stageCounts[lead.status] = { count: 0, value: 0 }
-      stageCounts[lead.status]!.count += 1
-      stageCounts[lead.status]!.value += lead.estimated_contract_value
+      const key = stageForStatus(lead.status)?.key ?? lead.status
+      if (!stageCounts[key]) stageCounts[key] = { count: 0, value: 0 }
+      stageCounts[key].count += 1
+      stageCounts[key].value += lead.estimated_contract_value
     }
 
-    const rows: StageRow[] = STAGES.map((s, i) => {
-      const curr = stageCounts[s.status] ?? { count: 0, value: 0 }
-      const prev = i > 0 ? (stageCounts[STAGES[i - 1].status] ?? { count: 0 }) : null
+    const rows: StageRow[] = PIPELINE_STAGES.map((stage, i) => {
+      const curr = stageCounts[stage.key] ?? { count: 0, value: 0 }
+      const prev = i > 0 ? (stageCounts[PIPELINE_STAGES[i - 1].key] ?? { count: 0 }) : null
       const conversionRate = prev && prev.count > 0
         ? Math.round((curr.count / prev.count) * 100)
         : null
-      return { ...s, ...curr, conversionRate }
+      return { label: stage.label, stageKey: stage.key, color: stage.hexColor, ...curr, conversionRate }
     })
 
-    const totalQualified = (stageCounts['qualified']?.count ?? 0) +
-      (stageCounts['proposal_sent']?.count ?? 0) +
-      (stageCounts['won']?.count ?? 0)
-    const wonCount = stageCounts['won']?.count ?? 0
-    const wonValue = stageCounts['won']?.value ?? 0
+    const totalQualified = leads.filter((l) => QUALIFIED_OR_LATER.has(l.status)).length
+    const wonLeads = leads.filter((l) => l.status === 'won')
+    const wonCount = wonLeads.length
+    const wonValue = wonLeads.reduce((s, l) => s + l.estimated_contract_value, 0)
 
     return {
       stages: rows,
@@ -123,7 +124,7 @@ export function PipelineAnalyticsCard() {
               <Tooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(var(--muted))', opacity: 0.5 }} />
               <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                 {stages.map((s) => (
-                  <Cell key={s.status} fill={s.color} />
+                  <Cell key={s.stageKey} fill={s.color} />
                 ))}
               </Bar>
             </BarChart>
@@ -134,7 +135,7 @@ export function PipelineAnalyticsCard() {
         {!isLoading && (
           <div className="flex gap-1.5 mt-3 flex-wrap">
             {stages.map((s) => (
-              <div key={s.status} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[hsl(var(--muted))]">
+              <div key={s.stageKey} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[hsl(var(--muted))]">
                 <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
                 <span className="text-[10px] text-[hsl(var(--muted-fg))]">
                   {s.label}: <span className="font-medium text-[hsl(var(--fg))]">{s.count}</span>

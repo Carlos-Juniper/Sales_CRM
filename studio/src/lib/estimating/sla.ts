@@ -26,6 +26,17 @@ export type SlaState = 'ok' | 'at_risk' | 'breached'
 const DAY_MS = 86400000
 
 /**
+ * Format a Date (or date-input string) as 'YYYY-MM-DD'. The backend's
+ * due_back_date / anticipated_close_date / service_start_date columns are
+ * SQL DATE, not DATETIME — a full `toISOString()` timestamp (with time +
+ * 'Z') fails the insert with "Incorrect date value".
+ */
+export function toDateOnly(value: string | Date): string {
+  const iso = value instanceof Date ? value.toISOString() : new Date(value).toISOString()
+  return iso.split('T')[0]
+}
+
+/**
  * Whole calendar days from `now` until the due-back date (midnight-normalized
  * so time of day never shifts the count). 0 = due today; negative = overdue.
  */

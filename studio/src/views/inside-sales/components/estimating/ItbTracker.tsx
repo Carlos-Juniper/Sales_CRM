@@ -27,11 +27,11 @@ import { useToast } from './useToast'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
-// Status legend config (BRD II-9.12 — pending final confirmation with Carlos)
+// Status legend config (BRD II-9.12 — confirmed with Carlos 2026-08-06)
 // ---------------------------------------------------------------------------
 
 export interface ItbStatusDef {
-  code: ItbStatusCode | '–'
+  code: ItbStatusCode
   label: string
   bg: string
   text: string
@@ -41,18 +41,16 @@ export interface ItbStatusDef {
 /** Config-driven status legend — add/edit rows here without touching render logic. */
 export const ITB_STATUS_LEGEND: ItbStatusDef[] = [
   { code: 'P', label: 'Pending',         bg: '#fef9c3', text: '#854d0e', border: '#fde68a' },
-  { code: 'C', label: 'Created',         bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' },
+  { code: 'C', label: 'Created Request', bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' },
   { code: 'S', label: 'Sent',            bg: '#e0e7ff', text: '#3730a3', border: '#c7d2fe' },
   { code: 'R', label: 'Received',        bg: '#d1fae5', text: '#065f46', border: '#a7f3d0' },
   { code: 'U', label: 'Updated',         bg: '#fce7f3', text: '#9d174d', border: '#f9a8d4' },
   { code: 'X', label: '100% Complete',   bg: '#dcfce7', text: '#15803d', border: '#86efac' },
-  { code: '–', label: 'N/A',             bg: '#f3f4f6', text: '#6b7280', border: '#e5e7eb' },
-  { code: 'E', label: 'Estimator Review',bg: '#fff7ed', text: '#c2410c', border: '#fed7aa' },
-  { code: 'I', label: 'In Progress',     bg: '#ede9fe', text: '#5b21b6', border: '#ddd6fe' },
+  { code: '-', label: 'Non-Applicable',  bg: '#f3f4f6', text: '#6b7280', border: '#e5e7eb' },
 ]
 
 const STATUS_MAP = new Map<string, ItbStatusDef>(ITB_STATUS_LEGEND.map((s) => [s.code, s]))
-const NA_STATUS: ItbStatusDef = ITB_STATUS_LEGEND.find((s) => s.code === '–')!
+const NA_STATUS: ItbStatusDef = ITB_STATUS_LEGEND.find((s) => s.code === '-')!
 
 // ---------------------------------------------------------------------------
 // Scope group ordering

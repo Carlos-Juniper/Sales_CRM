@@ -376,6 +376,39 @@ class TestListAttachments:
         assert resp.json() == []
 
 
+# ── Content-Disposition sanitization (L2) ─────────────────────────────────────
+
+class TestContentDispositionSanitization:
+    """The client-supplied filename is embedded in a response header on the
+    signed GET URL — quotes, CR/LF, and backslashes must never survive."""
+
+    def test_hostile_filename_is_neutralized(self):
+        import api.attachments as att
+        hostile = 'evil";\r\nX-Injected: 1\\ name="pwn.txt'
+        disp = att.content_disposition(hostile)
+        assert "\r" not in disp and "\n" not in disp
+        # The quoted-string fallback carries no raw quote or backslash.
+        fallback = disp.split('filename="', 1)[1].split('"', 1)[0]
+        assert '"' not in fallback and "\\" not in fallback
+
+    def test_plain_filename_round_trips(self):
+        import api.attachments as att
+        disp = att.content_disposition("site plan.pdf")
+        assert disp.startswith("attachment; ")
+        assert 'filename="site plan.pdf"' in disp
+        assert "filename*=UTF-8''site%20plan.pdf" in disp
+
+    def test_unicode_name_stays_ascii_via_rfc5987(self):
+        import api.attachments as att
+        disp = att.content_disposition("plán—final.pdf")
+        assert disp.isascii()          # header-safe
+        assert "UTF-8''" in disp       # full name preserved percent-encoded
+
+    def test_empty_name_falls_back_to_download(self):
+        import api.attachments as att
+        assert 'filename="download"' in att.content_disposition("")
+
+
 # ── GET .../attachments/{id}/download-url ─────────────────────────────────────
 
 class TestDownloadUrl:

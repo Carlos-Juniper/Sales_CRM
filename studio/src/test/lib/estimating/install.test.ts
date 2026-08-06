@@ -22,6 +22,7 @@ import { buildInstallEstimate } from '@/mocks/estimatingData'
 import {
   INSTALL_KIT_CATALOG,
   averagedVendorCostCents,
+  installKitCatalogFromItems,
   buildComponent,
   coerceNum,
   estimateGm,
@@ -207,5 +208,34 @@ describe('buildComponent / coerceNum / formatGmPct', () => {
     expect(formatGmPct(0.45)).toBe('45.00%')
     expect(formatGmPct(1_506_800 / 3_350_000)).toBe('44.98%')
     expect(formatGmPct(0)).toBe('0.00%')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Handoff 22 — the editor reads install kits from GET /catalog-items; the
+// INSTALL_KIT_CATALOG literal is only the offline fallback.
+// ---------------------------------------------------------------------------
+
+describe('Handoff 22 — installKitCatalogFromItems (API catalog adapter)', () => {
+  it('falls back to the literal when the API returned no install kits', () => {
+    expect(installKitCatalogFromItems([])).toBe(INSTALL_KIT_CATALOG)
+    // maintenance kits alone don't count
+    const maintOnly = [{ ...INSTALL_KIT_CATALOG[0], kitType: 'maintenance_hours' as const }]
+    expect(installKitCatalogFromItems(maintOnly)).toBe(INSTALL_KIT_CATALOG)
+  })
+
+  it('adapts install_quantity items, using the blended unit cost as the single vendor quote', () => {
+    const { vendorPricesCents: _v, ...item } = INSTALL_KIT_CATALOG[0]
+    const kits = installKitCatalogFromItems([item])
+    expect(kits).toHaveLength(1)
+    expect(kits[0].id).toBe(item.id)
+    expect(kits[0].vendorPricesCents).toEqual([item.unitCostCents])
+    expect(averagedVendorCostCents(kits[0].vendorPricesCents)).toBe(item.unitCostCents)
+  })
+
+  it('drops inactive kits', () => {
+    const { vendorPricesCents: _v, ...item } = INSTALL_KIT_CATALOG[0]
+    const kits = installKitCatalogFromItems([{ ...item, active: false }, { ...item, id: 'kit-x' }])
+    expect(kits.map((k) => k.id)).toEqual(['kit-x'])
   })
 })

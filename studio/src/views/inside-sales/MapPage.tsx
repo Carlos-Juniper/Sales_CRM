@@ -23,7 +23,8 @@ const TYPE_COLORS: Record<string, string> = {
 
 const STATUS_OPACITY: Record<string, number> = {
   new: 1, contacted: 1, qualified: 1, proposal_sent: 1,
-  won: 0.6, lost: 0.35, disqualified: 0.25, handed_off: 0.5,
+  won: 0.6, lost: 0.35, disqualified: 0.25,
+  estimating: 0.5, op_review: 0.5, approved: 0.5,
 }
 
 const LEAD_TYPE_FILTERS = ['HOA', 'commercial', 'deathcare', 'resort'] as const

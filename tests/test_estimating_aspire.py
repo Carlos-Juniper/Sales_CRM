@@ -24,7 +24,7 @@ from api.aspire_sync import OpportunityInput, SyncResult  # noqa: E402
 
 client = TestClient(app)
 
-_USER = {"id": "u1", "name": "Carlos", "email": "c@x.com", "role": "estimator",
+_USER = {"id": "u1", "name": "Carlos", "email": "c@x.com", "role": "maintenance_estimating",
          "branch_id": "Orlando, FL", "avatar_initials": "CH"}
 
 
@@ -128,20 +128,103 @@ class TestSyncNewOpportunityBg:
 # ── HTTP: create schedules the push, never blocks ────────────────────────────
 
 class TestCreateSchedulesSync:
+    @patch("api.properties.sync_property_if_needed", new_callable=AsyncMock)
     @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
-    def test_create_persists_property_link_and_schedules(self, mock_exec, mock_load, mock_bg, authed):
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_create_persists_property_link_and_schedules(self, mock_query, mock_exec, mock_load, mock_bg, mock_prop_sync, authed):
+        mock_query.return_value = []  # itb_scopes read (Handoff 21 auto-gen)
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
-            "propertyId": "prop-1"})
+            "branch": "Orlando, FL", "propertyId": "prop-1"})
         assert resp.status_code == 201
         # background task ran (TestClient executes background tasks)
         mock_bg.assert_awaited_once()
         # property link persisted in the INSERT
         insert_params = mock_exec.call_args_list[0].args[1]
         assert "prop-1" in insert_params
+
+
+# ── HTTP: create is THE property-sync trigger (Handoff 15) ───────────────────
+
+class TestCreateTriggersPropertySync:
+    """A property pushes to Aspire ONLY on estimate submission: unsynced/failed
+    rows are pushed exactly once (pending → synced); synced rows are left alone."""
+
+    @patch("api.properties._persist_property_result", new_callable=AsyncMock)
+    @patch("api.properties.aspire_sync")
+    @patch("api.properties.execute", new_callable=AsyncMock)
+    @patch("api.properties.query", new_callable=AsyncMock)
+    @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
+    @patch("api.estimating._load_estimate", new_callable=AsyncMock)
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_submission_pushes_unsynced_property_exactly_once(
+        self, mock_query, mock_exec, mock_load, mock_opp_bg, mock_pquery, mock_pexec, mock_sync, mock_persist, authed
+    ):
+        from api.aspire_sync import PropertySyncResult
+        mock_query.return_value = []  # itb_scopes read (Handoff 21 auto-gen)
+        mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
+        mock_pquery.side_effect = [
+            [{"aspire_sync_status": "unsynced"}],   # guard read
+            [{"id": "prop-1", "name": "Sunny HOA", "address1": "123 Palm St",
+              "city": "Orlando", "state": "FL", "zip": "32807",
+              "branch_city": "Orlando, FL", "address2": None}],  # push read
+        ]
+        mock_sync.push_property = AsyncMock(
+            return_value=PropertySyncResult(status="synced", aspire_property_id=715389))
+
+        resp = client.post("/api/estimating/estimates", json={
+            "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
+            "branch": "Orlando, FL", "propertyId": "prop-1"})
+        assert resp.status_code == 201
+
+        # exactly one push, and the row was flipped to pending at trigger time
+        mock_sync.push_property.assert_awaited_once()
+        pending_sql, pending_params = mock_pexec.call_args_list[0].args
+        assert "pending" in pending_sql or "pending" in pending_params
+        assert "prop-1" in pending_params
+        # the synced result was persisted back
+        mock_persist.assert_awaited_once()
+        assert mock_persist.call_args.args[0] == "prop-1"
+        assert mock_persist.call_args.args[1].status == "synced"
+
+    @patch("api.properties._sync_property_bg", new_callable=AsyncMock)
+    @patch("api.properties.query", new_callable=AsyncMock)
+    @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
+    @patch("api.estimating._load_estimate", new_callable=AsyncMock)
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_submission_skips_already_synced_property(
+        self, mock_query, mock_exec, mock_load, mock_opp_bg, mock_pquery, mock_push, authed
+    ):
+        mock_query.return_value = []  # itb_scopes read (Handoff 21 auto-gen)
+        mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
+        mock_pquery.return_value = [{"aspire_sync_status": "synced"}]
+
+        resp = client.post("/api/estimating/estimates", json={
+            "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
+            "branch": "Orlando, FL", "propertyId": "prop-1"})
+        assert resp.status_code == 201
+        mock_push.assert_not_awaited()
+
+    @patch("api.properties.sync_property_if_needed", new_callable=AsyncMock)
+    @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
+    @patch("api.estimating._load_estimate", new_callable=AsyncMock)
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_submission_without_property_does_not_touch_property_sync(
+        self, mock_query, mock_exec, mock_load, mock_opp_bg, mock_needed, authed
+    ):
+        mock_query.return_value = []  # itb_scopes read (Handoff 21 auto-gen)
+        mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
+        resp = client.post("/api/estimating/estimates", json={
+            "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
+            "branch": "Orlando, FL"})
+        assert resp.status_code == 201
+        mock_needed.assert_not_awaited()
 
 
 # ── HTTP: won/lost schedule the write-back ───────────────────────────────────
@@ -168,12 +251,13 @@ class TestWonLostWriteBack:
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_illegal_jump_to_won_does_not_write_back(self, mock_query, mock_exec, mock_load, mock_bg, authed):
-        # in_progress → won is NOT a legal terminal transition; no Aspire write-back.
+        # in_progress → won is NOT a legal terminal transition; since Handoff 25
+        # the PATCH itself is rejected (409) and no Aspire write-back fires.
         mock_query.return_value = [{"estimate_type": "maintenance", "status": "in_progress",
                                     "aspire_opportunity_id": 7}]
         mock_load.return_value = {"id": "est-1"}
         resp = client.patch("/api/estimating/estimates/est-1", json={"status": "won"})
-        assert resp.status_code == 200
+        assert resp.status_code == 409
         mock_bg.assert_not_awaited()
 
     @patch("api.estimating._sync_status_bg", new_callable=AsyncMock)

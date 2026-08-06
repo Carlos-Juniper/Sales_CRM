@@ -21,6 +21,7 @@ import {
 import {
   COMPLEXITY_OPTIONS,
   MAINTENANCE_SERVICE_CATALOG,
+  type MaintenanceCatalogService,
   coerceQty,
   formatCents,
   granularityFor,
@@ -42,6 +43,11 @@ export interface SectionCardProps {
   onAddLineItem: (catalogKey: string) => void
   onDuplicate: () => void
   onRemoveRequest: () => void
+  /**
+   * Handoff 22 — the addable-service catalog, sourced from GET /catalog-items
+   * by the parent editor. Defaults to the literal (offline fallback).
+   */
+  catalog?: MaintenanceCatalogService[]
   /** UI-only kit granularity selections (open item: persist to kit config). */
   granularity: Record<string, string>
   onGranularityChange: (serviceId: string, value: string) => void
@@ -160,6 +166,7 @@ export function SectionCard({
   onAddLineItem,
   onDuplicate,
   onRemoveRequest,
+  catalog = MAINTENANCE_SERVICE_CATALOG,
   granularity,
   onGranularityChange,
 }: SectionCardProps) {
@@ -167,7 +174,7 @@ export function SectionCard({
   const totalCents = sectionTotal(section, 'maintenance')
   const acres = acresFromSqft(section.squareFeet)
   const existingLabels = new Set(section.services.map((s) => s.label))
-  const addable = MAINTENANCE_SERVICE_CATALOG.filter((r) => !existingLabels.has(r.label))
+  const addable = catalog.filter((r) => !existingLabels.has(r.label))
 
   return (
     <Card

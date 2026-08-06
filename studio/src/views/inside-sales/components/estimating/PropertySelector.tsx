@@ -13,19 +13,38 @@ import { propertiesApi } from '@/api/estimating'
 import type { AspireOpportunitySummary, CreatePropertyPayload, Property } from '@/types/estimating'
 import { BranchPicker } from './AspirePickers'
 
+/**
+ * Canonical-origin fields for a newly created property (Handoff 15). When the
+ * property originates from an HOA prospect, pass
+ * `{ propertyType: 'hoa', sourceType: 'hoa', sourceId: <hoa id> }`; omitted
+ * fields default to 'manual' / null.
+ */
+export interface PropertyOrigin {
+  propertyType?: string
+  sourceType?: string
+  sourceId?: string | null
+}
+
 interface Props {
   value: Property | null
   onSelect: (property: Property | null) => void
+  origin?: PropertyOrigin
 }
 
-export function PropertySelector({ value, onSelect }: Props) {
+export function PropertySelector({ value, onSelect, origin }: Props) {
   if (value) {
     return <SelectedProperty property={value} onChange={() => onSelect(null)} />
   }
-  return <PropertySearch onSelect={onSelect} />
+  return <PropertySearch onSelect={onSelect} origin={origin} />
 }
 
-function PropertySearch({ onSelect }: { onSelect: (p: Property) => void }) {
+function PropertySearch({
+  onSelect,
+  origin,
+}: {
+  onSelect: (p: Property) => void
+  origin?: PropertyOrigin
+}) {
   const [term, setTerm] = useState('')
   const [results, setResults] = useState<Property[] | null>(null)
   const [searching, setSearching] = useState(false)
@@ -111,7 +130,7 @@ function PropertySearch({ onSelect }: { onSelect: (p: Property) => void }) {
         </div>
       )}
 
-      {creating && <CreatePropertyForm defaultName={term} onCreated={onSelect} />}
+      {creating && <CreatePropertyForm defaultName={term} onCreated={onSelect} origin={origin} />}
     </div>
   )
 }
@@ -119,12 +138,20 @@ function PropertySearch({ onSelect }: { onSelect: (p: Property) => void }) {
 function CreatePropertyForm({
   defaultName,
   onCreated,
+  origin,
 }: {
   defaultName: string
   onCreated: (p: Property) => void
+  origin?: PropertyOrigin
 }) {
+  const sourceType = origin?.sourceType ?? 'manual'
   const [form, setForm] = useState<CreatePropertyPayload>({
     name: defaultName,
+    // Canonical origin (Handoff 15): propertyType drives estimating/Aspire
+    // logic; sourceType/sourceId trace provenance (manual ⇒ no sourceId).
+    propertyType: origin?.propertyType ?? (sourceType !== 'manual' ? sourceType : 'manual'),
+    sourceType,
+    sourceId: sourceType !== 'manual' ? (origin?.sourceId ?? null) : null,
     address1: '',
     city: '',
     state: '',

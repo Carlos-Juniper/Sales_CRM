@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `juniper`.`scraper_runs` (
+CREATE TABLE IF NOT EXISTS `crm`.`scraper_runs` (
     `id`             VARCHAR(36)  NOT NULL,
     `source`         VARCHAR(50)  NOT NULL,
     `started_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,

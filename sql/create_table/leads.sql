@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS juniper.leads (
+CREATE TABLE IF NOT EXISTS crm.leads (
     id                       VARCHAR(36)    NOT NULL,
     source                   VARCHAR(50)    NOT NULL,
     source_ref               VARCHAR(255)   DEFAULT NULL,
@@ -26,7 +26,9 @@ CREATE TABLE IF NOT EXISTS juniper.leads (
     score                    TINYINT UNSIGNED DEFAULT NULL,
     score_factors            JSON           DEFAULT NULL,
     raw_data                 JSON           DEFAULT NULL,
-    hoa_property_id          VARCHAR(36)    DEFAULT NULL,
+    -- canonical properties.id (Handoff 15; logical ref, no FK). Nullable —
+    -- manual leads may have none. Replaces the removed hoa_property_id.
+    property_id              VARCHAR(36)    DEFAULT NULL,
     created_at               DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at               DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
@@ -36,5 +38,6 @@ CREATE TABLE IF NOT EXISTS juniper.leads (
     INDEX `idx_lead_type`    (`lead_type`),
     INDEX `idx_bid_deadline` (`bid_deadline`),
     INDEX `idx_branch_id`    (`branch_id`),
-    INDEX `idx_score`        (`score`)
+    INDEX `idx_score`        (`score`),
+    INDEX `idx_property_id`  (`property_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -14,7 +14,7 @@
 // styled native <select> elements (Handoff 03/04 precedent).
 // ---------------------------------------------------------------------------
 
-import { useState, useRef, type ChangeEvent } from 'react'
+import { useEffect, useState, useRef, type ChangeEvent } from 'react'
 import { Building2, FileText, Info, Paperclip, X } from 'lucide-react'
 import {
   Dialog,
@@ -28,44 +28,50 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { estimatingApi } from '@/api/estimating'
+import { estimatingApi, estimatingConfigApi } from '@/api/estimating'
+import { leadsApi } from '@/api/leads'
+import {
+  crmLeadFromLead,
+  DEFAULT_WIN_PROBABILITY,
+  type CrmLeadContext,
+} from '@/lib/estimating/crmLead'
 import type { Property } from '@/types/estimating'
-import { SLA_CONFIG } from '@/lib/estimating/sla'
+import { SLA_CONFIG, toDateOnly } from '@/lib/estimating/sla'
 import { DEFAULT_SERVICE_LINE } from '@/lib/estimating/aspireOptions'
 import { PropertySelector } from './PropertySelector'
 import { ServiceLineSelect } from './AspirePickers'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
-import type { MaintenanceCustomerType } from '@/types/estimating'
-import type { Estimate } from '@/types/estimating'
+import type { BranchOption, Estimate, MaintenanceCustomerType } from '@/types/estimating'
 import { FileAttachRow, type AttachedFile } from './IntakeFileAttachRow'
 import { useAttachmentUpload } from '@/lib/estimating/useAttachmentUpload'
 
 // ----- Types -----------------------------------------------------------------
 
-export interface CrmLeadContext {
-  leadNumber: string
-  rep: string
-  /** 0.20–1.00 */
-  winProbability: number
-}
+// Handoff 23 — the CRM lead context type + mapper live in lib (react-refresh:
+// component files export only components). Re-exported for existing importers.
+export type { CrmLeadContext }
 
 export interface MaintenanceIntakeModalProps {
   open: boolean
   onClose: () => void
-  /** CRM pipeline context injected by the queue / EstimatingPage. */
-  crmLead: CrmLeadContext
+  /**
+   * REAL CRM lead context (Handoff 23 — the L-TBD stub is gone). Provided when
+   * the caller already resolved the property's lead ("Request estimate" flow);
+   * when absent the modal sources it from leads.property_id once a property is
+   * selected.
+   */
+  crmLead?: CrmLeadContext | null
   /** Called after successful create so the queue can refresh. */
   onCreated: (estimate: Estimate) => void
+  /**
+   * Handoff 15 — "Request estimate" from the property/Accounts UI launches the
+   * modal pre-filled with the canonical property. Null ⇒ intake starts blank.
+   */
+  initialProperty?: Property | null
 }
 
 type ContractStructure = 'single' | 'split'
-
-// Default branch for CRM-sourced maintenance leads until per-user branch selection
-// is threaded from auth (AuthUser.branch_id is an opaque id, not this display name,
-// so it can't be used directly yet). TODO(auth): map the user's branch → this value
-// before multi-branch rollout.
-const DEFAULT_MAINTENANCE_BRANCH = 'Phoenix-Desert'
 
 interface FormState {
   // Lead & contact (I-6.1)
@@ -73,6 +79,8 @@ interface FormState {
   company: string
   phone: string
   email: string
+  // Branch (Handoff 28 — required, populated from Aspire config)
+  branch: string
   // Property
   propertyAddress: string
   county: string
@@ -80,6 +88,8 @@ interface FormState {
   contractStructure: ContractStructure
   homesBudget: string
   commonAreaBudget: string
+  /** Handoff 24 §3.1 — unit/home COUNT (I-6.4), distinct from budget dollars. */
+  homeCount: string
   // Scope & dates
   scopeOfWork: string
   neededBack: string
@@ -94,8 +104,9 @@ interface FormState {
 export function MaintenanceIntakeModal({
   open,
   onClose,
-  crmLead,
+  crmLead = null,
   onCreated,
+  initialProperty = null,
 }: MaintenanceIntakeModalProps) {
   const { setOpenEstimate, setActiveTab } = useEstimatingShell()
   const { show } = useToast()
@@ -106,17 +117,21 @@ export function MaintenanceIntakeModal({
     company: '',
     phone: '',
     email: '',
+    branch: '',
     propertyAddress: '',
     county: '',
     customerType: 'commercial',
     contractStructure: 'single',
     homesBudget: '',
     commonAreaBudget: '',
+    homeCount: '',
     scopeOfWork: '',
     neededBack: '',
     anticipatedClose: '',
     serviceStart: '',
-    winProbabilityPct: String(Math.round(crmLead.winProbability * 100)),
+    winProbabilityPct: String(
+      Math.round((crmLead?.winProbability ?? DEFAULT_WIN_PROBABILITY) * 100),
+    ),
   }))
 
   const [propertyMapFile, setPropertyMapFile] = useState<AttachedFile | null>(null)
@@ -125,8 +140,68 @@ export function MaintenanceIntakeModal({
   const [submitting, setSubmitting] = useState(false)
   // Aspire opportunity linkage: the property (→ PropertyID) and the service line
   // (→ DivisionID). Optional at intake; the backend defaults/pends what's missing.
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null)
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(initialProperty)
   const [serviceLine, setServiceLine] = useState<string>(DEFAULT_SERVICE_LINE.maintenance)
+  // Handoff 28 — Aspire-derived maintenance branch options.
+  const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
+
+  // Handoff 15: adopt an incoming property ("Request estimate" pre-fill) when
+  // the modal (re)opens with one. Render-phase derived-state pattern — no effect.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open && initialProperty) setSelectedProperty(initialProperty)
+  }
+
+  // Handoff 23 §4 — REAL lead context. When the caller didn't resolve it, source
+  // it from the selected property via leads.property_id (there is always a lead
+  // on the "Request estimate" path — the action is gated on it, §1a).
+  const [fetchedLead, setFetchedLead] = useState<CrmLeadContext | null>(null)
+  const selectedPropertyId = selectedProperty?.id ?? null
+  useEffect(() => {
+    if (!open || crmLead || !selectedPropertyId) return
+    let cancelled = false
+    leadsApi
+      .list({ property_id: selectedPropertyId, page_size: 100 })
+      .then((res) => {
+        if (cancelled) return
+        const active =
+          res.data.find((l) => l.status !== 'won' && l.status !== 'lost') ?? res.data[0]
+        setFetchedLead(active ? crmLeadFromLead(active) : null)
+      })
+      .catch(() => {
+        /* best-effort — banner simply shows no lead */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, crmLead, selectedPropertyId])
+
+  const leadCtx = crmLead ?? fetchedLead
+
+  // When a lead context arrives (or changes), pre-fill its win probability —
+  // still editable by the salesperson afterwards.
+  const [appliedLeadNumber, setAppliedLeadNumber] = useState<string | null>(
+    crmLead?.leadNumber ?? null,
+  )
+  if (leadCtx && leadCtx.leadNumber !== appliedLeadNumber) {
+    setAppliedLeadNumber(leadCtx.leadNumber)
+    setForm((prev) => ({
+      ...prev,
+      winProbabilityPct: String(Math.round(leadCtx.winProbability * 100)),
+    }))
+  }
+
+  // Fetch Aspire-derived maintenance branch options once on open.
+  useEffect(() => {
+    if (!open) return
+    estimatingConfigApi
+      .branches('maintenance')
+      .then(setBranchOptions)
+      .catch(() => {
+        show('Could not load branch list — please close and reopen the form.')
+      })
+  }, [open])
 
   const propertyMapRef = useRef<HTMLInputElement>(null)
   const rfpRef = useRef<HTMLInputElement>(null)
@@ -159,21 +234,26 @@ export function MaintenanceIntakeModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!form.branch) {
+      show('Select a branch before submitting.')
+      return
+    }
     setSubmitting(true)
 
     try {
       // SLA clock: dueBackDate from the "needed back" field, or +14 days from now.
+      // due_back_date is a SQL DATE column — must stay 'YYYY-MM-DD', not a full timestamp.
       const dueBackDate = form.neededBack
-        ? new Date(form.neededBack).toISOString()
-        : new Date(Date.now() + SLA_CONFIG.returnWindowDays * 86400000).toISOString()
+        ? toDateOnly(form.neededBack)
+        : toDateOnly(new Date(Date.now() + SLA_CONFIG.returnWindowDays * 86400000))
 
       const winProbability = Math.min(1.0, Math.max(0.2, Number(form.winProbabilityPct) / 100))
 
       // Build intake payload persisted verbatim (I-6.1; parsing uploads is
       // explicitly future scope — files stored for estimator to open).
       const intakePayload: Record<string, unknown> = {
-        crmLeadNumber: crmLead.leadNumber,
-        crmRep: crmLead.rep,
+        crmLeadNumber: leadCtx?.leadNumber ?? null,
+        crmRep: leadCtx?.rep ?? null,
         contactName: form.contactName,
         company: form.company,
         phone: form.phone,
@@ -186,6 +266,9 @@ export function MaintenanceIntakeModal({
           homesBudget: form.homesBudget,
           commonAreaBudget: form.commonAreaBudget,
         }),
+        // Handoff 24 §3.1 — unit/home COUNT (I-6.4: count only units in the
+        // proposed scope). Distinct from the budget dollars above.
+        homeCount: form.homeCount || null,
         scopeOfWork: form.scopeOfWork,
         neededBack: form.neededBack || null,
         anticipatedClose: form.anticipatedClose || null,
@@ -202,9 +285,13 @@ export function MaintenanceIntakeModal({
         aspireNumber: null,
         // Property link + service line drive the Aspire opportunity push.
         propertyId: selectedProperty?.id ?? null,
+        // Pipeline-sourced only (I-6.3) — the linked lead is already resolved via
+        // leadCtx (crmLead prop or fetched from the selected property), never a
+        // free-text override. Moves the lead Qualifying→Estimating on create.
+        leadId: leadCtx?.leadNumber || null,
         serviceLine,
         clientName: form.company || form.contactName,
-        branch: DEFAULT_MAINTENANCE_BRANCH,
+        branch: form.branch,
         customerType: form.customerType,
         acreage: null,
         contractValueCents: 0,
@@ -216,15 +303,11 @@ export function MaintenanceIntakeModal({
         winProbability,
         siteWalkDate: null,
         dueBackDate,
-        anticipatedCloseDate: form.anticipatedClose
-          ? new Date(form.anticipatedClose).toISOString()
-          : null,
-        serviceStartDate: form.serviceStart
-          ? new Date(form.serviceStart).toISOString()
-          : null,
+        anticipatedCloseDate: form.anticipatedClose ? toDateOnly(form.anticipatedClose) : null,
+        serviceStartDate: form.serviceStart ? toDateOnly(form.serviceStart) : null,
         assignedLsEstimator: null,
         assignedIrrEstimator: null,
-        crmRep: crmLead.rep,
+        crmRep: leadCtx?.rep ?? null,
         // Structured intake goes to its own table (intake_submissions), never notes.
         intake: { payload: intakePayload },
         sections: [],
@@ -253,7 +336,7 @@ export function MaintenanceIntakeModal({
   }
 
   // Format win probability for the banner display
-  const winPct = Math.round(crmLead.winProbability * 100)
+  const winPct = leadCtx ? Math.round(leadCtx.winProbability * 100) : null
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -271,11 +354,15 @@ export function MaintenanceIntakeModal({
         {/* CRM pipeline banner (I-6.3 — pipeline-sourced only) */}
         <div className="rounded-md bg-[#e8f3ed] border border-[#bfdcc9] px-3 py-2 text-xs text-[#2E7D52] flex items-center gap-2">
           <Info className="h-3.5 w-3.5 flex-shrink-0" />
-          <span>
-            Sourced from CRM pipeline — lead{' '}
-            <strong>#{crmLead.leadNumber}</strong>, {crmLead.rep} · win probability{' '}
-            <strong>{winPct}%</strong>
-          </span>
+          {leadCtx ? (
+            <span>
+              Sourced from CRM pipeline — lead{' '}
+              <strong>#{leadCtx.leadNumber}</strong>, {leadCtx.rep} · win probability{' '}
+              <strong>{winPct}%</strong>
+            </span>
+          ) : (
+            <span>Sourced from CRM pipeline — select a property to link its lead</span>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -338,6 +425,23 @@ export function MaintenanceIntakeModal({
                   required
                   className="h-8 text-xs"
                 />
+              </div>
+              {/* Branch — populated from Aspire config endpoint (Handoff 28) */}
+              <div className="space-y-1 sm:col-span-2">
+                <Label htmlFor="mi-branch" className="text-xs">
+                  Branch *
+                </Label>
+                <select
+                  id="mi-branch"
+                  value={form.branch}
+                  onChange={(e) => set('branch', e.target.value)}
+                  className="h-8 w-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 text-xs text-[hsl(var(--fg))] focus:outline-none focus:ring-2 focus:ring-[#2E7D52]"
+                >
+                  <option value="">— select branch —</option>
+                  {branchOptions.map((b) => (
+                    <option key={b.city} value={b.city}>{b.city}</option>
+                  ))}
+                </select>
               </div>
             </div>
           </section>
@@ -439,9 +543,6 @@ export function MaintenanceIntakeModal({
                       required
                       className="h-8 text-xs bg-[#eff6ff] border-[#bfdbfe]"
                     />
-                    <p className="text-[10px] text-[hsl(var(--muted-fg))]">
-                      Count only units in proposed scope (I-6.4)
-                    </p>
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="mi-common-area-budget" className="text-xs">
@@ -460,6 +561,27 @@ export function MaintenanceIntakeModal({
                   </div>
                 </div>
               )}
+
+              {/* Handoff 24 §3.1 — unit/home COUNT, distinct from the budget
+                  dollars above. Carries the I-6.4 counting guidance. */}
+              <div className="space-y-1 max-w-[220px]">
+                <Label htmlFor="mi-home-count" className="text-xs">
+                  Home / unit count
+                </Label>
+                <Input
+                  id="mi-home-count"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={form.homeCount}
+                  onChange={(e) => set('homeCount', e.target.value)}
+                  placeholder="142"
+                  className="h-8 text-xs"
+                />
+                <p className="text-[10px] text-[hsl(var(--muted-fg))]">
+                  Count only units in the proposed scope (I-6.4)
+                </p>
+              </div>
             </div>
           </section>
 

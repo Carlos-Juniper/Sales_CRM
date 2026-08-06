@@ -79,6 +79,12 @@ function fillMinimumFieldsFast() {
   fireEvent.change(screen.getByLabelText(/contact person/i), { target: { value: 'Morgan Pierce' } })
 }
 
+/** Wait for async branch options to appear then select one — required before submit (Handoff 28). */
+async function selectInstallBranch() {
+  await screen.findByRole('option', { name: 'Bradenton, FL' })
+  fireEvent.change(screen.getByLabelText(/install branch/i), { target: { value: 'Bradenton, FL' } })
+}
+
 beforeEach(() => {
   useAuthStore.setState({ user: makeUser({ branch_id: 'b1' }) })
 })
@@ -225,6 +231,32 @@ describe('InstallIntakeModal — field rendering (AC §3 bullet 1)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Handoff 28 — Branch field populated from Aspire config endpoint
+// ---------------------------------------------------------------------------
+
+describe('InstallIntakeModal — Aspire-derived install branch (Handoff 28)', () => {
+  it('starts with no branch selected (empty placeholder)', () => {
+    renderModal()
+    const select = screen.getByLabelText(/install branch/i) as HTMLSelectElement
+    expect(select.value).toBe('')
+  })
+
+  it('loads branch options from GET /config/branches?kind=install', async () => {
+    renderModal()
+    // MSW handler returns Bradenton, FL for install kind (see handlers.ts).
+    const option = await screen.findByRole('option', { name: 'Bradenton, FL' })
+    expect(option).toBeInTheDocument()
+  })
+
+  it('does NOT include fallback-only cities (like Bonita Springs, FL) in the install list', async () => {
+    renderModal()
+    // The default mock only returns the cities it's configured with.
+    await screen.findByRole('option', { name: 'Bradenton, FL' })
+    expect(screen.queryByRole('option', { name: 'Bonita Springs, FL' })).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // AC §3 bullet 6 — Duplicate/New client/Bond checkboxes persist
 // ---------------------------------------------------------------------------
 
@@ -271,6 +303,7 @@ describe('InstallIntakeModal — Requestor checkboxes (AC §3 bullet 6)', () => 
     renderModal()
     fireEvent.click(screen.getByLabelText(/duplicate/i))
     fillMinimumFieldsFast()
+    await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
     await waitFor(() => expect(created).toHaveLength(1))
@@ -301,11 +334,58 @@ describe('InstallIntakeModal — RFI status (AC §3 bullet 2)', () => {
       target: { value: 'Awaiting GC response on storm drain details' },
     })
     fillMinimumFieldsFast()
+    await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
     await waitFor(() => expect(created).toHaveLength(1))
     const payload = created[0].intake!.payload as Record<string, unknown>
     expect(payload.rfiStatus).toBe('Awaiting GC response on storm drain details')
+  })
+
+  it('sends rfiStatus as a first-class tracked field on the create payload (Handoff 24 §3.2)', async () => {
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildInstallEstimate({ status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json({ ...fakeEstimate, ...body, id: 'rfi-first-class' }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    fireEvent.change(screen.getByLabelText(/rfi status/i), {
+      target: { value: 'Awaiting GC response on storm drain details' },
+    })
+    fillMinimumFieldsFast()
+    await selectInstallBranch()
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    // First-class field on the estimate row — not just free text inside the payload.
+    expect(created[0].rfiStatus).toBe('Awaiting GC response on storm drain details')
+  })
+
+  it('sends rfiStatus null when the field is left blank', async () => {
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildInstallEstimate({ status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json({ ...fakeEstimate, ...body, id: 'rfi-blank' }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    fillMinimumFieldsFast()
+    await selectInstallBranch()
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].rfiStatus).toBeNull()
   })
 })
 
@@ -369,6 +449,7 @@ describe('InstallIntakeModal — file attachments (AC §3 bullet 3)', () => {
     await user.upload(input, file)
 
     fillMinimumFieldsFast()
+    await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
     await waitFor(() => expect(created).toHaveLength(1))
@@ -400,6 +481,7 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
 
     renderModal()
     fillMinimumFieldsFast()
+    await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
     await waitFor(() => expect(created).toHaveLength(1))
@@ -421,6 +503,7 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
 
     renderModal()
     fillMinimumFieldsFast()
+    await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
     await waitFor(() => expect(created).toHaveLength(1))
@@ -440,6 +523,7 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
     const shell = makeShell()
     renderModal({ shell })
     fillMinimumFieldsFast()
+    await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
     await waitFor(() => expect(shell.setOpenEstimate).toHaveBeenCalled())
@@ -462,6 +546,7 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
 
     renderModal()
     fillMinimumFieldsFast()
+    await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
     await waitFor(() =>
@@ -489,9 +574,59 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
       </EstimatingToastProvider>,
     )
     fillMinimumFieldsFast()
+    await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Pipeline kanban redesign — leadId drives the lead→estimate write-back
+// ---------------------------------------------------------------------------
+
+describe('InstallIntakeModal — leadId (Pipeline kanban redesign)', () => {
+  it('sends the Lead ID field as a top-level leadId on the create payload', async () => {
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildInstallEstimate({ status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json({ ...fakeEstimate, ...body, id: 'lead-id-test' }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    fireEvent.change(screen.getByLabelText(/lead id/i), { target: { value: 'lead-123' } })
+    fillMinimumFieldsFast()
+    await selectInstallBranch()
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].leadId).toBe('lead-123')
+  })
+
+  it('sends leadId null when the field is left blank', async () => {
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildInstallEstimate({ status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json({ ...fakeEstimate, ...body, id: 'lead-id-blank' }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    fillMinimumFieldsFast()
+    await selectInstallBranch()
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].leadId).toBeNull()
   })
 })
 
@@ -525,6 +660,151 @@ describe('InstallIntakeModal — Save Draft (AC §3 bullet 5)', () => {
     await waitFor(() =>
       expect(document.body).toHaveTextContent(/draft saved/i),
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Handoff 24 §3.3 — Save draft persists to the BACKEND (device-independent);
+// replaces the old localStorage path. A draft never creates an estimate and
+// never triggers an Aspire push.
+// ---------------------------------------------------------------------------
+
+describe('InstallIntakeModal — backend Save Draft (Handoff 24 §3.3)', () => {
+  it('POSTs the draft to /api/estimating/intake/drafts, not to localStorage', async () => {
+    const user = userEvent.setup()
+    const draftPosts: Array<Record<string, unknown>> = []
+    const estimatePosts: unknown[] = []
+    server.use(
+      http.get('/api/estimating/intake/drafts', () => HttpResponse.json([])),
+      http.post('/api/estimating/intake/drafts', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        draftPosts.push(body)
+        return HttpResponse.json(
+          {
+            id: 'draft-1',
+            estimateType: 'install',
+            payload: body.payload,
+            submittedBy: 'u1',
+            isDraft: true,
+            createdAt: new Date().toISOString(),
+          },
+          { status: 201 },
+        )
+      }),
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        estimatePosts.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    fireEvent.change(screen.getByLabelText(/opportunity name/i), {
+      target: { value: 'Draft Opportunity' },
+    })
+    await user.click(screen.getByRole('button', { name: /save draft/i }))
+
+    await waitFor(() => expect(draftPosts).toHaveLength(1))
+    expect(draftPosts[0].estimateType).toBe('install')
+    expect((draftPosts[0].payload as Record<string, unknown>).opportunityName).toBe(
+      'Draft Opportunity',
+    )
+    // No estimate is created for a draft, and nothing lands in localStorage.
+    expect(estimatePosts).toHaveLength(0)
+    expect(localStorage.getItem('install-intake-draft')).toBeNull()
+  })
+
+  it('restores the latest backend draft when the modal opens (resume on another device)', async () => {
+    server.use(
+      http.get('/api/estimating/intake/drafts', () =>
+        HttpResponse.json([
+          {
+            id: 'draft-9',
+            estimateType: 'install',
+            payload: { opportunityName: 'Resumed From Other Device' },
+            submittedBy: 'u1',
+            isDraft: true,
+            createdAt: '2026-08-01T10:00:00Z',
+          },
+        ]),
+      ),
+    )
+
+    renderModal()
+    await waitFor(() =>
+      expect(screen.getByLabelText(/opportunity name/i)).toHaveValue(
+        'Resumed From Other Device',
+      ),
+    )
+  })
+
+  it('updates the same backend draft on subsequent saves (sends draftId)', async () => {
+    const user = userEvent.setup()
+    const draftPosts: Array<Record<string, unknown>> = []
+    server.use(
+      http.get('/api/estimating/intake/drafts', () => HttpResponse.json([])),
+      http.post('/api/estimating/intake/drafts', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        draftPosts.push(body)
+        return HttpResponse.json(
+          {
+            id: 'draft-1',
+            estimateType: 'install',
+            payload: body.payload,
+            submittedBy: 'u1',
+            isDraft: true,
+            createdAt: new Date().toISOString(),
+          },
+          { status: draftPosts.length > 1 ? 200 : 201 },
+        )
+      }),
+    )
+
+    renderModal()
+    await user.click(screen.getByRole('button', { name: /save draft/i }))
+    await waitFor(() => expect(draftPosts).toHaveLength(1))
+    expect(draftPosts[0].draftId).toBeUndefined()
+
+    await user.click(screen.getByRole('button', { name: /save draft/i }))
+    await waitFor(() => expect(draftPosts).toHaveLength(2))
+    expect(draftPosts[1].draftId).toBe('draft-1')
+  })
+
+  it('deletes the backend draft after a successful submit', async () => {
+    const deleted: string[] = []
+    const fakeEstimate = buildInstallEstimate({ status: 'new_from_sales' })
+    server.use(
+      http.get('/api/estimating/intake/drafts', () =>
+        HttpResponse.json([
+          {
+            id: 'draft-9',
+            estimateType: 'install',
+            payload: { opportunityName: 'Draft To Submit' },
+            submittedBy: 'u1',
+            isDraft: true,
+            createdAt: '2026-08-01T10:00:00Z',
+          },
+        ]),
+      ),
+      http.delete('/api/estimating/intake/drafts/:id', ({ params }) => {
+        deleted.push(String(params.id))
+        return new HttpResponse(null, { status: 204 })
+      }),
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        return HttpResponse.json({ ...fakeEstimate, ...body, id: 'draft-submit' }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    // Wait for the draft to be adopted (draftId bound) before submitting.
+    await waitFor(() =>
+      expect(screen.getByLabelText(/opportunity name/i)).toHaveValue('Draft To Submit'),
+    )
+    fillMinimumFieldsFast()
+    await selectInstallBranch()
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+
+    await waitFor(() => expect(deleted).toEqual(['draft-9']))
   })
 })
 

@@ -51,7 +51,7 @@ describe('ApprovalHandoff — tier routing (config-driven)', () => {
     expect(screen.getByTestId('required-tier')).toHaveTextContent('Regional Director')
     const active = screen.getByTestId('tier-row-regional_director')
     expect(active).toHaveTextContent('Required for this estimate')
-    expect(screen.getByTestId('tier-row-branch_manager')).not.toHaveTextContent(
+    expect(screen.getByTestId('tier-row-manager')).not.toHaveTextContent(
       'Required for this estimate',
     )
   })
@@ -59,8 +59,8 @@ describe('ApprovalHandoff — tier routing (config-driven)', () => {
   it('renders the ladder from approval_tiers rows — changing a row changes the UI with no code change', () => {
     const est = buildMaintenanceEstimate({ contractValueCents: 15_000_000 })
     const customTiers: ApprovalTier[] = [
-      { id: 't1', roleKey: 'branch_manager', label: 'Branch Manager', minValueCents: 0, maxValueCents: 20_000_000, order: 1, estimateType: 'maintenance' },
-      { id: 't2', roleKey: 'coo', label: 'Chief Operating Officer', minValueCents: 20_000_000, maxValueCents: null, order: 2, estimateType: 'maintenance' },
+      { id: 't1', roleKey: 'manager', label: 'Branch Manager', minValueCents: 0, maxValueCents: 20_000_000, order: 1, estimateType: 'maintenance' },
+      { id: 't2', roleKey: 'ceo', label: 'Chief Operating Officer', minValueCents: 20_000_000, maxValueCents: null, order: 2, estimateType: 'maintenance' },
     ]
     render(<Harness estimate={est} tiers={customTiers} />)
 
@@ -69,30 +69,32 @@ describe('ApprovalHandoff — tier routing (config-driven)', () => {
     expect(screen.getByText('Chief Operating Officer')).toBeInTheDocument()
     expect(screen.getAllByTestId(/tier-row-/)).toHaveLength(2)
     // The seed's mid-band tiers are not rendered.
-    expect(screen.queryByText('Business Partner')).not.toBeInTheDocument()
+    expect(screen.queryByText('Vice President')).not.toBeInTheDocument()
   })
 
-  it('shows the BP title / COO mechanism open-item footnote', () => {
+  it('shows the CEO >$1M mechanism open-item footnote', () => {
     render(<Harness estimate={buildMaintenanceEstimate()} />)
     expect(
-      screen.getByText(/"BP" senior-ops title and the COO mechanism above \$1M are open items/i),
+      screen.getByText(/CEO mechanism above \$1M is an open item/i),
     ).toBeInTheDocument()
     expect(screen.getByText(/configurable, not hard-coded/i)).toBeInTheDocument()
   })
 })
 
-describe('ApprovalHandoff — install has no approval matrix (open item)', () => {
-  it('shows the "no matrix defined" state and disables the approve flow — no silent maintenance-ladder reuse', () => {
-    render(<Harness estimate={buildInstallEstimate()} />)
+describe('ApprovalHandoff — install routes through the same tier ladder (Handoff 19 §4)', () => {
+  it('computes the required tier for an install estimate from the install ladder — no "no approval matrix" state', () => {
+    // $150K install → Regional Director band ($100K–$250K), same as maintenance.
+    render(<Harness estimate={buildInstallEstimate({ contractValueCents: 15_000_000, status: 'pending_approval' })} />)
 
-    expect(
-      screen.getByText(/no approval matrix defined for install estimates/i),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/pending confirmation/i)).toBeInTheDocument()
-    // No maintenance tiers leak into the install view.
-    expect(screen.queryByText('Branch Manager')).not.toBeInTheDocument()
-    expect(screen.queryByTestId(/tier-row-/)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /approve & hand back to sales/i })).toBeDisabled()
+    expect(screen.queryByText(/no approval matrix/i)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('no-approval-matrix')).not.toBeInTheDocument()
+    expect(screen.getByTestId('required-tier')).toHaveTextContent('Regional Director')
+    expect(screen.getAllByTestId(/tier-row-/)).toHaveLength(4)
+    expect(screen.getByTestId('tier-row-regional_director')).toHaveTextContent(
+      'Required for this estimate',
+    )
+    // The tiered approve flow is ENABLED for install now.
+    expect(screen.getByRole('button', { name: /approve & hand back to sales/i })).toBeEnabled()
   })
 })
 

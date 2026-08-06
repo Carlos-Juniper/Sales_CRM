@@ -27,12 +27,13 @@ describe('PipelinePage', () => {
     useUIStore.setState({ selectedLeadId: null })
   })
 
-  it('renders all 3 kanban column titles', async () => {
+  it('renders all 4 kanban stage titles', async () => {
     render(<PipelinePage />)
-    await screen.findByText('New Leads')
-    expect(screen.getByText('New Leads')).toBeInTheDocument()
-    expect(screen.getByText('Contacted')).toBeInTheDocument()
-    expect(screen.getByText('Proposal Sent')).toBeInTheDocument()
+    await screen.findByText('Qualifying')
+    expect(screen.getByText('Qualifying')).toBeInTheDocument()
+    expect(screen.getByText('Estimating')).toBeInTheDocument()
+    expect(screen.getByText('OP Review')).toBeInTheDocument()
+    expect(screen.getByText('Approved')).toBeInTheDocument()
   })
 
   it('renders Pipeline page TopNav title', async () => {
@@ -43,8 +44,8 @@ describe('PipelinePage', () => {
 
   it('renders page description', async () => {
     render(<PipelinePage />)
-    await screen.findByText(/Drag leads between stages/)
-    expect(screen.getByText(/Drag leads between stages/)).toBeInTheDocument()
+    await screen.findByText(/Leads move between stages automatically/)
+    expect(screen.getByText(/Leads move between stages automatically/)).toBeInTheDocument()
   })
 
   it('places new-status leads in New Leads column', async () => {
@@ -62,13 +63,15 @@ describe('PipelinePage', () => {
     expect(screen.getByText('City of Tempe — Parks RFP')).toBeInTheDocument()
   })
 
-  it('places proposal_sent leads in Proposal Sent column', async () => {
+  it('hides proposal_sent leads from the kanban (terminal/hidden status)', async () => {
     render(<PipelinePage />)
-    await screen.findByText('Scottsdale Unified School District RFP')
-    expect(screen.getByText('Scottsdale Unified School District RFP')).toBeInTheDocument()
+    await screen.findByText('Silverleaf HOA')
+    expect(
+      screen.queryByText('Scottsdale Unified School District RFP'),
+    ).not.toBeInTheDocument()
   })
 
-  it('filters out won/lost/handed_off leads from kanban', async () => {
+  it('filters out won/lost leads from kanban', async () => {
     render(<PipelinePage />)
     // Wait for data to load
     await screen.findByText('Silverleaf HOA')
@@ -102,7 +105,7 @@ describe('PipelinePage', () => {
     await user.click(addLeadBtn)
 
     await screen.findByRole('dialog')
-    expect(screen.getByText(/Add lead to New Leads/i)).toBeInTheDocument()
+    expect(screen.getByText(/Add lead to Qualifying/i)).toBeInTheDocument()
   })
 
   it('Add lead modal closes when Cancel is clicked', async () => {
@@ -194,13 +197,13 @@ describe('PipelinePage', () => {
     })
   })
 
-  it('renders column Add lead buttons for each column', async () => {
+  it('renders a column Add lead button ONLY on Qualifying (auto-driven stages have none)', async () => {
     render(<PipelinePage />)
     await screen.findByText('Silverleaf HOA')
-    // Each column has an "Add lead" button
+    // 1 in the page header + 1 on the Qualifying column — the other stages are
+    // reached only via the estimate write-back, never by direct creation.
     const addLeadButtons = screen.getAllByRole('button', { name: /add lead/i })
-    // 1 in header + 3 in columns = 4 total, but at minimum 3 column buttons
-    expect(addLeadButtons.length).toBeGreaterThanOrEqual(3)
+    expect(addLeadButtons).toHaveLength(2)
   })
 
   it('search bar filters leads by property name', async () => {

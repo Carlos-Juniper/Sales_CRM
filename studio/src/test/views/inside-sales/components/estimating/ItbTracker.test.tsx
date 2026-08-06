@@ -189,17 +189,17 @@ describe('ItbTracker — status badges and legend', () => {
     expect(screen.getByTestId('status-badge-prj-test-sc-4')).toHaveTextContent('X')
   })
 
-  it('renders N/A badge ("–") for scopes without a status record', () => {
+  it('renders N/A badge ("-") for scopes without a status record', () => {
     render(<Harness projects={[makeProject({ id: 'prj-na' })]} scopes={SCOPES} statuses={[]} />)
     const badges = screen.getAllByTestId(/^status-badge-prj-na-/)
-    expect(badges.every((b) => b.textContent === '–')).toBe(true)
+    expect(badges.every((b) => b.textContent === '-')).toBe(true)
   })
 
   it('renders the status legend with all configured codes', () => {
     render(<Harness />)
     const legend = screen.getByTestId('status-legend')
-    // All 9 status codes should appear in the legend
-    const codes = ['P', 'C', 'S', 'R', 'U', 'X', '–', 'E', 'I']
+    // The 7 confirmed status codes should appear in the legend (Carlos, 2026-08-06)
+    const codes = ['P', 'C', 'S', 'R', 'U', 'X', '-']
     for (const code of codes) {
       expect(within(legend).getByTestId(`legend-${code}`)).toBeInTheDocument()
     }

@@ -18,8 +18,9 @@ import { ServiceLineSelect } from './AspirePickers'
 import { SLA_CONFIG } from '@/lib/estimating/sla'
 import { FileAttachRow } from './IntakeFileAttachRow'
 import type { AttachedFile } from './IntakeFileAttachRow'
-import type { Property } from '@/types/estimating'
-import type { InstallCustomerType } from '@/types/estimating'
+import type { BranchOption, InstallCustomerType, Property } from '@/types/estimating'
+
+export type { BranchOption }
 
 // Re-export the flat FormState so InstallIntakeModal can import from here or
 // keep it local — we define it here and re-export to keep the modal slimmer.
@@ -167,9 +168,11 @@ interface RequestorSectionProps {
   form: FormState
   setStr: SetStr
   setBool: SetBool
+  /** Aspire-derived install branch options (Handoff 28). */
+  branchOptions: BranchOption[]
 }
 
-export function RequestorSection({ form, setStr, setBool }: RequestorSectionProps) {
+export function RequestorSection({ form, setStr, setBool, branchOptions }: RequestorSectionProps) {
   return (
     <section>
       <p className="text-xs font-semibold text-[hsl(var(--muted-fg))] uppercase tracking-wide mb-2">
@@ -197,20 +200,19 @@ export function RequestorSection({ form, setStr, setBool }: RequestorSectionProp
             className="h-8 text-xs"
           />
         </div>
-        {/* Install branch — native <select> */}
+        {/* Install branch — populated from Aspire config endpoint (Handoff 28) */}
         <div className="space-y-1">
           <Label htmlFor="ii-install-branch" className="text-xs">Install branch *</Label>
           <select
             id="ii-install-branch"
             value={form.installBranch}
             onChange={(e) => setStr('installBranch', e.target.value)}
-            required
             className="h-8 w-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 text-xs text-[hsl(var(--fg))] focus:outline-none focus:ring-2 focus:ring-[#2E7D52]"
           >
-            <option value="Phoenix-Desert">Phoenix-Desert</option>
-            <option value="Raleigh">Raleigh</option>
-            <option value="Florida">Florida</option>
-            <option value="Pennsylvania">Pennsylvania</option>
+            <option value="">— select branch —</option>
+            {branchOptions.map((b) => (
+              <option key={b.city} value={b.city}>{b.city}</option>
+            ))}
           </select>
         </div>
         <div className="space-y-1">

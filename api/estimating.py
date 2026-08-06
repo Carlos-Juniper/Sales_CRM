@@ -19,19 +19,23 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
-from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 import api.attachments as _att_mod
 from db import execute, query
 from api import aspire_sync
+from api import authz
+from api import properties as _props_mod
 from api.aspire_sync import OpportunityInput
+from api.aspire_config import ASPIRE_BRANCH_MAP, ASPIRE_BRANCH_INSTALL_FALLBACKS
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +53,27 @@ STATUS_TRANSITIONS: dict[str, list[str]] = {
     "won": [],
     "lost": [],
 }
+
+
+# ── Lead → Pipeline-kanban write-back (Pipeline kanban redesign) ─────────────
+#
+# The Pipeline kanban's Estimating/OP Review/Approved columns are auto-driven
+# by this estimate's own status — never manually settable on the kanban.
+# Qualifying→Estimating fires on create (see create_estimate); the rest fires
+# whenever an estimate's status lands on one of these keys, mapped to the
+# lead's new LeadStatus.
+ESTIMATE_TO_LEAD_STATUS: dict[str, str] = {
+    "review": "op_review",
+    "pending_approval": "op_review",
+    "approved": "approved",
+}
+
+
+async def _write_back_lead_status(lead_id: Optional[str], status: str) -> None:
+    """Best-effort UPDATE leads.status — no-op when lead_id is absent."""
+    if not lead_id:
+        return
+    await execute("UPDATE leads SET status = %s WHERE id = %s", [status, lead_id])
 
 
 class IllegalTransitionError(Exception):
@@ -182,8 +207,20 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         "notes": r.get("notes"),
         # Aspire integration fields (.get keeps pre-migration rows working).
         "propertyId": r.get("property_id"),
+        # Pipeline kanban redesign — logical ref to the originating lead; drives
+        # the lead→estimate status write-back. (.get keeps pre-migration rows working.)
+        "leadId": r.get("lead_id"),
         "aspireOpportunityId": r.get("aspire_opportunity_id"),
         "aspireSyncStatus": r.get("aspire_sync_status"),
+        # Handoff 24 §3.2 — install RFI status, tracked first-class. Capture and
+        # display only: nothing gates approval on it. (.get keeps pre-migration
+        # rows working.)
+        "rfiStatus": r.get("rfi_status"),
+        # Handoff 27 — manual takeoff metadata (turf/curb). Manual entry today;
+        # Beam AI automated takeoff will populate these later. (.get keeps
+        # pre-migration rows working.)
+        "turfAreaAcres": _num(r.get("turf_area_acres")),
+        "curbMiles": _num(r.get("curb_miles")),
         "sections": sections,
         "createdAt": _iso(r["created_at"]),
         "updatedAt": _iso(r["updated_at"]),
@@ -267,14 +304,16 @@ async def _build_opportunity_input(est_row: dict, service_line: Optional[str] = 
     """
     aspire_property_id: Optional[int] = None
     branch_city: Optional[str] = None
+    property_type: Optional[str] = None
     if est_row.get("property_id"):
         prows = await query(
-            "SELECT aspire_property_id, branch_city FROM properties WHERE id = %s",
+            "SELECT aspire_property_id, branch_city, property_type FROM properties WHERE id = %s",
             [est_row["property_id"]],
         )
         if prows:
             aspire_property_id = prows[0].get("aspire_property_id")
             branch_city = prows[0].get("branch_city")
+            property_type = prows[0].get("property_type")
 
     rep_contact_id: Optional[int] = None
     if est_row.get("crm_rep"):
@@ -292,7 +331,11 @@ async def _build_opportunity_input(est_row: dict, service_line: Optional[str] = 
         is_install=(est_type == "install"),
         aspire_property_id=aspire_property_id,
         aspire_rep_contact_id=rep_contact_id,
-        sales_type=SALES_TYPE_BY_CUSTOMER.get(est_row.get("customer_type")),
+        # customer_type wins; the canonical property's property_type is the
+        # fallback so lead-origin estimates still map a sales type (Handoff 15).
+        sales_type=SALES_TYPE_BY_CUSTOMER.get(
+            est_row.get("customer_type") or property_type
+        ),
         lead_source="manual",
     )
 
@@ -375,6 +418,108 @@ async def sweep_loop() -> None:
             await sweep_once()
         except Exception:  # never let the sweep loop die
             logger.exception("aspire sync sweep failed")
+
+
+# ── Takeoff lines (Handoff 20) ────────────────────────────────────────────────
+#
+# Derived fields (bid_qty / flagged / delta_vs_opp) are RECOMPUTED here per
+# Handoff 00 §3.8 — never stored, never trusted from the client. The flag
+# threshold is config (default 10%, range 1–25%; mirrors DISCREPANCY_THRESHOLD
+# in studio/src/lib/estimating/config.ts) and is deliberately not a row column.
+# opportunity_qty is a LOCALLY-set, manually-editable value — it is never read
+# from Aspire (locked decision, Handoff 20 §2).
+
+DISCREPANCY_DEFAULT_THRESHOLD = 0.10
+
+_TAKEOFF_COLS = {
+    "description": "description",
+    "uom": "uom",
+    "planQty": "plan_qty",
+    "addPct": "add_pct",
+    "measuredQty": "measured_qty",
+    "opportunityQty": "opportunity_qty",
+    "catalogItemId": "catalog_item_id",
+}
+
+
+def _bid_qty(plan_qty: float, add_pct: float) -> int:
+    """round(plan × (1 + add%)) — half-up, mirroring JS Math.round in
+    studio/src/lib/estimating/calc.ts (Handoff 20 locked: round, not ceil)."""
+    return int(math.floor(plan_qty * (1 + add_pct) + 0.5))
+
+
+def _takeoff_flagged(
+    measured_qty: float, plan_qty: float, threshold: float = DISCREPANCY_DEFAULT_THRESHOLD
+) -> bool:
+    if plan_qty == 0:
+        return False
+    return abs(measured_qty - plan_qty) / plan_qty > threshold
+
+
+def _takeoff_line_out(r: dict) -> dict:
+    plan = float(_num(r["plan_qty"]) or 0)
+    add = float(_num(r["add_pct"]) or 0)
+    measured = float(_num(r["measured_qty"]) or 0)
+    opp = float(_num(r["opportunity_qty"]) or 0)
+    return {
+        "id": r["id"],
+        "estimateId": r["estimate_id"],
+        "description": r["description"],
+        "uom": r["uom"],
+        "planQty": plan,
+        "addPct": add,
+        "measuredQty": measured,
+        "opportunityQty": opp,
+        "catalogItemId": r.get("catalog_item_id"),
+        # Derived server-side at the default config threshold — the UI's live
+        # slider re-derives client-side; these are never stored.
+        "bidQty": _bid_qty(plan, add),
+        "flagged": _takeoff_flagged(measured, plan),
+        "deltaVsOpp": measured - opp,
+    }
+
+
+async def _push_takeoff_qtys_bg(estimate_id: str) -> None:
+    """Handoff 20 §4.2 — ONE batched, best-effort qty push on estimate Save.
+
+    Pushes every takeoff line that carries a catalog_item_id (a single pass,
+    not a call per edit) to OpportunityServiceItem.ItemQuantity via the
+    aspire_sync port. Strictly non-blocking: any failure is logged, never
+    raised — an Aspire outage must not fail the Save. (Separate from the
+    property→Aspire sync in Handoff 15 §5.6, which fires on estimate submit.)
+    """
+    try:
+        if not aspire_sync.sync_enabled():
+            return
+        rows = await query(
+            "SELECT aspire_opportunity_id FROM estimates WHERE id = %s", [estimate_id]
+        )
+        if not rows:
+            return
+        line_rows = await query(
+            """SELECT catalog_item_id, opportunity_qty, uom FROM takeoff_lines
+                 WHERE estimate_id = %s AND catalog_item_id IS NOT NULL""",
+            [estimate_id],
+        )
+        lines = [
+            aspire_sync.TakeoffQtyLine(
+                catalog_item_id=r["catalog_item_id"],
+                qty=float(_num(r["opportunity_qty"]) or 0),
+                uom=r.get("uom"),
+            )
+            for r in line_rows
+        ]
+        if not lines:
+            return
+        res = await aspire_sync.push_opportunity_service_item_qty(
+            rows[0].get("aspire_opportunity_id"), lines
+        )
+        if res.status not in ("synced", "disabled"):
+            logger.warning(
+                "takeoff qty push %s for estimate %s: %s", res.status, estimate_id, res.error
+            )
+    except Exception:  # best-effort by contract — never propagate
+        logger.exception("takeoff qty push failed for estimate %s", estimate_id)
 
 
 # ── Update helpers (one place for the camel→snake PATCH pattern) ─────────────
@@ -466,6 +611,40 @@ def _intake_out(r: dict) -> dict:
     }
 
 
+def _draft_out(r: dict) -> dict:
+    """Serialize an intake_submissions DRAFT row (Handoff 24 §3.3).
+
+    Drafts are partial intakes saved before submission: estimate_id is NULL
+    (a draft never creates an estimate) and is_draft=1. They are per-user and
+    device-independent — the modal resumes them from any browser.
+    """
+    payload = r["payload"]
+    if isinstance(payload, (str, bytes, bytearray)):
+        payload = json.loads(payload)
+    return {
+        "id": r["id"],
+        "estimateType": r["estimate_type"],
+        "payload": payload,
+        "submittedBy": r["submitted_by"],
+        "isDraft": True,
+        "createdAt": _iso(r["created_at"]),
+    }
+
+
+# Handoff 27 — the Takeoff Insert scan is a scanned map image (or PDF); the
+# intake kinds stay PDF-only at the endpoint layer.
+_SCAN_CONTENT_TYPES = frozenset(
+    {"application/pdf", "image/png", "image/jpeg", "image/webp"}
+)
+
+# Attachment-by-id lookup, authorized against the estimate. Rows are linked
+# either directly (ia.estimate_id — takeoff scans, Handoff 27) or through
+# their intake submission (legacy intake docs), hence the LEFT JOIN + OR.
+_ATTACHMENT_BY_ID_SQL = """SELECT ia.* FROM intake_attachments ia
+   LEFT JOIN intake_submissions ins ON ins.id = ia.intake_submission_id
+   WHERE ia.id = %s AND (ia.estimate_id = %s OR ins.estimate_id = %s)"""
+
+
 def _attachment_out(r: dict) -> dict:
     """Serialize an intake_attachments row to the API shape.
 
@@ -477,6 +656,9 @@ def _attachment_out(r: dict) -> dict:
     return {
         "id": r["id"],
         "intakeSubmissionId": r["intake_submission_id"],
+        # Direct estimate link (takeoff scans, Handoff 27); NULL for legacy
+        # submission-scoped rows (.get keeps pre-migration rows working).
+        "estimateId": r.get("estimate_id"),
         "fileName": r["file_name"],
         "contentType": r.get("content_type", ""),
         "sizeBytes": r.get("size_bytes", 0),
@@ -489,13 +671,196 @@ def _attachment_out(r: dict) -> dict:
     }
 
 
-async def _insert_component(service_id: str, comp: dict, idx: int) -> None:
+# ── Config-table row mappers (Handoff 16 — read-only GET endpoints) ──────────
+#
+# Shapes match the TS types in studio/src/types/estimating.ts exactly so the
+# frontend swap from config.ts literals is a drop-in. These tables are DATA:
+# changing a ladder/band/scope/formula is a row edit, never a code deploy.
+
+def _approval_tier_out(r: dict) -> dict:
+    return {
+        "id": r["id"],
+        "roleKey": r["role_key"],
+        "label": r["label"],
+        "minValueCents": int(r["min_value_cents"]),
+        "maxValueCents": None if r["max_value_cents"] is None else int(r["max_value_cents"]),
+        "order": r["tier_order"],
+        "estimateType": r["estimate_type"],
+    }
+
+
+def _margin_band_out(r: dict) -> dict:
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "goodMin": _num(r["good_min"]),
+        "okMin": _num(r["ok_min"]),
+    }
+
+
+def _material_calc_out(r: dict) -> dict:
+    # factors is JSON in MySQL; drivers may hand back a str or a parsed object.
+    factors = r["factors"]
+    if isinstance(factors, (str, bytes, bytearray)):
+        factors = json.loads(factors)
+    return {
+        "id": r["id"],
+        "materialKey": r["material_key"],
+        "label": r["label"],
+        "computeType": r["compute_type"],
+        "factors": factors,
+        "unitSellCents": int(r["unit_sell_cents"]),
+        "unitCostCents": int(r["unit_cost_cents"]),
+        "uom": r["uom"],
+        "volumeQuoteThresholdSf": r["volume_quote_threshold_sf"],
+    }
+
+
+def _itb_scope_out(r: dict) -> dict:
+    return {
+        "id": r["id"],
+        "key": r["scope_key"],
+        "label": r["label"],
+        "group": r["scope_group"],
+        "order": r["sort_order"],
+    }
+
+
+# ── ITB tracker (Handoff 21) ─────────────────────────────────────────────────
+#
+# Status legend codes (confirmed with Carlos 2026-08-06, Handoff 00 §3.10 /
+# BRD II-9.12): P Pending · C Created Request · S Sent · R Received ·
+# U Updated · X 100% Complete · '-' Non-Applicable.
+ITB_STATUS_CODES = frozenset({"P", "C", "S", "R", "U", "X", "-"})
+
+# Default initial scope status for a freshly auto-generated ITB project:
+# 'P' Pending (confirmed with Carlos 2026-08-06).
+DEFAULT_ITB_STATUS = "P"
+
+
+def _quarter_for(d: Any) -> str:
+    """Calendar quarter ('Q1'..'Q4') for an ISO date string or date object."""
+    if isinstance(d, str):
+        d = date.fromisoformat(d[:10])
+    return f"Q{(d.month - 1) // 3 + 1}"
+
+
+def _itb_project_out(r: dict, statuses: list[dict]) -> dict:
+    return {
+        "id": r["id"],
+        "estimateId": r.get("estimate_id"),
+        "name": r["name"],
+        "aspireNumber": r["aspire_number"],
+        "branch": r["branch"],
+        "salesRep": r["sales_rep"],
+        "lsEstimator": r["ls_estimator"],
+        "irrEstimator": r["irr_estimator"],
+        "irrDesigner": r["irr_designer"],
+        "bidNumber": r["bid_number"],
+        "itbDate": _iso(r["itb_date"]),
+        "dueDate": _iso(r["due_date"]),
+        "rebid": bool(r["rebid"]),
+        "estTotalCents": int(r["est_total_cents"]),
+        "estLsCents": int(r["est_ls_cents"]),
+        "estIrCents": int(r["est_ir_cents"]),
+        "client": r["client"],
+        "quarter": r["quarter"],
+        "notes": r["notes"],
+        "statuses": statuses,
+    }
+
+
+def _itb_status_out(r: dict) -> dict:
+    return {
+        "projectId": r["project_id"],
+        "scopeId": r["scope_id"],
+        "statusCode": r["status_code"],
+    }
+
+
+async def _create_itb_project(estimate_id: str, body: dict) -> str:
+    """Auto-generate the 1:1 itb_projects row for a new estimate (Handoff 21 §3).
+
+    LOCKED decision: every estimate created from either intake form gets exactly
+    one linked ITB project, plus one itb_scope_status row per itb_scopes row
+    (config-driven — a scope added in the DB gets a column with no code change),
+    each initialized to DEFAULT_ITB_STATUS. Local-only: no Aspire push here.
+
+    EST LS $ / EST IR $ split: intake carries no split, so the full contract
+    value defaults to the LS side unless the caller provides estLsCents /
+    estIrCents explicitly (flagged assumption).
+    """
+    project_id = _new_id("itb")
+    today = date.today()
+    due = body.get("dueBackDate") or today.isoformat()
+    total = int(body.get("contractValueCents") or 0)
+    est_ls = body.get("estLsCents")
+    est_ir = body.get("estIrCents")
+    if est_ls is None and est_ir is None:
+        est_ls, est_ir = total, 0
+    await execute(
+        """INSERT INTO itb_projects
+             (id, estimate_id, name, aspire_number, branch, sales_rep,
+              ls_estimator, irr_estimator, irr_designer, bid_number, itb_date,
+              due_date, rebid, est_total_cents, est_ls_cents, est_ir_cents,
+              client, quarter, notes)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        [
+            project_id,
+            estimate_id,
+            body.get("name", ""),
+            body.get("aspireNumber"),
+            body.get("branch", ""),
+            body.get("crmRep"),
+            body.get("assignedLsEstimator"),
+            body.get("assignedIrrEstimator"),
+            body.get("irrDesigner"),
+            body.get("bidNumber"),
+            today.isoformat(),
+            due,
+            1 if body.get("rebid") else 0,
+            total,
+            int(est_ls or 0),
+            int(est_ir or 0),
+            body.get("clientName", ""),
+            _quarter_for(due),
+            None,
+        ],
+    )
+    scopes = await query("SELECT id FROM itb_scopes", [])
+    for scope in scopes:
+        await execute(
+            """INSERT INTO itb_scope_status (project_id, scope_id, status_code)
+               VALUES (%s, %s, %s)""",
+            [project_id, scope["id"], DEFAULT_ITB_STATUS],
+        )
+    return project_id
+
+
+def _catalog_item_out(r: dict) -> dict:
+    return {
+        "id": r["id"],
+        "description": r["description"],
+        "uom": r["uom"],
+        "unitCostCents": int(r["unit_cost_cents"]),
+        "unitSellCents": int(r["unit_sell_cents"]),
+        "targetGm": _num(r["target_gm"]),
+        "kitType": r["kit_type"],
+        "productionRate": _num(r["production_rate"]),
+        "branch": r["branch"],
+        "active": bool(r["active"]),
+        "serviceType": r["service_type"],
+    }
+
+
+async def _insert_component(service_id: str, comp: dict, idx: int) -> str:
+    component_id = _new_id("cmp")
     await execute(
         """INSERT INTO section_service_components
              (id, section_service_id, kind, label, qty, unit_cost_cents, hours, sort_order)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
         [
-            _new_id("cmp"),
+            component_id,
             service_id,
             comp["kind"],
             comp["label"],
@@ -505,6 +870,7 @@ async def _insert_component(service_id: str, comp: dict, idx: int) -> None:
             comp.get("sortOrder", idx),
         ],
     )
+    return component_id
 
 
 async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
@@ -552,6 +918,47 @@ async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
     return section_id
 
 
+# ── Production-rate save guard (Handoff 22 §4 — LOCKED decision) ─────────────
+#
+# Production rates are REQUIRED: a maintenance service line cannot be saved
+# unless its hours are computable. A line resolves when it carries non-null
+# hours itself, OR its catalog_item has a non-null production_rate. Otherwise
+# the write is rejected 422 BEFORE anything persists (the frontend shows its
+# own guard, but the server never trusts the client). Install estimates are
+# untouched — install kits are quantity-driven and carry no production rate.
+
+async def _require_resolvable_maintenance_lines(services: list[dict]) -> None:
+    """Reject (422) any maintenance line whose hours cannot be resolved.
+
+    `services` are camelCase line dicts carrying label / hours / catalogItemId.
+    Kits are fetched in one batched query; a missing kit id counts as
+    unresolvable (a dangling catalog_item_id can never produce hours).
+    """
+    pending = [svc for svc in services if svc.get("hours") is None]
+    if not pending:
+        return
+    kit_ids = {svc.get("catalogItemId") for svc in pending if svc.get("catalogItemId")}
+    rates: dict[str, Any] = {}
+    if kit_ids:
+        placeholders = ", ".join(["%s"] * len(kit_ids))
+        rows = await query(
+            f"SELECT id, production_rate FROM catalog_items WHERE id IN ({placeholders})",
+            list(kit_ids),
+        )
+        rates = {r["id"]: r.get("production_rate") for r in rows}
+    for svc in pending:
+        kit_id = svc.get("catalogItemId")
+        if kit_id is None or rates.get(kit_id) is None:
+            label = svc.get("label") or "(unnamed line)"
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Maintenance line \"{label}\" cannot be saved: no production rate "
+                    "resolves for it. Enter hours or pick a kit that has a production rate."
+                ),
+            )
+
+
 # ── Request models ────────────────────────────────────────────────────────────
 
 # Payloads accept arbitrary camelCase keys (validated against the DB columns in
@@ -580,16 +987,86 @@ _UPDATABLE = {
     "assignedIrrEstimator": "assigned_irr_estimator",
     "crmRep": "crm_rep",
     "notes": "notes",
+    # Handoff 24 §3.2 — tracked RFI status (capture/display only; no gating).
+    "rfiStatus": "rfi_status",
+    # Handoff 27 — manual takeoff metadata (Takeoff Insert). Estimator-entered
+    # today; Beam AI automated takeoff is the eventual source (paused — when it
+    # lands it writes these same fields). Acreage/sqft stay derived, never stored.
+    "turfAreaAcres": "turf_area_acres",
+    "curbMiles": "curb_miles",
     "notifyBmRdOnReturn": "notify_bm_rd_on_return",
     # Captured at the lost transition so the durability sweep can re-send the same
     # reason on a retry (otherwise a re-push would drop it).
     "lostReasonId": "aspire_lost_reason_id",
 }
 
+# Refined estimate-header PATCH ownership (Handoff 18 §5.2 / Handoff 19 §7):
+#   * targetMargin — approver-only: it's the Handoff-19 approver lever.
+#   * contractValueCents — estimator OR approver: the value is derived from
+#     line items the estimator legitimately edits (there's no server-side
+#     contract-value rollup), and approver value-adjustments stay audited via
+#     the adjustments POST.
+#   * status — any authenticated role: the transition machine (Handoff 25's
+#     409 guard below) is the enforcement, and privileged transitions have
+#     their own guarded endpoint (approve-handback with tier checks). The
+#     won/lost/send-back edges are legitimately driven by sales and approvers.
+#   * everything else — estimator-owned (Handoff 18 §5.1, same convention as
+#     section/service/component mutations).
+_APPROVER_ONLY_FIELDS = frozenset({"targetMargin"})
+_ESTIMATOR_OR_APPROVER_FIELDS = frozenset({"contractValueCents"})
+_ANY_ROLE_FIELDS = frozenset({"status"})
+
+
+def _require_estimate_patch_ownership(body: dict, user: dict) -> None:
+    """Classify the PATCH body's fields and apply the strictest required check
+    per ownership group. A body mixing groups requires every group's check
+    (e.g. targetMargin + name → approver AND estimator, effectively admin),
+    which matches field ownership."""
+    keys = set(body)
+    if keys & _APPROVER_ONLY_FIELDS:
+        authz.require_approver(user)
+    if keys & _ESTIMATOR_OR_APPROVER_FIELDS:
+        role = user.get("role")
+        if not (authz.is_estimator(role) or authz.is_approver(role)):
+            raise HTTPException(
+                status_code=403,
+                detail="Estimator or approver role required: contract value is "
+                "derived from estimator-owned line items or adjusted by approvers.",
+            )
+    if keys - _APPROVER_ONLY_FIELDS - _ESTIMATOR_OR_APPROVER_FIELDS - _ANY_ROLE_FIELDS:
+        authz.require_estimator(user)
+
 
 class ApproveHandBackBody(BaseModel):
-    actor: str
+    # Actor identity comes from the JWT (Handoff 18) — the field is accepted
+    # for wire compatibility but IGNORED server-side.
+    actor: Optional[str] = None
     notifyBmRdOnReturn: Optional[bool] = None
+
+
+class AdjustmentBody(BaseModel):
+    """Handoff 19 §5 — one audited approver lever change (complexity|margin).
+
+    Values are decimals (0.22 = 22%). The actor is derived from the JWT —
+    an `actor` field in the body is accepted for wire compatibility but
+    IGNORED server-side, mirroring ApproveHandBackBody.
+    """
+    field: str
+    fromValue: float
+    toValue: float
+    actor: Optional[str] = None
+
+
+def _adjustment_out(r: dict) -> dict:
+    return {
+        "id": r["id"],
+        "estimateId": r["estimate_id"],
+        "actor": r["actor"],
+        "field": r["field"],
+        "fromValue": _num(r["from_value"]),
+        "toValue": _num(r["to_value"]),
+        "createdAt": _iso(r["created_at"]),
+    }
 
 
 # ── Routes ──────────────────────────────────────────────────────────────────
@@ -604,6 +1081,13 @@ def register(app, require_auth) -> None:
         branch: Optional[str] = Query(default=None),
         _user: dict = Depends(require_auth),
     ) -> list:
+        # Branch scope is derived from the AUTHENTICATED user (BRD I-9.5,
+        # Handoff 18) — the client `branch` param is never the authority. It
+        # survives only as an optional convenience filter for cross-branch
+        # (exec/admin) roles.
+        scope = await authz.resolve_branch_scope(_user)
+        if scope.kind == "none":
+            return []
         conditions: list[str] = []
         params: list[Any] = []
         if estimate_type:
@@ -612,7 +1096,10 @@ def register(app, require_auth) -> None:
         if status:
             conditions.append("status = %s")
             params.append(status)
-        if branch:
+        if scope.kind == "branch":
+            conditions.append("branch = %s")
+            params.append(scope.branch)
+        elif branch:  # cross-branch role opting into a narrower view
             conditions.append("branch = %s")
             params.append(branch)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -628,6 +1115,18 @@ def register(app, require_auth) -> None:
         est_type = body.get("estimateType")
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
+        if not body.get("branch", "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="branch is required — select a branch from the intake form",
+            )
+        # Handoff 22 — guard runs BEFORE any INSERT so a reject persists nothing.
+        if est_type == "maintenance":
+            await _require_resolvable_maintenance_lines([
+                svc
+                for section in (body.get("sections") or [])
+                for svc in (section.get("services") or [])
+            ])
         estimate_id = _new_id("est")
         await execute(
             """INSERT INTO estimates
@@ -635,8 +1134,8 @@ def register(app, require_auth) -> None:
                   acreage, contract_value_cents, target_margin, status, lifecycle, aspire_owner,
                   priority, win_probability, site_walk_date, due_back_date, anticipated_close_date,
                   service_start_date, assigned_ls_estimator, assigned_irr_estimator, crm_rep,
-                  notify_bm_rd_on_return, notes, property_id)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                  notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 estimate_id,
                 est_type,
@@ -663,6 +1162,9 @@ def register(app, require_auth) -> None:
                 (body.get("approvalSettings") or {}).get("notifyBmRdOnReturn", True),
                 body.get("notes"),
                 body.get("propertyId"),
+                body.get("leadId"),
+                # Handoff 24 §3.2 — RFI status tracked first-class (install).
+                body.get("rfiStatus"),
             ],
         )
         for si, section in enumerate(body.get("sections") or []):
@@ -673,9 +1175,23 @@ def register(app, require_auth) -> None:
             await _insert_intake_submission(
                 estimate_id, est_type, intake, user.get("id") or "unknown"
             )
+        # Handoff 21 §3 — auto-generate the 1:1 ITB project (+ its scope-status
+        # rows, one per itb_scopes row) for EITHER intake type. Local-only.
+        await _create_itb_project(estimate_id, body)
+        # Handoff 15 §5.6 — estimate submission is THE (only) trigger for the
+        # property's Aspire push: promotion/backfill/create leave properties
+        # 'unsynced'; submitting an estimate for one pushes it (pending →
+        # synced/failed). The guard skips already-synced/in-flight rows.
+        if body.get("propertyId"):
+            background.add_task(_props_mod.sync_property_if_needed, body["propertyId"])
         # Create never blocks on Aspire: push the opportunity in the background,
         # leaving aspire_sync_status='pending' (its column default) until it lands.
         background.add_task(_sync_new_opportunity_bg, estimate_id, body.get("serviceLine"))
+        # Pipeline kanban redesign — a lead sits in Qualifying until an estimate
+        # is actually created against it; this is the one and only Qualifying→
+        # Estimating trigger (never a manual kanban drag).
+        if body.get("leadId"):
+            await _write_back_lead_status(body["leadId"], "estimating")
         created = await _load_estimate(estimate_id)
         assert created is not None
         return created
@@ -699,12 +1215,107 @@ def register(app, require_auth) -> None:
         )
         return [_intake_out(r) for r in rows]
 
+    # ── Intake drafts (Handoff 24 §3.3) ──────────────────────────────────────
+    #
+    # "Save draft" persists a PARTIAL intake to intake_submissions with
+    # is_draft=1 and estimate_id NULL. A draft never creates an estimate and
+    # never triggers any Aspire push (property sync is estimate-submit only,
+    # Handoff 15 §5.6). Drafts are per-user: every route scopes by the JWT
+    # identity, so a rep can resume from any device but never sees another
+    # rep's drafts.
+
+    @app.post("/api/estimating/intake/drafts")
+    async def save_intake_draft(body: dict, response: Response, user: dict = Depends(require_auth)) -> dict:
+        est_type = body.get("estimateType")
+        if est_type not in ("maintenance", "install"):
+            raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
+        payload = body.get("payload")
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="payload must be an object")
+        user_id = user.get("id") or "unknown"
+
+        draft_id = body.get("draftId")
+        if draft_id:
+            rows = await query(
+                "SELECT * FROM intake_submissions WHERE id = %s AND submitted_by = %s AND is_draft = 1",
+                [draft_id, user_id],
+            )
+            if not rows:
+                raise HTTPException(status_code=404, detail="Draft not found")
+            await execute(
+                "UPDATE intake_submissions SET payload = %s WHERE id = %s",
+                [json.dumps(payload), draft_id],
+            )
+            return _draft_out({**rows[0], "payload": payload})
+
+        new_draft_id = _new_id("ins")
+        await execute(
+            """INSERT INTO intake_submissions
+                 (id, estimate_id, estimate_type, payload, submitted_by, is_draft)
+               VALUES (%s, NULL, %s, %s, %s, 1)""",
+            [new_draft_id, est_type, json.dumps(payload), user_id],
+        )
+        response.status_code = 201
+        return _draft_out({
+            "id": new_draft_id,
+            "estimate_type": est_type,
+            "payload": payload,
+            "submitted_by": user_id,
+            "created_at": _now_utc(),
+        })
+
+    @app.get("/api/estimating/intake/drafts")
+    async def list_intake_drafts(
+        estimate_type: Optional[str] = Query(default=None),
+        user: dict = Depends(require_auth),
+    ) -> list:
+        conditions = ["submitted_by = %s", "is_draft = 1"]
+        params: list[Any] = [user.get("id") or "unknown"]
+        if estimate_type:
+            if estimate_type not in ("maintenance", "install"):
+                raise HTTPException(
+                    status_code=400, detail="estimate_type must be maintenance or install"
+                )
+            conditions.append("estimate_type = %s")
+            params.append(estimate_type)
+        rows = await query(
+            f"""SELECT * FROM intake_submissions
+                 WHERE {' AND '.join(conditions)}
+                 ORDER BY created_at DESC""",
+            params,
+        )
+        return [_draft_out(r) for r in rows]
+
+    @app.delete("/api/estimating/intake/drafts/{draft_id}", status_code=204)
+    async def delete_intake_draft(draft_id: str, user: dict = Depends(require_auth)):
+        rows = await query(
+            "SELECT id FROM intake_submissions WHERE id = %s AND submitted_by = %s AND is_draft = 1",
+            [draft_id, user.get("id") or "unknown"],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Draft not found")
+        await execute("DELETE FROM intake_submissions WHERE id = %s", [draft_id])
+
     @app.patch("/api/estimating/estimates/{estimate_id}")
     async def update_estimate(
         estimate_id: str, body: dict, background: BackgroundTasks, _user: dict = Depends(require_auth)
     ) -> dict:
+        # C1 — refined Handoff 18 ownership split, enforced server-side (not
+        # just in the UI): targetMargin is approver-only; contractValueCents
+        # is estimator-or-approver (derived from estimator-owned line items);
+        # status is any-authenticated (the Handoff 25 transition machine below
+        # is the enforcement); every other header field — name, dates, notes,
+        # assignments, takeoff metadata — is estimator-owned, mirroring the
+        # section/service guards. See _require_estimate_patch_ownership.
+        # TODO(Handoff 19 §7 open item): couple approver targetMargin PATCHes
+        # to a persisted estimate_adjustments row so a lever change can never
+        # land without its audit row — not built yet, pending that open item.
+        # (contractValueCents is now estimator-or-approver since it mirrors
+        # the line-item rollup; approver value-adjustments remain audited via
+        # the adjustments POST.)
+        _require_estimate_patch_ownership(body, _user)
         rows = await query(
-            "SELECT estimate_type, status, aspire_opportunity_id FROM estimates WHERE id = %s",
+            "SELECT estimate_type, status, aspire_opportunity_id, lead_id FROM estimates WHERE id = %s",
             [estimate_id],
         )
         if not rows:
@@ -719,9 +1330,24 @@ def register(app, require_auth) -> None:
         if isinstance(body.get("approvalSettings"), dict):
             body["notifyBmRdOnReturn"] = body["approvalSettings"].get("notifyBmRdOnReturn")
 
+        # Handoff 25 — every status write goes through the transition machine.
+        # The generic PATCH used to accept any DB-enum-valid status, bypassing
+        # STATUS_TRANSITIONS (only approve-handback enforced it). Reject illegal
+        # edges with the same 409 shape as approve-handback. A same-status PATCH
+        # (e.g. a full-form Save re-sending the current value) stays a no-op.
+        target_status = body.get("status")
+        if (
+            target_status is not None
+            and target_status != current.get("status")
+            and not _can_transition(current.get("status"), target_status)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=str(IllegalTransitionError(current.get("status"), target_status)),
+            )
+
         # Terminal WON folds in the same side effects as the approve/handback path
         # (lifecycle→won, ownership→crm); see _side_effects, the single source.
-        target_status = body.get("status")
         if target_status == "won":
             for camel, val in {"lifecycle": "won", "aspireOwner": "crm"}.items():
                 body.setdefault(camel, val)
@@ -739,6 +1365,21 @@ def register(app, require_auth) -> None:
             background.add_task(
                 _sync_status_bg, estimate_id, target_status, body.get("lostReasonId")
             )
+
+        # Handoff 20 §4.2 — estimate Save triggers ONE batched, best-effort
+        # push of the takeoff quantities that carry a catalog_item_id. Never
+        # blocks the Save; failures are logged inside the task.
+        background.add_task(_push_takeoff_qtys_bg, estimate_id)
+
+        # Pipeline kanban redesign — Estimating→OP Review write-back. Approved
+        # is handled separately by approve_handback (the only path that today
+        # actually lands status='approved'); this covers review/pending_approval.
+        if (
+            target_status in ESTIMATE_TO_LEAD_STATUS
+            and target_status != current.get("status")
+            and current.get("lead_id")
+        ):
+            await _write_back_lead_status(current["lead_id"], ESTIMATE_TO_LEAD_STATUS[target_status])
 
         est = await _load_estimate(estimate_id)
         assert est is not None
@@ -765,12 +1406,21 @@ def register(app, require_auth) -> None:
     async def approve_handback(
         estimate_id: str, body: ApproveHandBackBody, _user: dict = Depends(require_auth)
     ) -> dict:
-        rows = await query("SELECT id, status FROM estimates WHERE id = %s", [estimate_id])
+        # Approve is approver-owned, and only within the caller's tier — a
+        # manager cannot approve a >$100k estimate (Handoff 18 §5.2). Identity
+        # comes from the JWT, never from the client body.
+        authz.require_approver(_user)
+        rows = await query(
+            "SELECT id, status, contract_value_cents, lead_id FROM estimates WHERE id = %s",
+            [estimate_id],
+        )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
+        authz.require_approval_authority(_user, int(rows[0].get("contract_value_cents") or 0))
+        actor = _user.get("name") or _user.get("email") or _user.get("id") or "unknown"
         at = _now_utc().isoformat()
         try:
-            patch, records = _approve_and_hand_back(estimate_id, rows[0]["status"], body.actor, at)
+            patch, records = _approve_and_hand_back(estimate_id, rows[0]["status"], actor, at)
         except IllegalTransitionError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
 
@@ -797,6 +1447,12 @@ def register(app, require_auth) -> None:
                    VALUES (%s, %s, %s, %s, %s, %s)""",
                 [_new_id("trn"), estimate_id, rec["from"], rec["to"], rec["actor"], rec["at"]],
             )
+        # Pipeline kanban redesign — Approved is the same real-world event on
+        # both sides: an estimate's status landing on 'approved' write-backs
+        # the linked lead's Pipeline stage to Approved (never independently
+        # settable on the kanban).
+        if rows[0].get("lead_id") and any(rec["to"] == "approved" for rec in records):
+            await _write_back_lead_status(rows[0]["lead_id"], "approved")
         est = await _load_estimate(estimate_id)
         return {"estimate": est, "transitions": records}
 
@@ -819,10 +1475,69 @@ def register(app, require_auth) -> None:
             for r in rows
         ]
 
-    @app.post("/api/estimating/estimates/{estimate_id}/sections", status_code=201)
-    async def create_section(estimate_id: str, body: dict, _user: dict = Depends(require_auth)) -> dict:
+    # ── estimate_adjustments (Handoff 19 §5 — approver lever audit, BRD III-1) ─
+    #
+    # Complexity/margin are the ONLY approver-owned levers; every change (and
+    # every revert back to the original) persists a from/to row here. This is
+    # the audited companion of the estimate-level PATCH the approver flow uses
+    # to move targetMargin/contractValueCents. One approver action may write
+    # BOTH an adjustment row and a status transition (via approve-handback) —
+    # neither path suppresses the other.
+
+    @app.post("/api/estimating/estimates/{estimate_id}/adjustments", status_code=201)
+    async def create_adjustment(
+        estimate_id: str, body: AdjustmentBody, _user: dict = Depends(require_auth)
+    ) -> dict:
+        # Adjustments are approver-owned (Handoff 18 §5.2) — estimators 403.
+        authz.require_approver(_user)
+        if body.field not in ("complexity", "margin"):
+            raise HTTPException(
+                status_code=400,
+                detail="field must be complexity or margin — approvers may adjust only these levers",
+            )
         if not await query("SELECT id FROM estimates WHERE id = %s", [estimate_id]):
             raise HTTPException(status_code=404, detail="Not found")
+        actor = _user.get("name") or _user.get("email") or _user.get("id") or "unknown"
+        adj_id = _new_id("adj")
+        at = _now_utc()
+        await execute(
+            """INSERT INTO estimate_adjustments
+                 (id, estimate_id, actor, field, from_value, to_value, created_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            [adj_id, estimate_id, actor, body.field, body.fromValue, body.toValue, at],
+        )
+        return _adjustment_out({
+            "id": adj_id,
+            "estimate_id": estimate_id,
+            "actor": actor,
+            "field": body.field,
+            "from_value": body.fromValue,
+            "to_value": body.toValue,
+            "created_at": at,
+        })
+
+    @app.get("/api/estimating/estimates/{estimate_id}/adjustments")
+    async def list_adjustments(estimate_id: str, _user: dict = Depends(require_auth)) -> list:
+        # Audit read — any authenticated role may see why a number moved.
+        if not await query("SELECT id FROM estimates WHERE id = %s", [estimate_id]):
+            raise HTTPException(status_code=404, detail="Not found")
+        rows = await query(
+            "SELECT * FROM estimate_adjustments WHERE estimate_id = %s ORDER BY created_at",
+            [estimate_id],
+        )
+        return [_adjustment_out(r) for r in rows]
+
+    @app.post("/api/estimating/estimates/{estimate_id}/sections", status_code=201)
+    async def create_section(estimate_id: str, body: dict, _user: dict = Depends(require_auth)) -> dict:
+        authz.require_estimator(_user)  # sections are estimator-owned (Handoff 18 §5.1)
+        est_rows = await query(
+            "SELECT id, estimate_type FROM estimates WHERE id = %s", [estimate_id]
+        )
+        if not est_rows:
+            raise HTTPException(status_code=404, detail="Not found")
+        # Handoff 22 — nested services must resolve a production rate/hours.
+        if est_rows[0].get("estimate_type") == "maintenance":
+            await _require_resolvable_maintenance_lines(body.get("services") or [])
         idx = await _next_sort_order("estimate_sections", "estimate_id", estimate_id, body)
         section_id = await _insert_section(estimate_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
@@ -837,6 +1552,7 @@ def register(app, require_auth) -> None:
     async def update_section(
         estimate_id: str, section_id: str, body: dict, _user: dict = Depends(require_auth)
     ) -> dict:
+        authz.require_estimator(_user)
         rows = await query(
             "SELECT * FROM estimate_sections WHERE id = %s AND estimate_id = %s",
             [section_id, estimate_id],
@@ -854,6 +1570,7 @@ def register(app, require_auth) -> None:
 
     @app.delete("/api/estimating/estimates/{estimate_id}/sections/{section_id}", status_code=204)
     async def delete_section(estimate_id: str, section_id: str, _user: dict = Depends(require_auth)):
+        authz.require_estimator(_user)
         rows = await query(
             "SELECT id FROM estimate_sections WHERE id = %s AND estimate_id = %s",
             [section_id, estimate_id],
@@ -870,12 +1587,19 @@ def register(app, require_auth) -> None:
     async def create_service(
         estimate_id: str, section_id: str, body: dict, _user: dict = Depends(require_auth)
     ) -> dict:
+        authz.require_estimator(_user)  # services/line items are estimator-owned
         rows = await query(
             "SELECT id FROM estimate_sections WHERE id = %s AND estimate_id = %s",
             [section_id, estimate_id],
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
+        # Handoff 22 — a maintenance line must resolve a production rate/hours.
+        est_rows = await query(
+            "SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id]
+        )
+        if est_rows and est_rows[0].get("estimate_type") == "maintenance":
+            await _require_resolvable_maintenance_lines([body])
         idx = await _next_sort_order("section_services", "section_id", section_id, body)
         service_id = await _insert_service(section_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
@@ -896,14 +1620,31 @@ def register(app, require_auth) -> None:
         body: dict,
         _user: dict = Depends(require_auth),
     ) -> dict:
+        authz.require_estimator(_user)
         rows = await query(
-            """SELECT sv.id FROM section_services sv
+            """SELECT sv.* FROM section_services sv
                JOIN estimate_sections s ON s.id = sv.section_id
                WHERE sv.id = %s AND sv.section_id = %s AND s.estimate_id = %s""",
             [service_id, section_id, estimate_id],
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
+        current = rows[0]
+        # Handoff 22 — guard the MERGED line (row + patch): an edit may not
+        # null-out hours or repoint at an unrated kit and leave the line
+        # unresolvable.
+        est_rows = await query(
+            "SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id]
+        )
+        if est_rows and est_rows[0].get("estimate_type") == "maintenance":
+            merged = {
+                "label": body.get("label", current.get("label")),
+                "hours": body["hours"] if "hours" in body else current.get("hours"),
+                "catalogItemId": body["catalogItemId"]
+                if "catalogItemId" in body
+                else current.get("catalog_item_id"),
+            }
+            await _require_resolvable_maintenance_lines([merged])
         cols = {
             "catalogItemId": "catalog_item_id",
             "label": "label",
@@ -932,6 +1673,7 @@ def register(app, require_auth) -> None:
     async def delete_service(
         estimate_id: str, section_id: str, service_id: str, _user: dict = Depends(require_auth)
     ):
+        authz.require_estimator(_user)
         rows = await query(
             """SELECT sv.id FROM section_services sv
                JOIN estimate_sections s ON s.id = sv.section_id
@@ -942,6 +1684,236 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Not found")
         await execute("DELETE FROM section_services WHERE id = %s", [service_id])
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
+
+    # ── Component CRUD (Handoff 17 §2.2 — the level the editors need) ─────────
+    #
+    # Kit components (labor/material breakdown) are estimator-owned like the
+    # rest of the tree. Every route validates the full ownership chain
+    # (component → service → section → estimate) so a stray id can never
+    # mutate another estimate's row.
+
+    _SERVICE_CHAIN_SQL = """SELECT sv.id FROM section_services sv
+               JOIN estimate_sections s ON s.id = sv.section_id
+               WHERE sv.id = %s AND sv.section_id = %s AND s.estimate_id = %s"""
+
+    _COMPONENT_CHAIN_SQL = """SELECT c.* FROM section_service_components c
+               JOIN section_services sv ON sv.id = c.section_service_id
+               JOIN estimate_sections s ON s.id = sv.section_id
+               WHERE c.id = %s AND c.section_service_id = %s
+                 AND sv.section_id = %s AND s.estimate_id = %s"""
+
+    @app.post(
+        "/api/estimating/estimates/{estimate_id}/sections/{section_id}/services/{service_id}/components",
+        status_code=201,
+    )
+    async def create_component(
+        estimate_id: str,
+        section_id: str,
+        service_id: str,
+        body: dict,
+        _user: dict = Depends(require_auth),
+    ) -> dict:
+        authz.require_estimator(_user)  # components are estimator-owned
+        if body.get("kind") not in ("labor", "material"):
+            raise HTTPException(status_code=400, detail="kind must be labor or material")
+        rows = await query(_SERVICE_CHAIN_SQL, [service_id, section_id, estimate_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="Not found")
+        idx = await _next_sort_order(
+            "section_service_components", "section_service_id", service_id, body
+        )
+        component_id = await _insert_component(service_id, {**body, "sortOrder": idx}, idx)
+        await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
+        comp = await query(
+            "SELECT * FROM section_service_components WHERE id = %s", [component_id]
+        )
+        return _component_out(comp[0])
+
+    @app.patch(
+        "/api/estimating/estimates/{estimate_id}/sections/{section_id}/services/{service_id}/components/{component_id}"
+    )
+    async def update_component(
+        estimate_id: str,
+        section_id: str,
+        service_id: str,
+        component_id: str,
+        body: dict,
+        _user: dict = Depends(require_auth),
+    ) -> dict:
+        authz.require_estimator(_user)
+        rows = await query(
+            _COMPONENT_CHAIN_SQL, [component_id, service_id, section_id, estimate_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Not found")
+        cols = {
+            "kind": "kind",
+            "label": "label",
+            "qty": "qty",
+            "unitCostCents": "unit_cost_cents",
+            "hours": "hours",
+            "sortOrder": "sort_order",
+        }
+        await _apply_updates("section_service_components", cols, body, component_id)
+        await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
+        comp = await query(
+            "SELECT * FROM section_service_components WHERE id = %s", [component_id]
+        )
+        return _component_out(comp[0])
+
+    @app.delete(
+        "/api/estimating/estimates/{estimate_id}/sections/{section_id}/services/{service_id}/components/{component_id}",
+        status_code=204,
+    )
+    async def delete_component(
+        estimate_id: str,
+        section_id: str,
+        service_id: str,
+        component_id: str,
+        _user: dict = Depends(require_auth),
+    ):
+        authz.require_estimator(_user)
+        rows = await query(
+            _COMPONENT_CHAIN_SQL, [component_id, service_id, section_id, estimate_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Not found")
+        await execute("DELETE FROM section_service_components WHERE id = %s", [component_id])
+        await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
+
+    # ── Lifecycle flip (Handoff 17 §2.3 — audit rides the status edge) ────────
+    #
+    # The Bidding↔Won toggle persists here, NOT in a frontend in-memory log.
+    # Ownership always derives from lifecycle (won → crm); the edge is recorded
+    # in estimate_status_transitions with a `lifecycle:` prefix so status edges
+    # and lifecycle edges stay distinguishable in the one audit trail (per the
+    # audit-wiring decision — no separate audit table).
+
+    LIFECYCLE_OWNER = {"won": "crm", "bidding": "estimating"}
+
+    @app.post("/api/estimating/estimates/{estimate_id}/lifecycle")
+    async def transition_estimate_lifecycle(
+        estimate_id: str, body: dict, _user: dict = Depends(require_auth)
+    ) -> dict:
+        authz.require_estimator(_user)  # the editor toggle is estimator-owned
+        to = body.get("to")
+        if to not in LIFECYCLE_OWNER:
+            raise HTTPException(status_code=400, detail="to must be bidding or won")
+        rows = await query("SELECT lifecycle FROM estimates WHERE id = %s", [estimate_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="Not found")
+        frm = rows[0]["lifecycle"]
+        if frm == to:  # no-op — never spam the audit trail
+            est = await _load_estimate(estimate_id)
+            return {"estimate": est, "transition": None}
+        await execute(
+            "UPDATE estimates SET lifecycle = %s, aspire_owner = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+            [to, LIFECYCLE_OWNER[to], estimate_id],
+        )
+        actor = _user.get("name") or _user.get("email") or _user.get("id") or "unknown"
+        record = {
+            "estimateId": estimate_id,
+            "from": f"lifecycle:{frm}",
+            "to": f"lifecycle:{to}",
+            "actor": actor,
+            "at": _now_utc().isoformat(),
+        }
+        await execute(
+            """INSERT INTO estimate_status_transitions
+                 (id, estimate_id, from_status, to_status, actor, at)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            [_new_id("trn"), estimate_id, record["from"], record["to"], actor, record["at"]],
+        )
+        est = await _load_estimate(estimate_id)
+        return {"estimate": est, "transition": record}
+
+    # ── Takeoff-line CRUD (Handoff 20 — Discrepancy Review persistence) ───────
+    #
+    # Takeoff is estimator-owned (Handoff 18 §5.1). All qty fields — including
+    # opportunity_qty — are writable by the estimator; opportunity_qty is a
+    # local value with NO Aspire read dependency, ever. Derived fields come
+    # back recomputed via _takeoff_line_out; client-sent derived values are
+    # ignored by the colmap. The Aspire qty push rides estimate Save
+    # (PATCH /estimates/{id}), never these per-line edits.
+
+    async def _get_takeoff_line(estimate_id: str, line_id: str) -> dict:
+        rows = await query(
+            "SELECT * FROM takeoff_lines WHERE id = %s AND estimate_id = %s",
+            [line_id, estimate_id],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Not found")
+        return rows[0]
+
+    @app.get("/api/estimating/estimates/{estimate_id}/takeoff-lines")
+    async def list_takeoff_lines(
+        estimate_id: str, _user: dict = Depends(require_auth)
+    ) -> list:
+        if not await query("SELECT id FROM estimates WHERE id = %s", [estimate_id]):
+            raise HTTPException(status_code=404, detail="Not found")
+        rows = await query(
+            "SELECT * FROM takeoff_lines WHERE estimate_id = %s ORDER BY created_at, id",
+            [estimate_id],
+        )
+        return [_takeoff_line_out(r) for r in rows]
+
+    @app.post(
+        "/api/estimating/estimates/{estimate_id}/takeoff-lines", status_code=201
+    )
+    async def create_takeoff_line(
+        estimate_id: str, body: dict, _user: dict = Depends(require_auth)
+    ) -> dict:
+        authz.require_estimator(_user)
+        if not await query("SELECT id FROM estimates WHERE id = %s", [estimate_id]):
+            raise HTTPException(status_code=404, detail="Not found")
+        line_id = _new_id("tk")
+        await execute(
+            """INSERT INTO takeoff_lines
+                 (id, estimate_id, description, uom, plan_qty, add_pct,
+                  measured_qty, opportunity_qty, catalog_item_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            [
+                line_id,
+                estimate_id,
+                body.get("description", ""),
+                body.get("uom", ""),
+                body.get("planQty", 0),
+                body.get("addPct", 0),
+                body.get("measuredQty", 0),
+                body.get("opportunityQty", 0),
+                body.get("catalogItemId"),
+            ],
+        )
+        await execute(
+            "UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id]
+        )
+        return _takeoff_line_out(await _get_takeoff_line(estimate_id, line_id))
+
+    @app.patch("/api/estimating/estimates/{estimate_id}/takeoff-lines/{line_id}")
+    async def update_takeoff_line(
+        estimate_id: str, line_id: str, body: dict, _user: dict = Depends(require_auth)
+    ) -> dict:
+        authz.require_estimator(_user)
+        await _get_takeoff_line(estimate_id, line_id)  # 404 outside the chain
+        await _apply_updates("takeoff_lines", _TAKEOFF_COLS, body, line_id)
+        await execute(
+            "UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id]
+        )
+        return _takeoff_line_out(await _get_takeoff_line(estimate_id, line_id))
+
+    @app.delete(
+        "/api/estimating/estimates/{estimate_id}/takeoff-lines/{line_id}",
+        status_code=204,
+    )
+    async def delete_takeoff_line(
+        estimate_id: str, line_id: str, _user: dict = Depends(require_auth)
+    ):
+        authz.require_estimator(_user)
+        await _get_takeoff_line(estimate_id, line_id)
+        await execute("DELETE FROM takeoff_lines WHERE id = %s", [line_id])
+        await execute(
+            "UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id]
+        )
 
     # ── Attachment routes (GCS upload/download, Handoff plan §WP-B) ──────────
 
@@ -961,9 +1933,20 @@ def register(app, require_auth) -> None:
         if not est_rows:
             raise HTTPException(status_code=404, detail="Estimate not found")
 
-        # 2. Validate content type.
+        # 2. Validate content type per kind. Intake docs stay PDF-only; the
+        # Takeoff Insert scan (Handoff 27) is a scanned map image, so the
+        # takeoff_scan kind also accepts common image types.
+        kind = body.get("kind", "other")
+        if kind not in ("property_map", "rfp", "other", "takeoff_scan"):
+            kind = "other"
         content_type = body.get("contentType", "")
-        if content_type != "application/pdf":
+        if kind == "takeoff_scan":
+            if content_type not in _SCAN_CONTENT_TYPES:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Takeoff scans must be PNG, JPEG, WebP, or PDF",
+                )
+        elif content_type != "application/pdf":
             raise HTTPException(status_code=400, detail="Only PDF attachments are supported")
 
         # 3. Validate size (must be a positive integer ≤ 2 GiB).
@@ -977,29 +1960,30 @@ def register(app, require_auth) -> None:
         if size_bytes > _att_mod.GCS_MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=400, detail="File exceeds the 2 GiB limit")
 
-        # 4. Resolve intake submission for the FK.
-        sub_rows = await query(
-            "SELECT id FROM intake_submissions WHERE estimate_id = %s ORDER BY created_at DESC LIMIT 1",
-            [estimate_id],
-        )
-        if not sub_rows:
-            raise HTTPException(status_code=404, detail="No intake submission found for this estimate")
-        submission_id = sub_rows[0]["id"]
+        # 4. Resolve intake submission for the FK. Takeoff scans (Handoff 27)
+        # are ESTIMATE-scoped, not intake-submission-scoped: they hang directly
+        # off intake_attachments.estimate_id and need no submission.
+        submission_id: Optional[str] = None
+        if kind != "takeoff_scan":
+            sub_rows = await query(
+                "SELECT id FROM intake_submissions WHERE estimate_id = %s ORDER BY created_at DESC LIMIT 1",
+                [estimate_id],
+            )
+            if not sub_rows:
+                raise HTTPException(status_code=404, detail="No intake submission found for this estimate")
+            submission_id = sub_rows[0]["id"]
 
-        # 5. Mint IDs and persist pending row.
+        # 5. Mint IDs and persist pending row (always carrying the estimate link).
         attachment_id = _new_id("att")
-        object_key = _att_mod.object_key_for(estimate_id, attachment_id)
-        kind = body.get("kind", "other")
-        if kind not in ("property_map", "rfp", "other"):
-            kind = "other"
+        object_key = _att_mod.object_key_for(estimate_id, attachment_id, content_type)
 
         await execute(
             """INSERT INTO intake_attachments
-                 (id, intake_submission_id, file_name, content_type, size_bytes, url,
-                  kind, uploaded_by, status, object_key)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                 (id, intake_submission_id, estimate_id, file_name, content_type,
+                  size_bytes, url, kind, uploaded_by, status, object_key)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
-                attachment_id, submission_id,
+                attachment_id, submission_id, estimate_id,
                 body.get("fileName", ""), content_type, size_bytes, "",
                 kind, user.get("id"), "pending", object_key,
             ],
@@ -1009,7 +1993,7 @@ def register(app, require_auth) -> None:
         # Allowlist the origin so we never grant cross-origin CORS for arbitrary domains.
         raw_origin = request.headers.get("origin", "")
         origin = raw_origin if raw_origin in _att_mod.ALLOWED_ORIGINS else ""
-        upload_url = _att_mod.begin_resumable_session(object_key, "application/pdf", origin)
+        upload_url = _att_mod.begin_resumable_session(object_key, content_type, origin)
         return {"attachmentId": attachment_id, "objectKey": object_key, "uploadUrl": upload_url}
 
     @app.post(
@@ -1022,10 +2006,8 @@ def register(app, require_auth) -> None:
     ) -> dict:
         """Verify the blob landed in GCS and flip status to 'stored' (or 'failed')."""
         rows = await query(
-            """SELECT ia.* FROM intake_attachments ia
-               JOIN intake_submissions ins ON ins.id = ia.intake_submission_id
-               WHERE ia.id = %s AND ins.estimate_id = %s""",
-            [attachment_id, estimate_id],
+            _ATTACHMENT_BY_ID_SQL,
+            [attachment_id, estimate_id, estimate_id],
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Attachment not found")
@@ -1046,8 +2028,10 @@ def register(app, require_auth) -> None:
             )
             raise HTTPException(status_code=400, detail="Object not found in GCS")
 
-        # Validate the blob matches expectations.
-        if blob.content_type != "application/pdf" or not blob.size:
+        # Validate the blob matches what presign authorized (per-kind content
+        # type — PDF for intake docs, image types for takeoff scans).
+        expected_type = row.get("content_type") or "application/pdf"
+        if blob.content_type != expected_type or not blob.size:
             await execute(
                 "UPDATE intake_attachments SET status = %s WHERE id = %s",
                 ["failed", attachment_id],
@@ -1079,10 +2063,10 @@ def register(app, require_auth) -> None:
 
         rows = await query(
             """SELECT ia.* FROM intake_attachments ia
-               JOIN intake_submissions ins ON ins.id = ia.intake_submission_id
-               WHERE ins.estimate_id = %s
+               LEFT JOIN intake_submissions ins ON ins.id = ia.intake_submission_id
+               WHERE ia.estimate_id = %s OR ins.estimate_id = %s
                ORDER BY ia.created_at ASC""",
-            [estimate_id],
+            [estimate_id, estimate_id],
         )
         return [_attachment_out(r) for r in rows]
 
@@ -1096,10 +2080,8 @@ def register(app, require_auth) -> None:
     ) -> dict:
         """Return a short-lived v4 signed GET URL for a stored attachment."""
         rows = await query(
-            """SELECT ia.* FROM intake_attachments ia
-               JOIN intake_submissions ins ON ins.id = ia.intake_submission_id
-               WHERE ia.id = %s AND ins.estimate_id = %s""",
-            [attachment_id, estimate_id],
+            _ATTACHMENT_BY_ID_SQL,
+            [attachment_id, estimate_id, estimate_id],
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Attachment not found")
@@ -1110,3 +2092,171 @@ def register(app, require_auth) -> None:
 
         url = _att_mod.signed_get_url(row["object_key"], row["file_name"])
         return {"url": url, "expiresIn": _att_mod.GCS_SIGNED_URL_TTL_MIN * 60}
+
+    # ── Config-table read APIs (Handoff 16 — READ-ONLY by locked decision) ────
+    #
+    # No POST/PATCH/DELETE for these tables here: config is edited via SQL/DB
+    # for now; an admin editing surface is a separate future handoff.
+
+    @app.get("/api/estimating/config/approval-tiers")
+    async def list_approval_tiers(
+        estimate_type: Optional[str] = Query(default=None),
+        _user: dict = Depends(require_auth),
+    ) -> list:
+        if estimate_type is not None and estimate_type not in ("maintenance", "install"):
+            raise HTTPException(
+                status_code=400, detail="estimate_type must be maintenance or install"
+            )
+        where = "WHERE estimate_type = %s" if estimate_type else ""
+        params: list[Any] = [estimate_type] if estimate_type else []
+        rows = await query(
+            f"SELECT * FROM approval_tiers {where} ORDER BY tier_order", params
+        )
+        return [_approval_tier_out(r) for r in rows]
+
+    @app.get("/api/estimating/config/margin-bands")
+    async def list_margin_bands(_user: dict = Depends(require_auth)) -> list:
+        rows = await query("SELECT * FROM margin_bands ORDER BY name", [])
+        return [_margin_band_out(r) for r in rows]
+
+    @app.get("/api/estimating/config/material-calcs")
+    async def list_material_calcs(_user: dict = Depends(require_auth)) -> list:
+        rows = await query("SELECT * FROM material_calcs ORDER BY material_key", [])
+        return [_material_calc_out(r) for r in rows]
+
+    @app.get("/api/estimating/config/branches")
+    async def list_branches(
+        kind: str = Query(...),
+        _user: dict = Depends(require_auth),
+    ) -> list:
+        """Return Aspire-derived branch options for the intake branch dropdown.
+
+        kind=install:      cities with a dedicated install branch (excludes
+                           ASPIRE_BRANCH_INSTALL_FALLBACKS which share the
+                           maintenance branch).
+        kind=maintenance:  all cities (every city has a maintenance branch).
+
+        Returns [{city, aspire_branch_id}] sorted by city name.  Auth-only;
+        no role or branch scoping (this is reference/config data).
+        """
+        if kind not in ("install", "maintenance"):
+            raise HTTPException(
+                status_code=400, detail="kind must be 'install' or 'maintenance'"
+            )
+        is_install = kind == "install"
+        cities = {c for (c, _) in ASPIRE_BRANCH_MAP}
+        if is_install:
+            cities -= ASPIRE_BRANCH_INSTALL_FALLBACKS
+        return sorted(
+            [{"city": c, "aspire_branch_id": ASPIRE_BRANCH_MAP[(c, is_install)]} for c in cities],
+            key=lambda x: x["city"],
+        )
+
+    @app.get("/api/estimating/config/itb-scopes")
+    async def list_itb_scopes(_user: dict = Depends(require_auth)) -> list:
+        # Handoff 13 grouping: estimating → outside_dept → vendor_only (enum
+        # order), then the admin-set sort_order within each group.
+        rows = await query(
+            "SELECT * FROM itb_scopes ORDER BY scope_group, sort_order", []
+        )
+        return [_itb_scope_out(r) for r in rows]
+
+    # ── ITB tracker (Handoff 21) ─────────────────────────────────────────────
+
+    @app.get("/api/estimating/itb/projects")
+    async def list_itb_projects(_user: dict = Depends(require_auth)) -> list:
+        """All ACTIVE estimates' ITB projects, branch-scoped (Handoff 18).
+
+        "Active" = the linked estimate's status is NOT terminal — NOT IN
+        ('won', 'lost'). handed_back/approved estimates stay visible (Handoff 21
+        §4 default; flagged open item pending Carlos). Every estimate appears
+        (LOCKED: one estimate → one ITB project). Scope definitions come from
+        GET /config/itb-scopes; this returns projects + their scope statuses.
+        """
+        scope = await authz.resolve_branch_scope(_user)
+        if scope.kind == "none":
+            return []
+        conditions = ["e.status NOT IN ('won', 'lost')"]
+        params: list[Any] = []
+        if scope.kind == "branch":
+            conditions.append("p.branch = %s")
+            params.append(scope.branch)
+        rows = await query(
+            f"""SELECT p.* FROM itb_projects p
+                 JOIN estimates e ON e.id = p.estimate_id
+                 WHERE {' AND '.join(conditions)}
+                 ORDER BY p.due_date, p.created_at""",
+            params,
+        )
+        if not rows:
+            return []
+        ids = [r["id"] for r in rows]
+        placeholders = ", ".join(["%s"] * len(ids))
+        status_rows = await query(
+            f"""SELECT project_id, scope_id, status_code FROM itb_scope_status
+                 WHERE project_id IN ({placeholders})""",
+            ids,
+        )
+        by_project: dict[str, list[dict]] = {}
+        for sr in status_rows:
+            by_project.setdefault(sr["project_id"], []).append(_itb_status_out(sr))
+        return [_itb_project_out(r, by_project.get(r["id"], [])) for r in rows]
+
+    @app.patch("/api/estimating/itb/projects/{project_id}/scopes/{scope_id}")
+    async def update_itb_scope_status(
+        project_id: str, scope_id: str, body: dict, _user: dict = Depends(require_auth)
+    ) -> dict:
+        """Update one scope's status code for one ITB project.
+
+        Upserts, so scopes added to itb_scopes AFTER a project was auto-created
+        still accept a status (the tracker renders missing cells as N/A).
+        """
+        code = body.get("statusCode")
+        if code not in ITB_STATUS_CODES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"statusCode must be one of {sorted(ITB_STATUS_CODES)}",
+            )
+        if not await query("SELECT id FROM itb_projects WHERE id = %s", [project_id]):
+            raise HTTPException(status_code=404, detail="ITB project not found")
+        if not await query("SELECT id FROM itb_scopes WHERE id = %s", [scope_id]):
+            raise HTTPException(status_code=404, detail="ITB scope not found")
+        await execute(
+            """INSERT INTO itb_scope_status (project_id, scope_id, status_code)
+               VALUES (%s, %s, %s)
+               ON DUPLICATE KEY UPDATE status_code = VALUES(status_code)""",
+            [project_id, scope_id, code],
+        )
+        return {"projectId": project_id, "scopeId": scope_id, "statusCode": code}
+
+    @app.get("/api/estimating/catalog-items")
+    async def list_catalog_items(
+        branch: Optional[str] = Query(default=None),
+        kit_type: Optional[str] = Query(default=None),
+        active: Optional[str] = Query(default=None),
+        _user: dict = Depends(require_auth),
+    ) -> list:
+        if kit_type is not None and kit_type not in ("maintenance_hours", "install_quantity"):
+            raise HTTPException(
+                status_code=400,
+                detail="kit_type must be maintenance_hours or install_quantity",
+            )
+        conditions: list[str] = []
+        params: list[Any] = []
+        if branch:
+            conditions.append("branch = %s")
+            params.append(branch)
+        if kit_type:
+            conditions.append("kit_type = %s")
+            params.append(kit_type)
+        if active is not None:
+            flag = {"true": 1, "1": 1, "false": 0, "0": 0}.get(active.lower())
+            if flag is None:
+                raise HTTPException(status_code=400, detail="active must be true or false")
+            conditions.append("active = %s")
+            params.append(flag)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = await query(
+            f"SELECT * FROM catalog_items {where} ORDER BY description", params
+        )
+        return [_catalog_item_out(r) for r in rows]

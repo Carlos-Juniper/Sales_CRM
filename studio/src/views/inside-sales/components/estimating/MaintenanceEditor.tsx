@@ -7,8 +7,8 @@
 //   • Hours vs price: complexity adjusts HOURS; margin is the commercial
 //     lever. Nothing here nudges hours to hit a number.
 //   • All math via lib/estimating/calc; approval tier via the config table.
-//   • Bidding↔Won runs through transitionLifecycle (the status-transition
-//     handler) which flips Aspire ownership and writes the audit record.
+//   • Bidding↔Won persists via estimatingApi.setLifecycle — the server flips
+//     Aspire ownership (aspireOwnerFor derivation) and writes the audit record.
 // ---------------------------------------------------------------------------
 
 import { useMemo, useRef, useState } from 'react'
@@ -22,21 +22,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useAuthStore } from '@/store/authStore'
-import { estimatingApi } from '@/api/estimating'
+import { estimatingApi, type UpdateEstimatePayload } from '@/api/estimating'
+import { ApiError } from '@/api/client'
 import type { EstimateLifecycle, MaintenanceEstimate, SectionService } from '@/types/estimating'
 import { LostTransition } from './LostTransition'
 import { acresFromSqft, contractTotal, tierForValue } from '@/lib/estimating/calc'
-import { APPROVAL_TIER_SEED, tiersForType } from '@/lib/estimating/config'
+import { tiersForType } from '@/lib/estimating/config'
+import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import {
-  MAINTENANCE_SERVICE_CATALOG,
   buildDefaultSection,
   catalogToService,
   duplicateSection,
   formatCents,
+  maintenanceCatalogFromItems,
   removeSection,
-  transitionLifecycle,
+  unresolvedProductionRateLabels,
 } from '@/lib/estimating/maintenance'
+import { persistEstimateTree } from '@/lib/estimating/persistTree'
 import { useToast } from './useToast'
 import { useEstimatingShell } from './useEstimatingShell'
 import { SectionCard } from './SectionCard'
@@ -52,7 +54,11 @@ export interface MaintenanceEditorProps {
 export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   const { setOpenEstimate } = useEstimatingShell()
   const toast = useToast()
-  const actor = useAuthStore((s) => s.user?.name) ?? 'estimator'
+  // Actor identity for the lifecycle audit comes from the JWT server-side
+  // (Handoff 18) — the client no longer sends or records it.
+  // approval_tiers + catalog_items from the API-fetched config (Handoffs 16 +
+  // 22); the config.ts / maintenance.ts literals are only the offline fallback.
+  const { approvalTiers, catalogItems } = useEstimatingConfig()
 
   const [draft, setDraft] = useState<MaintenanceEstimate>(estimate)
   /** Snapshot Reset restores to (last saved state). */
@@ -66,9 +72,11 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   const contractCents = contractTotal(draft)
   const totalSqft = draft.sections.reduce((s, sec) => s + sec.squareFeet, 0)
   const maintenanceTiers = useMemo(
-    () => tiersForType(APPROVAL_TIER_SEED, 'maintenance'),
-    [],
+    () => tiersForType(approvalTiers, 'maintenance'),
+    [approvalTiers],
   )
+  // Handoff 22 — kits come from GET /catalog-items; literal = offline fallback.
+  const maintCatalog = useMemo(() => maintenanceCatalogFromItems(catalogItems), [catalogItems])
   const tier = tierForValue(contractCents, maintenanceTiers)
   const removeTarget = draft.sections.find((s) => s.id === confirmRemoveId) ?? null
 
@@ -90,14 +98,27 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     }))
   }
 
-  function handleLifecycle(to: EstimateLifecycle) {
-    const result = transitionLifecycle(draft, to, actor)
-    if (!result) return
-    setDraft(result.estimate)
-    setOpenEstimate(result.estimate)
-    toast.show(
-      to === 'won' ? 'Won — Aspire ownership transferred to CRM' : 'Back to Bidding — Estimating owns Aspire',
-    )
+  async function handleLifecycle(to: EstimateLifecycle) {
+    if (draft.lifecycle === to) return // no-op — never spam the audit trail
+    try {
+      // Persisted server-side (Handoff 17 §2.3): the server flips lifecycle,
+      // derives aspireOwner, and records the edge in estimate_status_transitions.
+      const res = await estimatingApi.setLifecycle(draft.id, to)
+      const flip = {
+        lifecycle: res.estimate.lifecycle,
+        aspireOwner: res.estimate.aspireOwner,
+      } as const
+      // Merge ONLY the lifecycle fields — unsaved tree edits stay local.
+      const next = { ...draft, ...flip }
+      savedRef.current = { ...savedRef.current, ...flip }
+      setDraft(next)
+      setOpenEstimate(next)
+      toast.show(
+        to === 'won' ? 'Won — Aspire ownership transferred to CRM' : 'Back to Bidding — Estimating owns Aspire',
+      )
+    } catch {
+      toast.show('Lifecycle change failed — check your connection and retry')
+    }
   }
 
   function handleReset() {
@@ -107,23 +128,51 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   }
 
   async function handleSave() {
+    // Handoff 22 save guard (client half — the server enforces it with a 422):
+    // every maintenance line must resolve a production rate (kit) or hours.
+    const unresolved = unresolvedProductionRateLabels(draft.sections, catalogItems)
+    if (unresolved.length > 0) {
+      setSaveError(
+        `No production rate resolves for ${unresolved.map((l) => `“${l}”`).join(', ')}. ` +
+          'Pick a kit with a production rate or enter hours — the line can’t be saved without one.',
+      )
+      return
+    }
     setSaving(true)
     setSaveError(null)
     const toSave: MaintenanceEstimate = { ...draft, contractValueCents: contractTotal(draft) }
     try {
-      await estimatingApi.update(toSave.id, {
+      // Handoff 17: persist the FULL tree (diff-and-apply against the last
+      // server-loaded state), then the scalar fields, then reload from the
+      // server so the editor reflects persisted state — never local state.
+      await persistEstimateTree(toSave.id, savedRef.current.sections, toSave.sections)
+      // Handoff 18 ownership split: targetMargin/contractValueCents are
+      // approver-owned levers server-side (an estimator PATCH touching them
+      // 403s). Only send them when this Save actually changed them so the
+      // routine estimator Save never trips the approver guard.
+      const scalars: UpdateEstimatePayload = {
         name: toSave.name,
-        contractValueCents: toSave.contractValueCents,
-        targetMargin: toSave.targetMargin,
         lifecycle: toSave.lifecycle,
         aspireOwner: toSave.aspireOwner,
-      })
-      savedRef.current = toSave
-      setDraft(toSave)
-      setOpenEstimate(toSave)
+      }
+      if (toSave.contractValueCents !== savedRef.current.contractValueCents)
+        scalars.contractValueCents = toSave.contractValueCents
+      if (toSave.targetMargin !== savedRef.current.targetMargin)
+        scalars.targetMargin = toSave.targetMargin
+      await estimatingApi.update(toSave.id, scalars)
+      const fresh = (await estimatingApi.get(toSave.id)) as MaintenanceEstimate
+      savedRef.current = fresh
+      setDraft(fresh)
+      setOpenEstimate(fresh)
       toast.show('Estimate saved')
-    } catch {
-      setSaveError('The estimate couldn’t be saved. Check your connection and retry.')
+    } catch (err) {
+      // A 422 is the server-side production-rate guard — surface its message
+      // (it names the offending line) instead of the generic connection copy.
+      if (err instanceof ApiError && err.status === 422) {
+        setSaveError(err.message)
+      } else {
+        setSaveError('The estimate couldn’t be saved. Check your connection and retry.')
+      }
     } finally {
       setSaving(false)
     }
@@ -132,7 +181,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   function handleAddSection() {
     setDraft((d) => ({
       ...d,
-      sections: [...d.sections, buildDefaultSection(d.id, d.sections.length)],
+      sections: [...d.sections, buildDefaultSection(d.id, d.sections.length, maintCatalog)],
     }))
     toast.show('Section added')
   }
@@ -176,7 +225,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
           </div>
           <p className="mt-1 text-xs text-[hsl(var(--muted-fg))]">
             ≈ {acresFromSqft(totalSqft).toFixed(1)} ac · {formatCents(contractCents)} ·{' '}
-            <span className="font-medium text-[hsl(var(--fg))]">{draft.branch} region template</span>{' '}
+            <span className="font-medium text-[hsl(var(--fg))]">{draft.branch}</span>{' '}
             · Target margin {Math.round(draft.targetMargin * 100)}%
           </p>
         </div>
@@ -279,8 +328,9 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
             onRename={(name) => patchSection(section.id, { name })}
             onSqftChange={(squareFeet) => patchSection(section.id, { squareFeet })}
             onServiceChange={(serviceId, patch) => patchService(section.id, serviceId, patch)}
+            catalog={maintCatalog}
             onAddLineItem={(catalogKey) => {
-              const row = MAINTENANCE_SERVICE_CATALOG.find((r) => r.key === catalogKey)
+              const row = maintCatalog.find((r) => r.key === catalogKey)
               if (!row) return
               patchSection(section.id, {
                 services: [

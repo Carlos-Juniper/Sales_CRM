@@ -1,30 +1,49 @@
 import { http, HttpResponse, delay } from 'msw'
 import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockConnections } from './data'
-import { mockEstimatesV2 } from './estimatingData'
+import { CATALOG_ITEM_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid } from '@/types'
 import type {
   Estimate,
+  EstimateAdjustment,
   EstimateSection,
+  IntakeDraft,
   IntakeSubmission,
   IntakeAttachment,
   AttachmentKind,
+  ItbProject,
+  ItbScopeStatus,
+  ItbStatusCode,
   SectionService,
+  SectionServiceComponent,
+  TakeoffLine,
 } from '@/types/estimating'
 import type {
   ApproveHandBackPayload,
+  CreateAdjustmentPayload,
   CreateEstimatePayload,
   UpdateEstimatePayload,
   CreateSectionPayload,
   UpdateSectionPayload,
   CreateServicePayload,
   UpdateServicePayload,
+  CreateComponentPayload,
+  UpdateComponentPayload,
+  CreateTakeoffLinePayload,
+  UpdateTakeoffLinePayload,
 } from '@/api/estimating'
+import { deriveTakeoffLine } from '@/lib/estimating/discrepancy'
 import {
   approveAndHandBack,
+  canTransition,
   IllegalTransitionError,
   type StatusTransitionRecord,
 } from '@/lib/estimating/transitions'
+import {
+  APPROVAL_TIER_SEED,
+  ITB_SCOPE_SEED,
+  MATERIAL_FORMULA_ROWS,
+} from '@/lib/estimating/config'
 
 const API = '/api'
 const leads = [...mockLeads]
@@ -33,10 +52,14 @@ const bids = [...mockBids]
 // In-memory store for the new estimating model (Handoff 00).
 const estimates: Estimate[] = structuredClone(mockEstimatesV2)
 
-// In-memory app-owned property store (source of truth; pushed to Aspire async).
+// In-memory CANONICAL property store (Handoff 15: source of truth; a row is
+// local-only/'unsynced' until an estimate submission triggers the Aspire push).
 interface MockProperty {
   id: string
   name: string
+  propertyType: string | null
+  sourceType: string | null
+  sourceId: string | null
   address1: string | null
   address2: string | null
   city: string | null
@@ -46,7 +69,7 @@ interface MockProperty {
   customerType: string | null
   managementCompanyId: string | null
   aspirePropertyId: number | null
-  aspireSyncStatus: 'pending' | 'synced' | 'failed'
+  aspireSyncStatus: 'unsynced' | 'pending' | 'synced' | 'failed'
   createdAt: string | null
   updatedAt: string | null
 }
@@ -55,14 +78,42 @@ const properties: MockProperty[] = []
 // Status-transition audit log (Handoff 08 — actor + timestamp per change).
 const statusTransitions: StatusTransitionRecord[] = []
 
+// Persisted approver-lever audit (Handoff 19 — estimate_adjustments).
+const estimateAdjustments: EstimateAdjustment[] = []
+let adjustmentSeq = 0
+
 // Structured intake submissions (persisted verbatim; NEVER in estimate.notes).
 const intakeSubmissions: IntakeSubmission[] = []
+
+// Handoff 24 §3.3 — server-side intake drafts ("Save draft"). Per-user and
+// device-independent; a draft never creates an estimate or fires an Aspire push.
+const intakeDrafts: IntakeDraft[] = []
 
 // In-memory attachment store (GCS attachment feature).
 const attachments: IntakeAttachment[] = []
 
 // In-memory resumable sessions: sessionId → { attachmentId, estimateId }.
 const resumableSessions: Map<string, { attachmentId: string; estimateId: string }> = new Map()
+
+/** Attachment authz: linked directly (takeoff scans) or via the intake submission. */
+function attachmentBelongsTo(a: IntakeAttachment, estimateId: string): boolean {
+  if (a.estimateId === estimateId) return true
+  return intakeSubmissions.some(
+    (s) => s.id === a.intakeSubmissionId && s.estimateId === estimateId,
+  )
+}
+
+// Handoff 20 — takeoff lines (Discrepancy Review persistence). Lazily seeded
+// per estimate with the sample fixture on first GET so the dev experience
+// matches the old fixture-seeded tab; derived fields are recomputed on the
+// way out (mirrors the backend, which never trusts client-sent derived values).
+const takeoffLines: TakeoffLine[] = []
+const seededTakeoffEstimates = new Set<string>()
+function ensureTakeoffSeed(estimateId: string): void {
+  if (seededTakeoffEstimates.has(estimateId)) return
+  seededTakeoffEstimates.add(estimateId)
+  takeoffLines.push(...buildTakeoffLines(estimateId))
+}
 
 let estimatingSeq = 0
 function eid(prefix: string): string {
@@ -73,6 +124,62 @@ function eid(prefix: string): string {
 function notFound() {
   return HttpResponse.json({ error: 'Not found' }, { status: 404 })
 }
+
+// ---------------------------------------------------------------------------
+// Handoff 21 — ITB tracker store. One project per estimate, AUTO-GENERATED at
+// estimate creation (LOCKED decision — either intake form). Scope statuses are
+// initialized to DEFAULT_ITB_STATUS for every config scope.
+// ---------------------------------------------------------------------------
+
+interface MockItbProject extends ItbProject {
+  statuses: ItbScopeStatus[]
+}
+
+const ITB_STATUS_CODES: ItbStatusCode[] = ['P', 'C', 'S', 'R', 'U', 'X', '-']
+// Default initial scope status: 'P' Pending (confirmed with Carlos 2026-08-06).
+const DEFAULT_ITB_STATUS: ItbStatusCode = 'P'
+
+function quarterFor(isoDate: string): string {
+  const month = Number(isoDate.slice(5, 7))
+  return `Q${Math.floor((month - 1) / 3) + 1}`
+}
+
+/** Mirror the server's auto-generation (Handoff 21 §3): estimate → ITB row. */
+function itbProjectForEstimate(e: Estimate): MockItbProject {
+  const id = eid('itb')
+  const due = (e.dueBackDate ?? new Date().toISOString()).slice(0, 10)
+  return {
+    id,
+    estimateId: e.id,
+    name: e.name,
+    aspireNumber: e.aspireNumber ?? null,
+    branch: e.branch,
+    salesRep: e.crmRep ?? null,
+    lsEstimator: e.assignedLsEstimator ?? null,
+    irrEstimator: e.assignedIrrEstimator ?? null,
+    irrDesigner: null,
+    bidNumber: null,
+    itbDate: (e.createdAt ?? new Date().toISOString()).slice(0, 10),
+    dueDate: due,
+    rebid: false,
+    estTotalCents: e.contractValueCents ?? 0,
+    // Intake carries no LS/IR split — the full value defaults to the LS side
+    // (same flagged assumption as the server).
+    estLsCents: e.contractValueCents ?? 0,
+    estIrCents: 0,
+    client: e.clientName,
+    quarter: quarterFor(due),
+    notes: null,
+    statuses: ITB_SCOPE_SEED.map((s) => ({
+      projectId: id,
+      scopeId: s.id,
+      statusCode: DEFAULT_ITB_STATUS,
+    })),
+  }
+}
+
+// Seeded estimates get their auto-generated projects too.
+const itbProjects: MockItbProject[] = estimates.map(itbProjectForEstimate)
 
 const allHandlers = [
   // GET /api/leads
@@ -109,6 +216,9 @@ const allHandlers = [
       filtered = filtered.filter(l => stateList.includes(l.state))
     }
     if (minScore) filtered = filtered.filter(l => l.score !== null && l.score >= parseInt(minScore))
+    // Handoff 23 — property engagement: leads queryable by canonical property_id
+    const propertyId = url.searchParams.get('property_id')
+    if (propertyId) filtered = filtered.filter(l => l.property_id === propertyId)
 
     filtered.sort((a, b) => {
       const av = a[sortBy as keyof Lead] as number | string
@@ -266,6 +376,115 @@ const allHandlers = [
   }),
 
   // ---------------------------------------------------------------------
+  // Estimating config read APIs (Handoff 16) — read-only; the seeded config
+  // tables mirrored here. Tests override with server.use() to simulate DB
+  // row edits reaching the UI with no code change.
+  // ---------------------------------------------------------------------
+
+  // GET /api/estimating/config/approval-tiers?estimate_type=
+  http.get(`${API}/estimating/config/approval-tiers`, async ({ request }) => {
+    await delay(50)
+    const estimateType = new URL(request.url).searchParams.get('estimate_type')
+    const rows = estimateType
+      ? APPROVAL_TIER_SEED.filter((t) => t.estimateType === estimateType)
+      : APPROVAL_TIER_SEED
+    return HttpResponse.json([...rows].sort((a, b) => a.order - b.order))
+  }),
+
+  // GET /api/estimating/config/margin-bands
+  http.get(`${API}/estimating/config/margin-bands`, async () => {
+    await delay(50)
+    return HttpResponse.json([{ id: 'mb-default', name: 'default', goodMin: 0.2, okMin: 0.12 }])
+  }),
+
+  // GET /api/estimating/config/material-calcs
+  http.get(`${API}/estimating/config/material-calcs`, async () => {
+    await delay(50)
+    return HttpResponse.json(MATERIAL_FORMULA_ROWS)
+  }),
+
+  // GET /api/estimating/config/itb-scopes
+  http.get(`${API}/estimating/config/itb-scopes`, async () => {
+    await delay(50)
+    return HttpResponse.json([...ITB_SCOPE_SEED].sort((a, b) => a.order - b.order))
+  }),
+
+  // GET /api/estimating/config/branches?kind=install|maintenance (Handoff 28)
+  // Returns a representative subset of the Aspire branch map for tests.
+  http.get(`${API}/estimating/config/branches`, async ({ request }) => {
+    await delay(50)
+    const kind = new URL(request.url).searchParams.get('kind')
+    const INSTALL_BRANCHES = [
+      { city: 'Bradenton, FL', aspire_branch_id: 1374 },
+      { city: 'Fort Myers, FL', aspire_branch_id: 1403 },
+      { city: 'Orlando, FL', aspire_branch_id: 3579 },
+      { city: 'Raleigh, NC', aspire_branch_id: 3689 },
+    ]
+    const MAINTENANCE_BRANCHES = [
+      { city: 'Bradenton, FL', aspire_branch_id: 3684 },
+      { city: 'Fort Myers, FL', aspire_branch_id: 3696 },
+      { city: 'Orlando, FL', aspire_branch_id: 3668 },
+      { city: 'Raleigh, NC', aspire_branch_id: 3688 },
+    ]
+    return HttpResponse.json(kind === 'install' ? INSTALL_BRANCHES : MAINTENANCE_BRANCHES)
+  }),
+
+  // ---------------------------------------------------------------------
+  // ITB tracker (Handoff 21) — read + scope-status update. Projects are
+  // auto-generated (no create endpoint); "active" = the linked estimate's
+  // status is not won/lost.
+  // ---------------------------------------------------------------------
+
+  // GET /api/estimating/itb/projects
+  http.get(`${API}/estimating/itb/projects`, async () => {
+    await delay(80)
+    const active = itbProjects.filter((p) => {
+      const est = estimates.find((e) => e.id === p.estimateId)
+      return est != null && est.status !== 'won' && est.status !== 'lost'
+    })
+    return HttpResponse.json(active)
+  }),
+
+  // PATCH /api/estimating/itb/projects/:projectId/scopes/:scopeId
+  http.patch(
+    `${API}/estimating/itb/projects/:projectId/scopes/:scopeId`,
+    async ({ params, request }) => {
+      await delay(50)
+      const { statusCode } = (await request.json()) as { statusCode?: ItbStatusCode }
+      if (!statusCode || !ITB_STATUS_CODES.includes(statusCode)) {
+        return HttpResponse.json(
+          { error: `statusCode must be one of ${ITB_STATUS_CODES.join(', ')}` },
+          { status: 400 },
+        )
+      }
+      const project = itbProjects.find((p) => p.id === params.projectId)
+      if (!project) return notFound()
+      const scopeId = String(params.scopeId)
+      if (!ITB_SCOPE_SEED.some((s) => s.id === scopeId)) return notFound()
+      const row = project.statuses.find((s) => s.scopeId === scopeId)
+      // Upsert, so scopes added after the project was created still accept status.
+      if (row) row.statusCode = statusCode
+      else project.statuses.push({ projectId: project.id, scopeId, statusCode })
+      return HttpResponse.json({ projectId: project.id, scopeId, statusCode })
+    },
+  ),
+
+  // GET /api/estimating/catalog-items — Handoff 22 kit catalog (seeded from
+  // the workbook rows; mirrors the backend's branch/kit_type/active filters).
+  http.get(`${API}/estimating/catalog-items`, async ({ request }) => {
+    await delay(50)
+    const url = new URL(request.url)
+    const branch = url.searchParams.get('branch')
+    const kitType = url.searchParams.get('kit_type')
+    const active = url.searchParams.get('active')
+    let rows = CATALOG_ITEM_SEED
+    if (branch) rows = rows.filter((r) => r.branch === branch)
+    if (kitType) rows = rows.filter((r) => r.kitType === kitType)
+    if (active !== null) rows = rows.filter((r) => r.active === (active === 'true' || active === '1'))
+    return HttpResponse.json(rows)
+  }),
+
+  // ---------------------------------------------------------------------
   // Estimating (Handoff 00) — single-source estimate model
   // ---------------------------------------------------------------------
 
@@ -336,6 +555,8 @@ const allHandlers = [
       updatedAt: now,
     } as Estimate
     estimates.push(created)
+    // Handoff 21 §3 — auto-generate the 1:1 ITB project for EITHER intake type.
+    itbProjects.push(itbProjectForEstimate(created))
     if (intake?.payload) {
       intakeSubmissions.push({
         id: eid('ins'),
@@ -382,6 +603,20 @@ const allHandlers = [
       )
     }
     delete body.estimateType
+    // Handoff 25 — the mock mirrors the server: every status write walks the
+    // ONE transition module. Illegal edges 409 (same shape as approve-handback);
+    // re-sending the current status is an idempotent no-op.
+    const currentStatus = estimates[idx].status
+    if (
+      body.status !== undefined &&
+      body.status !== currentStatus &&
+      !canTransition(currentStatus, body.status)
+    ) {
+      return HttpResponse.json(
+        { error: new IllegalTransitionError(currentStatus, body.status).message },
+        { status: 409 },
+      )
+    }
     estimates[idx] = {
       ...estimates[idx],
       ...body,
@@ -399,7 +634,11 @@ const allHandlers = [
     if (idx === -1) return notFound()
     const body = (await request.json()) as ApproveHandBackPayload
     try {
-      const { patch, records } = approveAndHandBack(estimates[idx], { actor: body.actor })
+      // In production the server derives the actor from the JWT (Handoff 18);
+      // the mock falls back to a session placeholder when the client omits it.
+      const { patch, records } = approveAndHandBack(estimates[idx], {
+        actor: body.actor ?? 'Session Approver',
+      })
       estimates[idx] = {
         ...estimates[idx],
         ...patch,
@@ -425,11 +664,102 @@ const allHandlers = [
     return HttpResponse.json(statusTransitions.filter((t) => t.estimateId === params.id))
   }),
 
+  // POST /api/estimating/estimates/:id/adjustments (Handoff 19 §5)
+  // Persists one audited approver lever change (complexity|margin). In
+  // production the server derives the actor from the JWT and enforces the
+  // approver-only guard; the mock mirrors the wire shape and falls back to a
+  // session placeholder when the client omits the deprecated actor field.
+  http.post(`${API}/estimating/estimates/:id/adjustments`, async ({ params, request }) => {
+    await delay(100)
+    if (!estimates.some((e) => e.id === params.id)) return notFound()
+    const body = (await request.json()) as CreateAdjustmentPayload
+    if (body.field !== 'complexity' && body.field !== 'margin') {
+      return HttpResponse.json(
+        { error: 'field must be complexity or margin' },
+        { status: 400 },
+      )
+    }
+    adjustmentSeq += 1
+    const record: EstimateAdjustment = {
+      id: `adj-${adjustmentSeq}`,
+      estimateId: String(params.id),
+      actor: body.actor ?? 'Session Approver',
+      field: body.field,
+      fromValue: body.fromValue,
+      toValue: body.toValue,
+      createdAt: new Date().toISOString(),
+    }
+    estimateAdjustments.push(record)
+    return HttpResponse.json(record, { status: 201 })
+  }),
+
+  // GET /api/estimating/estimates/:id/adjustments (audit trail, BRD III-1)
+  http.get(`${API}/estimating/estimates/:id/adjustments`, async ({ params }) => {
+    await delay(100)
+    if (!estimates.some((e) => e.id === params.id)) return notFound()
+    return HttpResponse.json(estimateAdjustments.filter((a) => a.estimateId === params.id))
+  }),
+
   // GET /api/estimating/estimates/:id/intake (structured intake submissions)
   http.get(`${API}/estimating/estimates/:id/intake`, async ({ params }) => {
     await delay(100)
     if (!estimates.some((e) => e.id === params.id)) return notFound()
     return HttpResponse.json(intakeSubmissions.filter((s) => s.estimateId === params.id))
+  }),
+
+  // ── Intake drafts (Handoff 24 §3.3) ────────────────────────────────────────
+  // "Save draft" persists a partial intake server-side (per-user, resumable on
+  // any device). Never creates an estimate; never fires an Aspire push.
+
+  // POST /api/estimating/intake/drafts
+  http.post(`${API}/estimating/intake/drafts`, async ({ request }) => {
+    await delay(100)
+    const body = (await request.json()) as {
+      estimateType: Estimate['estimateType']
+      payload: Record<string, unknown>
+      draftId?: string
+    }
+    if (body.estimateType !== 'maintenance' && body.estimateType !== 'install') {
+      return HttpResponse.json(
+        { error: 'estimateType must be maintenance or install' },
+        { status: 400 },
+      )
+    }
+    if (body.draftId) {
+      const existing = intakeDrafts.find((d) => d.id === body.draftId)
+      if (!existing) return notFound()
+      existing.payload = body.payload
+      return HttpResponse.json(existing)
+    }
+    const draft: IntakeDraft = {
+      id: eid('draft'),
+      estimateType: body.estimateType,
+      payload: body.payload,
+      submittedBy: 'mock-user',
+      isDraft: true,
+      createdAt: new Date().toISOString(),
+    }
+    intakeDrafts.push(draft)
+    return HttpResponse.json(draft, { status: 201 })
+  }),
+
+  // GET /api/estimating/intake/drafts
+  http.get(`${API}/estimating/intake/drafts`, async ({ request }) => {
+    await delay(100)
+    const estimateType = new URL(request.url).searchParams.get('estimate_type')
+    const rows = intakeDrafts
+      .filter((d) => !estimateType || d.estimateType === estimateType)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    return HttpResponse.json(rows)
+  }),
+
+  // DELETE /api/estimating/intake/drafts/:id
+  http.delete(`${API}/estimating/intake/drafts/:id`, async ({ params }) => {
+    await delay(100)
+    const idx = intakeDrafts.findIndex((d) => d.id === params.id)
+    if (idx === -1) return notFound()
+    intakeDrafts.splice(idx, 1)
+    return new HttpResponse(null, { status: 204 })
   }),
 
   // POST /api/estimating/estimates/:id/sections
@@ -445,12 +775,21 @@ const allHandlers = [
       sortOrder: body.sortOrder ?? estimate.sections.length,
       id: sectionId,
       estimateId: estimate.id,
-      services: (body.services ?? []).map((svc, vi) => ({
-        ...svc,
-        id: eid('svc'),
-        sectionId,
-        sortOrder: svc.sortOrder ?? vi,
-      })),
+      services: (body.services ?? []).map((svc, vi) => {
+        const serviceId = eid('svc')
+        return {
+          ...svc,
+          id: serviceId,
+          sectionId,
+          sortOrder: svc.sortOrder ?? vi,
+          components: (svc.components ?? []).map((c, ci) => ({
+            ...c,
+            id: eid('cmp'),
+            sectionServiceId: serviceId,
+            sortOrder: c.sortOrder ?? ci,
+          })),
+        }
+      }),
     }
     estimate.sections.push(section)
     estimate.updatedAt = new Date().toISOString()
@@ -544,6 +883,165 @@ const allHandlers = [
     },
   ),
 
+  // ── Component CRUD (Handoff 17 §2.2 — kit labor/material breakdown) ────────
+
+  // POST /api/estimating/estimates/:id/sections/:sectionId/services/:serviceId/components
+  http.post(
+    `${API}/estimating/estimates/:id/sections/:sectionId/services/:serviceId/components`,
+    async ({ params, request }) => {
+      await delay(100)
+      const estimate = estimates.find((e) => e.id === params.id)
+      const section = estimate?.sections.find((s) => s.id === params.sectionId)
+      const service = section?.services.find((sv) => sv.id === params.serviceId)
+      if (!estimate || !section || !service) return notFound()
+      const body = (await request.json()) as CreateComponentPayload
+      const component: SectionServiceComponent = {
+        ...body,
+        id: eid('cmp'),
+        sectionServiceId: service.id,
+        sortOrder: body.sortOrder ?? service.components.length,
+      }
+      service.components.push(component)
+      estimate.updatedAt = new Date().toISOString()
+      return HttpResponse.json(component, { status: 201 })
+    },
+  ),
+
+  // PATCH /api/estimating/estimates/:id/sections/:sectionId/services/:serviceId/components/:componentId
+  http.patch(
+    `${API}/estimating/estimates/:id/sections/:sectionId/services/:serviceId/components/:componentId`,
+    async ({ params, request }) => {
+      await delay(100)
+      const estimate = estimates.find((e) => e.id === params.id)
+      const section = estimate?.sections.find((s) => s.id === params.sectionId)
+      const service = section?.services.find((sv) => sv.id === params.serviceId)
+      const component = service?.components.find((c) => c.id === params.componentId)
+      if (!estimate || !section || !service || !component) return notFound()
+      const body = (await request.json()) as UpdateComponentPayload
+      Object.assign(component, body)
+      estimate.updatedAt = new Date().toISOString()
+      return HttpResponse.json(component)
+    },
+  ),
+
+  // DELETE /api/estimating/estimates/:id/sections/:sectionId/services/:serviceId/components/:componentId
+  http.delete(
+    `${API}/estimating/estimates/:id/sections/:sectionId/services/:serviceId/components/:componentId`,
+    async ({ params }) => {
+      await delay(100)
+      const estimate = estimates.find((e) => e.id === params.id)
+      const section = estimate?.sections.find((s) => s.id === params.sectionId)
+      const service = section?.services.find((sv) => sv.id === params.serviceId)
+      if (!estimate || !section || !service) return notFound()
+      const idx = service.components.findIndex((c) => c.id === params.componentId)
+      if (idx === -1) return notFound()
+      service.components.splice(idx, 1)
+      estimate.updatedAt = new Date().toISOString()
+      return new HttpResponse(null, { status: 204 })
+    },
+  ),
+
+  // POST /api/estimating/estimates/:id/lifecycle (Handoff 17 §2.3)
+  // Persists the Bidding↔Won flip: derives aspireOwner from the lifecycle and
+  // records the edge in the ONE status-transition audit trail (`lifecycle:`
+  // prefix). This server-side trail is the ONLY audit source (the old
+  // client-side in-memory log was deleted).
+  http.post(`${API}/estimating/estimates/:id/lifecycle`, async ({ params, request }) => {
+    await delay(100)
+    const estimate = estimates.find((e) => e.id === params.id)
+    if (!estimate) return notFound()
+    const body = (await request.json()) as { to: Estimate['lifecycle'] }
+    if (body.to !== 'bidding' && body.to !== 'won') {
+      return HttpResponse.json({ error: 'to must be bidding or won' }, { status: 400 })
+    }
+    if (estimate.lifecycle === body.to) {
+      return HttpResponse.json({ estimate, transition: null })
+    }
+    const from = estimate.lifecycle
+    estimate.lifecycle = body.to
+    estimate.aspireOwner = body.to === 'won' ? 'crm' : 'estimating'
+    estimate.updatedAt = new Date().toISOString()
+    const transition: StatusTransitionRecord = {
+      estimateId: estimate.id,
+      from: `lifecycle:${from}`,
+      to: `lifecycle:${body.to}`,
+      actor: 'mock-user',
+      at: new Date().toISOString(),
+    }
+    statusTransitions.push(transition)
+    return HttpResponse.json({ estimate, transition })
+  }),
+
+  // ── Takeoff-line CRUD (Handoff 20 — Discrepancy Review persistence) ───────
+  // opportunityQty is a LOCAL, estimator-editable value (never read from
+  // Aspire); the Aspire qty push rides estimate Save on the real backend.
+
+  // GET /api/estimating/estimates/:id/takeoff-lines
+  http.get(`${API}/estimating/estimates/:id/takeoff-lines`, async ({ params }) => {
+    await delay(100)
+    const estimateId = String(params.id)
+    ensureTakeoffSeed(estimateId)
+    const rows = takeoffLines.filter((l) => l.estimateId === estimateId)
+    return HttpResponse.json(rows.map((l) => deriveTakeoffLine(l)))
+  }),
+
+  // POST /api/estimating/estimates/:id/takeoff-lines
+  http.post(`${API}/estimating/estimates/:id/takeoff-lines`, async ({ params, request }) => {
+    await delay(100)
+    const estimateId = String(params.id)
+    const body = (await request.json()) as CreateTakeoffLinePayload
+    const line: TakeoffLine = {
+      id: eid('tk'),
+      estimateId,
+      description: body.description ?? '',
+      uom: body.uom ?? '',
+      planQty: body.planQty ?? 0,
+      addPct: body.addPct ?? 0,
+      measuredQty: body.measuredQty ?? 0,
+      opportunityQty: body.opportunityQty ?? 0,
+      catalogItemId: body.catalogItemId ?? null,
+    }
+    ensureTakeoffSeed(estimateId)
+    takeoffLines.push(line)
+    return HttpResponse.json(deriveTakeoffLine(line), { status: 201 })
+  }),
+
+  // PATCH /api/estimating/estimates/:id/takeoff-lines/:lineId
+  http.patch(
+    `${API}/estimating/estimates/:id/takeoff-lines/:lineId`,
+    async ({ params, request }) => {
+      await delay(100)
+      const line = takeoffLines.find(
+        (l) => l.id === params.lineId && l.estimateId === params.id,
+      )
+      if (!line) return notFound()
+      const body = (await request.json()) as UpdateTakeoffLinePayload
+      // Only the writable columns — client-sent derived values are ignored.
+      if (body.description !== undefined) line.description = body.description
+      if (body.uom !== undefined) line.uom = body.uom
+      if (body.planQty !== undefined) line.planQty = body.planQty
+      if (body.addPct !== undefined) line.addPct = body.addPct
+      if (body.measuredQty !== undefined) line.measuredQty = body.measuredQty
+      if (body.opportunityQty !== undefined) line.opportunityQty = body.opportunityQty
+      if (body.catalogItemId !== undefined) line.catalogItemId = body.catalogItemId
+      return HttpResponse.json(deriveTakeoffLine(line))
+    },
+  ),
+
+  // DELETE /api/estimating/estimates/:id/takeoff-lines/:lineId
+  http.delete(
+    `${API}/estimating/estimates/:id/takeoff-lines/:lineId`,
+    async ({ params }) => {
+      await delay(100)
+      const idx = takeoffLines.findIndex(
+        (l) => l.id === params.lineId && l.estimateId === params.id,
+      )
+      if (idx === -1) return notFound()
+      takeoffLines.splice(idx, 1)
+      return new HttpResponse(null, { status: 204 })
+    },
+  ),
+
   // POST /api/estimating/estimates/:id/retry-aspire-sync
   http.post(`${API}/estimating/estimates/:id/retry-aspire-sync`, async ({ params }) => {
     await delay(100)
@@ -581,17 +1079,30 @@ const allHandlers = [
     return HttpResponse.json([])
   }),
 
-  // POST /api/properties — local-first create (returns pending), async push.
+  // POST /api/properties — LOCAL-ONLY create (Handoff 15): upsert on
+  // (sourceType, sourceId); the row stays 'unsynced' — NO auto Aspire push.
+  // The only sync trigger is estimate submission.
   http.post(`${API}/properties`, async ({ request }) => {
     await delay(120)
     const body = (await request.json()) as Partial<MockProperty>
     if (!body.name) {
       return HttpResponse.json({ error: 'name is required' }, { status: 400 })
     }
+    const sourceType = body.sourceType ?? 'manual'
+    const sourceId = body.sourceId ?? null
+    if (sourceId != null) {
+      const existing = properties.find(
+        (p) => p.sourceType === sourceType && p.sourceId === sourceId,
+      )
+      if (existing) return HttpResponse.json(existing, { status: 201 })
+    }
     const now = new Date().toISOString()
     const row: MockProperty = {
       id: eid('prop'),
       name: body.name,
+      propertyType: body.propertyType ?? (sourceType !== 'manual' ? sourceType : 'manual'),
+      sourceType,
+      sourceId,
       address1: body.address1 ?? null,
       address2: body.address2 ?? null,
       city: body.city ?? null,
@@ -601,15 +1112,11 @@ const allHandlers = [
       customerType: body.customerType ?? null,
       managementCompanyId: body.managementCompanyId ?? null,
       aspirePropertyId: null,
-      aspireSyncStatus: 'pending',
+      aspireSyncStatus: 'unsynced',
       createdAt: now,
       updatedAt: now,
     }
     properties.push(row)
-    setTimeout(() => {
-      row.aspireSyncStatus = 'synced'
-      row.aspirePropertyId = Math.floor(700000 + Math.random() * 50000)
-    }, 300)
     return HttpResponse.json(row, { status: 201 })
   }),
 ]
@@ -623,8 +1130,7 @@ allHandlers.push(
   http.post(`${API}/estimating/estimates/:estimateId/attachments/presign`, async ({ params, request }) => {
     const { estimateId } = params as { estimateId: string }
     const est = estimates.find((e) => e.id === estimateId)
-    const sub = intakeSubmissions.find((s) => s.estimateId === estimateId)
-    if (!est || !sub) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+    if (!est) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
 
     const body = (await request.json()) as {
       kind?: AttachmentKind
@@ -632,25 +1138,46 @@ allHandlers.push(
       contentType: string
       sizeBytes: number
     }
+    const kind = body.kind ?? 'other'
 
-    if (body.contentType !== 'application/pdf') {
+    // Handoff 27: takeoff scans are estimate-scoped (no intake submission
+    // needed) and may be images; intake kinds stay submission-linked + PDF-only.
+    const scanTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp']
+    if (kind === 'takeoff_scan') {
+      if (!scanTypes.includes(body.contentType)) {
+        return HttpResponse.json(
+          { error: 'Takeoff scans must be PNG, JPEG, WebP, or PDF' },
+          { status: 400 },
+        )
+      }
+    } else if (body.contentType !== 'application/pdf') {
       return HttpResponse.json({ error: 'Only PDF attachments are supported' }, { status: 400 })
     }
     if (body.sizeBytes > 2 * 1024 * 1024 * 1024) {
       return HttpResponse.json({ error: 'File exceeds the 2 GiB limit' }, { status: 400 })
     }
 
+    const sub = intakeSubmissions.find((s) => s.estimateId === estimateId)
+    if (kind !== 'takeoff_scan' && !sub) {
+      return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+
     const attachmentId = eid('att')
-    const objectKey = `estimating/${estimateId}/${attachmentId}.pdf`
+    const ext =
+      { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[
+        body.contentType
+      ] ?? 'bin'
+    const objectKey = `estimating/${estimateId}/${attachmentId}.${ext}`
     const sessionId = eid('sess')
 
     const att: IntakeAttachment = {
       id: attachmentId,
-      intakeSubmissionId: sub.id,
+      intakeSubmissionId: kind === 'takeoff_scan' ? null : (sub?.id ?? null),
+      estimateId,
       fileName: body.fileName,
       contentType: body.contentType,
       sizeBytes: body.sizeBytes,
-      kind: body.kind ?? 'other',
+      kind,
       uploadedBy: null,
       status: 'pending',
       objectKey,
@@ -686,8 +1213,7 @@ allHandlers.push(
     ({ params }) => {
       const { estimateId, attachmentId } = params as { estimateId: string; attachmentId: string }
       const att = attachments.find(
-        (a) => a.id === attachmentId && a.intakeSubmissionId &&
-          intakeSubmissions.some((s) => s.id === a.intakeSubmissionId && s.estimateId === estimateId),
+        (a) => a.id === attachmentId && attachmentBelongsTo(a, estimateId),
       )
       if (!att) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
       att.status = 'stored'
@@ -703,10 +1229,7 @@ allHandlers.push(
     const { estimateId } = params as { estimateId: string }
     const est = estimates.find((e) => e.id === estimateId)
     if (!est) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
-    const submissionIds = intakeSubmissions
-      .filter((s) => s.estimateId === estimateId)
-      .map((s) => s.id)
-    const result = attachments.filter((a) => submissionIds.includes(a.intakeSubmissionId))
+    const result = attachments.filter((a) => attachmentBelongsTo(a, estimateId))
     return HttpResponse.json(result)
   }),
 )
@@ -718,8 +1241,7 @@ allHandlers.push(
     ({ params }) => {
       const { estimateId, attachmentId } = params as { estimateId: string; attachmentId: string }
       const att = attachments.find(
-        (a) => a.id === attachmentId &&
-          intakeSubmissions.some((s) => s.id === a.intakeSubmissionId && s.estimateId === estimateId),
+        (a) => a.id === attachmentId && attachmentBelongsTo(a, estimateId),
       )
       if (!att) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
       if (att.status !== 'stored') return HttpResponse.json({ error: 'Not stored' }, { status: 409 })

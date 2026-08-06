@@ -6,6 +6,14 @@
 // Money is integer cents; percentages are decimals (0.22 = 22%).
 // ---------------------------------------------------------------------------
 
+// ----- Config reference types -----------------------------------------------
+
+/** Aspire-derived branch option returned by GET /api/estimating/config/branches. */
+export interface BranchOption {
+  city: string
+  aspire_branch_id: number
+}
+
 // ----- Core enums ----------------------------------------------------------
 
 /**
@@ -33,13 +41,29 @@ export type EstimateLifecycle = 'bidding' | 'won'
 
 export type AspireOwner = 'estimating' | 'crm'
 
-/** Async Aspire push state for this estimate (mirrors the backend column). */
-export type AspireSyncStatus = 'pending' | 'synced' | 'failed'
+/**
+ * Async Aspire push state (mirrors the backend column). Properties start
+ * 'unsynced' (local-only) and are pushed ONLY when an estimate is submitted
+ * for them ('pending' = queued/in-flight at trigger time).
+ */
+export type AspireSyncStatus = 'unsynced' | 'pending' | 'synced' | 'failed'
 
-/** App-owned property record (source of truth); pushed to Aspire asynchronously. */
+/**
+ * CANONICAL app-owned property record (Handoff 15) — the single source of
+ * truth for every physical location, across verticals. `propertyType` drives
+ * estimating/Aspire logic; `sourceType`/`sourceId` trace provenance back to
+ * the vertical prospecting table the row was promoted from ('manual' when
+ * hand-entered).
+ */
 export interface Property {
   id: string
   name: string
+  /** Business category: 'hoa', 'hospital', 'cemetery', 'park', 'gov', 'manual', … */
+  propertyType?: string | null
+  /** Provenance table ('hoa', …) or 'manual'. */
+  sourceType?: string | null
+  /** Row id in the vertical table; null when sourceType==='manual'. */
+  sourceId?: string | null
   address1: string | null
   address2: string | null
   city: string | null
@@ -57,6 +81,10 @@ export interface Property {
 
 export interface CreatePropertyPayload {
   name: string
+  /** Canonical origin fields (Handoff 15); default 'manual' on the server. */
+  propertyType?: string | null
+  sourceType?: string | null
+  sourceId?: string | null
   address1?: string
   address2?: string | null
   city?: string
@@ -117,6 +145,14 @@ export interface EstimateBase {
   aspireSyncStatus: AspireSyncStatus
   /** Link to the app-owned property (source of truth); null for legacy rows. */
   propertyId: string | null
+  /**
+   * Pipeline kanban redesign — logical ref to the sales lead this estimate was
+   * created against. Drives the lead→estimate status write-back: creating an
+   * estimate with a leadId moves that lead from Qualifying to Estimating.
+   * Optional/absent for estimates with no originating lead (e.g. direct
+   * Aspire import).
+   */
+  leadId?: string | null
   clientName: string
   /** Region/branch scope: Phoenix-Desert, Raleigh, Florida, Pennsylvania. */
   branch: string
@@ -146,6 +182,20 @@ export interface EstimateBase {
   approvalSettings?: EstimateApprovalSettings
   /** Optional queue-card notes (e.g. intake context from Sales, walk notes). */
   notes?: string | null
+  /**
+   * Handoff 24 §3.2 — install RFI status, tracked as a first-class field and
+   * surfaced in the queue/editor. Capture/display only: nothing gates approval
+   * on it. Null/absent for maintenance and legacy rows.
+   */
+  rfiStatus?: string | null
+  /**
+   * Handoff 27 — manual takeoff metadata (Takeoff Insert stat grid). Manual
+   * estimator entry today, persisted on the estimate. Beam AI automated
+   * takeoff (paused — Handoffs 14/14b) is the eventual source and will write
+   * these same fields. Acreage & sqft stay DERIVED from sections.
+   */
+  turfAreaAcres?: number | null
+  curbMiles?: number | null
   sections: EstimateSection[]
   createdAt: string
   updatedAt: string
@@ -305,13 +355,24 @@ export interface TakeoffLine {
   /** Decimal adder, e.g. 0.10. */
   addPct: number
   measuredQty: number
-  /** Quantity currently in the Aspire opportunity. */
+  /**
+   * LOCALLY-set, manually-editable opportunity qty (drives Δ vs Opp). Never
+   * read from Aspire (Handoff 20 locked decision); on estimate Save the
+   * backend pushes it one-way to OpportunityServiceItem.ItemQuantity for
+   * lines that carry a catalogItemId.
+   */
   opportunityQty: number
+  /** Nullable kit link enabling the Aspire qty push (Handoff 20). */
+  catalogItemId?: string | null
 }
 
 // ----- Approval tiers (config-driven) ----------------------------------------
 
-export type ApprovalRoleKey = 'branch_manager' | 'regional_director' | 'bp' | 'coo'
+/**
+ * Handoff 19: tier role keys equal the canonical auth roles (Handoff 18), so
+ * the JWT role checks directly against the routed tier.
+ */
+export type ApprovalRoleKey = 'manager' | 'regional_director' | 'vice_president' | 'ceo'
 
 export interface ApprovalTier {
   id: string
@@ -322,8 +383,8 @@ export interface ApprovalTier {
   maxValueCents: number | null
   order: number
   /**
-   * Which estimate type this ladder applies to. Install has no approval
-   * matrix yet (open item) — the model supports adding one as config rows.
+   * Which estimate type this ladder applies to. Install uses the same
+   * ladder as maintenance (its own rows, mirrored $ bands — Handoff 19).
    */
   estimateType: EstimateType
 }
@@ -342,11 +403,11 @@ export interface ItbScope {
 }
 
 /**
- * P Pending · C Created · S Sent · R Received · U Updated · X 100% Complete ·
- * '-' N/A · E Estimator Review · I In Progress (BRD II-9.12; legend pending
- * confirmation with Carlos).
+ * Confirmed legend (Carlos, 2026-08-06; BRD II-9.12): P Pending ·
+ * C Created Request · S Sent · R Received · U Updated · X 100% Complete ·
+ * '-' Non-Applicable.
  */
-export type ItbStatusCode = 'P' | 'C' | 'S' | 'R' | 'U' | 'X' | '-' | 'E' | 'I'
+export type ItbStatusCode = 'P' | 'C' | 'S' | 'R' | 'U' | 'X' | '-'
 
 export interface ItbScopeStatus {
   projectId: string
@@ -356,6 +417,12 @@ export interface ItbScopeStatus {
 
 export interface ItbProject {
   id: string
+  /**
+   * Handoff 21: the estimate that auto-generated this project (1:1 LOCKED —
+   * one estimate → one ITB project, created at intake from either form).
+   * Optional/null only for legacy rows seeded before auto-generation.
+   */
+  estimateId?: string | null
   name: string
   aspireNumber: string | null
   branch: string
@@ -388,13 +455,34 @@ export interface IntakeSubmission {
   createdAt: string
 }
 
-export type AttachmentKind = 'property_map' | 'rfp' | 'other'
+/**
+ * Handoff 24 §3.3 — a "Save draft" row: a partial intake persisted server-side
+ * (intake_submissions, is_draft=1) BEFORE any estimate exists. Per-user and
+ * device-independent; saving/resuming a draft never creates an estimate and
+ * never triggers an Aspire push.
+ */
+export interface IntakeDraft {
+  id: string
+  estimateType: EstimateType
+  /** Partial intake form state, persisted verbatim. */
+  payload: Record<string, unknown>
+  submittedBy: string
+  isDraft: true
+  createdAt: string
+}
+
+// 'takeoff_scan' (Handoff 27) — the Takeoff Insert scanned boundary map;
+// estimate-scoped (no intake submission) and may be an image, not just PDF.
+export type AttachmentKind = 'property_map' | 'rfp' | 'other' | 'takeoff_scan'
 export type AttachmentStatus = 'pending' | 'stored' | 'failed'
 
 /** Intake attachment row — enriched with GCS columns added in the attachment feature. */
 export interface IntakeAttachment {
   id: string
-  intakeSubmissionId: string
+  /** Null for estimate-scoped rows (takeoff scans have no intake submission). */
+  intakeSubmissionId: string | null
+  /** Direct estimate link (takeoff scans, Handoff 27); null for legacy intake rows. */
+  estimateId: string | null
   fileName: string
   contentType: string
   sizeBytes: number
@@ -434,14 +522,21 @@ export interface MarginBands {
 
 export type MarginBandLabel = 'good' | 'ok' | 'low'
 
+/**
+ * A margin_bands config row as returned by GET /api/estimating/config/margin-bands
+ * (Handoff 16). The canonical set the UI consumes is the row named 'default'.
+ */
+export interface MarginBandRow extends MarginBands {
+  id: string
+  name: string
+}
+
 // ---------------------------------------------------------------------------
 // Legacy types (pre-redesign prototype). Deprecated — retained only so the
 // existing EstimateQueue / LineItemEditor / MarginAnalysis / ProposalExport
 // components keep compiling until Handoffs 02–07 replace them.
 // ---------------------------------------------------------------------------
 
-/** @deprecated Use {@link EstimateStatus}. */
-export type LegacyEstimateStatus = 'queued' | 'in_progress' | 'review' | 'approved' | 'sent'
 /** @deprecated Use {@link EstimatePriority}. */
 export type LegacyEstimatePriority = 'urgent' | 'high' | 'medium' | 'low'
 /** @deprecated */
@@ -467,7 +562,7 @@ export interface EstimateQueueItem {
   assigned_to: string | null
   priority: LegacyEstimatePriority
   deadline: string
-  status: LegacyEstimateStatus
+  status: EstimateStatus
   estimated_acreage: number
   estimated_contract_value: number
   site_walk_date: string | null
@@ -506,7 +601,7 @@ export interface LegacyEstimate {
   margin_pct: number
   target_margin_pct: number
   notes: string
-  status: 'draft' | 'review' | 'approved' | 'sent'
+  status: EstimateStatus
   created_at: string
   updated_at: string
 }
@@ -537,19 +632,6 @@ export interface MarginCategoryBreakdown {
   target_margin_pct: number
   historical_avg_pct: number
   weight_pct: number
-}
-
-/** @deprecated Legacy stub preserved for backward compat. */
-export interface EstimateQueue {
-  id: string
-  lead_id: string
-  property_name: string
-  assigned_to: string | null
-  priority: 'high' | 'medium' | 'low'
-  due_date: string
-  status: 'queued' | 'in_progress' | 'review' | 'approved'
-  site_walk_id: string | null
-  created_at: string
 }
 
 /** @deprecated Legacy stub preserved for backward compat. */

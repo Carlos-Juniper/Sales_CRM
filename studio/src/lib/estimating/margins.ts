@@ -15,7 +15,7 @@
 //     config.DEFAULT_MARGIN_BANDS — no local thresholds.
 // ---------------------------------------------------------------------------
 
-import type { Estimate, EstimateSection, SectionService } from '@/types/estimating'
+import type { CatalogItem, Estimate, EstimateSection, SectionService } from '@/types/estimating'
 import {
   SQFT_PER_ACRE,
   contractTotal,
@@ -115,32 +115,49 @@ export function medianCents(values: number[]): number {
 
 // ----- Line cost bases ---------------------------------------------------------
 
+/**
+ * Handoff 22 — per-occurrence hours for a maintenance line. The line's own
+ * hours win; a null-hours line derives them from its kit's production rate
+ * (units per labor hour → section sqft ÷ rate). Null when neither resolves —
+ * a state the save guard (frontend + backend 422) prevents from persisting.
+ */
+export function resolveOccurrenceHours(
+  section: EstimateSection,
+  svc: SectionService,
+  catalogItems: CatalogItem[] = [],
+): number | null {
+  if (svc.hours !== null) return svc.hours
+  const kit = svc.catalogItemId
+    ? catalogItems.find((k) => k.id === svc.catalogItemId)
+    : undefined
+  if (kit?.productionRate) return section.squareFeet / kit.productionRate
+  return null
+}
+
 /** Annualized maintenance labor hours: hours/occurrence × qty × (1 + complexity). */
-export function maintenanceLineHours(svc: SectionService): number {
-  return (svc.hours ?? 0) * svc.qty * (1 + svc.complexityPct)
+export function maintenanceLineHours(
+  svc: SectionService,
+  occurrenceHours: number = svc.hours ?? 0,
+): number {
+  return occurrenceHours * svc.qty * (1 + svc.complexityPct)
 }
 
 /**
- * Maintenance line cost, integer cents — hours-driven. When a line carries no
- * hours, fall back to price × (1 − target margin), i.e. assume it was priced
- * at target (the honest default until real kit production rates land).
+ * Maintenance line cost, integer cents — ALWAYS hours × loaded crew rate
+ * (Handoff 22). Hours resolve from the line or its kit's production rate; the
+ * old `price × (1 − targetMargin)` fallback is GONE — it was circular (it
+ * assumed the line was priced exactly at target, so over/under-pricing could
+ * never flag). An unresolvable line (blocked from saving by the guard) costs
+ * 0 rather than inventing a number.
  */
 export function maintenanceLineCost(
   section: EstimateSection,
   svc: SectionService,
-  targetMargin: number,
+  catalogItems: CatalogItem[] = [],
   crewRateCents: number = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
 ): number {
-  if (svc.hours === null) {
-    const price = maintServiceLine(
-      section.squareFeet,
-      svc.unitSellCents ?? 0,
-      svc.qty,
-      svc.complexityPct,
-    )
-    return Math.round(price * (1 - targetMargin))
-  }
-  return Math.round(maintenanceLineHours(svc) * crewRateCents)
+  const occurrenceHours = resolveOccurrenceHours(section, svc, catalogItems) ?? 0
+  return Math.round(maintenanceLineHours(svc, occurrenceHours) * crewRateCents)
 }
 
 export interface InstallCostSplit {
@@ -202,7 +219,10 @@ export interface ServiceGroupMargin {
  * SERVICE across all sections, on a cost basis. Reads the same live model the
  * editors mutate — editing a line flows straight into these numbers.
  */
-export function serviceGroupMargins(estimate: Estimate): ServiceGroupMargin[] {
+export function serviceGroupMargins(
+  estimate: Estimate,
+  catalogItems: CatalogItem[] = [],
+): ServiceGroupMargin[] {
   const contract = contractTotal(estimate)
   const groups = new Map<string, ServiceGroupMargin>()
 
@@ -231,8 +251,11 @@ export function serviceGroupMargins(estimate: Estimate): ServiceGroupMargin[] {
           svc.qty,
           svc.complexityPct,
         )
-        g.costCents += maintenanceLineCost(section, svc, estimate.targetMargin)
-        g.hoursPerYear += maintenanceLineHours(svc)
+        g.costCents += maintenanceLineCost(section, svc, catalogItems)
+        g.hoursPerYear += maintenanceLineHours(
+          svc,
+          resolveOccurrenceHours(section, svc, catalogItems) ?? 0,
+        )
       } else {
         const split = installLineCostSplit(svc)
         g.priceCents += installLineTotal(svc.qty, svc.unitSellCents ?? 0)
@@ -273,8 +296,11 @@ export function perAcreCents(estimate: Estimate): number {
  * occurrence count (max qty — one occurrence is one site visit that covers
  * every section). Null when the estimate has no mowing group.
  */
-export function mowingPerOccurrenceCents(estimate: Estimate): number | null {
-  const mowing = serviceGroupMargins(estimate).find((g) => /mow/i.test(g.label))
+export function mowingPerOccurrenceCents(
+  estimate: Estimate,
+  catalogItems: CatalogItem[] = [],
+): number | null {
+  const mowing = serviceGroupMargins(estimate, catalogItems).find((g) => /mow/i.test(g.label))
   if (!mowing || mowing.maxQty === 0) return null
   return mowing.priceCents / mowing.maxQty
 }

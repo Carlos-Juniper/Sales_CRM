@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `juniper`.`management_companies` (
+CREATE TABLE IF NOT EXISTS `crm`.`management_companies` (
     `id`               VARCHAR(36)   NOT NULL,
     `name`             VARCHAR(255)  NOT NULL,
     `mailing_address`  VARCHAR(255)  DEFAULT NULL,

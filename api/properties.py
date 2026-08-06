@@ -1,14 +1,22 @@
-"""Properties API — /api/properties/* routes.
+"""Properties API — /api/properties/* routes (Handoff 15: canonical model).
 
-App-owned property records are the SOURCE OF TRUTH; Aspire is downstream. Create
-writes locally (aspire_sync_status='pending') and returns immediately, scheduling
-a best-effort background push that fills in the Aspire PropertyID. Search reads
-the local table (modeled on list_hoa_properties). A best-effort proxy surfaces a
-property's existing Aspire opportunities so intake catches prior work before
-creating anything (the front-end dedup step).
+App-owned CANONICAL property records are the SOURCE OF TRUTH; Aspire is
+downstream. Every vertical prospecting table (hoa_properties, …) feeds into
+this table on engagement via (source_type, source_id); `property_type` drives
+estimating/Aspire logic while `source_type`/`source_id` trace provenance.
 
-All Aspire vocabulary is confined to api/aspire_sync.py; this module never speaks
-it directly.
+Create is LOCAL-ONLY and an upsert on (source_type, source_id): promotion is
+idempotent, and NO Aspire push happens here — a property stays 'unsynced'
+until an estimate is submitted for it. The one and only sync trigger is
+estimate submission (api/estimating.py → sync_property_if_needed), which
+flips the row pending → synced/failed.
+
+Search reads the local table (modeled on list_hoa_properties). A best-effort
+proxy surfaces a property's existing Aspire opportunities so intake catches
+prior work before creating anything (the front-end dedup step).
+
+All Aspire vocabulary is confined to api/aspire_sync.py; this module never
+speaks it directly.
 """
 from __future__ import annotations
 
@@ -16,10 +24,10 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
-from fastapi import BackgroundTasks, Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query
 
 from db import execute, query
-from api import aspire_sync
+from api import aspire_sync, pipeline
 from api.aspire_sync import PropertyInput
 
 
@@ -43,6 +51,9 @@ def _property_out(r: dict) -> dict:
     return {
         "id": r["id"],
         "name": r["name"],
+        "propertyType": r.get("property_type"),
+        "sourceType": r.get("source_type"),
+        "sourceId": r.get("source_id"),
         "address1": r.get("address1"),
         "address2": r.get("address2"),
         "city": r.get("city"),
@@ -80,10 +91,23 @@ async def _persist_property_result(property_id: str, res) -> None:
 
 
 async def _sync_property_bg(property_id: str) -> None:
+    """Push one property to Aspire (the reusable trigger — Handoff 15 §5.4).
+
+    Invoked from estimate submission, NEVER from create_property. Sets
+    aspire_sync_status='pending' at the start of the push; the result flips it
+    to synced/failed via _persist_property_result.
+    """
     rows = await query("SELECT * FROM properties WHERE id = %s", [property_id])
     if not rows:
         return
     p = rows[0]
+    # Mark the push queued/in-flight before touching Aspire.
+    await execute(
+        """UPDATE properties
+             SET aspire_sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+           WHERE id = %s""",
+        [property_id],
+    )
     # A property is a branch-level entity, NOT tied to a single opportunity type,
     # so it registers under the city's primary (maintenance) branch. The branch map
     # is keyed by (city, is_install); install opportunities pick their own branch at
@@ -101,6 +125,19 @@ async def _sync_property_bg(property_id: str) -> None:
     )
     res = await aspire_sync.push_property(inp)
     await _persist_property_result(property_id, res)
+
+
+async def sync_property_if_needed(property_id: str) -> None:
+    """Estimate-submission trigger: push the property to Aspire iff it has not
+    already been pushed (only 'unsynced'/'failed' rows; 'pending' is in-flight
+    and 'synced' must never re-push)."""
+    rows = await query(
+        "SELECT aspire_sync_status FROM properties WHERE id = %s", [property_id]
+    )
+    if not rows:
+        return
+    if rows[0].get("aspire_sync_status") in ("unsynced", "failed", None):
+        await _sync_property_bg(property_id)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -139,18 +176,42 @@ def register(app, require_auth) -> None:
 
     @app.post("/api/properties", status_code=201)
     async def create_property(
-        body: dict, background: BackgroundTasks, _user: dict = Depends(require_auth)
+        body: dict, _user: dict = Depends(require_auth)
     ) -> dict:
         if not body.get("name"):
             raise HTTPException(status_code=400, detail="name is required")
+
+        source_type = body.get("sourceType") or "manual"
+        source_id = body.get("sourceId")
+        property_type = body.get("propertyType") or (
+            source_type if source_type != "manual" else "manual"
+        )
+
+        # Upsert on (source_type, source_id): promotion / find-or-create is
+        # idempotent — return the existing row if the vertical row was already
+        # promoted. (source_type='manual' rows carry source_id NULL and are
+        # never deduped this way — MySQL treats NULLs as distinct.)
+        if source_id is not None:
+            existing = await query(
+                "SELECT * FROM properties WHERE source_type = %s AND source_id = %s",
+                [source_type, source_id],
+            )
+            if existing:
+                return _property_out(existing[0])
+
         property_id = _new_id()
         await execute(
             """INSERT INTO properties
-                 (id, name, address1, address2, city, state, zip, branch_city,
-                  customer_type, management_company_id)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                 (id, property_type, source_type, source_id, name, address1,
+                  address2, city, state, zip, branch_city, customer_type,
+                  management_company_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON DUPLICATE KEY UPDATE id = id""",
             [
                 property_id,
+                property_type,
+                source_type,
+                source_id,
                 body.get("name"),
                 body.get("address1", ""),
                 body.get("address2"),
@@ -162,7 +223,25 @@ def register(app, require_auth) -> None:
                 body.get("managementCompanyId"),
             ],
         )
-        # Local-first: never block on Aspire; push in the background.
-        background.add_task(_sync_property_bg, property_id)
-        rows = await query("SELECT * FROM properties WHERE id = %s", [property_id])
+        # LOCAL-ONLY: no Aspire push here. The row stays 'unsynced' (column
+        # default) until an estimate submission triggers sync_property_if_needed.
+        if source_id is not None:
+            # Authoritative re-read via the UNIQUE key (covers a concurrent promote).
+            rows = await query(
+                "SELECT * FROM properties WHERE source_type = %s AND source_id = %s",
+                [source_type, source_id],
+            )
+        else:
+            rows = await query("SELECT * FROM properties WHERE id = %s", [property_id])
         return _property_out(rows[0])
+
+    @app.post("/api/properties/{property_id}/promote", status_code=201)
+    async def promote_property(
+        property_id: str, _user: dict = Depends(require_auth)
+    ) -> dict:
+        """Create-lead-from-property (generalized promote — Handoff 15 §5.5)."""
+        try:
+            lead = await pipeline.promote_property_to_lead(property_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        return lead.to_dict()

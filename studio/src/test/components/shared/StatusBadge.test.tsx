@@ -12,7 +12,9 @@ describe('StatusBadge', () => {
     ['proposal_sent', 'Proposal Sent'],
     ['won', 'Won'],
     ['lost', 'Lost'],
-    ['handed_off', 'Handed Off'],
+    ['estimating', 'Estimating'],
+    ['op_review', 'OP Review'],
+    ['approved', 'Approved'],
   ]
 
   it.each(cases)('status "%s" renders label "%s"', (status, label) => {

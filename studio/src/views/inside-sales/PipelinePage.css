@@ -1,4 +1,0 @@
-.kanban-card {
-  transform: var(--dnd-transform, none);
-  transition: var(--dnd-transition);
-}

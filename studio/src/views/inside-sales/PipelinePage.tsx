@@ -1,131 +1,75 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react'
-import './PipelinePage.css'
-import {
-  DndContext,
-  DragOverlay,
-  closestCorners,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragStartEvent,
-  type DragEndEvent,
-} from '@dnd-kit/core'
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-  useSortable,
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
-import { useDroppable } from '@dnd-kit/core'
-import { GripVertical, Clock, Search, X, Plus } from 'lucide-react'
+import React, { useState, useMemo } from 'react'
+import { Clock, Search, X, Plus } from 'lucide-react'
 import { TopNav } from '@/components/layout/TopNav'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { LeadTypeBadge } from '@/components/shared/LeadTypeBadge'
 import { ScoreMeter } from '@/components/shared/ScoreMeter'
 import { KanbanCardSkeleton } from '@/components/shared/LoadingSkeleton'
 import { LeadDetailPanel } from './components/LeadDetailPanel'
-import { useLeads, useUpdateLead } from '@/hooks/useLeads'
+import { useLeads } from '@/hooks/useLeads'
 import { AddLeadModal } from './components/AddLeadModal'
 import { useUIStore } from '@/store/uiStore'
 import { formatCurrency, formatRelativeTime, cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { PIPELINE_STAGES, type PipelineStage } from '@/lib/pipelineStages'
 import type { Lead, LeadStatus } from '@/types'
-
-const COLUMNS: { id: LeadStatus; title: string; color: string; index: number }[] = [
-  { id: 'new', title: 'New Leads', color: 'border-sky-400', index: 1 },
-  { id: 'contacted', title: 'Contacted', color: 'border-blue-400', index: 2 },
-  { id: 'proposal_sent', title: 'Proposal Sent', color: 'border-purple-400', index: 3 },
-]
-
-const COLUMN_COLORS: Record<string, string> = {
-  new: 'bg-sky-500',
-  contacted: 'bg-blue-500',
-  proposal_sent: 'bg-purple-500',
-}
 
 // --- Kanban Card ---
 interface KanbanCardProps {
   lead: Lead
   onSelect: (id: string) => void
-  isDragging?: boolean
 }
 
-const KanbanCard = React.memo(function KanbanCard({ lead, onSelect, isDragging = false }: KanbanCardProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging: sortableIsDragging } = useSortable({ id: lead.id })
-  const cardRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!cardRef.current) return
-    cardRef.current.style.transform = CSS.Transform.toString(transform) ?? ''
-    cardRef.current.style.transition = transition ?? ''
-  }, [transform, transition])
-
+const KanbanCard = React.memo(function KanbanCard({ lead, onSelect }: KanbanCardProps) {
   return (
     <div
-      ref={(node) => { setNodeRef(node); cardRef.current = node }}
-      className={cn(
-        'kanban-card',
-        'group bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-lg p-3 cursor-pointer hover:shadow-md hover:border-[#2E7D52]/30 transition-all',
-        (sortableIsDragging || isDragging) && 'opacity-50 shadow-lg'
-      )}
+      className="group bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-lg p-3 cursor-pointer hover:shadow-md hover:border-[#2E7D52]/30 transition-all"
       onClick={() => onSelect(lead.id)}
     >
-      <div className="flex items-start gap-2">
-        <div
-          {...attributes}
-          {...listeners}
-          className="mt-0.5 text-[hsl(var(--muted-fg))] opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing flex-shrink-0"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <GripVertical className="h-3.5 w-3.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-medium text-[hsl(var(--fg))] truncate leading-snug">{lead.property_name}</p>
+        <p className="text-[10px] text-[hsl(var(--muted-fg))] mt-0.5">{lead.city}, {lead.state}</p>
+        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+          <LeadTypeBadge type={lead.lead_type} className="text-[10px] py-0 px-1.5" />
+          <span className="text-[10px] font-medium text-[hsl(var(--fg))]">{formatCurrency(lead.estimated_contract_value)}</span>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-[hsl(var(--fg))] truncate leading-snug">{lead.property_name}</p>
-          <p className="text-[10px] text-[hsl(var(--muted-fg))] mt-0.5">{lead.city}, {lead.state}</p>
-          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-            <LeadTypeBadge type={lead.lead_type} className="text-[10px] py-0 px-1.5" />
-            <span className="text-[10px] font-medium text-[hsl(var(--fg))]">{formatCurrency(lead.estimated_contract_value)}</span>
-          </div>
-          <div className="mt-2">
-            <ScoreMeter score={lead.score} size="sm" showLabel={false} />
-          </div>
-          <div className="flex items-center gap-1 mt-1.5 text-[10px] text-[hsl(var(--muted-fg))]">
-            <Clock className="h-2.5 w-2.5" />
-            <span>{formatRelativeTime(lead.updated_at)}</span>
-          </div>
+        <div className="mt-2">
+          <ScoreMeter score={lead.score} size="sm" showLabel={false} />
+        </div>
+        <div className="flex items-center gap-1 mt-1.5 text-[10px] text-[hsl(var(--muted-fg))]">
+          <Clock className="h-2.5 w-2.5" />
+          <span>{formatRelativeTime(lead.updated_at)}</span>
         </div>
       </div>
     </div>
   )
 })
 
-// --- Droppable Column ---
+// --- Kanban Column ---
+// Stages are read-only visual buckets: Qualifying/Estimating/OP Review/Approved
+// move automatically (manual sales flow for Qualifying's sub-statuses lives in
+// the Lead detail panel's stage tracker; the other three are estimate write-back
+// only — see pipelineStages.ts), so there is no drag-and-drop between columns.
 interface KanbanColumnProps {
-  id: LeadStatus
-  title: string
-  color: string
+  stage: PipelineStage
   leads: Lead[]
   conversionRate: number | null
   onCardClick: (id: string) => void
-  onAddLead: (status: LeadStatus) => void
+  onAddLead: () => void
 }
 
-function KanbanColumn({ id, title, color, leads, conversionRate, onCardClick, onAddLead }: KanbanColumnProps) {
-  const { setNodeRef, isOver } = useDroppable({ id })
+function KanbanColumn({ stage, leads, conversionRate, onCardClick, onAddLead }: KanbanColumnProps) {
   const totalValue = leads.reduce((s, l) => s + l.estimated_contract_value, 0)
-  const dotColor = COLUMN_COLORS[id] ?? 'bg-slate-500'
 
   return (
     <div className="flex flex-col min-w-[200px] lg:flex-1 lg:min-w-0">
-      <div className={cn('border-t-2 rounded-t-none mb-3 pt-0', color)} />
+      <div className={cn('border-t-2 rounded-t-none mb-3 pt-0', stage.borderColor)} />
       <div className="flex items-center justify-between mb-1.5 px-0.5">
         <div className="flex items-center gap-2">
-          <span className={cn('w-5 h-5 rounded-full text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0', dotColor)}>
+          <span className={cn('w-5 h-5 rounded-full text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0', stage.dotColor)}>
             {leads.length}
           </span>
-          <h3 className="text-xs font-semibold text-[hsl(var(--fg))]">{title}</h3>
+          <h3 className="text-xs font-semibold text-[hsl(var(--fg))]">{stage.label}</h3>
         </div>
       </div>
       <div className="flex items-center justify-between px-0.5 mb-2">
@@ -135,32 +79,22 @@ function KanbanColumn({ id, title, color, leads, conversionRate, onCardClick, on
         )}
       </div>
 
-      <div
-        ref={setNodeRef}
-        className={cn(
-          'flex-1 min-h-[400px] rounded-lg p-2 space-y-2 transition-colors',
-          isOver ? 'bg-[#2E7D52]/5 border border-dashed border-[#2E7D52]' : 'bg-[hsl(var(--muted))]/50'
-        )}
-      >
-        <SortableContext items={leads.map(l => l.id)} strategy={verticalListSortingStrategy}>
-          {leads.map((lead) => (
-            <KanbanCard
-              key={lead.id}
-              lead={lead}
-              onSelect={onCardClick}
-            />
-          ))}
-        </SortableContext>
+      <div className="flex-1 min-h-[400px] rounded-lg p-2 space-y-2 bg-[hsl(var(--muted))]/50">
+        {leads.map((lead) => (
+          <KanbanCard key={lead.id} lead={lead} onSelect={onCardClick} />
+        ))}
       </div>
 
-      <button
-        type="button"
-        onClick={() => onAddLead(id)}
-        className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed border-[hsl(var(--border))] text-[11px] text-[hsl(var(--muted-fg))] hover:border-[#2E7D52]/50 hover:text-[#2E7D52] hover:bg-[#2E7D52]/5 transition-colors"
-      >
-        <Plus className="h-3 w-3" />
-        Add lead
-      </button>
+      {stage.allowManualCreate && (
+        <button
+          type="button"
+          onClick={onAddLead}
+          className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed border-[hsl(var(--border))] text-[11px] text-[hsl(var(--muted-fg))] hover:border-[#2E7D52]/50 hover:text-[#2E7D52] hover:bg-[#2E7D52]/5 transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          Add lead
+        </button>
+      )}
     </div>
   )
 }
@@ -199,17 +133,10 @@ function SearchBar({ value, onChange }: SearchBarProps) {
 // --- Page ---
 export default function PipelinePage() {
   const { data, isLoading } = useLeads()
-  const updateLead = useUpdateLead()
   const selectedLeadId = useUIStore((s) => s.selectedLeadId)
   const selectLead = useUIStore((s) => s.selectLead)
-  const [activeId, setActiveId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [addLeadStatus, setAddLeadStatus] = useState<LeadStatus | null>(null)
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  )
+  const [addLeadOpen, setAddLeadOpen] = useState(false)
 
   const allLeads = useMemo(() => data?.data ?? [], [data])
 
@@ -232,54 +159,28 @@ export default function PipelinePage() {
   }, [allLeads, searchQuery])
 
   const columnLeads = useMemo(() => {
-    const byStatus: Record<string, Lead[]> = {}
-    for (const col of COLUMNS) {
-      byStatus[col.id] = filteredLeads.filter((l: Lead) => l.status === col.id)
+    const byStage: Record<string, Lead[]> = {}
+    for (const stage of PIPELINE_STAGES) {
+      byStage[stage.key] = filteredLeads.filter((l: Lead) => (stage.statuses as LeadStatus[]).includes(l.status))
     }
-    return byStatus
+    return byStage
   }, [filteredLeads])
 
-  const activeLead = activeId ? allLeads.find((l: Lead) => l.id === activeId) : null
-
   const activeLeadCount = useMemo(
-    () => COLUMNS.reduce((s, col) => s + (columnLeads[col.id]?.length ?? 0), 0),
+    () => PIPELINE_STAGES.reduce((s, stage) => s + (columnLeads[stage.key]?.length ?? 0), 0),
     [columnLeads]
   )
 
   const totalPipelineValue = useMemo(
-    () => COLUMNS.reduce((s, col) => s + (columnLeads[col.id] ?? []).reduce((ss: number, l: Lead) => ss + l.estimated_contract_value, 0), 0),
+    () => PIPELINE_STAGES.reduce((s, stage) => s + (columnLeads[stage.key] ?? []).reduce((ss: number, l: Lead) => ss + l.estimated_contract_value, 0), 0),
     [columnLeads]
   )
 
-  function findColumnForLead(leadId: string): LeadStatus | null {
-    for (const col of COLUMNS) {
-      if (columnLeads[col.id]?.some((l: Lead) => l.id === leadId)) return col.id
+  function findStageForLead(leadId: string): string | null {
+    for (const stage of PIPELINE_STAGES) {
+      if (columnLeads[stage.key]?.some((l: Lead) => l.id === leadId)) return stage.key
     }
     return null
-  }
-
-  function handleDragStart(event: DragStartEvent) {
-    setActiveId(event.active.id as string)
-  }
-
-  async function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event
-    setActiveId(null)
-    if (!over) return
-
-    const sourceColumn = findColumnForLead(active.id as string)
-    let targetColumn = over.id as LeadStatus
-    if (!COLUMNS.some(c => c.id === targetColumn)) {
-      targetColumn = findColumnForLead(over.id as string) ?? sourceColumn!
-    }
-
-    if (sourceColumn && targetColumn && sourceColumn !== targetColumn) {
-      try {
-        await updateLead.mutateAsync({ id: active.id as string, body: { status: targetColumn } })
-      } catch {
-        // useUpdateLead onError already surfaces a toast
-      }
-    }
   }
 
   return (
@@ -293,9 +194,9 @@ export default function PipelinePage() {
       <div className="flex-1 overflow-auto p-5">
         <PageHeader
           title="Inbound Pipeline"
-          description="Drag leads between stages to update their status."
+          description="Leads move between stages automatically as estimates progress."
           actions={
-            <Button size="sm" onClick={() => setAddLeadStatus('new')}>
+            <Button size="sm" onClick={() => setAddLeadOpen(true)}>
               <Plus className="h-3.5 w-3.5 mr-1" />
               Add lead
             </Button>
@@ -304,54 +205,33 @@ export default function PipelinePage() {
 
         {isLoading ? (
           <div className="flex gap-4">
-            {COLUMNS.map(col => (
-              <div key={col.id} className="min-w-[200px] lg:flex-1 lg:min-w-0 space-y-2">
+            {PIPELINE_STAGES.map(stage => (
+              <div key={stage.key} className="min-w-[200px] lg:flex-1 lg:min-w-0 space-y-2">
                 {Array.from({ length: 3 }).map((_, i) => <KanbanCardSkeleton key={i} />)}
               </div>
             ))}
           </div>
         ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCorners}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <div className="flex gap-4 pb-4 min-w-max lg:w-full lg:min-w-0">
-              {COLUMNS.map(col => (
-                <KanbanColumn
-                  key={col.id}
-                  id={col.id}
-                  title={col.title}
-                  color={col.color}
-                  leads={columnLeads[col.id] ?? []}
-                  conversionRate={conversionRate}
-                  onCardClick={selectLead}
-                  onAddLead={setAddLeadStatus}
-                />
-              ))}
-            </div>
-
-            <DragOverlay>
-              {activeLead && (
-                <div className="bg-[hsl(var(--card))] border border-[#2E7D52] rounded-lg p-3 shadow-xl w-56">
-                  <p className="text-xs font-medium text-[hsl(var(--fg))] truncate">{activeLead.property_name}</p>
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <LeadTypeBadge type={activeLead.lead_type} className="text-[10px] py-0 px-1.5" />
-                    <span className="text-[10px] font-medium">{formatCurrency(activeLead.estimated_contract_value)}</span>
-                  </div>
-                </div>
-              )}
-            </DragOverlay>
-          </DndContext>
+          <div className="flex gap-4 pb-4 min-w-max lg:w-full lg:min-w-0">
+            {PIPELINE_STAGES.map(stage => (
+              <KanbanColumn
+                key={stage.key}
+                stage={stage}
+                leads={columnLeads[stage.key] ?? []}
+                conversionRate={conversionRate}
+                onCardClick={selectLead}
+                onAddLead={() => setAddLeadOpen(true)}
+              />
+            ))}
+          </div>
         )}
       </div>
 
-      {addLeadStatus && (
+      {addLeadOpen && (
         <AddLeadModal
           open
-          defaultStatus={addLeadStatus}
-          onClose={() => setAddLeadStatus(null)}
+          defaultStatus="new"
+          onClose={() => setAddLeadOpen(false)}
         />
       )}
 
@@ -360,19 +240,19 @@ export default function PipelinePage() {
         onClose={() => selectLead(null)}
         onPrev={(() => {
           if (!selectedLeadId) return undefined
-          const col = findColumnForLead(selectedLeadId)
-          if (!col) return undefined
-          const colLeads = columnLeads[col] ?? []
-          const idx = colLeads.findIndex((l) => l.id === selectedLeadId)
-          return idx > 0 ? () => selectLead(colLeads[idx - 1].id) : undefined
+          const stage = findStageForLead(selectedLeadId)
+          if (!stage) return undefined
+          const stageLeads = columnLeads[stage] ?? []
+          const idx = stageLeads.findIndex((l) => l.id === selectedLeadId)
+          return idx > 0 ? () => selectLead(stageLeads[idx - 1].id) : undefined
         })()}
         onNext={(() => {
           if (!selectedLeadId) return undefined
-          const col = findColumnForLead(selectedLeadId)
-          if (!col) return undefined
-          const colLeads = columnLeads[col] ?? []
-          const idx = colLeads.findIndex((l) => l.id === selectedLeadId)
-          return idx !== -1 && idx < colLeads.length - 1 ? () => selectLead(colLeads[idx + 1].id) : undefined
+          const stage = findStageForLead(selectedLeadId)
+          if (!stage) return undefined
+          const stageLeads = columnLeads[stage] ?? []
+          const idx = stageLeads.findIndex((l) => l.id === selectedLeadId)
+          return idx !== -1 && idx < stageLeads.length - 1 ? () => selectLead(stageLeads[idx + 1].id) : undefined
         })()}
       />
     </div>

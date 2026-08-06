@@ -19,11 +19,18 @@
 
 import type { AspireOwner, Estimate, EstimateLifecycle, EstimateStatus } from '@/types/estimating'
 
+/**
+ * A lifecycle (Bidding↔Won) edge riding the ONE status-transition audit trail
+ * (Handoff 17 §2.3 — no separate audit table). The `lifecycle:` prefix keeps
+ * lifecycle edges distinguishable from status edges in the same table.
+ */
+export type LifecycleEdge = `lifecycle:${EstimateLifecycle}`
+
 /** Who did it, when — persisted for every status change (BRD III-1). */
 export interface StatusTransitionRecord {
   estimateId: string
-  from: EstimateStatus
-  to: EstimateStatus
+  from: EstimateStatus | LifecycleEdge
+  to: EstimateStatus | LifecycleEdge
   actor: string
   /** ISO timestamp. */
   at: string

@@ -17,7 +17,7 @@
 // (same pattern as Handoff 03/04/11).
 // ---------------------------------------------------------------------------
 
-import { useState, useRef, type ChangeEvent } from 'react'
+import { useEffect, useState, useRef, type ChangeEvent } from 'react'
 import { Building2, Info } from 'lucide-react'
 import {
   Dialog,
@@ -28,10 +28,10 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { estimatingApi } from '@/api/estimating'
+import { estimatingApi, estimatingConfigApi } from '@/api/estimating'
 import type { Property } from '@/types/estimating'
 import { DEFAULT_SERVICE_LINE } from '@/lib/estimating/aspireOptions'
-import { SLA_CONFIG } from '@/lib/estimating/sla'
+import { SLA_CONFIG, toDateOnly } from '@/lib/estimating/sla'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
 import type { InstallCustomerType } from '@/types/estimating'
@@ -40,6 +40,7 @@ import type { AttachedFile } from './IntakeFileAttachRow'
 import { useAttachmentUpload } from '@/lib/estimating/useAttachmentUpload'
 import {
   type FormState,
+  type BranchOption,
   AspireSection,
   RequestorSection,
   DatesProbabilitySection,
@@ -51,7 +52,6 @@ import {
   RfiSection,
   TakeoffFilesSection,
 } from './InstallIntakeSections'
-
 // ----- Types -----------------------------------------------------------------
 
 export interface InstallIntakeModalProps {
@@ -59,16 +59,16 @@ export interface InstallIntakeModalProps {
   onClose: () => void
   /** Called after successful create so the queue can refresh. */
   onCreated: (estimate: Estimate) => void
+  /**
+   * Handoff 15 — "Request estimate" from the property/Accounts UI launches the
+   * modal pre-filled with the canonical property. Null ⇒ intake starts blank.
+   */
+  initialProperty?: Property | null
 }
-
-type InstallBranch = 'Phoenix-Desert' | 'Raleigh' | 'Florida' | 'Pennsylvania'
-
-/** localStorage key for the Save-draft feature (serializable form fields only). */
-const DRAFT_STORAGE_KEY = 'install-intake-draft'
 
 // ----- Component -------------------------------------------------------------
 
-export function InstallIntakeModal({ open, onClose, onCreated }: InstallIntakeModalProps) {
+export function InstallIntakeModal({ open, onClose, onCreated, initialProperty = null }: InstallIntakeModalProps) {
   const { setOpenEstimate, setActiveTab } = useEstimatingShell()
   const { show } = useToast()
   const { upload: uploadFile } = useAttachmentUpload()
@@ -78,7 +78,7 @@ export function InstallIntakeModal({ open, onClose, onCreated }: InstallIntakeMo
   const defaultForm = (): FormState => ({
     leadId: '',
     requestedBy: '',
-    installBranch: 'Phoenix-Desert',
+    installBranch: '',
     phone: '',
     email: '',
     requestDate: today,
@@ -165,24 +165,61 @@ export function InstallIntakeModal({ open, onClose, onCreated }: InstallIntakeMo
     rfiStatus: '',
   })
 
-  const [form, setForm] = useState<FormState>(() => {
-    // Restore a previously saved draft (serializable fields only) if present.
-    try {
-      const saved = localStorage.getItem(DRAFT_STORAGE_KEY)
-      if (saved) return { ...defaultForm(), ...(JSON.parse(saved) as Partial<FormState>) }
-    } catch {
-      // Corrupt/unavailable storage — fall back to defaults.
+  const [form, setForm] = useState<FormState>(defaultForm)
+  // Handoff 24 §3.3 — backend Save-draft. The id of the server draft this form
+  // is bound to (created on first save / adopted on resume); null ⇒ none yet.
+  const [draftId, setDraftId] = useState<string | null>(null)
+  // Handoff 28 — Aspire-derived install branch options.
+  const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
+
+  // Resume the latest saved draft from the BACKEND when the modal opens —
+  // drafts are per-user and device-independent (they replaced localStorage).
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    estimatingApi
+      .listIntakeDrafts('install')
+      .then((drafts) => {
+        const latest = drafts[0]
+        if (cancelled || !latest) return
+        setForm({ ...defaultForm(), ...(latest.payload as Partial<FormState>) })
+        setDraftId(latest.id)
+      })
+      .catch(() => {
+        // Draft resume is best-effort — a fresh form is always a safe fallback.
+      })
+    return () => {
+      cancelled = true
     }
-    return defaultForm()
-  })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  // Fetch Aspire-derived install branch options once on open.
+  useEffect(() => {
+    if (!open) return
+    estimatingConfigApi
+      .branches('install')
+      .then(setBranchOptions)
+      .catch(() => {
+        show('Could not load branch list — please close and reopen the form.')
+      })
+  }, [open])
 
   const [propertyMapFile, setPropertyMapFile] = useState<AttachedFile | null>(null)
   const [rfpFile, setRfpFile] = useState<AttachedFile | null>(null)
   const [otherFiles, setOtherFiles] = useState<AttachedFile[]>([])
   const [submitting, setSubmitting] = useState(false)
   // Aspire opportunity linkage: property (→ PropertyID) + service line (→ DivisionID).
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null)
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(initialProperty)
   const [serviceLine, setServiceLine] = useState<string>(DEFAULT_SERVICE_LINE.install)
+
+  // Handoff 15: adopt an incoming property ("Request estimate" pre-fill) when
+  // the modal (re)opens with one. Render-phase derived-state pattern — no effect.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open && initialProperty) setSelectedProperty(initialProperty)
+  }
 
   const propertyMapRef = useRef<HTMLInputElement>(null)
   const rfpRef = useRef<HTMLInputElement>(null)
@@ -313,12 +350,17 @@ export function InstallIntakeModal({ open, onClose, onCreated }: InstallIntakeMo
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!form.installBranch) {
+      show('Select a branch before submitting.')
+      return
+    }
     setSubmitting(true)
 
     try {
+      // due_back_date is a SQL DATE column — must stay 'YYYY-MM-DD', not a full timestamp.
       const dueBackDate = form.internalDeadline
-        ? new Date(form.internalDeadline).toISOString()
-        : new Date(Date.now() + SLA_CONFIG.returnWindowDays * 86400000).toISOString()
+        ? toDateOnly(form.internalDeadline)
+        : toDateOnly(new Date(Date.now() + SLA_CONFIG.returnWindowDays * 86400000))
 
       const winProbability = Math.min(1.0, Math.max(0.2, Number(form.winProbabilityPct) / 100))
 
@@ -329,9 +371,11 @@ export function InstallIntakeModal({ open, onClose, onCreated }: InstallIntakeMo
         aspireNumber: null,
         // Property link + service line drive the Aspire opportunity push.
         propertyId: selectedProperty?.id ?? null,
+        // Pipeline kanban redesign — moves the linked lead Qualifying→Estimating.
+        leadId: form.leadId || null,
         serviceLine,
         clientName: form.company || form.contactPerson,
-        branch: form.installBranch as InstallBranch,
+        branch: form.installBranch,
         customerType: form.industry as InstallCustomerType,
         acreage: form.acreage ? parseFloat(form.acreage) : null,
         contractValueCents: form.estimatedValue ? Math.round(parseFloat(form.estimatedValue) * 100) : 0,
@@ -343,13 +387,14 @@ export function InstallIntakeModal({ open, onClose, onCreated }: InstallIntakeMo
         winProbability,
         siteWalkDate: null,
         dueBackDate,
-        anticipatedCloseDate: form.anticipatedClose
-          ? new Date(form.anticipatedClose).toISOString()
-          : null,
-        serviceStartDate: form.startDate ? new Date(form.startDate).toISOString() : null,
+        anticipatedCloseDate: form.anticipatedClose ? toDateOnly(form.anticipatedClose) : null,
+        serviceStartDate: form.startDate ? toDateOnly(form.startDate) : null,
         assignedLsEstimator: null,
         assignedIrrEstimator: null,
         crmRep: form.requestedBy || null,
+        // Handoff 24 §3.2 — RFI status is tracked first-class on the estimate
+        // row (surfaced in queue/editor), in addition to the verbatim payload.
+        rfiStatus: form.rfiStatus || null,
         // Structured intake goes to its own table (never notes); leave notes for a
         // short human queue note if one is ever added to this form.
         intake: { payload: intakePayload },
@@ -364,11 +409,10 @@ export function InstallIntakeModal({ open, onClose, onCreated }: InstallIntakeMo
       ]
       await Promise.allSettled(uploads.map((fn) => fn()))
 
-      // Submitted successfully — discard any saved draft.
-      try {
-        localStorage.removeItem(DRAFT_STORAGE_KEY)
-      } catch {
-        // ignore storage errors
+      // Submitted successfully — discard the server-side draft (best-effort).
+      if (draftId) {
+        estimatingApi.deleteIntakeDraft(draftId).catch(() => {})
+        setDraftId(null)
       }
       show('Install request sent to Estimating.')
       onCreated(created)
@@ -382,14 +426,21 @@ export function InstallIntakeModal({ open, onClose, onCreated }: InstallIntakeMo
     }
   }
 
-  function handleSaveDraft() {
-    // Persist serializable form fields to localStorage (attachments are File
-    // objects and can't be serialized — future scope: persist to backend).
+  async function handleSaveDraft() {
+    // Handoff 24 §3.3 — persist serializable form fields to the backend so the
+    // rep can resume on any device. Saves NO estimate and fires NO Aspire push.
+    // (Attachments are File objects and can't ride along; they re-attach on
+    // resume, same as the old localStorage path.)
     try {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(form))
+      const saved = await estimatingApi.saveIntakeDraft({
+        estimateType: 'install',
+        payload: { ...form },
+        ...(draftId ? { draftId } : {}),
+      })
+      setDraftId(saved.id)
       show('Draft saved.')
     } catch {
-      show('Could not save draft — storage unavailable.')
+      show('Could not save draft — please try again.')
     }
   }
 
@@ -422,7 +473,7 @@ export function InstallIntakeModal({ open, onClose, onCreated }: InstallIntakeMo
             onChangeServiceLine={setServiceLine}
           />
 
-          <RequestorSection form={form} setStr={setStr} setBool={setBool} />
+          <RequestorSection form={form} setStr={setStr} setBool={setBool} branchOptions={branchOptions} />
 
           <DatesProbabilitySection form={form} setStr={setStr} />
 

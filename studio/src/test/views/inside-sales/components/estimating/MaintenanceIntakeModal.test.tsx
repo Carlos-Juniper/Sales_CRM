@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen, waitFor, within } from '@testing-library/react'
+import { screen, waitFor, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { render, makeUser } from '@/test/utils'
@@ -48,6 +48,8 @@ interface RenderModalOptions {
   shell?: EstimatingShellApi
   /** Fake CRM pipeline context injected by the queue */
   crmLead?: { leadNumber: string; rep: string; winProbability: number }
+  /** Handoff 15 — "Request estimate" launches the modal pre-filled with a property. */
+  initialProperty?: import('@/types/estimating').Property | null
 }
 
 function renderModal({
@@ -55,6 +57,7 @@ function renderModal({
   onClose = vi.fn(),
   shell,
   crmLead,
+  initialProperty = null,
 }: RenderModalOptions = {}) {
   const resolvedShell = shell ?? makeShell()
   const defaultLead = crmLead ?? { leadNumber: 'L-1042', rep: 'Jennifer Torres', winProbability: 0.65 }
@@ -66,6 +69,7 @@ function renderModal({
           onClose={onClose}
           crmLead={defaultLead}
           onCreated={vi.fn()}
+          initialProperty={initialProperty}
         />
       </EstimatingShellContext.Provider>
     </EstimatingToastProvider>,
@@ -88,6 +92,9 @@ async function fillMinimumFields(
   await user.type(q(/property address/i), '123 Desert Way, Phoenix, AZ')
   await user.type(q(/county/i), 'Maricopa')
   await user.type(q(/scope of work/i), 'Full grounds maintenance')
+  // Handoff 28 — branch is now required; wait for async options then select one.
+  await screen.findByRole('option', { name: 'Bradenton, FL' })
+  await user.selectOptions(q(/^branch/i) as HTMLSelectElement, 'Bradenton, FL')
 }
 
 beforeEach(() => {
@@ -242,6 +249,75 @@ describe('MaintenanceIntakeModal — cancel behavior (AC §3 bullet 6)', () => {
 // AC: Submit creates maintenance estimate with estimateType='maintenance',
 //     persists payload, starts SLA clock, routes to editor — no mode prompt
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Handoff 24 §3.1 — unit/home-count field, distinct from budget dollars, with
+// the I-6.4 "count only units in the proposed scope" guidance.
+// ---------------------------------------------------------------------------
+
+describe('MaintenanceIntakeModal — home count (Handoff 24 §3.1)', () => {
+  it('renders a numeric unit/home-count field with the I-6.4 guidance', () => {
+    renderModal()
+    const count = screen.getByLabelText(/home \/ unit count/i)
+    expect(count).toHaveAttribute('type', 'number')
+    expect(screen.getByText(/count only units in the proposed scope/i)).toBeInTheDocument()
+  })
+
+  it('keeps the count field distinct from the split budget dollar fields', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    // Budget $ inputs and the unit-count input coexist as separate fields…
+    expect(screen.getByLabelText(/homes budget/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/common area budget/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/home \/ unit count/i)).toBeInTheDocument()
+    // …and the I-6.4 guidance lives on the count field only, not the dollars.
+    expect(screen.getAllByText(/count only units in the proposed scope/i)).toHaveLength(1)
+  })
+
+  it('persists homeCount in the intake payload', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'hc-1', status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.type(screen.getByLabelText(/home \/ unit count/i), '142')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.homeCount).toBe('142')
+  })
+
+  it('sends homeCount null when left blank', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'hc-2', status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.homeCount).toBeNull()
+  })
+})
 
 describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
   it('POSTs an estimate with estimateType="maintenance" on submit', async () => {
@@ -435,6 +511,23 @@ describe('MaintenanceIntakeModal — file attachments (AC §3 bullet 2)', () => 
 // EstimatingPage integration — queue refresh after intake
 // ---------------------------------------------------------------------------
 
+describe('MaintenanceIntakeModal — incoming property (Handoff 15 "Request estimate")', () => {
+  it('pre-fills the property selector with the incoming property', () => {
+    renderModal({
+      initialProperty: {
+        id: 'prop-1', name: 'Sunny HOA', address1: '123 Palm St', address2: null,
+        city: 'Orlando', state: 'FL', zip: '32807', branchCity: 'Orlando, FL',
+        customerType: 'hoa', managementCompanyId: null, aspirePropertyId: null,
+        aspireSyncStatus: 'unsynced', propertyType: 'hoa', sourceType: 'hoa',
+        sourceId: 'hoa-1', createdAt: null, updatedAt: null,
+      },
+    })
+    // The selector renders in "selected" mode: property name + Change affordance
+    expect(screen.getByText('Sunny HOA')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /change/i })).toBeInTheDocument()
+  })
+})
+
 describe('MaintenanceIntakeModal — EstimatingPage integration (Handoff 11 seam)', () => {
   it('EstimatingPage wires onMaintenanceIntake to open the modal', async () => {
     const user = userEvent.setup()
@@ -479,5 +572,182 @@ describe('MaintenanceIntakeModal — EstimatingPage integration (Handoff 11 seam
 
     // Verify the queue stat cards are rendered (confirms EstimateQueue is mounted and wired)
     expect(screen.getByTestId('stat-total-queue')).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Handoff 23 — real lead context (stub removed): crmLead is optional; when the
+// intake opens from a property, lead context is sourced from leads.property_id
+// via the leads API. L-TBD never appears.
+// ---------------------------------------------------------------------------
+
+const h23Property: import('@/types/estimating').Property = {
+  id: 'prop-1',
+  name: 'Pelican Bay',
+  propertyType: 'hoa',
+  sourceType: 'hoa',
+  sourceId: 'h1',
+  address1: '6620 Pelican Bay Blvd',
+  address2: null,
+  city: 'Naples',
+  state: 'FL',
+  zip: '34108',
+  branchCity: 'Naples',
+  customerType: 'hoa',
+  managementCompanyId: 'pm1',
+  aspirePropertyId: null,
+  aspireSyncStatus: 'unsynced',
+  createdAt: null,
+  updatedAt: null,
+}
+
+const h23Lead = {
+  id: 'lead-77',
+  property_name: 'Pelican Bay',
+  status: 'new',
+  assigned_to: 'Marisol Vega',
+  score: 65,
+  property_id: 'prop-1',
+}
+
+function renderModalRaw(props: Partial<React.ComponentProps<typeof MaintenanceIntakeModal>> = {}) {
+  render(
+    <EstimatingToastProvider>
+      <EstimatingShellContext.Provider value={makeShell()}>
+        <MaintenanceIntakeModal open onClose={vi.fn()} onCreated={vi.fn()} {...props} />
+      </EstimatingShellContext.Provider>
+    </EstimatingToastProvider>,
+  )
+}
+
+describe('MaintenanceIntakeModal — real lead context (Handoff 23 §4)', () => {
+  it('with no crmLead and no property, shows the pipeline banner without any stub lead (no L-TBD)', () => {
+    renderModalRaw({ crmLead: null })
+    expect(screen.getByText(/sourced from crm pipeline/i)).toBeInTheDocument()
+    expect(screen.queryByText(/L-TBD/)).not.toBeInTheDocument()
+  })
+
+  it('with an incoming property and no crmLead, fetches the property lead and shows it in the banner', async () => {
+    server.use(
+      http.get('/api/leads', ({ request }) => {
+        const url = new URL(request.url)
+        if (url.searchParams.get('property_id') === 'prop-1') {
+          return HttpResponse.json({ data: [h23Lead], total: 1, page: 1, page_size: 25, total_pages: 1 })
+        }
+        return HttpResponse.json({ data: [], total: 0, page: 1, page_size: 25, total_pages: 0 })
+      }),
+    )
+
+    renderModalRaw({ crmLead: null, initialProperty: h23Property })
+
+    expect(await screen.findByText(/lead-77/)).toBeInTheDocument()
+    expect(screen.getByText(/Marisol Vega/)).toBeInTheDocument()
+    expect(screen.queryByText(/L-TBD/)).not.toBeInTheDocument()
+    // Win probability pre-fills from the lead's score (65 → 65%)
+    await waitFor(() => expect(screen.getByLabelText(/win probability/i)).toHaveValue(65))
+  })
+
+  it('submission carries the real lead number and rep in the intake payload', async () => {
+    const user = userEvent.setup()
+    const fakeEstimate = buildMaintenanceEstimate({ status: 'new_from_sales' })
+    let captured: CreateEstimatePayload | null = null
+
+    server.use(
+      http.get('/api/leads', () =>
+        HttpResponse.json({ data: [h23Lead], total: 1, page: 1, page_size: 25, total_pages: 1 }),
+      ),
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        captured = (await request.json()) as CreateEstimatePayload
+        return HttpResponse.json({ ...fakeEstimate, id: 'test-est-h23' }, { status: 201 })
+      }),
+    )
+
+    renderModalRaw({ crmLead: null, initialProperty: h23Property })
+    await screen.findByText(/lead-77/)
+
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(captured).not.toBeNull())
+    const intake = (captured!.intake as { payload: Record<string, unknown> }).payload
+    expect(intake.crmLeadNumber).toBe('lead-77')
+    expect(intake.crmRep).toBe('Marisol Vega')
+    expect(captured!.crmRep).toBe('Marisol Vega')
+    expect(captured!.propertyId).toBe('prop-1')
+    // Pipeline kanban redesign — top-level leadId drives the lead→estimate
+    // write-back (Qualifying→Estimating), same field the Install intake sends.
+    expect(captured!.leadId).toBe('lead-77')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Pipeline kanban redesign — leadId drives the lead→estimate write-back
+// ---------------------------------------------------------------------------
+
+describe('MaintenanceIntakeModal — leadId (Pipeline kanban redesign)', () => {
+  it('sends the resolved crmLead lead number as top-level leadId on create', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'lead-id-test', status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal({ crmLead: { leadNumber: 'L-1042', rep: 'Jennifer Torres', winProbability: 0.65 } })
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].leadId).toBe('L-1042')
+  })
+
+  it('sends leadId null when no lead context is available (no crmLead, no property)', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'lead-id-blank', status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModalRaw({ crmLead: null })
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].leadId).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Handoff 28 — Branch field populated from Aspire config endpoint
+// ---------------------------------------------------------------------------
+
+describe('MaintenanceIntakeModal — Aspire-derived maintenance branch (Handoff 28)', () => {
+  it('starts with no branch selected (empty placeholder)', () => {
+    renderModal()
+    const select = screen.getByLabelText(/branch/i) as HTMLSelectElement
+    expect(select.value).toBe('')
+  })
+
+  it('loads branch options from GET /config/branches?kind=maintenance', async () => {
+    renderModal()
+    // MSW handler returns Bradenton, FL for maintenance kind (see handlers.ts).
+    const option = await screen.findByRole('option', { name: 'Bradenton, FL' })
+    expect(option).toBeInTheDocument()
+  })
+
+  it('shows multiple cities in the maintenance branch dropdown', async () => {
+    renderModal()
+    await screen.findByRole('option', { name: 'Bradenton, FL' })
+    expect(screen.getByRole('option', { name: 'Fort Myers, FL' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Raleigh, NC' })).toBeInTheDocument()
   })
 })

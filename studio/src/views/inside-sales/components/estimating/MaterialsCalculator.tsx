@@ -4,11 +4,13 @@
 // Principles:
 //   • Rendered only when openEstimate.estimateType === 'install'. The tab bar
 //     already hides the tab for maintenance; the component also guards itself.
-//   • Each material card is driven by a MaterialCalcRow from MATERIAL_FORMULA_ROWS
-//     (or the `rows` prop). Adding a material = add a config row, zero code edits.
-//   • All compute_type formulas live in buildMaterialCalc (lib/estimating/config).
+//   • Each material card is driven by a MaterialCalcRow from the API-fetched
+//     material_calcs config (Handoff 16; MATERIAL_FORMULA_ROWS is the offline
+//     fallback) or the `rows` prop. Adding a material = a DB row, zero code edits.
+//   • All compute_type formulas live in buildMaterialCalc (lib/estimating/config):
+//     the API supplies compute_type + factors (data); the math stays here.
 //   • Blue-cell (#eff6ff/#bfdbfe) convention for estimator-editable inputs.
-//   • Margin bands from DEFAULT_MARGIN_BANDS (never hardcoded 34/28 literals).
+//   • Margin bands from the config API (never hardcoded 34/28 literals).
 //   • Freight tables and volume-price thresholds (44,000 SF+) are future config;
 //     a placeholder note is present in the footer.
 //   • Factor inputs render as <select> when the row declares discrete options
@@ -18,13 +20,10 @@
 import { useState, useMemo } from 'react'
 import { Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import {
-  MATERIAL_FORMULA_ROWS,
-  buildMaterialCalc,
-  DEFAULT_MARGIN_BANDS,
-} from '@/lib/estimating/config'
+import { buildMaterialCalc } from '@/lib/estimating/config'
+import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import { groupMargin, marginBand } from '@/lib/estimating/calc'
-import type { MaterialCalcRow, MaterialComputeInput } from '@/types/estimating'
+import type { MarginBands, MaterialCalcRow, MaterialComputeInput } from '@/types/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
 
 // ---------------------------------------------------------------------------
@@ -45,8 +44,8 @@ function formatCents(cents: number): string {
   return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 }
 
-function gmLabel(gm: number): string {
-  const band = marginBand(gm, DEFAULT_MARGIN_BANDS)
+function gmLabel(gm: number, bands: MarginBands): string {
+  const band = marginBand(gm, bands)
   if (band === 'good') return 'text-[#2E7D52]'
   if (band === 'ok') return 'text-amber-600'
   return 'text-red-600'
@@ -99,10 +98,11 @@ function depthOptions(row: MaterialCalcRow): string[] {
 interface MaterialCardProps {
   row: MaterialCalcRow
   inputState: MaterialInputState
+  bands: MarginBands
   onInput: (field: keyof MaterialInputState, value: string) => void
 }
 
-function MaterialCard({ row, inputState, onInput }: MaterialCardProps) {
+function MaterialCard({ row, inputState, bands, onInput }: MaterialCardProps) {
   const calc = useMemo(() => buildMaterialCalc(row), [row])
   const input = toComputeInput(inputState)
   const { units, uom } = calc.compute(input)
@@ -261,7 +261,7 @@ function MaterialCard({ row, inputState, onInput }: MaterialCardProps) {
             <span className="text-[hsl(var(--muted-fg))]">GM %</span>
             <span
               data-testid="margin-gm"
-              className={cn('font-semibold tabular-nums', gmLabel(gm))}
+              className={cn('font-semibold tabular-nums', gmLabel(gm, bands))}
             >
               {(gm * 100).toFixed(1)}%
             </span>
@@ -287,26 +287,29 @@ function MaterialCard({ row, inputState, onInput }: MaterialCardProps) {
 
 export interface MaterialsCalculatorProps {
   /**
-   * Config rows to render. Defaults to MATERIAL_FORMULA_ROWS.
-   * Accepting this as a prop makes the component config-extensible in tests
-   * without code edits — a new row in the array renders a new card.
+   * Config rows to render. Defaults to the API-fetched material_calcs config
+   * (Handoff 16; MATERIAL_FORMULA_ROWS is the offline fallback). Accepting
+   * this as a prop makes the component config-extensible in tests without
+   * code edits — a new row in the array renders a new card.
    */
   rows?: MaterialCalcRow[]
 }
 
-export function MaterialsCalculator({ rows = MATERIAL_FORMULA_ROWS }: MaterialsCalculatorProps) {
+export function MaterialsCalculator({ rows: rowsProp }: MaterialsCalculatorProps) {
   const { openEstimate } = useEstimatingShell()
+  const { materialCalcs, marginBands } = useEstimatingConfig()
+  const rows = rowsProp ?? materialCalcs
 
   // Guard: this calculator is install-only.
   if (openEstimate && openEstimate.estimateType !== 'install') {
     return null
   }
 
-  return <MaterialsCalculatorInner rows={rows} />
+  return <MaterialsCalculatorInner rows={rows} bands={marginBands} />
 }
 
 // Inner component holds state (avoids hook-order issues with the guard above).
-function MaterialsCalculatorInner({ rows }: Required<MaterialsCalculatorProps>) {
+function MaterialsCalculatorInner({ rows, bands }: { rows: MaterialCalcRow[]; bands: MarginBands }) {
   // Per-material input state keyed by materialKey
   const [inputs, setInputs] = useState<Record<string, MaterialInputState>>(
     () => Object.fromEntries(rows.map((r) => [r.materialKey, defaultInputState()])),
@@ -350,6 +353,7 @@ function MaterialsCalculatorInner({ rows }: Required<MaterialsCalculatorProps>) 
               key={row.id}
               row={row}
               inputState={state}
+              bands={bands}
               onInput={(field, value) => handleInput(row.materialKey, field, value)}
             />
           )

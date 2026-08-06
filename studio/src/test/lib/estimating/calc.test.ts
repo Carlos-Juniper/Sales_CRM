@@ -165,12 +165,17 @@ describe('per1000SfRead', () => {
 })
 
 describe('bidQty', () => {
-  it('rounds up plan qty inflated by add pct', () => {
+  it('rounds plan qty inflated by add pct to the nearest unit (Handoff 20: round, not ceil)', () => {
     expect(bidQty(100, 0.1)).toBe(110)
-    expect(bidQty(101, 0.1)).toBe(112) // 111.1 -> 112
+    expect(bidQty(101, 0.1)).toBe(111) // 111.1 -> 111 (ceil would say 112)
+    expect(bidQty(24, 0.05)).toBe(25) // 25.2 -> 25 (ceil would say 26)
+    expect(bidQty(9, 0.1)).toBe(10) // 9.9 -> 10
   })
   it('returns plan qty when add pct is 0', () => {
     expect(bidQty(100, 0)).toBe(100)
+  })
+  it('is unaffected by float artifacts (100 × 1.1 = 110.00000000000001)', () => {
+    expect(bidQty(100, 0.1)).toBe(110)
   })
   it('returns 0 for zero plan qty', () => {
     expect(bidQty(0, 0.25)).toBe(0)
@@ -201,29 +206,29 @@ describe('groupMargin', () => {
 
 describe('tierForValue', () => {
   const tiers: ApprovalTier[] = [
-    { id: 't1', roleKey: 'branch_manager', label: 'Branch Manager', minValueCents: 0, maxValueCents: 10_000_000, order: 1, estimateType: 'maintenance' },
+    { id: 't1', roleKey: 'manager', label: 'Manager', minValueCents: 0, maxValueCents: 10_000_000, order: 1, estimateType: 'maintenance' },
     { id: 't2', roleKey: 'regional_director', label: 'Regional Director', minValueCents: 10_000_000, maxValueCents: 25_000_000, order: 2, estimateType: 'maintenance' },
-    { id: 't3', roleKey: 'bp', label: 'Business Partner', minValueCents: 25_000_000, maxValueCents: 100_000_000, order: 3, estimateType: 'maintenance' },
-    { id: 't4', roleKey: 'coo', label: 'COO', minValueCents: 100_000_000, maxValueCents: null, order: 4, estimateType: 'maintenance' },
+    { id: 't3', roleKey: 'vice_president', label: 'Vice President', minValueCents: 25_000_000, maxValueCents: 100_000_000, order: 3, estimateType: 'maintenance' },
+    { id: 't4', roleKey: 'ceo', label: 'CEO', minValueCents: 100_000_000, maxValueCents: null, order: 4, estimateType: 'maintenance' },
   ]
 
   it('returns the first tier where min <= value < max', () => {
-    expect(tierForValue(5_000_000, tiers)?.roleKey).toBe('branch_manager')
+    expect(tierForValue(5_000_000, tiers)?.roleKey).toBe('manager')
     expect(tierForValue(15_000_000, tiers)?.roleKey).toBe('regional_director')
   })
   it('treats min as inclusive and max as exclusive', () => {
     expect(tierForValue(10_000_000, tiers)?.roleKey).toBe('regional_director')
-    expect(tierForValue(9_999_999, tiers)?.roleKey).toBe('branch_manager')
+    expect(tierForValue(9_999_999, tiers)?.roleKey).toBe('manager')
   })
   it('treats a null max as unbounded', () => {
-    expect(tierForValue(500_000_000, tiers)?.roleKey).toBe('coo')
+    expect(tierForValue(500_000_000, tiers)?.roleKey).toBe('ceo')
   })
   it('returns null when no tier matches', () => {
     expect(tierForValue(5_000_000, [])).toBeNull()
   })
   it('respects tier order, not array order', () => {
     const shuffled = [tiers[3], tiers[1], tiers[0], tiers[2]]
-    expect(tierForValue(5_000_000, shuffled)?.roleKey).toBe('branch_manager')
+    expect(tierForValue(5_000_000, shuffled)?.roleKey).toBe('manager')
   })
 })
 

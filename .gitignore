@@ -28,7 +28,8 @@ studio/coverage/
 
 
 # One-time Azure→GCP data migration — kept local, never committed/pushed
-migrations/
+# (anchored to repo root; sql/migrations/ holds committed schema migrations)
+/migrations/
 migration_loader.py
 migration_runner.py
 inspect_azure_schema.py

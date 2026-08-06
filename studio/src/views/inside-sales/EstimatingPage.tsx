@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { TopNav } from '@/components/layout/TopNav'
 import { EstimateQueue } from './components/estimating/EstimateQueue'
 import { LineItemEditor } from './components/estimating/LineItemEditor'
@@ -19,16 +20,19 @@ import {
 // Handoff 05 — Materials Calculator
 import { MaterialsCalculator } from './components/estimating/MaterialsCalculator'
 // Handoff 11 — Maintenance Intake Modal
-import {
-  MaintenanceIntakeModal,
-  type CrmLeadContext,
-} from './components/estimating/MaintenanceIntakeModal'
+import { MaintenanceIntakeModal } from './components/estimating/MaintenanceIntakeModal'
+// Handoff 23 — real CRM lead context (replaces the L-TBD stub)
+import { crmLeadFromLead } from '@/lib/estimating/crmLead'
 // Handoff 12 — Install Intake Modal
 import { InstallIntakeModal } from './components/estimating/InstallIntakeModal'
 // Handoff 13 — ITB Tracker
 import { ItbTracker } from './components/estimating/ItbTracker'
-import { ITB_SCOPE_SEED } from '@/lib/estimating/config'
-import type { Estimate } from '@/types/estimating'
+// Handoff 16 — config-table read APIs (itb_scopes et al.), literals as fallback
+import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
+// Handoff 21 — ITB projects + scope statuses from the API (auto-generated per estimate)
+import { useItbProjects } from '@/hooks/useItbProjects'
+import type { Estimate, Property } from '@/types/estimating'
+import type { Lead } from '@/types'
 import { cn } from '@/lib/utils'
 
 interface EstimatingPageProps {
@@ -53,19 +57,33 @@ export default function EstimatingPage({
 }: EstimatingPageProps) {
   const [activeTab, setActiveTab] = useState<EstimatingTabKey>('queue')
   const [openEstimate, setOpenEstimate] = useState<Estimate | null>(initialOpenEstimate)
+  // API-fetched config (Handoff 16); config.ts seeds only as offline fallback.
+  const { itbScopes } = useEstimatingConfig()
+  // Handoff 21 — real ITB data: one auto-generated project per active estimate.
+  const { projects: itbProjects, statuses: itbStatuses } = useItbProjects()
+
+  // Handoff 15/23 — "Request estimate" from the property/Accounts UI navigates
+  // here with the canonical property AND its lead in router state; the
+  // maintenance intake modal opens pre-filled with both. The action is gated on
+  // a lead existing (Handoff 23 §1a), so property arrivals always carry one.
+  const location = useLocation()
+  const navState = location.state as {
+    requestEstimateProperty?: Property
+    requestEstimateLead?: Lead
+  } | null
+  const incomingProperty = navState?.requestEstimateProperty ?? null
+  const incomingLead = navState?.requestEstimateLead ?? null
+  // REAL CRM lead context (Handoff 23 — the L-TBD stub is gone). Null when the
+  // intake is opened from the queue CTA; the modal then sources the lead from
+  // leads.property_id once a property is selected.
+  const incomingCrmLead = incomingLead ? crmLeadFromLead(incomingLead) : null
 
   // Handoff 11 — Maintenance Intake Modal state
-  const [maintIntakeOpen, setMaintIntakeOpen] = useState(false)
+  const [maintIntakeOpen, setMaintIntakeOpen] = useState(incomingProperty != null)
   // Handoff 12 — Install Intake Modal state
   const [installIntakeOpen, setInstallIntakeOpen] = useState(false)
   // Queue refresh key: bump after successful intake to trigger re-fetch.
   const [queueKey, setQueueKey] = useState(0)
-  // Stub CRM lead context — in production this would come from the selected pipeline lead.
-  const stubCrmLead: CrmLeadContext = {
-    leadNumber: 'L-TBD',
-    rep: 'Sales Rep',
-    winProbability: 0.5,
-  }
 
   const tabs = visibleTabs(openEstimate?.estimateType ?? null)
   // If the open estimate's type hides the active tab, fall back to the queue.
@@ -110,9 +128,10 @@ export default function EstimatingPage({
         // Handoff 05 — Materials Calculator (install-only).
         return <MaterialsCalculator />
       case 'itb':
-        // Handoff 13 — ITB Tracker. Scopes from config (admin-extensible without migration).
-        // TODO(api): replace empty arrays with real API calls once ITB endpoints land.
-        return <ItbTracker projects={[]} scopes={ITB_SCOPE_SEED} statuses={[]} />
+        // Handoff 13 — ITB Tracker. Scopes from the config API (admin-extensible
+        // without migration; Handoff 16); projects + scope statuses from the ITB
+        // endpoints (Handoff 21 — auto-generated, all active estimates).
+        return <ItbTracker projects={itbProjects} scopes={itbScopes} statuses={itbStatuses} />
       default:
         return <TabPlaceholder tab={tab} />
     }
@@ -168,8 +187,9 @@ export default function EstimatingPage({
         <MaintenanceIntakeModal
           open={maintIntakeOpen}
           onClose={() => setMaintIntakeOpen(false)}
-          crmLead={stubCrmLead}
+          crmLead={incomingCrmLead}
           onCreated={() => setQueueKey((k) => k + 1)}
+          initialProperty={incomingProperty}
         />
 
         {/* Handoff 12 — Install Intake Modal (Sales-authored; controlled by queue's

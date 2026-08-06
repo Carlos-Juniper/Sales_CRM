@@ -79,7 +79,7 @@ All use password: **`demo`**
 | File | Description |
 |------|-------------|
 | `authStore.ts` | Persisted store (localStorage key `studio-auth`). Holds the authenticated `AuthUser` (id, name, email, role, token). Exposes `login`, `logout`, `setLoading`. Token is excluded from persistence. |
-| `leadsStore.ts` | Ephemeral store for the Lead Feed UI state: active filters (search, lead types, states, min score, assigned/unassigned toggles), sort field + direction, current page, and an optimistic-update cache keyed by lead id. |
+| `leadsStore.ts` | Ephemeral store for the Public Leads UI state: active filters (search, lead types, states, min score, assigned/unassigned toggles), sort field + direction, current page, and an optimistic-update cache keyed by lead id. |
 | `uiStore.ts` | Global UI state: theme (`light`/`dark`/`system`), sidebar collapsed state, selected lead id, and a toast queue with auto-dismiss at 4.5 s. |
 
 ---
@@ -252,7 +252,7 @@ Thin wrappers around Radix UI primitives with Tailwind styling applied via CVA (
 | `components/shared/` | Per-component unit tests for `LeadCard`, `ScoreMeter`, `StatusBadge`, `LeadTypeBadge`, `DeadlineChip`, `EmptyState`. |
 | `views/auth/LoginPage.test.tsx` | Integration tests for login form submission, validation, error display, and demo account shortcuts. |
 | `views/auth/RoleGate.test.tsx` | Tests for redirect behavior when unauthenticated or wrong role. |
-| `views/inside-sales/` | Page-level integration tests for Dashboard, Lead Feed, Outreach Queue, Bid Tracker, Pipeline, and Estimating pages. |
+| `views/inside-sales/` | Page-level integration tests for Dashboard, Public Leads, Outreach Queue, Bid Tracker, Pipeline, and Estimating pages. |
 | `views/inside-sales/components/` | Tests for `LeadDetailPanel` and `LeadFilters`. |
 | `router.test.tsx` | Route-level tests verifying default redirect, auth guard, and role-guard redirects. |
 | `edge-cases.test.tsx` | Cross-cutting edge-case tests (empty states, loading states, error boundaries). |

@@ -1,4 +1,5 @@
 import type {
+  CatalogItem,
   EstimateQueueItem,
   LegacyEstimate,
   LineItem,
@@ -239,7 +240,7 @@ export const mockEstimates: LegacyEstimate[] = [
     margin_pct: 0,
     target_margin_pct: 20,
     notes: 'Premium HOA. White-glove service tier expected. Premium materials pricing applied. Lighting upgrade potential add-on scope (~$18K).',
-    status: 'draft',
+    status: 'in_progress',
     created_at: new Date(Date.now() - 86400000).toISOString(),
     updated_at: new Date(Date.now() - 86400000).toISOString(),
   }),
@@ -428,6 +429,7 @@ export const mockBidOutcomes: BidOutcomeLog[] = [
 // ---------------------------------------------------------------------------
 
 import { contractTotal } from '@/lib/estimating/calc'
+import { INSTALL_KIT_CATALOG } from '@/lib/estimating/install'
 import type { CreateEstimatePayload } from '@/api/estimating'
 
 let fixtureSeq = 0
@@ -508,6 +510,7 @@ export function buildMaintenanceEstimate(
     aspireOpportunityId: 630956,
     aspireSyncStatus: 'synced',
     propertyId: null,
+    leadId: null,
     clientName: 'Dobson Ranch HOA',
     branch: 'Phoenix-Desert',
     customerType: 'hoa',
@@ -611,6 +614,7 @@ export function buildInstallEstimate(
     aspireOpportunityId: 631077,
     aspireSyncStatus: 'synced',
     propertyId: null,
+    leadId: null,
     clientName: 'Silverleaf Development LLC',
     branch: 'Phoenix-Desert',
     customerType: 'commercial',
@@ -660,6 +664,44 @@ export function toCreatePayload(estimate: Estimate): CreateEstimatePayload {
 export const mockEstimatesV2: Estimate[] = [buildMaintenanceEstimate(), buildInstallEstimate()]
 export const mockTakeoffLines: TakeoffLine[] = buildTakeoffLines(mockEstimatesV2[1].id)
 
+// ---------------------------------------------------------------------------
+// Handoff 22 — catalog_items seed for GET /catalog-items. The maintenance
+// rows mirror real workbook kits from sql/migrations/009_seed_catalog_items.sql
+// (rated + deliberately UNRATED rows, so the production-rate save guard is
+// exercisable in dev); the install rows reuse the kit literals (same ids, so
+// editor fixtures resolve whether the config API has loaded or not).
+// ---------------------------------------------------------------------------
+
+const maintKit = (over: Partial<CatalogItem> & Pick<CatalogItem, 'id' | 'description'>): CatalogItem => ({
+  uom: 'Sq. Ft.',
+  unitCostCents: 0,
+  unitSellCents: 0,
+  targetGm: 0.22,
+  kitType: 'maintenance_hours',
+  productionRate: null,
+  branch: 'All Branches',
+  active: true,
+  serviceType: '',
+  ...over,
+})
+
+export const CATALOG_ITEM_SEED: CatalogItem[] = [
+  // maintenance_hours (production-rated — units per labor hour)
+  maintKit({ id: 'kit-maint-3422', description: 'Standard Production Mowing', unitCostCents: 1750, productionRate: 67650, serviceType: 'Turf Area' }),
+  maintKit({ id: 'kit-maint-3431', description: 'Bed Area Maintenance', unitCostCents: 1750, productionRate: 3000, serviceType: 'Bed Area' }),
+  maintKit({ id: 'kit-maint-3432', description: 'Additional Round Up', unitCostCents: 1750, productionRate: 5000, serviceType: 'Bed Area' }),
+  // maintenance_hours (UNRATED — saving a null-hours line against these must be
+  // blocked by the guard until an estimator enters hours)
+  maintKit({ id: 'kit-maint-3435', description: 'Prune Easy', serviceType: 'Bed Area' }),
+  maintKit({ id: 'kit-maint-3440', description: 'Turf Area Fertilization', serviceType: 'Fertilization & Pest Control' }),
+  // install_quantity — the literal rows ARE CatalogItems (plus vendor quotes)
+  ...INSTALL_KIT_CATALOG.map((kit) => {
+    const item: CatalogItem & { vendorPricesCents?: number[] } = { ...kit }
+    delete item.vendorPricesCents
+    return item as CatalogItem
+  }),
+]
+
 /** Build a stored attachment fixture for tests. */
 export function buildStoredAttachment(
   estimateId: string,
@@ -669,6 +711,7 @@ export function buildStoredAttachment(
   return {
     id: `att-test-${Date.now()}`,
     intakeSubmissionId: submissionId,
+    estimateId: null,
     fileName: 'site_plan.pdf',
     contentType: 'application/pdf',
     sizeBytes: 512_000,
@@ -687,6 +730,7 @@ export function buildLegacyAttachment(submissionId: string): IntakeAttachment {
   return {
     id: `att-legacy-${Date.now()}`,
     intakeSubmissionId: submissionId,
+    estimateId: null,
     fileName: 'old_rfp.pdf',
     contentType: '',
     sizeBytes: 0,

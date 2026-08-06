@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `juniper`.`crm_users` (
+CREATE TABLE IF NOT EXISTS `juniper`.`users` (
     `id`              VARCHAR(36)  NOT NULL,
     `name`            VARCHAR(255) NOT NULL,
     `email`           VARCHAR(255) NOT NULL,
@@ -11,5 +11,7 @@ CREATE TABLE IF NOT EXISTS `juniper`.`crm_users` (
     `aspire_rep_id`   INT          NULL DEFAULT NULL,
     `created_at`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uq_email` (`email`)
+    UNIQUE KEY `uq_email` (`email`),
+    KEY `idx_users_branch` (`branch_id`),
+    KEY `idx_users_role` (`role`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

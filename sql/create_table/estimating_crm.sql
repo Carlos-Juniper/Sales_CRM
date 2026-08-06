@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS estimates (
     branch                  VARCHAR(100)  NOT NULL,
     customer_type           VARCHAR(30)   NOT NULL,
     acreage                 DECIMAL(10,2) DEFAULT NULL,
+    -- Handoff 27 — manual takeoff metadata (Takeoff Insert). Estimator-entered
+    -- today; Beam AI automated takeoff (paused) will write these same columns.
+    -- Acreage & sqft stay derived from sections — never stored here.
+    turf_area_acres         DECIMAL(10,2) DEFAULT NULL,
+    curb_miles              DECIMAL(10,2) DEFAULT NULL,
     contract_value_cents    BIGINT        NOT NULL DEFAULT 0,
     target_margin           DECIMAL(6,4)  NOT NULL DEFAULT 0.2200,
     status                  ENUM('new_from_sales','queued','in_progress','review',
@@ -41,11 +46,15 @@ CREATE TABLE IF NOT EXISTS estimates (
     notify_bm_rd_on_return  TINYINT(1)    NOT NULL DEFAULT 1,     -- approvalSettings.notifyBmRdOnReturn
     notes                   TEXT          DEFAULT NULL,           -- optional queue-card notes
     property_id             VARCHAR(36)   DEFAULT NULL,           -- properties.id (source of truth)
+    -- Logical ref to the sales lead this estimate was created against (Pipeline
+    -- kanban redesign). No FK; drives the lead→estimate status write-back.
+    lead_id                 VARCHAR(36)   DEFAULT NULL,
     aspire_opportunity_id   INT           DEFAULT NULL,           -- Aspire OpportunityID (write-back key)
     aspire_lost_reason_id   INT           DEFAULT NULL,           -- captured at the lost transition
     aspire_sync_status      ENUM('pending','synced','failed') NOT NULL DEFAULT 'pending',
     aspire_sync_error       TEXT          DEFAULT NULL,
     aspire_synced_at        DATETIME      DEFAULT NULL,
+    rfi_status              VARCHAR(255)  DEFAULT NULL,       -- Handoff 24 — tracked, never gates approval
     created_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -55,7 +64,8 @@ CREATE TABLE IF NOT EXISTS estimates (
     INDEX idx_estimates_due_back    (due_back_date),
     INDEX idx_estimates_ls_est      (assigned_ls_estimator),
     INDEX idx_estimates_sync_status (aspire_sync_status),
-    INDEX idx_estimates_property_id (property_id)
+    INDEX idx_estimates_property_id (property_id),
+    INDEX idx_estimates_lead_id     (lead_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §2 estimate_type immutability guard (DB-level; mirrored in the app layer).
@@ -100,6 +110,9 @@ CREATE TABLE IF NOT EXISTS estimate_sections (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §3.6 catalog_items / kits ---------------------------------------------------
+-- POPULATED by sql/migrations/009_seed_catalog_items.sql (Handoff 22 —
+-- generated from business docs/Juniper_Aspire_Kit_Review.xlsx by
+-- scripts/load_catalog_items.py: 80 install + 48 maintenance kits).
 CREATE TABLE IF NOT EXISTS catalog_items (
     id               VARCHAR(36)   NOT NULL,
     description      VARCHAR(255)  NOT NULL,
@@ -174,6 +187,9 @@ CREATE TABLE IF NOT EXISTS material_calcs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §3.8 takeoff_lines ----------------------------------------------------------
+-- bid_qty = round(plan_qty * (1 + add_pct)) (Handoff 20: round, not ceil);
+-- opportunity_qty is LOCALLY-set (never read from Aspire); catalog_item_id
+-- links a line to a kit for the estimate-Save Aspire qty push (migration 008).
 CREATE TABLE IF NOT EXISTS takeoff_lines (
     id              VARCHAR(36)   NOT NULL,
     estimate_id     VARCHAR(36)   NOT NULL,
@@ -183,16 +199,21 @@ CREATE TABLE IF NOT EXISTS takeoff_lines (
     add_pct         DECIMAL(6,4)  NOT NULL DEFAULT 0,
     measured_qty    DECIMAL(14,4) NOT NULL DEFAULT 0,
     opportunity_qty DECIMAL(14,4) NOT NULL DEFAULT 0,
+    catalog_item_id VARCHAR(36)   DEFAULT NULL,
+    created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     CONSTRAINT fk_takeoff_estimate
         FOREIGN KEY (estimate_id) REFERENCES estimates (id) ON DELETE CASCADE,
-    INDEX idx_takeoff_estimate (estimate_id)
+    CONSTRAINT fk_takeoff_catalog_item
+        FOREIGN KEY (catalog_item_id) REFERENCES catalog_items (id) ON DELETE SET NULL,
+    INDEX idx_takeoff_estimate (estimate_id),
+    INDEX idx_takeoff_catalog_item (catalog_item_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §3.9 approval_tiers ---------------------------------------------------------
 CREATE TABLE IF NOT EXISTS approval_tiers (
     id              VARCHAR(36)  NOT NULL,
-    role_key        ENUM('branch_manager','regional_director','bp','coo') NOT NULL,
+    role_key        ENUM('manager','regional_director','vice_president','ceo') NOT NULL,
     label           VARCHAR(100) NOT NULL,
     min_value_cents BIGINT       NOT NULL,
     max_value_cents BIGINT       DEFAULT NULL,
@@ -215,6 +236,9 @@ CREATE TABLE IF NOT EXISTS itb_scopes (
 
 CREATE TABLE IF NOT EXISTS itb_projects (
     id                VARCHAR(36)   NOT NULL,
+    -- Handoff 21: the estimate that auto-generated this row (1:1; UNIQUE).
+    -- NULLable for pre-auto-gen rows; kept in sync with migrations/006.
+    estimate_id       VARCHAR(36)   DEFAULT NULL,
     name              VARCHAR(255)  NOT NULL,
     aspire_number     VARCHAR(50)   DEFAULT NULL,
     branch            VARCHAR(100)  NOT NULL,
@@ -235,6 +259,7 @@ CREATE TABLE IF NOT EXISTS itb_projects (
     created_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_itb_estimate (estimate_id),
     INDEX idx_itb_due_date (due_date),
     INDEX idx_itb_branch   (branch)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -242,7 +267,7 @@ CREATE TABLE IF NOT EXISTS itb_projects (
 CREATE TABLE IF NOT EXISTS itb_scope_status (
     project_id  VARCHAR(36) NOT NULL,
     scope_id    VARCHAR(36) NOT NULL,
-    status_code ENUM('P','C','S','R','U','X','-','E','I') NOT NULL DEFAULT 'P',
+    status_code ENUM('P','C','S','R','U','X','-') NOT NULL DEFAULT 'P',
     PRIMARY KEY (project_id, scope_id),
     CONSTRAINT fk_itb_status_project
         FOREIGN KEY (project_id) REFERENCES itb_projects (id) ON DELETE CASCADE,
@@ -251,27 +276,37 @@ CREATE TABLE IF NOT EXISTS itb_scope_status (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §3.11 intake_submissions + attachments --------------------------------------
+-- Handoff 24 §3.3: estimate_id is NULLABLE and is_draft flags "Save draft"
+-- rows — a partial intake saved per-user (device-independent) that has NOT
+-- created an estimate yet. Submitting for real writes a normal row
+-- (is_draft=0, estimate_id set).
 CREATE TABLE IF NOT EXISTS intake_submissions (
     id            VARCHAR(36) NOT NULL,
-    estimate_id   VARCHAR(36) NOT NULL,
+    estimate_id   VARCHAR(36) NULL,
     estimate_type ENUM('maintenance','install') NOT NULL,
     payload       JSON        NOT NULL,
     submitted_by  VARCHAR(36) NOT NULL,
+    is_draft      TINYINT(1)  NOT NULL DEFAULT 0,
     created_at    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     CONSTRAINT fk_intake_estimate
         FOREIGN KEY (estimate_id) REFERENCES estimates (id) ON DELETE CASCADE,
-    INDEX idx_intake_estimate (estimate_id)
+    INDEX idx_intake_estimate (estimate_id),
+    INDEX idx_intake_drafts (submitted_by, is_draft)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Handoff 27: intake_submission_id is NULLable and estimate_id links straight
+-- to the estimate — takeoff scans (kind='takeoff_scan') are estimate-scoped
+-- and have no intake submission; intake docs keep the submission link.
 CREATE TABLE IF NOT EXISTS intake_attachments (
     id                   VARCHAR(36)  NOT NULL,
-    intake_submission_id VARCHAR(36)  NOT NULL,
+    intake_submission_id VARCHAR(36)  NULL,
+    estimate_id          VARCHAR(36)  NULL,
     file_name            VARCHAR(255) NOT NULL,
     content_type         VARCHAR(100) NOT NULL,
     size_bytes           BIGINT       NOT NULL DEFAULT 0,
     url                  TEXT         NULL,
-    kind                 ENUM('property_map','rfp','other') NOT NULL DEFAULT 'other',
+    kind                 ENUM('property_map','rfp','other','takeoff_scan') NOT NULL DEFAULT 'other',
     uploaded_by          VARCHAR(36)  NULL,
     status               ENUM('pending','stored','failed') NOT NULL DEFAULT 'pending',
     object_key           VARCHAR(512) NULL,
@@ -279,7 +314,10 @@ CREATE TABLE IF NOT EXISTS intake_attachments (
     PRIMARY KEY (id),
     CONSTRAINT fk_attachments_intake
         FOREIGN KEY (intake_submission_id) REFERENCES intake_submissions (id) ON DELETE CASCADE,
+    CONSTRAINT fk_attachments_estimate
+        FOREIGN KEY (estimate_id) REFERENCES estimates (id) ON DELETE CASCADE,
     INDEX idx_attachments_intake (intake_submission_id),
+    INDEX idx_attachments_estimate (estimate_id),
     INDEX idx_attachments_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -287,7 +325,7 @@ CREATE TABLE IF NOT EXISTS intake_attachments (
 CREATE TABLE IF NOT EXISTS estimate_adjustments (
     id          VARCHAR(36)   NOT NULL,
     estimate_id VARCHAR(36)   NOT NULL,
-    actor       VARCHAR(36)   NOT NULL,
+    actor       VARCHAR(255)  NOT NULL,  -- JWT display name/email (mirrors estimate_status_transitions.actor)
     field       ENUM('complexity','margin') NOT NULL,
     from_value  DECIMAL(12,4) NOT NULL,
     to_value    DECIMAL(12,4) NOT NULL,
@@ -313,10 +351,14 @@ CREATE TABLE IF NOT EXISTS margin_bands (
 -- ---------------------------------------------------------------------------
 
 INSERT INTO approval_tiers (id, role_key, label, min_value_cents, max_value_cents, tier_order, estimate_type) VALUES
-    ('tier-maint-bm',  'branch_manager',    'Branch Manager',    0,           10000000,  1, 'maintenance'),
+    ('tier-maint-mgr', 'manager',           'Manager',           0,           10000000,  1, 'maintenance'),
     ('tier-maint-rd',  'regional_director', 'Regional Director', 10000000,    25000000,  2, 'maintenance'),
-    ('tier-maint-bp',  'bp',                'Business Partner',  25000000,    100000000, 3, 'maintenance'),
-    ('tier-maint-coo', 'coo',               'COO',               100000000,   NULL,      4, 'maintenance')
+    ('tier-maint-vp',  'vice_president',    'Vice President',    25000000,    100000000, 3, 'maintenance'),
+    ('tier-maint-ceo', 'ceo',               'CEO',               100000000,   NULL,      4, 'maintenance'),
+    ('tier-inst-mgr',  'manager',           'Manager',           0,           10000000,  1, 'install'),
+    ('tier-inst-rd',   'regional_director', 'Regional Director', 10000000,    25000000,  2, 'install'),
+    ('tier-inst-vp',   'vice_president',    'Vice President',    25000000,    100000000, 3, 'install'),
+    ('tier-inst-ceo',  'ceo',               'CEO',               100000000,   NULL,      4, 'install')
 ON DUPLICATE KEY UPDATE label = VALUES(label);
 
 INSERT INTO margin_bands (id, name, good_min, ok_min) VALUES
@@ -345,3 +387,36 @@ INSERT INTO material_calcs (id, material_key, label, compute_type, factors, unit
     ('mc-backfill',     'backfill',     'Backfill Soil',               'backfill',  '{"defaultDepthIn": 6, "compactionPct": 0.15}',                     5500,  3400,  'cy',      NULL),
     ('mc-root-barrier', 'root_barrier', 'Root Barrier',                'divPiece',  '{"pieceLengthFt": 24}',                                            14500, 9800,  'pcs',     NULL)
 ON DUPLICATE KEY UPDATE label = VALUES(label);
+
+-- ── Handoff 15: canonical properties (crm-schema copy) ───────────────────────
+-- Estimates hang off properties.id; leads do too (leads.property_id). This is
+-- the unprefixed copy so a fresh `crm` DB is reproducible from the crm set.
+-- Kept in sync with sql/migrations/001_canonical_properties.sql.
+CREATE TABLE IF NOT EXISTS properties (
+    id                    VARCHAR(36)   NOT NULL,
+    property_type         VARCHAR(32)   NOT NULL,             -- hoa/hospital/…/manual (VARCHAR, not ENUM)
+    source_type           VARCHAR(32)   NOT NULL,             -- provenance table, or 'manual'
+    source_id             VARCHAR(36)   DEFAULT NULL,         -- vertical row id; NULL when manual
+    name                  VARCHAR(255)  NOT NULL,
+    address1              VARCHAR(255)  NOT NULL DEFAULT '',
+    address2              VARCHAR(255)  DEFAULT NULL,
+    city                  VARCHAR(100)  NOT NULL DEFAULT '',
+    state                 CHAR(2)       NOT NULL DEFAULT '',
+    zip                   VARCHAR(20)   NOT NULL DEFAULT '',
+    branch_city           VARCHAR(100)  DEFAULT NULL,
+    customer_type         VARCHAR(50)   DEFAULT NULL,
+    management_company_id VARCHAR(36)   DEFAULT NULL,
+    aspire_property_id    INT           DEFAULT NULL,
+    -- 'unsynced' default: local-only until an estimate submission triggers the push
+    aspire_sync_status    ENUM('unsynced','pending','synced','failed') NOT NULL DEFAULT 'unsynced',
+    aspire_sync_error     TEXT          DEFAULT NULL,
+    aspire_synced_at      DATETIME      DEFAULT NULL,
+    created_at            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_prop_source        (source_type, source_id),
+    INDEX idx_prop_property_type     (property_type),
+    INDEX idx_prop_name              (name),
+    INDEX idx_prop_sync_status       (aspire_sync_status),
+    INDEX idx_prop_mgmt_co_id        (management_company_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -151,6 +151,8 @@ class CreateLeadBody(BaseModel):
     status: str = "new"
     contact_name: Optional[str] = None
     contact_email: Optional[str] = None
+    # Canonical properties.id (Handoff 15) — optional: manual leads may have none.
+    property_id: Optional[str] = None
 
 
 class PatchLeadBody(BaseModel):
@@ -342,6 +344,7 @@ async def list_leads(
     search: Optional[str] = None,
     states: Optional[str] = None,
     min_score: Optional[int] = None,
+    property_id: Optional[str] = None,
     sort_by: str = "score",
     sort_dir: str = "desc",
     page: int = 1,
@@ -385,6 +388,12 @@ async def list_leads(
         conditions.append("score >= %s")
         params.append(min_score)
 
+    # Handoff 23 — property engagement: look up the lead(s) hanging off one
+    # canonical properties.id ("Request estimate" gating + intake lead context).
+    if property_id:
+        conditions.append("property_id = %s")
+        params.append(property_id)
+
     where = f"WHERE {' AND '.join(conditions)}"
     offset = (page - 1) * page_size
 
@@ -419,11 +428,11 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
         INSERT INTO leads
             (id, source, lead_type, property_name, city, state,
              estimated_contract_value, estimated_acreage, units, status,
-             contact_name, contact_email, created_at, updated_at)
+             contact_name, contact_email, property_id, created_at, updated_at)
         VALUES
             (%s, 'manual', %s, %s, %s, %s,
              %s, %s, %s, %s,
-             %s, %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+             %s, %s, %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
             new_id,
@@ -437,6 +446,7 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
             body.status,
             body.contact_name,
             body.contact_email,
+            body.property_id,
         ],
     )
     return await _fetch_lead(new_id)
@@ -486,10 +496,20 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
 
     new_status = data.get("status")
     if new_status and new_status != current.get("status"):
-        hoa_prop_id = current.get("hoa_property_id")
-        if hoa_prop_id:
-            if new_status == "won":
-                await set_hoa_property_status(hoa_prop_id, "won")
+        # Handoff 15 reverse-lookup: lead → canonical property → (if the
+        # property came from an HOA prospect) hoa_properties via source_id.
+        prop_id = current.get("property_id")
+        if prop_id and new_status == "won":
+            prop_rows = await query(
+                "SELECT source_type, source_id FROM properties WHERE id = %s",
+                [prop_id],
+            )
+            if (
+                prop_rows
+                and prop_rows[0].get("source_type") == "hoa"
+                and prop_rows[0].get("source_id")
+            ):
+                await set_hoa_property_status(prop_rows[0]["source_id"], "won")
             # "lost" no longer auto-downgrades the property — status is managed manually
         await execute(
             """
@@ -1393,13 +1413,23 @@ async def patch_bid(bid_id: str, body: PatchBidBody, _user: dict = Depends(requi
             lead_id_for_bid = bid_rows[0].get("lead_id")
             if lead_id_for_bid:
                 lead_rows = await query(
-                    "SELECT hoa_property_id FROM leads WHERE id = %s",
+                    "SELECT property_id FROM leads WHERE id = %s",
                     [lead_id_for_bid],
                 )
-                if lead_rows:
-                    hoa_prop_id = lead_rows[0].get("hoa_property_id")
-                    if hoa_prop_id:
-                        await set_property_contacted(hoa_prop_id)
+                # Handoff 15 reverse-lookup: lead → canonical property → (if
+                # HOA-sourced) hoa_properties via source_id.
+                prop_id = lead_rows[0].get("property_id") if lead_rows else None
+                if prop_id:
+                    prop_rows = await query(
+                        "SELECT source_type, source_id FROM properties WHERE id = %s",
+                        [prop_id],
+                    )
+                    if (
+                        prop_rows
+                        and prop_rows[0].get("source_type") == "hoa"
+                        and prop_rows[0].get("source_id")
+                    ):
+                        await set_property_contacted(prop_rows[0]["source_id"])
 
     rows = await query("SELECT * FROM bids WHERE id = %s", [bid_id])
     return _coerce_row(rows[0])

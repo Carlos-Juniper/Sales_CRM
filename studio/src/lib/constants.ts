@@ -1,3 +1,5 @@
+import { PIPELINE_STAGES } from './pipelineStages'
+
 export const BRAND_GREEN = '#2E7D52'
 
 export const COMPANY_INFO = {
@@ -25,7 +27,9 @@ export const STATUS_COLORS = {
   proposal_sent: { bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-700 dark:text-purple-300' },
   won: { bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-700 dark:text-emerald-300' },
   lost: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-300' },
-  handed_off: { bg: 'bg-indigo-100 dark:bg-indigo-900/30', text: 'text-indigo-700 dark:text-indigo-300' },
+  estimating: { bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-700 dark:text-orange-300' },
+  op_review: { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-700 dark:text-amber-300' },
+  approved: { bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-700 dark:text-emerald-300' },
 } as const
 
 export const BID_STATUS_LABELS = {
@@ -46,15 +50,16 @@ export const LEAD_STATUS_LABELS = {
   proposal_sent: 'Proposal Sent',
   won: 'Won',
   lost: 'Lost',
-  handed_off: 'Handed Off',
+  estimating: 'Estimating',
+  op_review: 'OP Review',
+  approved: 'Approved',
 } as const
 
-export const KANBAN_COLUMNS = [
-  { id: 'new', title: 'New Leads', color: 'border-sky-400' },
-  { id: 'contacted', title: 'Contacted', color: 'border-blue-400' },
-  { id: 'proposal_sent', title: 'Proposal Sent', color: 'border-purple-400' },
-  { id: 'won', title: 'Won / Lost', color: 'border-emerald-400' },
-] as const
+export const KANBAN_COLUMNS = PIPELINE_STAGES.map((stage) => ({
+  id: stage.key,
+  title: stage.label,
+  color: stage.borderColor,
+}))
 
 export const DISQUALIFY_REASONS = [
   'Out of service area',

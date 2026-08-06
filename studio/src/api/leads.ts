@@ -16,6 +16,8 @@ export interface LeadQueryParams {
   search?: string
   states?: string
   min_score?: number
+  /** Canonical properties.id (Handoff 23) — look up the lead(s) for one property. */
+  property_id?: string
   page?: number
   page_size?: number
   sort_by?: string
@@ -34,6 +36,8 @@ export interface CreateLeadPayload {
   units?: number
   contact_name?: string
   contact_email?: string
+  /** Canonical properties.id (Handoff 15) — optional create-lead-from-property link. */
+  property_id?: string | null
 }
 
 export const leadsApi = {
@@ -49,7 +53,7 @@ export const leadsApi = {
   deleteLead: (id: string): Promise<void> => apiClient.delete(`/leads/${id}`),
   handoff: (payload: HandoffPayload) =>
     apiClient.patch<Lead>(`/leads/${payload.lead_id}`, {
-      status: 'handed_off',
+      status: 'estimating',
       assigned_to: payload.assigned_to,
       handoff_notes: payload.handoff_notes,
       division_id: payload.division_id ?? null,

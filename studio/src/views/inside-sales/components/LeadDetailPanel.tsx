@@ -224,9 +224,9 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                   size="sm"
                   className="flex items-center gap-1.5 bg-[#2E7D52] hover:bg-[#256644] text-white"
                   onClick={() => setHandoffOpen(true)}
-                  disabled={lead.status === 'handed_off'}
+                  disabled={lead.status === 'estimating'}
                 >
-                  {lead.status === 'handed_off' ? 'Handed Off' : 'Hand off to Estimating Team'}
+                  {lead.status === 'estimating' ? 'Handed Off' : 'Hand off to Estimating Team'}
                   <ArrowRight className="h-3.5 w-3.5" />
                 </Button>
                 <Button

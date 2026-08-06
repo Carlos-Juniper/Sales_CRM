@@ -47,21 +47,25 @@ export const DISCREPANCY_THRESHOLD = {
 // ----- Approval tiers (§3.9) ---------------------------------------------------
 
 /**
- * Maintenance ladder per BRD I-7: BM <$100K · RD $100K–$250K · BP $250K–$1M ·
- * COO >$1M. Values in integer cents; min inclusive, max exclusive, null max
- * unbounded.
+ * Ladder per BRD I-7: Manager <$100K · RD $100K–$250K · VP $250K–$1M ·
+ * CEO >$1M. Values in integer cents; min inclusive, max exclusive, null max
+ * unbounded. Role keys equal the canonical auth roles (Handoffs 18/19).
  *
- * Install has NO approval matrix yet (open item) — when defined, it is added
- * here as rows with `estimateType: 'install'`; no code change required.
+ * Install uses the SAME ladder as maintenance (Handoff 19 §4) — its own rows
+ * with mirrored $ bands, so either can diverge later as a data change.
  */
 export const APPROVAL_TIER_SEED: ApprovalTier[] = [
-  { id: 'tier-maint-bm', roleKey: 'branch_manager', label: 'Branch Manager', minValueCents: 0, maxValueCents: 10_000_000, order: 1, estimateType: 'maintenance' },
+  { id: 'tier-maint-mgr', roleKey: 'manager', label: 'Manager', minValueCents: 0, maxValueCents: 10_000_000, order: 1, estimateType: 'maintenance' },
   { id: 'tier-maint-rd', roleKey: 'regional_director', label: 'Regional Director', minValueCents: 10_000_000, maxValueCents: 25_000_000, order: 2, estimateType: 'maintenance' },
-  { id: 'tier-maint-bp', roleKey: 'bp', label: 'Business Partner', minValueCents: 25_000_000, maxValueCents: 100_000_000, order: 3, estimateType: 'maintenance' },
-  { id: 'tier-maint-coo', roleKey: 'coo', label: 'COO', minValueCents: 100_000_000, maxValueCents: null, order: 4, estimateType: 'maintenance' },
+  { id: 'tier-maint-vp', roleKey: 'vice_president', label: 'Vice President', minValueCents: 25_000_000, maxValueCents: 100_000_000, order: 3, estimateType: 'maintenance' },
+  { id: 'tier-maint-ceo', roleKey: 'ceo', label: 'CEO', minValueCents: 100_000_000, maxValueCents: null, order: 4, estimateType: 'maintenance' },
+  { id: 'tier-inst-mgr', roleKey: 'manager', label: 'Manager', minValueCents: 0, maxValueCents: 10_000_000, order: 1, estimateType: 'install' },
+  { id: 'tier-inst-rd', roleKey: 'regional_director', label: 'Regional Director', minValueCents: 10_000_000, maxValueCents: 25_000_000, order: 2, estimateType: 'install' },
+  { id: 'tier-inst-vp', roleKey: 'vice_president', label: 'Vice President', minValueCents: 25_000_000, maxValueCents: 100_000_000, order: 3, estimateType: 'install' },
+  { id: 'tier-inst-ceo', roleKey: 'ceo', label: 'CEO', minValueCents: 100_000_000, maxValueCents: null, order: 4, estimateType: 'install' },
 ]
 
-/** Ladder for one estimate type. Empty ⇒ "no approval matrix defined". */
+/** Ladder for one estimate type. */
 export function tiersForType(tiers: ApprovalTier[], estimateType: EstimateType): ApprovalTier[] {
   return tiers.filter((t) => t.estimateType === estimateType)
 }

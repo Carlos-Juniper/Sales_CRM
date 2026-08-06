@@ -47,7 +47,7 @@ def test_provision_inserts_new_user():
     values = list(params)
     assert "new.rep@juniperlandscaping.com" in values
     assert "New Rep" in values
-    assert "inside_sales" in values
+    assert "sales" in values  # legacy inside_sales normalizes to sales (Handoff 18)
     assert "b1" in values
 
 

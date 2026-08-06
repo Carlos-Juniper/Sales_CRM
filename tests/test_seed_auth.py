@@ -2,9 +2,9 @@
 Tests for api/seed_auth.py — the no-password crm_users onboarding tool.
 
 Manual login was removed, so seed_auth no longer provisions passwords into
-crm_logins. It now upserts rows into the BigQuery `users` table (the same store
-entra_callback reads for authorization), via the shared query()/execute()
-helpers — email, name, role, branch_id.
+crm_logins. It now upserts rows into the GCP Cloud SQL MySQL `users` table
+(the same store entra_callback reads for authorization), via the shared
+query()/execute() helpers — email, name, role, branch_id.
 
 DB is fully mocked — no real datastore required.
 Run with:  pytest tests/test_seed_auth.py -v
@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 os.environ.setdefault("GCP_PROJECT", "test-project")
-os.environ.setdefault("BQ_DATASET", "crm")
 
 import api.seed_auth as seed_auth  # noqa: E402
 
@@ -44,7 +43,7 @@ def test_provision_inserts_new_user():
     assert execute_mock.await_count == 1
     sql, params = execute_mock.await_args[0]
     assert "INSERT" in sql.upper()
-    assert ".users`" in sql  # BigQuery T('users') reference — same table the callback reads
+    assert ".users`" in sql  # MySQL `users` table reference — same table the callback reads
     values = [p.value for p in params]
     assert "new.rep@juniperlandscaping.com" in values
     assert "New Rep" in values
@@ -89,9 +88,45 @@ def test_provision_rejects_unknown_role():
             existing=[],
             email="x@juniperlandscaping.com",
             name="X",
-            role="ceo",
+            role="astronaut",
             branch_id="b1",
         )
+
+
+def test_valid_roles_are_the_nine_canonical_roles():
+    # Handoff 18 §2 — one canonical role vocabulary, backend-validated.
+    assert seed_auth.VALID_ROLES == frozenset({
+        "procurement", "sales", "admin", "manager", "regional_director",
+        "maintenance_estimating", "install_estimating", "vice_president", "ceo",
+    })
+
+
+def test_provision_accepts_new_canonical_roles():
+    _, execute_mock = _run(
+        existing=[],
+        email="exec@juniperlandscaping.com",
+        name="Big Exec",
+        role="ceo",
+        branch_id=None,
+    )
+    sql, params = execute_mock.await_args[0]
+    assert "INSERT" in sql.upper()
+    assert "ceo" in list(params)
+
+
+def test_provision_normalizes_legacy_roles_to_sales():
+    # Legacy inside_sales/outside_sales collapse into `sales` (Handoff 18).
+    for legacy in ("inside_sales", "outside_sales"):
+        _, execute_mock = _run(
+            existing=[],
+            email=f"{legacy}@juniperlandscaping.com",
+            name="Legacy Rep",
+            role=legacy,
+            branch_id=None,
+        )
+        params = list(execute_mock.await_args[0][1])
+        assert "sales" in params
+        assert legacy not in params
 
 
 def test_provision_requires_branch_for_manager():

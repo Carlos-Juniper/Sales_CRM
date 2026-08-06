@@ -10,10 +10,6 @@ import { render, makeUser } from '@/test/utils'
 import { useAuthStore } from '@/store/authStore'
 import { estimatingApi } from '@/api/estimating'
 import { APPROVAL_TIER_SEED } from '@/lib/estimating/config'
-import {
-  adjustmentAuditLog,
-  clearAdjustmentAuditLog,
-} from '@/lib/estimating/approvalReview'
 import { buildMaintenanceEstimate, toCreatePayload } from '@/mocks/estimatingData'
 import type { Estimate } from '@/types/estimating'
 import { ApprovalQueue } from '@/views/inside-sales/components/estimating/ApprovalQueue'
@@ -73,7 +69,6 @@ function daysAgo(n: number): string {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  clearAdjustmentAuditLog()
   useAuthStore.setState({ user: makeUser({ name: 'Amanda Torres', role: 'manager' }) })
 })
 
@@ -85,7 +80,7 @@ describe('ApprovalQueue — routing (config-driven)', () => {
     const rdEst = pending(15_000_000, { name: 'Silverleaf HOA' })
     render(<Harness estimates={[bmEst, rdEst]} />)
 
-    // default view: Branch Manager
+    // default view: Manager
     expect(screen.getByText('Legacy HOA Peoria')).toBeInTheDocument()
     expect(screen.queryByText('Silverleaf HOA')).not.toBeInTheDocument()
 
@@ -96,7 +91,7 @@ describe('ApprovalQueue — routing (config-driven)', () => {
 
   it('shows the empty state when nothing routes to the viewer', async () => {
     render(<Harness estimates={[pending(9_500_000)]} />)
-    await userEvent.click(screen.getByRole('button', { name: 'COO' }))
+    await userEvent.click(screen.getByRole('button', { name: 'CEO' }))
     expect(screen.getByText(/queue is clear/i)).toBeInTheDocument()
   })
 
@@ -135,12 +130,12 @@ describe('ApprovalQueue — stats', () => {
 
 // ----- Escalation banner on cards ---------------------------------------------------
 
-describe('ApprovalQueue — COO escalation banner', () => {
-  it('flags >$1M estimates with the COO open-item banner', async () => {
+describe('ApprovalQueue — CEO >$1M open-item banner', () => {
+  it('flags >$1M estimates with the CEO open-item banner', async () => {
     render(<Harness estimates={[pending(124_000_000, { name: 'Maricopa County' })]} />)
-    await userEvent.click(screen.getByRole('button', { name: 'COO' }))
+    await userEvent.click(screen.getByRole('button', { name: 'CEO' }))
     expect(screen.getByText('Maricopa County')).toBeInTheDocument()
-    expect(screen.getByText(/COO mechanism to confirm/i)).toBeInTheDocument()
+    expect(screen.getByText(/CEO mechanism to confirm/i)).toBeInTheDocument()
   })
 })
 
@@ -171,7 +166,7 @@ describe('ApprovalQueue — review drawer', () => {
 
     expect(within(drawer).getByTestId('live-total')).toHaveTextContent('$95,000')
     expect(within(drawer).getByTestId('lever-readout')).toHaveTextContent('Cost $74,100 · was $95,000')
-    expect(within(drawer).getByTestId('routes-to')).toHaveTextContent('Routes to Branch Manager')
+    expect(within(drawer).getByTestId('routes-to')).toHaveTextContent('Routes to Manager')
 
     // margin 22 → 30: liveValue = 74,100/0.70 = $105,857 → Regional Director
     fireEvent.change(within(drawer).getByRole('slider', { name: /gross margin/i }), {
@@ -190,10 +185,10 @@ describe('ApprovalQueue — review drawer', () => {
     await userEvent.click(within(drawer).getByRole('button', { name: /reset complexity/i }))
     await userEvent.click(within(drawer).getByRole('button', { name: /reset margin/i }))
     expect(within(drawer).getByTestId('live-total')).toHaveTextContent('$95,000')
-    expect(within(drawer).getByTestId('routes-to')).toHaveTextContent('Routes to Branch Manager')
+    expect(within(drawer).getByTestId('routes-to')).toHaveTextContent('Routes to Manager')
   })
 
-  it('over-ceiling adjustment shows the escalation banner and swaps the primary action', async () => {
+  it('over-ceiling adjustment disables Approve — the primary becomes a plain "Save adjustment" (no Escalate)', async () => {
     const est = pending(9_500_000)
     render(<Harness estimates={[est]} />)
     await userEvent.click(screen.getByText(est.name))
@@ -205,11 +200,14 @@ describe('ApprovalQueue — review drawer', () => {
     fireEvent.change(within(drawer).getByRole('slider', { name: /gross margin/i }), {
       target: { value: '30' },
     })
-    expect(within(drawer).getByTestId('over-ceiling-banner')).toHaveTextContent(/above your approval ceiling/i)
-    expect(
-      within(drawer).getByRole('button', { name: /escalate to regional director/i }),
-    ).toBeInTheDocument()
+    const banner = within(drawer).getByTestId('over-ceiling-banner')
+    expect(banner).toHaveTextContent(/above your approval ceiling/i)
+    // Informational: the estimate re-routes on save; no escalate framing anywhere.
+    expect(banner).toHaveTextContent(/routes it to/i)
+    expect(banner).not.toHaveTextContent(/escalat/i)
+    expect(within(drawer).getByRole('button', { name: 'Save adjustment' })).toBeInTheDocument()
     expect(within(drawer).queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+    expect(within(drawer).queryByText(/escalate/i)).not.toBeInTheDocument()
   })
 
   it('changed levers within ceiling relabel the primary to "Save adjustment & approve"', async () => {
@@ -256,43 +254,48 @@ describe('ApprovalQueue — actions', () => {
     await userEvent.click(within(drawer).getByRole('button', { name: /save adjustment & approve/i }))
 
     await waitFor(() => expect(screen.queryByTestId(`aq-card-${est.id}`)).not.toBeInTheDocument())
-    // audited (BRD III-1): from/to + actor
-    expect(adjustmentAuditLog).toHaveLength(1)
-    expect(adjustmentAuditLog[0]).toMatchObject({
+    // PERSISTED audit (BRD III-1): from/to + actor, via POST /adjustments
+    const trail = await estimatingApi.listAdjustments(est.id)
+    expect(trail).toHaveLength(1)
+    expect(trail[0]).toMatchObject({
       estimateId: est.id,
       field: 'complexity',
       actor: 'Amanda Torres',
     })
-    expect(adjustmentAuditLog[0].fromValue).toBeCloseTo(0.1)
-    expect(adjustmentAuditLog[0].toValue).toBeCloseTo(0.14)
+    expect(trail[0].fromValue).toBeCloseTo(0.1)
+    expect(trail[0].toValue).toBeCloseTo(0.14)
 
     const updated = await estimatingApi.get(est.id)
     expect(updated.status).toBe('handed_back')
     // complexity +4 pts scales cost: 74,100 × 1.04 / 0.78 = $98,800
     expect(updated.contractValueCents).toBe(Math.round(Math.round(9_500_000 * 0.78) * 1.04 / 0.78))
+    // …and BOTH audit paths were written: adjustment row + status transitions.
+    const transitions = await estimatingApi.listStatusTransitions(est.id)
+    expect(transitions.map((t) => t.to)).toEqual(['approved', 'handed_back'])
   })
 
-  it('Escalate saves the adjustment and re-routes without approving', async () => {
-    const est = await seed(pending(9_500_000, { name: 'Escalate Me' }))
+  it('saving an over-ceiling adjustment re-routes to the correct tier queue without approving', async () => {
+    const est = await seed(pending(9_500_000, { name: 'Reroute Me' }))
     render(<Harness estimates={[est]} />)
-    await userEvent.click(screen.getByText('Escalate Me'))
+    await userEvent.click(screen.getByText('Reroute Me'))
     const drawer = screen.getByRole('dialog')
 
     fireEvent.change(within(drawer).getByRole('slider', { name: /gross margin/i }), {
       target: { value: '30' },
     })
-    await userEvent.click(within(drawer).getByRole('button', { name: /escalate to regional director/i }))
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Save adjustment' }))
 
-    // leaves the BM queue (now routed to RD by value) but is NOT approved
+    // leaves the MGR queue (now routed to RD by value) but is NOT approved
     await waitFor(() => expect(screen.queryByTestId(`aq-card-${est.id}`)).not.toBeInTheDocument())
     const updated = await estimatingApi.get(est.id)
     expect(updated.status).toBe('pending_approval')
     expect(updated.targetMargin).toBeCloseTo(0.3)
-    expect(adjustmentAuditLog.some((r) => r.field === 'margin')).toBe(true)
+    const trail = await estimatingApi.listAdjustments(est.id)
+    expect(trail.some((r) => r.field === 'margin')).toBe(true)
 
-    // …and it now appears under the RD view
+    // …and it now appears under the RD view — value-driven auto-routing
     await userEvent.click(screen.getByRole('button', { name: 'RD' }))
-    expect(await screen.findByText('Escalate Me')).toBeInTheDocument()
+    expect(await screen.findByText('Reroute Me')).toBeInTheDocument()
   })
 
   it('Send back requires a reason and re-enters the estimator queue as a revision', async () => {

@@ -7,8 +7,11 @@
 //   - Gross margin (price) 10–40% → re-prices
 // All math + the tier re-route come from lib/estimating/approvalReview; every
 // saved adjustment writes estimate_adjustments rows and reverting to the
-// original is one click. If the live value climbs past the approver's ceiling
-// the primary action becomes "Escalate to {tier}".
+// original is one click. If the live value climbs past the approver's ceiling,
+// Approve is no longer available — the primary action becomes a plain
+// "Save adjustment" (persist without approving); the value-driven tier
+// recompute re-routes the estimate to the higher tier's queue automatically.
+// There is NO explicit "Escalate" action (Handoff 19 §4).
 // ---------------------------------------------------------------------------
 
 import { useMemo, useState } from 'react'
@@ -41,7 +44,7 @@ export interface ApproverReviewDrawerProps {
   estimate: Estimate
   /** The tier the estimate is CURRENTLY routed to (badge in the header). */
   tier: ApprovalTier | null
-  /** The viewer's own tier — the escalation ceiling. */
+  /** The viewer's own tier — the approval ceiling. */
   approverTier: ApprovalTier | null
   /** Full ladder for the estimate's type. */
   tiers: ApprovalTier[]
@@ -52,8 +55,11 @@ export interface ApproverReviewDrawerProps {
   onClose: () => void
   /** Approve, optionally persisting adjusted levers first. */
   onApprove: (live: { compPct: number; marginPct: number }, changed: boolean) => void
-  /** Over-ceiling: persist the adjustment and re-route without approving. */
-  onEscalate: (live: { compPct: number; marginPct: number }, toTier: ApprovalTier) => void
+  /**
+   * Over-ceiling: persist the adjustment WITHOUT approving — the value-driven
+   * tier recompute re-routes the estimate to the higher tier's queue.
+   */
+  onSaveAdjustment: (live: { compPct: number; marginPct: number }) => void
   onSendBack: (reason: SendBackReason, note: string) => void
 }
 
@@ -66,7 +72,7 @@ export function ApproverReviewDrawer({
   initialSendBack = false,
   onClose,
   onApprove,
-  onEscalate,
+  onSaveAdjustment,
   onSendBack,
 }: ApproverReviewDrawerProps) {
   const baseline = useMemo(() => reviewBaseline(estimate), [estimate])
@@ -80,14 +86,13 @@ export function ApproverReviewDrawer({
   const overCeiling = isOverCeiling(live.liveTier, approverTier)
 
   const primaryLabel = overCeiling
-    ? `Escalate to ${live.liveTier!.label}`
+    ? 'Save adjustment'
     : live.changed
       ? 'Save adjustment & approve'
       : 'Approve'
-  const PrimaryIcon = overCeiling ? ArrowUp : Check
 
   function handlePrimary() {
-    if (overCeiling) onEscalate({ compPct, marginPct }, live.liveTier!)
+    if (overCeiling) onSaveAdjustment({ compPct, marginPct })
     else onApprove({ compPct, marginPct }, live.changed)
   }
 
@@ -226,7 +231,7 @@ export function ApproverReviewDrawer({
             </div>
           </div>
 
-          {/* Over-ceiling escalation banner */}
+          {/* Over-ceiling banner — auto-routes on save, no explicit escalation */}
           {overCeiling && (
             <div
               data-testid="over-ceiling-banner"
@@ -234,8 +239,9 @@ export function ApproverReviewDrawer({
             >
               <ArrowUp className="h-4 w-4 flex-shrink-0 text-amber-600" />
               <span className="text-xs text-amber-800">
-                Your adjustment pushes this above your approval ceiling — it must escalate to{' '}
-                <strong>{live.liveTier?.label}</strong>.
+                This adjustment pushes the estimate above your approval ceiling — saving routes it
+                to <strong>{live.liveTier?.label}</strong>&rsquo;s queue and you can no longer
+                approve it directly.
               </span>
             </div>
           )}
@@ -315,7 +321,7 @@ export function ApproverReviewDrawer({
                   overCeiling ? 'bg-[#b45309]' : 'bg-[#2E7D52]',
                 )}
               >
-                <PrimaryIcon className="h-4 w-4" />
+                <Check className="h-4 w-4" />
                 {primaryLabel}
               </button>
             </>

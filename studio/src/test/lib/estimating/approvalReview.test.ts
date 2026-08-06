@@ -7,11 +7,16 @@
 //   overCeiling = order(liveTier) > order(approverTier)
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import type { ApprovalTier, Estimate } from '@/types/estimating'
+import { estimatingApi } from '@/api/estimating'
 import { APPROVAL_TIER_SEED, tiersForType } from '@/lib/estimating/config'
 import { canEditField, assertCanEdit } from '@/lib/estimating/maintenance'
-import { buildMaintenanceEstimate, buildInstallEstimate } from '@/mocks/estimatingData'
+import {
+  buildMaintenanceEstimate,
+  buildInstallEstimate,
+  toCreatePayload,
+} from '@/mocks/estimatingData'
 import {
   reviewBaseline,
   computeReview,
@@ -24,16 +29,14 @@ import {
   SEND_BACK_REASONS,
   buildAdjustmentRecords,
   applyApproverAdjustments,
-  adjustmentAuditLog,
   recordAdjustments,
-  clearAdjustmentAuditLog,
   tierRangeLabel,
 } from '@/lib/estimating/approvalReview'
 
 const MAINT_TIERS = tiersForType(APPROVAL_TIER_SEED, 'maintenance')
-const bm = MAINT_TIERS.find((t) => t.roleKey === 'branch_manager')!
+const mgr = MAINT_TIERS.find((t) => t.roleKey === 'manager')!
 const rd = MAINT_TIERS.find((t) => t.roleKey === 'regional_director')!
-const coo = MAINT_TIERS.find((t) => t.roleKey === 'coo')!
+const ceo = MAINT_TIERS.find((t) => t.roleKey === 'ceo')!
 
 /** Pending-approval maintenance estimate with uniform complexity for clean math. */
 function pendingEstimate(
@@ -94,7 +97,7 @@ describe('computeReview', () => {
     expect(r.effCostCents).toBe(27_924_000)
     expect(r.liveValueCents).toBe(35_800_000)
     expect(r.changed).toBe(false)
-    expect(r.liveTier?.roleKey).toBe('bp') // $358K → $250K–$1M band
+    expect(r.liveTier?.roleKey).toBe('vice_president') // $358K → $250K–$1M band
   })
 
   it('complexity delta scales cost; margin re-prices (effCost / (1 − margin))', () => {
@@ -122,23 +125,23 @@ describe('computeReview', () => {
   })
 
   it('routes the live value through the config ladder', () => {
-    // $95K → BM; margin 30% pushes it to $105,857 → RD
+    // $95K → Manager; margin 30% pushes it to $105,857 → RD
     const b = reviewBaseline(pendingEstimate(9_500_000))
-    expect(computeReview(b, 10, 22, MAINT_TIERS).liveTier?.roleKey).toBe('branch_manager')
+    expect(computeReview(b, 10, 22, MAINT_TIERS).liveTier?.roleKey).toBe('manager')
     expect(computeReview(b, 10, 30, MAINT_TIERS).liveTier?.roleKey).toBe('regional_director')
   })
 })
 
 describe('isOverCeiling', () => {
-  it('is true only when the live tier outranks the approver tier (BM<RD<BP<COO)', () => {
-    expect(isOverCeiling(rd, bm)).toBe(true)
-    expect(isOverCeiling(bm, rd)).toBe(false)
-    expect(isOverCeiling(bm, bm)).toBe(false)
-    expect(isOverCeiling(coo, rd)).toBe(true)
+  it('is true only when the live tier outranks the approver tier (MGR<RD<VP<CEO)', () => {
+    expect(isOverCeiling(rd, mgr)).toBe(true)
+    expect(isOverCeiling(mgr, rd)).toBe(false)
+    expect(isOverCeiling(mgr, mgr)).toBe(false)
+    expect(isOverCeiling(ceo, rd)).toBe(true)
   })
 
   it('is false when either tier is unresolved (no matrix)', () => {
-    expect(isOverCeiling(null, bm)).toBe(false)
+    expect(isOverCeiling(null, mgr)).toBe(false)
     expect(isOverCeiling(rd, null)).toBe(false)
   })
 })
@@ -147,20 +150,23 @@ describe('isOverCeiling', () => {
 
 describe('routeApprovalQueue / queueForRole', () => {
   it('routes pending_approval estimates to tiers by contract value (config-driven)', () => {
-    const a = pendingEstimate(9_500_000) // BM
+    const a = pendingEstimate(9_500_000) // Manager
     const b = pendingEstimate(15_000_000) // RD
     const c = buildMaintenanceEstimate({ status: 'in_progress', contractValueCents: 5_000_000 })
     const routed = routeApprovalQueue([a, b, c], APPROVAL_TIER_SEED)
     expect(routed).toHaveLength(2)
-    expect(queueForRole(routed, 'branch_manager').map((r) => r.estimate.id)).toEqual([a.id])
+    expect(queueForRole(routed, 'manager').map((r) => r.estimate.id)).toEqual([a.id])
     expect(queueForRole(routed, 'regional_director').map((r) => r.estimate.id)).toEqual([b.id])
-    expect(queueForRole(routed, 'coo')).toHaveLength(0)
+    expect(queueForRole(routed, 'ceo')).toHaveLength(0)
   })
 
-  it('excludes estimates with no matching ladder (install has no approval matrix)', () => {
-    const inst = buildInstallEstimate({ status: 'pending_approval' })
+  it('routes INSTALL estimates through the install ladder — same bands as maintenance (Handoff 19 §4)', () => {
+    const inst = buildInstallEstimate({ status: 'pending_approval', contractValueCents: 15_000_000 })
     const routed = routeApprovalQueue([inst], APPROVAL_TIER_SEED)
-    for (const role of ['branch_manager', 'regional_director', 'bp', 'coo'] as const) {
+    expect(routed).toHaveLength(1)
+    expect(routed[0].tier?.estimateType).toBe('install')
+    expect(queueForRole(routed, 'regional_director').map((r) => r.estimate.id)).toEqual([inst.id])
+    for (const role of ['manager', 'vice_president', 'ceo'] as const) {
       expect(queueForRole(routed, role)).toHaveLength(0)
     }
   })
@@ -181,7 +187,7 @@ describe('queueStats & waitSeverity', () => {
     a.updatedAt = new Date('2026-07-19T12:00:00Z').toISOString() // 4d
     const b = pendingEstimate(4_000_000)
     b.updatedAt = new Date('2026-07-22T12:00:00Z').toISOString() // 1d
-    const routed = queueForRole(routeApprovalQueue([a, b], APPROVAL_TIER_SEED, now), 'branch_manager')
+    const routed = queueForRole(routeApprovalQueue([a, b], APPROVAL_TIER_SEED, now), 'manager')
     const stats = queueStats(routed)
     expect(stats.count).toBe(2)
     expect(stats.valuePendingCents).toBe(13_500_000)
@@ -198,24 +204,22 @@ describe('queueStats & waitSeverity', () => {
 })
 
 describe('escalationNote / tierRangeLabel', () => {
-  it('flags the COO >$1M mechanism as an open item', () => {
-    expect(escalationNote(coo)).toMatch(/COO mechanism to confirm/i)
-    expect(escalationNote(bm)).toBeNull()
+  it('flags the CEO >$1M mechanism as an open item', () => {
+    expect(escalationNote(ceo)).toMatch(/CEO mechanism to confirm/i)
+    expect(escalationNote(mgr)).toBeNull()
     expect(escalationNote(null)).toBeNull()
   })
 
   it('formats tier ranges from config cents', () => {
-    expect(tierRangeLabel(bm)).toBe('Under $100K')
+    expect(tierRangeLabel(mgr)).toBe('Under $100K')
     expect(tierRangeLabel(rd)).toBe('$100K–$250K')
-    expect(tierRangeLabel(coo)).toBe('Over $1M')
+    expect(tierRangeLabel(ceo)).toBe('Over $1M')
   })
 })
 
 // ----- Audit + revert + ownership (BRD III-1) ---------------------------------------
 
 describe('adjustment audit', () => {
-  beforeEach(() => clearAdjustmentAuditLog())
-
   it('writes one record per changed lever with from/to decimals and actor', () => {
     const records = buildAdjustmentRecords(
       'est-1',
@@ -253,11 +257,47 @@ describe('adjustment audit', () => {
     ])
   })
 
-  it('recordAdjustments appends to the audit log', () => {
-    const records = buildAdjustmentRecords('est-1', 'A', { comp0Pct: 10, margin0Pct: 22 }, { compPct: 12, marginPct: 22 })
-    recordAdjustments(records)
-    expect(adjustmentAuditLog).toHaveLength(1)
-    expect(adjustmentAuditLog[0].field).toBe('complexity')
+  it('recordAdjustments PERSISTS the rows — GET /adjustments returns the trail (survives reload)', async () => {
+    const est = await estimatingApi.create(
+      toCreatePayload(buildMaintenanceEstimate({ status: 'pending_approval' })),
+    )
+    const records = buildAdjustmentRecords(
+      est.id, 'Amanda Torres', { comp0Pct: 10, margin0Pct: 22 }, { compPct: 12, marginPct: 22 },
+    )
+    const saved = await recordAdjustments(records)
+    expect(saved).toHaveLength(1)
+
+    // A "reload" (fresh GET) shows the persisted row — not an in-memory array.
+    const trail = await estimatingApi.listAdjustments(est.id)
+    expect(trail).toHaveLength(1)
+    expect(trail[0]).toMatchObject({
+      estimateId: est.id,
+      field: 'complexity',
+      actor: 'Amanda Torres',
+    })
+    expect(trail[0].fromValue).toBeCloseTo(0.1)
+    expect(trail[0].toValue).toBeCloseTo(0.12)
+    expect(trail[0].id).toBeTruthy()
+    expect(Number.isNaN(Date.parse(trail[0].createdAt))).toBe(false)
+  })
+
+  it('a revert persists a REVERSING row — the trail shows both the change and the revert (BRD III-1)', async () => {
+    const est = await estimatingApi.create(
+      toCreatePayload(buildMaintenanceEstimate({ status: 'pending_approval' })),
+    )
+    // The change: margin 22 → 30.
+    await recordAdjustments(
+      buildAdjustmentRecords(est.id, 'A', { comp0Pct: 10, margin0Pct: 22 }, { compPct: 10, marginPct: 30 }),
+    )
+    // The revert: margin 30 → back to the original 22 (current → original).
+    await recordAdjustments(
+      buildAdjustmentRecords(est.id, 'A', { comp0Pct: 10, margin0Pct: 30 }, { compPct: 10, marginPct: 22 }),
+    )
+    const trail = await estimatingApi.listAdjustments(est.id)
+    expect(trail.map((r) => [r.fromValue, r.toValue])).toEqual([
+      [0.22, 0.3],
+      [0.3, 0.22],
+    ])
   })
 })
 
@@ -299,7 +339,7 @@ describe('SEND_BACK_REASONS', () => {
 
 // keep the tier fixtures honest against the seed
 describe('seed sanity', () => {
-  it('BM < RD < BP < COO ordering holds in config', () => {
+  it('MGR < RD < VP < CEO ordering holds in config', () => {
     const orders = MAINT_TIERS.map((t: ApprovalTier) => t.order)
     expect(orders).toEqual([...orders].sort((a, b) => a - b))
   })

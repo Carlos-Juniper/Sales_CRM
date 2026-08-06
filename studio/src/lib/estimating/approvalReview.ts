@@ -6,7 +6,7 @@
 //   effCost   = cost0 × (1 + (comp − comp0))     // complexity delta scales cost
 //   liveValue = effCost / (1 − margin)           // margin re-prices
 //   liveTier  = tierForValue(liveValue, tiers)   // config ladder, never hardcoded
-//   overCeiling = order(liveTier) > order(approverTier)   // BM<RD<BP<COO
+//   overCeiling = order(liveTier) > order(approverTier)   // MGR<RD<VP<CEO
 //
 // Hours-vs-price principle: complexity adjusts hours (→ cost); margin adjusts
 // price. Both are AUDITED (estimate_adjustments, BRD III-1) and revertible.
@@ -22,6 +22,7 @@ import type {
   Estimate,
   EstimateAdjustment,
 } from '@/types/estimating'
+import { estimatingApi } from '@/api/estimating'
 import { sectionTotal, tierForValue } from './calc'
 import { assertCanEdit } from './maintenance'
 
@@ -136,7 +137,7 @@ export function computeReview(
   }
 }
 
-/** BM < RD < BP < COO — true when the live tier outranks the approver's. */
+/** MGR < RD < VP < CEO — true when the live tier outranks the approver's. */
 export function isOverCeiling(
   liveTier: ApprovalTier | null,
   approverTier: ApprovalTier | null,
@@ -164,9 +165,8 @@ export function waitedDays(estimate: Estimate, now: Date = new Date()): number {
 
 /**
  * The approver inbox source: pending-approval estimates, each routed to the
- * config tier its contract value falls in. Estimates whose type has no
- * approval matrix (install, open item) resolve to a null tier and therefore
- * never appear in any role's queue.
+ * config tier its contract value falls in. Both maintenance AND install route
+ * through their own config ladder (mirrored $ bands — Handoff 19 §4).
  */
 export function routeApprovalQueue(
   estimates: Estimate[],
@@ -214,10 +214,10 @@ export function waitSeverity(days: number): WaitSeverity {
   return 'normal'
 }
 
-/** COO >$1M mechanism is an open item (BRD III-3 / §12) — flag it on the card. */
+/** CEO >$1M mechanism is an open item (BRD III-3 / §12) — flag it on the card. */
 export function escalationNote(tier: ApprovalTier | null): string | null {
-  if (tier?.roleKey !== 'coo') return null
-  return 'Above $1M — COO mechanism to confirm (§12)'
+  if (tier?.roleKey !== 'ceo') return null
+  return 'Above $1M — CEO mechanism to confirm (§12)'
 }
 
 /** Compact dollars from config cents: $100K · $1M. */
@@ -301,18 +301,27 @@ export function buildAdjustmentRecords(
 }
 
 /**
- * In-memory adjustments audit log. Open item: persist through a backend
- * estimate_adjustments endpoint once one exists (none in the Handoff 00 API
- * surface yet) — mirrors the lifecycleAuditLog precedent.
+ * Persist adjustment records through the backend estimate_adjustments
+ * endpoint (Handoff 19 §5) — the server is the audit source of truth (the
+ * old in-memory adjustmentAuditLog was lost on reload). The actor field
+ * travels only as a deprecated mock/wire-compat hint; production derives it
+ * from the JWT. Returns the persisted rows (server-assigned id/createdAt).
  */
-export const adjustmentAuditLog: EstimateAdjustment[] = []
-
-export function recordAdjustments(records: EstimateAdjustment[]): void {
-  adjustmentAuditLog.push(...records)
-}
-
-export function clearAdjustmentAuditLog(): void {
-  adjustmentAuditLog.length = 0
+export async function recordAdjustments(
+  records: EstimateAdjustment[],
+): Promise<EstimateAdjustment[]> {
+  const saved: EstimateAdjustment[] = []
+  for (const r of records) {
+    saved.push(
+      await estimatingApi.createAdjustment(r.estimateId, {
+        field: r.field,
+        fromValue: r.fromValue,
+        toValue: r.toValue,
+        actor: r.actor,
+      }),
+    )
+  }
+  return saved
 }
 
 // ----- Applying approver adjustments ---------------------------------------------------

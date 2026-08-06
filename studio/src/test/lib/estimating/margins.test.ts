@@ -27,27 +27,66 @@ import {
   medianCents,
   mowingPerOccurrenceCents,
   perAcreCents,
+  resolveOccurrenceHours,
   serviceGroupMargins,
 } from '@/lib/estimating/margins'
+import type { CatalogItem } from '@/types/estimating'
 
 const maint = buildMaintenanceEstimate()
 const install = buildInstallEstimate()
+
+/** A production-rated maintenance kit (mirrors the workbook seed rows). */
+const MOWING_KIT: CatalogItem = {
+  id: 'kit-maint-3422',
+  description: 'Standard Production Mowing',
+  uom: 'Sq. Ft.',
+  unitCostCents: 1750,
+  unitSellCents: 0,
+  targetGm: 0.22,
+  kitType: 'maintenance_hours',
+  productionRate: 60_000, // sq ft per labor hour
+  branch: 'All Branches',
+  active: true,
+  serviceType: 'Turf Area',
+}
 
 describe('maintenance cost basis (hours-driven)', () => {
   it('derives line cost from hours × qty × (1 + complexity) × loaded crew rate', () => {
     const s1 = maint.sections[0]
     const mowing = s1.services[0] // 1.6 h, 42/yr, +10%
     const expectedHours = 1.6 * 42 * 1.1 // 73.92 h/yr
-    expect(maintenanceLineCost(s1, mowing, maint.targetMargin)).toBe(
+    expect(maintenanceLineCost(s1, mowing)).toBe(
       Math.round(expectedHours * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
     )
   })
 
-  it('falls back to price × (1 − targetMargin) when the line has no hours', () => {
+  it('Handoff 22 — a null-hours line derives hours from its kit production rate (sqft ÷ rate)', () => {
+    const s1 = maint.sections[0] // 120,000 SF
+    const noHours = { ...s1.services[0], hours: null, catalogItemId: MOWING_KIT.id }
+    // hours/occurrence = 120,000 / 60,000 = 2 h → 2 × 42 × 1.1 = 92.4 h/yr
+    expect(resolveOccurrenceHours(s1, noHours, [MOWING_KIT])).toBeCloseTo(2, 10)
+    expect(maintenanceLineCost(s1, noHours, [MOWING_KIT])).toBe(
+      Math.round(2 * 42 * 1.1 * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+    )
+  })
+
+  it('Handoff 22 — the circular price × (1 − targetMargin) fallback is GONE: an unresolvable line costs 0, never “priced at target”', () => {
     const s1 = maint.sections[0]
-    const noHours = { ...s1.services[0], hours: null }
-    // price = (120,000/1000) × 450¢ × 42 × 1.1 = 2,494,800¢
-    expect(maintenanceLineCost(s1, noHours, 0.22)).toBe(Math.round(2_494_800 * 0.78))
+    const noHours = { ...s1.services[0], hours: null, catalogItemId: null }
+    expect(resolveOccurrenceHours(s1, noHours)).toBeNull()
+    // The old fallback would have returned round(2,494,800 × 0.78) — a number
+    // that could never flag mispricing because it assumed target margin.
+    expect(maintenanceLineCost(s1, noHours)).toBe(0)
+    expect(maintenanceLineCost(s1, noHours)).not.toBe(Math.round(2_494_800 * 0.78))
+  })
+
+  it('Handoff 22 — a mispriced line now flags: cost from production rate diverges from price-at-target', () => {
+    const s1 = maint.sections[0]
+    // Same price either way; real cost = 92.4 h × $180/h = $16,632.
+    const line = { ...s1.services[0], hours: null, catalogItemId: MOWING_KIT.id }
+    const realCost = maintenanceLineCost(s1, line, [MOWING_KIT])
+    const circular = Math.round(2_494_800 * 0.78)
+    expect(realCost).not.toBe(circular) // over/under-pricing is now visible
   })
 })
 

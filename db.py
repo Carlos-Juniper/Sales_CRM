@@ -10,15 +10,20 @@ _pool: aiomysql.Pool | None = None
 
 
 def _cfg() -> dict:
-    return dict(
-        host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
-        port=int(os.environ.get("MYSQL_PORT", "3306")),
+    cfg = dict(
         user=os.environ.get("MYSQL_USER", "crmadmin"),
         password=os.environ.get("MYSQL_PASSWORD", ""),
         db=os.environ.get("MYSQL_DB", "crm"),
         autocommit=True,
         cursorclass=aiomysql.DictCursor,
     )
+    socket_path = os.environ.get("MYSQL_SOCKET_PATH")
+    if socket_path:
+        cfg["unix_socket"] = socket_path
+    else:
+        cfg["host"] = os.environ.get("MYSQL_HOST", "127.0.0.1")
+        cfg["port"] = int(os.environ.get("MYSQL_PORT", "3306"))
+    return cfg
 
 
 async def _get_pool() -> aiomysql.Pool:

@@ -7,7 +7,6 @@ steps:
     args:
       - '-c'
       - |
-        gcloud secrets versions access latest --secret=GITHUB_TOKEN --project=juniper-crm-498215-p5 > /workspace/github_token
         gcloud secrets versions access latest --secret=ENTRA_CLIENT_ID --project=juniper-crm-498215-p5 > /workspace/entra_client_id
         gcloud secrets versions access latest --secret=ENTRA_TENANT_ID --project=juniper-crm-498215-p5 > /workspace/entra_tenant_id
 
@@ -17,7 +16,6 @@ steps:
       - '-c'
       - |
         DOCKER_BUILDKIT=1 docker build \
-          --secret id=github_token,src=/workspace/github_token \
           --build-arg VITE_ENTRA_CLIENT_ID=$(cat /workspace/entra_client_id) \
           --build-arg VITE_ENTRA_TENANT_ID=$(cat /workspace/entra_tenant_id) \
           -t us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app-staging \

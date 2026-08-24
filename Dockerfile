@@ -15,6 +15,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY db.py .
 COPY api/ ./api/
 COPY --from=frontend /app/studio/dist ./dist
 

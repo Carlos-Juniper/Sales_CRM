@@ -60,6 +60,7 @@ import {
 import { useToast } from './useToast'
 import { useEstimatingShell } from './useEstimatingShell'
 import { IntakeAttachmentsPanel } from './IntakeAttachmentsPanel'
+import { DisciplineSelect } from './DisciplineSelect'
 
 /** Blue-cell convention: estimator-editable override inputs (legacy Excel). */
 const BLUE_CELL = 'bg-[#eff6ff] border-[#bfdbfe] focus-visible:ring-[#2E7D52]'
@@ -190,6 +191,12 @@ function ServiceRow({
             <span className="w-3.5 flex-shrink-0" />
           )}
           <span className="truncate">{svc.label}</span>
+          <DisciplineSelect
+            label={svc.label}
+            value={svc.discipline ?? null}
+            onChange={(discipline) => onChange({ discipline })}
+            className="h-5 flex-shrink-0 border-[hsl(var(--border))] bg-[hsl(var(--card))] px-1 text-[10px] text-[hsl(var(--muted-fg))]"
+          />
         </span>
         <span className="flex items-center justify-center gap-1">
           <input

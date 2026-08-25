@@ -15,7 +15,6 @@ const defaultState = {
   sortBy: 'score' as const,
   sortDir: 'desc' as const,
   page: 1,
-  optimisticUpdates: {},
 }
 
 beforeEach(() => {
@@ -40,9 +39,6 @@ describe('leadsStore — initial state', () => {
     expect(page).toBe(1)
   })
 
-  it('starts with empty optimisticUpdates', () => {
-    expect(useLeadsStore.getState().optimisticUpdates).toEqual({})
-  })
 })
 
 describe('leadsStore — setFilter', () => {
@@ -184,40 +180,3 @@ describe('leadsStore — setPage', () => {
   })
 })
 
-describe('leadsStore — optimistic updates', () => {
-  it('applyOptimistic merges patch into cache', () => {
-    useLeadsStore.getState().applyOptimistic('l1', { score: 99 })
-    expect(useLeadsStore.getState().optimisticUpdates['l1']).toEqual({ score: 99 })
-  })
-
-  it('applyOptimistic with multiple calls merges (later wins on conflict)', () => {
-    useLeadsStore.getState().applyOptimistic('l1', { score: 80, status: 'new' })
-    useLeadsStore.getState().applyOptimistic('l1', { score: 95 })
-    expect(useLeadsStore.getState().optimisticUpdates['l1']).toEqual({ score: 95, status: 'new' })
-  })
-
-  it('applyOptimistic for different leads are stored independently', () => {
-    useLeadsStore.getState().applyOptimistic('l1', { score: 80 })
-    useLeadsStore.getState().applyOptimistic('l2', { score: 90 })
-    expect(useLeadsStore.getState().optimisticUpdates['l1']?.score).toBe(80)
-    expect(useLeadsStore.getState().optimisticUpdates['l2']?.score).toBe(90)
-  })
-
-  it('clearOptimistic removes the entry', () => {
-    useLeadsStore.getState().applyOptimistic('l1', { score: 99 })
-    useLeadsStore.getState().clearOptimistic('l1')
-    expect(useLeadsStore.getState().optimisticUpdates['l1']).toBeUndefined()
-  })
-
-  it('clearOptimistic does not affect other entries', () => {
-    useLeadsStore.getState().applyOptimistic('l1', { score: 80 })
-    useLeadsStore.getState().applyOptimistic('l2', { score: 90 })
-    useLeadsStore.getState().clearOptimistic('l1')
-    expect(useLeadsStore.getState().optimisticUpdates['l2']).toEqual({ score: 90 })
-  })
-
-  it('clearOptimistic on non-existent id is a no-op', () => {
-    expect(() => useLeadsStore.getState().clearOptimistic('nonexistent')).not.toThrow()
-    expect(useLeadsStore.getState().optimisticUpdates).toEqual({})
-  })
-})

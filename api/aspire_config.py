@@ -138,11 +138,14 @@ ASPIRE_LEAD_SOURCE_MAP: dict[str, int] = {
     "manual":      2117,  # Cold Call
 }
 
-# ── Write-path behaviour (UNVERIFIED live — build defensively) ────────────────
-# TODO(aspire-live): confirm PATCH vs PUT for OpportunityStatusID write-back and
-# flip if needed after a real write test.
+# ── Write-path behaviour ──────────────────────────────────────────────────────
+# CONFIRMED MOOT (2026-08-24, swagger v1): Aspire API v1 has no PATCH or PUT
+# endpoint for individual opportunities — only PATCH /WorkTickets/PartialOccurrences
+# exists in the entire API. ASPIRE_STATUS_WRITE_VERB is unused until a working
+# opportunity-update endpoint is found (see push_status docstring).
 ASPIRE_STATUS_WRITE_VERB = "PATCH"
 
-# TODO(aspire-live): confirm empty string is accepted on create. Mirrors the
-# proven nightly-batch value; empty string was not observed in sampled records.
-ASPIRE_OPPORTUNITY_TYPE_DEFAULT = ""
+# Confirmed 2026-08-24 (swagger v1): OpportunityType is required, minLength: 1.
+# Empty string fails validation. "Work Order" observed on existing sandbox opportunities.
+# Confirm the correct label for Juniper's maintenance/install opportunities before enabling sync.
+ASPIRE_OPPORTUNITY_TYPE_DEFAULT = "Work Order"

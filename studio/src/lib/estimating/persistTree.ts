@@ -55,6 +55,7 @@ export type TreeOp =
 const SECTION_FIELDS = ['name', 'squareFeet', 'sortOrder'] as const
 const SERVICE_FIELDS = [
   'catalogItemId',
+  'discipline',
   'label',
   'qty',
   'uom',

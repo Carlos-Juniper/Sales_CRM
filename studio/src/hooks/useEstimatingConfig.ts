@@ -1,3 +1,4 @@
+
 // ---------------------------------------------------------------------------
 // Handoff 16 — Config-Table Read APIs (frontend fetch layer).
 //

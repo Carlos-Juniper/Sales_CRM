@@ -50,7 +50,7 @@ import { acresFromSqft } from '@/lib/estimating/calc'
 import { SLA_CONFIG, slaCountdownLabel, slaDaysLeft, slaStateFor, type SlaState } from '@/lib/estimating/sla'
 import { useAuthStore } from '@/store/authStore'
 import { useRole } from '@/hooks/useRole'
-import { mockUsers } from '@/mocks/data'
+import { useUsers } from '@/hooks/useUsers'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import type { Estimate, EstimatePriority, EstimateStatus } from '@/types/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
@@ -159,6 +159,7 @@ export function EstimateQueue({
   const user = useAuthStore((s) => s.user)
   const { seesAllBranches } = useRole()
   const branchScope = branchScopeLabel(seesAllBranches, user?.branch_id)
+  const { findUser } = useUsers()
 
   const [estimates, setEstimates] = useState<Estimate[] | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -326,7 +327,7 @@ export function EstimateQueue({
           </p>
         ) : (
           items.map((estimate) => (
-            <QueueCard key={estimate.id} estimate={estimate} onOpen={openEstimate} onRetried={reload} />
+            <QueueCard key={estimate.id} estimate={estimate} onOpen={openEstimate} onRetried={reload} findUser={findUser} />
           ))
         )}
       </div>
@@ -366,17 +367,19 @@ function QueueCard({
   estimate,
   onOpen,
   onRetried,
+  findUser,
 }: {
   estimate: Estimate
   onOpen: (estimate: Estimate) => void
   onRetried?: () => void
+  findUser: (id: string | null | undefined) => { avatar_initials: string; name: string } | undefined
 }) {
   const daysLeft = slaDaysLeft(estimate.dueBackDate)
   const sla: SlaState = slaStateFor(daysLeft)
   const priCfg = PRIORITY_CONFIG[estimate.priority]
   const statusCfg = STATUS_CONFIG[estimate.status]
   const StatusIcon = statusCfg.icon
-  const rep = mockUsers.find((u) => u.id === (estimate.assignedLsEstimator ?? estimate.assignedIrrEstimator))
+  const rep = findUser(estimate.assignedLsEstimator ?? estimate.assignedIrrEstimator)
   const acres = estimateAcres(estimate)
 
   return (

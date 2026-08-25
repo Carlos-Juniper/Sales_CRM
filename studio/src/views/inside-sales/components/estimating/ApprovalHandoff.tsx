@@ -29,7 +29,7 @@ import { tiersForType } from '@/lib/estimating/config'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import { canApproveAndHandBack } from '@/lib/estimating/transitions'
 import { useAuthStore } from '@/store/authStore'
-import { mockUsers } from '@/mocks/data'
+import { useUsers } from '@/hooks/useUsers'
 import { cn } from '@/lib/utils'
 import type { ApprovalRoleKey, ApprovalTier } from '@/types/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
@@ -84,6 +84,7 @@ export function ApprovalHandoff({ tiers: tiersProp }: ApprovalHandoffProps) {
   const { openEstimate, setOpenEstimate } = useEstimatingShell()
   const { show } = useToast()
   const user = useAuthStore((s) => s.user)
+  const { findUser } = useUsers()
   const [notifyBmRd, setNotifyBmRd] = useState(
     openEstimate?.approvalSettings?.notifyBmRdOnReturn ?? true,
   )
@@ -103,8 +104,7 @@ export function ApprovalHandoff({ tiers: tiersProp }: ApprovalHandoffProps) {
 
   const ladder = tiersForType(tiers, openEstimate.estimateType)
   const requiredTier = tierForValue(openEstimate.contractValueCents, ladder)
-  const salesperson =
-    mockUsers.find((u) => u.id === openEstimate.crmRep)?.name ?? 'the salesperson'
+  const salesperson = findUser(openEstimate.crmRep)?.name ?? 'the salesperson'
   const eligible = canApproveAndHandBack(openEstimate.status)
 
   async function handleNotifyChange(checked: boolean) {

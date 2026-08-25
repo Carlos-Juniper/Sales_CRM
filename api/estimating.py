@@ -153,6 +153,7 @@ def _service_out(r: dict, components: list[dict]) -> dict:
         "id": r["id"],
         "sectionId": r["section_id"],
         "catalogItemId": r["catalog_item_id"],
+        "discipline": r.get("discipline"),
         "label": r["label"],
         "qty": _num(r["qty"]),
         "uom": r["uom"],
@@ -728,14 +729,130 @@ def _itb_scope_out(r: dict) -> dict:
 
 # ── ITB tracker (Handoff 21) ─────────────────────────────────────────────────
 #
-# Status legend codes (confirmed with Carlos 2026-08-06, Handoff 00 §3.10 /
-# BRD II-9.12): P Pending · C Created Request · S Sent · R Received ·
+# Status legend codes: P Pending · C Created Request · S Sent · R Received ·
 # U Updated · X 100% Complete · '-' Non-Applicable.
 ITB_STATUS_CODES = frozenset({"P", "C", "S", "R", "U", "X", "-"})
 
 # Default initial scope status for a freshly auto-generated ITB project:
-# 'P' Pending (confirmed with Carlos 2026-08-06).
+# 'P' Pending 
 DEFAULT_ITB_STATUS = "P"
+
+# Handoff 29 — EST LS $ / EST IR $ auto-split. A line's catalog_items.service_type
+# in this set is classified as Irrigation; everything else is Landscape. A named
+# config set (not a hardcoded branch) so adding a service type is a data change.
+IRRIGATION_SERVICE_TYPES = frozenset({"Irrigation"})
+
+
+def _line_discipline(discipline_override: Optional[str], service_type: Optional[str]) -> str:
+    """'irrigation' or 'landscape' for one section_services line (Handoff 29).
+
+    A per-line `discipline` override always wins; otherwise derive from the
+    line's catalog item `service_type`. Manual lines (no catalog item, no
+    override) default to landscape.
+    """
+    if discipline_override in ("landscape", "irrigation"):
+        return discipline_override
+    return "irrigation" if service_type in IRRIGATION_SERVICE_TYPES else "landscape"
+
+
+async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int) -> tuple[int, int]:
+    """Derive (est_ls_cents, est_ir_cents) from an estimate's PERSISTED line
+    items (Handoff 29). Each is summed directly from its classified lines
+    (not `total_cents - ir_cents`) so a split can never go negative even when
+    lines are added/edited after creation and no longer match the create-time
+    `total_cents` snapshot — that snapshot is only used as a fallback when the
+    estimate has no lines yet.
+
+    Reads section_services fresh from the DB rather than trusting the create
+    body — both intake forms POST sections: [] and add lines afterward via the
+    section/service endpoints, so this must reflect current persisted state to
+    mean anything (see _recompute_itb_split, called from those endpoints).
+
+    Line sell math mirrors studio/src/lib/estimating/calc.ts exactly (the one
+    other place this formula lives) — install: qty * unitSellCents; maintenance:
+    (squareFeet / 1000) * unitSellCents * qty * (1 + complexityPct).
+    """
+    sections = await query(
+        "SELECT id, square_feet FROM estimate_sections WHERE estimate_id = %s", [estimate_id]
+    )
+    if not sections:
+        return total_cents, 0
+    section_ids = [s["id"] for s in sections]
+    sqft_by_section = {s["id"]: s.get("square_feet") or 0 for s in sections}
+    placeholders = ", ".join(["%s"] * len(section_ids))
+    svc_rows = await query(
+        f"SELECT section_id, catalog_item_id, discipline, qty, unit_sell_cents, complexity_pct"
+        f" FROM section_services WHERE section_id IN ({placeholders})",
+        section_ids,
+    )
+    lines: list[dict] = []
+    catalog_item_ids: set[str] = set()
+    for sv in svc_rows:
+        lines.append({**sv, "square_feet": sqft_by_section.get(sv["section_id"], 0)})
+        if sv.get("discipline") not in ("landscape", "irrigation"):
+            cid = sv.get("catalog_item_id")
+            if cid:
+                catalog_item_ids.add(cid)
+    if not lines:
+        return total_cents, 0
+    service_types: dict[str, str] = {}
+    if catalog_item_ids:
+        ids = list(catalog_item_ids)
+        placeholders = ", ".join(["%s"] * len(ids))
+        rows = await query(
+            f"SELECT id, service_type FROM catalog_items WHERE id IN ({placeholders})", ids
+        )
+        service_types = {r["id"]: r["service_type"] for r in rows}
+    # Sum LS and IR independently from the lines themselves (rather than
+    # `total_cents - ir_cents`) so the split can never go negative: total_cents
+    # is a snapshot from estimate creation and can drift stale as lines are
+    # added/edited afterward, whereas LS + IR here is always exactly the sum
+    # of every persisted line's sell.
+    ls_cents = 0
+    ir_cents = 0
+    for sv in lines:
+        qty = float(sv.get("qty") or 0)
+        unit_sell = float(sv.get("unit_sell_cents") or 0)
+        if est_type == "maintenance":
+            square_feet = float(sv.get("square_feet") or 0)
+            complexity = float(sv.get("complexity_pct") or 0)
+            sell = round((square_feet / 1000) * unit_sell * qty * (1 + complexity))
+        else:
+            sell = round(qty * unit_sell)
+        discipline = _line_discipline(sv.get("discipline"), service_types.get(sv.get("catalog_item_id")))
+        if discipline == "irrigation":
+            ir_cents += sell
+        else:
+            ls_cents += sell
+    return ls_cents, ir_cents
+
+
+async def _recompute_itb_split(estimate_id: str) -> None:
+    """Re-derive EST LS $ / EST IR $ on the linked itb_projects row whenever an
+    estimate's line items change post-creation (Handoff 29 §4.3 — LOCKED
+    default: recompute, not a create-time snapshot). No-op if the estimate has
+    no linked ITB project (shouldn't happen per Handoff 21's 1:1 guarantee, but
+    defensive since this runs from several independent CRUD endpoints) — a
+    single self-contained call so every call site looks the same.
+    """
+    itb_rows = await query(
+        "SELECT est_total_cents FROM itb_projects WHERE estimate_id = %s", [estimate_id]
+    )
+    if not itb_rows:
+        return
+    est_rows = await query("SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id])
+    if not est_rows:
+        return
+    total = int(itb_rows[0]["est_total_cents"])
+    est_ls, est_ir = await _compute_ls_ir_split(estimate_id, est_rows[0]["estimate_type"], total)
+    # Once real lines exist, LS + IR is the sum of their sells, which becomes
+    # the new source of truth for the total too (the create-time total was
+    # only ever a placeholder for the "no lines yet" case).
+    await execute(
+        "UPDATE itb_projects SET est_total_cents = %s, est_ls_cents = %s, est_ir_cents = %s "
+        "WHERE estimate_id = %s",
+        [est_ls + est_ir, est_ls, est_ir, estimate_id],
+    )
 
 
 def _quarter_for(d: Any) -> str:
@@ -778,7 +895,7 @@ def _itb_status_out(r: dict) -> dict:
     }
 
 
-async def _create_itb_project(estimate_id: str, body: dict) -> str:
+async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> str:
     """Auto-generate the 1:1 itb_projects row for a new estimate (Handoff 21 §3).
 
     LOCKED decision: every estimate created from either intake form gets exactly
@@ -786,9 +903,9 @@ async def _create_itb_project(estimate_id: str, body: dict) -> str:
     (config-driven — a scope added in the DB gets a column with no code change),
     each initialized to DEFAULT_ITB_STATUS. Local-only: no Aspire push here.
 
-    EST LS $ / EST IR $ split: intake carries no split, so the full contract
-    value defaults to the LS side unless the caller provides estLsCents /
-    estIrCents explicitly (flagged assumption).
+    EST LS $ / EST IR $ split (Handoff 29): derived automatically from the
+    estimate's own line items (see _compute_ls_ir_split), unless the caller
+    provides estLsCents / estIrCents explicitly — those always win.
     """
     project_id = _new_id("itb")
     today = date.today()
@@ -796,8 +913,12 @@ async def _create_itb_project(estimate_id: str, body: dict) -> str:
     total = int(body.get("contractValueCents") or 0)
     est_ls = body.get("estLsCents")
     est_ir = body.get("estIrCents")
-    if est_ls is None and est_ir is None:
-        est_ls, est_ir = total, 0
+    if est_ls is None or est_ir is None:
+        # Compute both if either is missing — a partial body (only one provided)
+        # is not a valid split, so always derive together or use both from body.
+        est_ls, est_ir = await _compute_ls_ir_split(estimate_id, est_type, total)
+    est_ls = int(est_ls)
+    est_ir = int(est_ir)
     await execute(
         """INSERT INTO itb_projects
              (id, estimate_id, name, aspire_number, branch, sales_rep,
@@ -819,9 +940,9 @@ async def _create_itb_project(estimate_id: str, body: dict) -> str:
             today.isoformat(),
             due,
             1 if body.get("rebid") else 0,
-            total,
-            int(est_ls or 0),
-            int(est_ir or 0),
+            est_ls + est_ir,
+            est_ls,
+            est_ir,
             body.get("clientName", ""),
             _quarter_for(due),
             None,
@@ -877,13 +998,14 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
     service_id = _new_id("svc")
     await execute(
         """INSERT INTO section_services
-             (id, section_id, catalog_item_id, label, qty, uom, complexity_pct,
+             (id, section_id, catalog_item_id, discipline, label, qty, uom, complexity_pct,
               unit_sell_cents, embedded_cost_cents, target_gm, hours, sort_order)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
             service_id,
             section_id,
             svc.get("catalogItemId"),
+            svc.get("discipline"),
             svc["label"],
             svc.get("qty", 0),
             svc.get("uom", ""),
@@ -959,7 +1081,7 @@ async def _require_resolvable_maintenance_lines(services: list[dict]) -> None:
             )
 
 
-# ── Request models ────────────────────────────────────────────────────────────
+# ── rou ────────────────────────────────────────────────────────────
 
 # Payloads accept arbitrary camelCase keys (validated against the DB columns in
 # the handlers); modeled loosely to mirror the flexible mock contract.
@@ -1177,7 +1299,7 @@ def register(app, require_auth) -> None:
             )
         # Handoff 21 §3 — auto-generate the 1:1 ITB project (+ its scope-status
         # rows, one per itb_scopes row) for EITHER intake type. Local-only.
-        await _create_itb_project(estimate_id, body)
+        await _create_itb_project(estimate_id, body, est_type)
         # Handoff 15 §5.6 — estimate submission is THE (only) trigger for the
         # property's Aspire push: promotion/backfill/create leave properties
         # 'unsynced'; submitting an estimate for one pushes it (pending →
@@ -1541,6 +1663,9 @@ def register(app, require_auth) -> None:
         idx = await _next_sort_order("estimate_sections", "estimate_id", estimate_id, body)
         section_id = await _insert_section(estimate_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
+        # Handoff 29 §4.3 — a newly added section may carry lines, which shift
+        # the ITB LS/IR split.
+        await _recompute_itb_split(estimate_id)
         rows = await query("SELECT * FROM estimate_sections WHERE id = %s", [section_id])
         svc_rows = await query(
             "SELECT * FROM section_services WHERE section_id = %s ORDER BY sort_order", [section_id]
@@ -1562,6 +1687,11 @@ def register(app, require_auth) -> None:
         cols = {"name": "name", "squareFeet": "square_feet", "sortOrder": "sort_order"}
         await _apply_updates("estimate_sections", cols, body, section_id)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
+        # Handoff 29 §4.3 — a squareFeet edit changes every maintenance line's
+        # sell in this section, which shifts the ITB LS/IR split (recomputed
+        # unconditionally, like every other section/service mutation, so the
+        # trigger never has to be kept in sync with the split formula's inputs).
+        await _recompute_itb_split(estimate_id)
         rows = await query("SELECT * FROM estimate_sections WHERE id = %s", [section_id])
         svc_rows = await query(
             "SELECT * FROM section_services WHERE section_id = %s ORDER BY sort_order", [section_id]
@@ -1579,6 +1709,8 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Not found")
         await execute("DELETE FROM estimate_sections WHERE id = %s", [section_id])
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
+        # Handoff 29 §4.3 — deleting a section removes its lines from the split.
+        await _recompute_itb_split(estimate_id)
 
     @app.post(
         "/api/estimating/estimates/{estimate_id}/sections/{section_id}/services",
@@ -1603,6 +1735,8 @@ def register(app, require_auth) -> None:
         idx = await _next_sort_order("section_services", "section_id", section_id, body)
         service_id = await _insert_service(section_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
+        # Handoff 29 §4.3 — a new line shifts the ITB LS/IR split.
+        await _recompute_itb_split(estimate_id)
         svc = await query("SELECT * FROM section_services WHERE id = %s", [service_id])
         comp = await query(
             "SELECT * FROM section_service_components WHERE section_service_id = %s ORDER BY sort_order",
@@ -1647,6 +1781,7 @@ def register(app, require_auth) -> None:
             await _require_resolvable_maintenance_lines([merged])
         cols = {
             "catalogItemId": "catalog_item_id",
+            "discipline": "discipline",
             "label": "label",
             "qty": "qty",
             "uom": "uom",
@@ -1659,6 +1794,9 @@ def register(app, require_auth) -> None:
         }
         await _apply_updates("section_services", cols, body, service_id)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
+        # Handoff 29 §4.3 — an edited line (qty, sell, discipline, …) shifts
+        # the ITB LS/IR split.
+        await _recompute_itb_split(estimate_id)
         svc = await query("SELECT * FROM section_services WHERE id = %s", [service_id])
         comp = await query(
             "SELECT * FROM section_service_components WHERE section_service_id = %s ORDER BY sort_order",
@@ -1684,6 +1822,8 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Not found")
         await execute("DELETE FROM section_services WHERE id = %s", [service_id])
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
+        # Handoff 29 §4.3 — a removed line shifts the ITB LS/IR split.
+        await _recompute_itb_split(estimate_id)
 
     # ── Component CRUD (Handoff 17 §2.2 — the level the editors need) ─────────
     #

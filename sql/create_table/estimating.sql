@@ -158,6 +158,7 @@ CREATE TABLE IF NOT EXISTS crm.section_services (
     id                  VARCHAR(36)   NOT NULL,
     section_id          VARCHAR(36)   NOT NULL,
     catalog_item_id     VARCHAR(36)   DEFAULT NULL,               -- link to catalog_items / kit
+    discipline          ENUM('landscape', 'irrigation') DEFAULT NULL, -- override for LS/IR split (Handoff 29); NULL = derive from catalog_items.service_type
     label               VARCHAR(255)  NOT NULL,                   -- "Mowing", "Mahogany 10'-12' — Installed"
     qty                 DECIMAL(12,4) NOT NULL DEFAULT 0,         -- occurrences/yr (maint) or quantity (install)
     uom                 VARCHAR(20)   NOT NULL,                   -- /yr, ea, plt, FT, 30g, …

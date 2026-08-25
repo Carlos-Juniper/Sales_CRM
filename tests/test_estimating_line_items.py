@@ -100,10 +100,16 @@ class FakeDb:
             self.tables[table][row["id"]] = row
             return
 
-        m = re.match(r"UPDATE (\w+) SET (.*) WHERE id = %s$", s, re.I)
+        m = re.match(r"UPDATE (\w+) SET (.*) WHERE (id|estimate_id) = %s$", s, re.I)
         if m:
-            table, sets = m.group(1), m.group(2)
-            row = self.tables[table].get(params[-1])
+            table, sets, key_col = m.group(1), m.group(2), m.group(3)
+            if key_col == "id":
+                row = self.tables[table].get(params[-1])
+            else:
+                row = next(
+                    (r for r in self.tables[table].values() if r.get(key_col) == params[-1]),
+                    None,
+                )
             i = 0
             for part in [p.strip() for p in sets.split(",")]:
                 col, expr = [x.strip() for x in part.split("=", 1)]

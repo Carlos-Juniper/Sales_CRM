@@ -234,6 +234,13 @@ export interface SectionService {
   id: string
   sectionId: string
   catalogItemId: string | null
+  /**
+   * Per-line LS/IR override for the ITB EST LS $ / EST IR $ split. `null`
+   * derives the discipline from the catalog item's `serviceType` (irrigation
+   * vs. landscape); a manual line with no catalog item defaults to landscape
+   * unless set explicitly here.
+   */
+  discipline?: 'landscape' | 'irrigation' | null
   label: string
   /** Occurrences/yr (maintenance) or quantity (install). */
   qty: number

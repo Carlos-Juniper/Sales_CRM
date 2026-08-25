@@ -1,8 +1,60 @@
-# Hand-run migrations (Handoff 15 — canonical properties model)
+# Schema migrations
 
-`db.run_migrations()` is a deliberate **no-op** — nothing applies SQL
-automatically. Apply these numbered files **by hand, in order**, against the
-live **`crm`** database (`db.py` default `MYSQL_DB=crm`):
+**New source of truth: `scripts/migrate.py`**
+
+Migrations are now applied automatically by the runner — not by hand.
+See [handoffs/34-migration-runner-and-state-reconciliation.md](../../handoffs/34-migration-runner-and-state-reconciliation.md) (tool) and [handoffs/35-migration-deploy-wiring-and-live-apply.md](../../handoffs/35-migration-deploy-wiring-and-live-apply.md) (CI wiring).
+
+## Running migrations
+
+```bash
+# dry-run — report what would apply, no writes
+python -m scripts.migrate --dry-run
+
+# apply all pending (idempotent — safe to re-run)
+python -m scripts.migrate
+
+# verbose — prints each SQL statement as it executes
+python -m scripts.migrate --verbose
+```
+
+Env vars (same as `db.py`): `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB`, `MYSQL_SOCKET_PATH` (Unix socket; overrides host/port).
+
+## CI integration
+
+`cloudbuild.staging.yaml` runs the migration step **before** `gcloud run deploy` on every staging build.
+A non-zero exit from `scripts/migrate.py` fails the Cloud Build step and blocks the deploy.
+
+Prod wiring is a separate, deliberately-gated follow-up once staging has proven the pipeline step
+for at least one real deploy cycle.
+
+## Per-migration notes
+
+- **001** — creates the `properties` table (canonical property model, Handoff 15).
+- **002** — backfills `leads.property_id` from `leads.hoa_property_id`. Idempotent (`INSERT IGNORE` + `UPDATE`). Safe to re-run while `hoa_property_id` still exists; never re-run once 003 has dropped it.
+- **003** — drops `leads.hoa_property_id`. Hard gate: runner halts if any leads still have `hoa_property_id IS NOT NULL AND property_id IS NULL` after 002.
+- **004** — commits the `users` DDL plus `branches` and `sales_territories`. If a populated legacy `crm_users` table exists and `users` does not, the runner issues `RENAME TABLE crm_users TO users` instead of the CREATE. See the runner's 004 branch logic.
+- **005** — adds `estimates.rfi_status` (Handoff 24).
+- **006** — adds `itb_projects.estimate_id` (Handoff 21).
+- **007** — renames `approval_tiers.role_key` to canonical auth roles, adds the install approval ladder (Handoff 19).
+- **008** — adds `takeoff_lines.catalog_item_id` and `takeoff_lines.created_at` (Handoff 20).
+- **009** — seeds `catalog_items` from the Aspire kit workbook (Handoff 22). Idempotent (`INSERT … ON DUPLICATE KEY UPDATE`). Refreshing from a newer workbook is a separate manual operation via `scripts/load_catalog_items.py`.
+- **010** — adds `estimates.lead_id` (pipeline kanban redesign).
+- **011** — renames `leads.status = 'handed_off'` → `'estimating'` (data-only; idempotent `UPDATE WHERE`). Run before deploying the renamed frontend/backend code.
+- **012** — adds `estimates.turf_area_acres`, `estimates.curb_miles`, and wires takeoff-scan attachments (Handoff 27).
+- **013** — adds `section_services.discipline` (nullable LS/IR override, Handoff 29).
+
+---
+
+## Historical note — hand-run instructions (superseded)
+
+The instructions below were the old manual process before `scripts/migrate.py` existed.
+They are preserved here for reference only. **Do not follow them** — the runner handles all of this automatically, including detection of already-applied migrations.
+
+<details>
+<summary>Old hand-run instructions (click to expand)</summary>
+
+`db.run_migrations()` was a deliberate **no-op** — nothing applied SQL automatically. Files were applied by hand, in order, against the live `crm` database:
 
 ```bash
 mysql -h 127.0.0.1 -P 3306 -u <user> -p crm < sql/migrations/001_canonical_properties.sql
@@ -11,76 +63,6 @@ mysql -h 127.0.0.1 -P 3306 -u <user> -p crm < sql/migrations/002_backfill_leads_
 mysql -h 127.0.0.1 -P 3306 -u <user> -p crm < sql/migrations/003_drop_leads_hoa_property_id.sql
 ```
 
-Notes:
+Superseded by `scripts/migrate.py` — see Handoff 34.
 
-- All DDL here is **unprefixed** (no `juniper.`). The historical files in
-  `sql/*.sql` are `juniper`-prefixed while the live DB is `crm` — that mismatch
-  is why the `properties` table was never created (the bug this fixes). Strip
-  the prefix when applying anything from the legacy set.
-- **No FK constraints** — all relationships are logical/indexed by convention;
-  integrity is enforced in code (upsert on the UNIQUE source key + the backfill
-  verification step).
-- `002` backfills a canonical `properties` row for every `hoa_property_id`
-  still referenced by a lead and repoints `leads.property_id`. Backfilled rows
-  are `aspire_sync_status='unsynced'` — they must NOT push to Aspire; the only
-  sync trigger is estimate submission.
-  **⚠️ Before applying `002`, verify what live `hoa_properties.branch_id`
-  actually contains** (`SELECT DISTINCT branch_id FROM hoa_properties;`). The
-  backfill copies it into `properties.branch_city`, which expects a branch
-  NAME ("Orlando, FL"-style — what Aspire branch resolution in
-  `api/aspire_sync.py` matches on). If it holds ids (`b1`, …), resolve names
-  via the `sales_territories` table from `004` (apply `004` first) or backfill
-  `branch_city` as NULL — id-like values fail Aspire branch resolution
-  silently. See the header warning in the `002` file.
-- `003` drops `leads.hoa_property_id`. It is a separate file so the drop cannot
-  run before the verification in `002` passes.
-- `007` (Handoff 19) renames `approval_tiers.role_key` to the canonical auth
-  roles (`branch_manager→manager`, `bp→vice_president`, `coo→ceo`; thresholds
-  unchanged), adds the install approval ladder (same $ bands as maintenance),
-  and widens `estimate_adjustments.actor` to VARCHAR(255).
-- `004` (Handoff 18) commits the `users` DDL that auth actually queries, builds
-  the branch model as TWO tables, and migrates legacy roles
-  (`inside_sales`/`outside_sales` → `sales`). The two tables are at different
-  grains: `branches` = one row per REAL Aspire branch (BranchID PK, mirrored
-  from the Aspire export — name/address/manager/active), and
-  `sales_territories` = the "City, ST" units the app operates on
-  (`users.branch_id` and `estimates.branch` both carry this), each routing to a
-  maintenance + install Aspire branch. **`api/authz.resolve_branch_name` reads
-  `sales_territories` — deploy that code with this migration.** If a populated
-  legacy `crm_users` table exists and `users` does not, `RENAME TABLE crm_users
-  TO users;` instead of the CREATE — see the header comment in the file.
-- `008` (Handoff 20) adds `takeoff_lines.catalog_item_id` (nullable kit link
-  enabling the estimate-Save Aspire qty push to
-  `OpportunityServiceItem.ItemQuantity`) and `takeoff_lines.created_at`
-  (stable Discrepancy Review list ordering). Logical/indexed only, no FK —
-  per this set's convention.
-- `009` (Handoff 22) seeds `catalog_items` from the Aspire kit workbook
-  (`business docs/Juniper_Aspire_Kit_Review.xlsx`, pulled live 2026-07-14) —
-  80 install kits + 48 maintenance takeoff-item kits with observed production
-  rates. GENERATED by `scripts/load_catalog_items.py` (regenerate, don't
-  hand-edit) and idempotent (`INSERT … ON DUPLICATE KEY UPDATE` on
-  deterministic ids). After applying, count-validate against the live DB:
-  `venv/bin/python scripts/load_catalog_items.py --verify` (expects
-  install_quantity=80, maintenance_hours=48). Maintenance rows the Aspire
-  sample never hit keep `production_rate = NULL` on purpose — the Handoff 22
-  save guard blocks estimating against them until the team supplies a rate.
-- `010` (Pipeline kanban redesign) adds `estimates.lead_id` — logical ref to
-  the sales lead an estimate was created against, driving the lead→estimate
-  status write-back (Qualifying→Estimating on create; Estimating→OP
-  Review/Approved as the estimate's own status progresses).
-- `011` (Pipeline kanban redesign) renames `leads.status = 'handed_off'` to
-  `'estimating'` (data-only — the column is a plain VARCHAR). **Run `010`
-  and `011` together, before deploying** — the renamed frontend/backend code
-  no longer recognizes `'handed_off'`, so any lead left on the old value
-  would silently vanish from the kanban.
-- `012` (Handoff 27) makes the Takeoff Insert durable: adds `'takeoff_scan'`
-  to the `intake_attachments.kind` enum, adds `intake_attachments.estimate_id`
-  (takeoff scans are estimate-scoped — no intake submission;
-  `intake_submission_id` becomes NULLable), and adds the manual takeoff
-  metadata columns `estimates.turf_area_acres` / `estimates.curb_miles`
-  (estimator-entered now; Beam AI automated takeoff — paused — will write the
-  same columns later). This table already carries FKs from the attachment
-  feature, so the new `estimate_id` gets one too (unlike the properties-set
-  convention). **Verify the current enum/column state against the live `crm`
-  DB before applying** (the file drops/re-adds `fk_attachments_intake` by
-  name).
+</details>

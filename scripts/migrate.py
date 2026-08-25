@@ -14,8 +14,6 @@ Usage (from repo root):
 Env vars (same as db.py):
     MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB
     MYSQL_SOCKET_PATH   — Cloud SQL Auth Proxy socket; overrides host/port
-
-See handoffs/34-migration-runner-and-state-reconciliation.md for full spec.
 """
 from __future__ import annotations
 
@@ -158,7 +156,7 @@ def split_statements(sql_text: str) -> list[str]:
     Skips blank segments and pure SELECT statements (informational checksums).
 
     The migration set has no stored procedures or ';'-containing string literals,
-    so semicolon splitting is safe after comment removal (Handoff 34 §2.4).
+    so semicolon splitting is safe after comment removal.
     """
     # Remove everything from -- to end of line before splitting.
     cleaned = re.sub(r"--[^\n]*", "", sql_text)
@@ -389,7 +387,7 @@ def _is_create_table_users(stmt: str) -> bool:
 
 def apply_004(conn, path: Path, verbose: bool = False, branch: str | None = None) -> None:
     """
-    Execute migration 004 with branch logic per Handoff 34 §2.4.
+    Execute migration 004 with branch logic.
 
     Caller should pass `branch` (already returned by detect_004) to avoid
     a redundant INFORMATION_SCHEMA round-trip and prevent TOCTOU skew.

@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
-// Handoffs 10 + 27 — Takeoff Insert (maintenance-only).
+// Takeoff Insert (maintenance-only).
 //
 // Estimating's ONLY maintenance output to the CRM (the salesperson, a person)
 // is a takeoff insert: the scanned property boundary image + acreage stats.
 // Never a proposal, quote document, or pricing letter.
 //
-// Handoff 27 makes the tab durable:
+// The tab is durable:
 //   * the uploaded scan persists via the real GCS attachment flow
 //     (presign → PUT → confirm) as an estimate-scoped `takeoff_scan`
 //     attachment that survives reload;
@@ -123,7 +123,7 @@ describe('TakeoffInsert — scanned map card', () => {
   })
 })
 
-describe('TakeoffInsert — scan persistence (Handoff 27)', () => {
+describe('TakeoffInsert — scan persistence', () => {
   it('uploading a scan previews it immediately and persists it as a takeoff_scan attachment', async () => {
     const { user } = await openTakeoffTab(seededMaintenance())
     const file = new File(['scan-bytes'], 'dobson-ranch-boundary.png', { type: 'image/png' })
@@ -190,7 +190,7 @@ describe('TakeoffInsert — stat grid', () => {
   })
 })
 
-describe('TakeoffInsert — manual turf/curb persistence (Handoff 27)', () => {
+describe('TakeoffInsert — manual turf/curb persistence', () => {
   it('persists turf area on blur via the estimate PATCH', async () => {
     const { user } = await openTakeoffTab(seededMaintenance())
     const turf = screen.getByLabelText('Turf area (acres)')
@@ -242,7 +242,7 @@ describe('TakeoffInsert — actions', () => {
 
   it('"Attach & hand off" attaches the insert, advances handoff state, and disables itself', async () => {
     // Must be the MSW-seeded maintenance estimate so the PATCH finds it. The
-    // mock now enforces the status machine (Handoff 25): `handed_back` is only
+    // mock now enforces the status machine: `handed_back` is only
     // legal from `approved`, so walk the seed there first.
     const seeded = seededMaintenance()
     // The MSW store row is a structuredClone of the seed — advance it to

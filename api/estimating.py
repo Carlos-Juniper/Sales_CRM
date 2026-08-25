@@ -1,4 +1,4 @@
-"""Estimating API — /api/estimating/* routes (Handoff 00 + 08).
+"""Estimating API — /api/estimating/* routes.
 
 Backs the Estimating tab's single-source estimate model. Mirrors the MSW mock
 contract in studio/src/mocks/handlers.ts exactly:
@@ -213,11 +213,11 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         "leadId": r.get("lead_id"),
         "aspireOpportunityId": r.get("aspire_opportunity_id"),
         "aspireSyncStatus": r.get("aspire_sync_status"),
-        # Handoff 24 §3.2 — install RFI status, tracked first-class. Capture and
+        # Install RFI status, tracked first-class. Capture and
         # display only: nothing gates approval on it. (.get keeps pre-migration
         # rows working.)
         "rfiStatus": r.get("rfi_status"),
-        # Handoff 27 — manual takeoff metadata (turf/curb). Manual entry today;
+        # Manual takeoff metadata (turf/curb). Manual entry today;
         # Beam AI automated takeoff will populate these later. (.get keeps
         # pre-migration rows working.)
         "turfAreaAcres": _num(r.get("turf_area_acres")),
@@ -333,7 +333,7 @@ async def _build_opportunity_input(est_row: dict, service_line: Optional[str] = 
         aspire_property_id=aspire_property_id,
         aspire_rep_contact_id=rep_contact_id,
         # customer_type wins; the canonical property's property_type is the
-        # fallback so lead-origin estimates still map a sales type (Handoff 15).
+        # fallback so lead-origin estimates still map a sales type.
         sales_type=SALES_TYPE_BY_CUSTOMER.get(
             est_row.get("customer_type") or property_type
         ),
@@ -421,14 +421,14 @@ async def sweep_loop() -> None:
             logger.exception("aspire sync sweep failed")
 
 
-# ── Takeoff lines (Handoff 20) ────────────────────────────────────────────────
+# ── Takeoff lines ──────────────────────────────────────────────────────────
 #
-# Derived fields (bid_qty / flagged / delta_vs_opp) are RECOMPUTED here per
-# Handoff 00 §3.8 — never stored, never trusted from the client. The flag
+# Derived fields (bid_qty / flagged / delta_vs_opp) are RECOMPUTED here —
+# never stored, never trusted from the client. The flag
 # threshold is config (default 10%, range 1–25%; mirrors DISCREPANCY_THRESHOLD
 # in studio/src/lib/estimating/config.ts) and is deliberately not a row column.
 # opportunity_qty is a LOCALLY-set, manually-editable value — it is never read
-# from Aspire (locked decision, Handoff 20 §2).
+# from Aspire (locked decision).
 
 DISCREPANCY_DEFAULT_THRESHOLD = 0.10
 
@@ -445,7 +445,7 @@ _TAKEOFF_COLS = {
 
 def _bid_qty(plan_qty: float, add_pct: float) -> int:
     """round(plan × (1 + add%)) — half-up, mirroring JS Math.round in
-    studio/src/lib/estimating/calc.ts (Handoff 20 locked: round, not ceil)."""
+    studio/src/lib/estimating/calc.ts (locked: round, not ceil)."""
     return int(math.floor(plan_qty * (1 + add_pct) + 0.5))
 
 
@@ -481,13 +481,13 @@ def _takeoff_line_out(r: dict) -> dict:
 
 
 async def _push_takeoff_qtys_bg(estimate_id: str) -> None:
-    """Handoff 20 §4.2 — ONE batched, best-effort qty push on estimate Save.
+    """ONE batched, best-effort qty push on estimate Save.
 
     Pushes every takeoff line that carries a catalog_item_id (a single pass,
     not a call per edit) to OpportunityServiceItem.ItemQuantity via the
     aspire_sync port. Strictly non-blocking: any failure is logged, never
     raised — an Aspire outage must not fail the Save. (Separate from the
-    property→Aspire sync in Handoff 15 §5.6, which fires on estimate submit.)
+    property→Aspire sync, which fires on estimate submit.)
     """
     try:
         if not aspire_sync.sync_enabled():
@@ -613,7 +613,7 @@ def _intake_out(r: dict) -> dict:
 
 
 def _draft_out(r: dict) -> dict:
-    """Serialize an intake_submissions DRAFT row (Handoff 24 §3.3).
+    """Serialize an intake_submissions DRAFT row.
 
     Drafts are partial intakes saved before submission: estimate_id is NULL
     (a draft never creates an estimate) and is_draft=1. They are per-user and
@@ -632,14 +632,14 @@ def _draft_out(r: dict) -> dict:
     }
 
 
-# Handoff 27 — the Takeoff Insert scan is a scanned map image (or PDF); the
+# The Takeoff Insert scan is a scanned map image (or PDF); the
 # intake kinds stay PDF-only at the endpoint layer.
 _SCAN_CONTENT_TYPES = frozenset(
     {"application/pdf", "image/png", "image/jpeg", "image/webp"}
 )
 
 # Attachment-by-id lookup, authorized against the estimate. Rows are linked
-# either directly (ia.estimate_id — takeoff scans, Handoff 27) or through
+# either directly (ia.estimate_id — takeoff scans) or through
 # their intake submission (legacy intake docs), hence the LEFT JOIN + OR.
 _ATTACHMENT_BY_ID_SQL = """SELECT ia.* FROM intake_attachments ia
    LEFT JOIN intake_submissions ins ON ins.id = ia.intake_submission_id
@@ -657,7 +657,7 @@ def _attachment_out(r: dict) -> dict:
     return {
         "id": r["id"],
         "intakeSubmissionId": r["intake_submission_id"],
-        # Direct estimate link (takeoff scans, Handoff 27); NULL for legacy
+        # Direct estimate link (takeoff scans); NULL for legacy
         # submission-scoped rows (.get keeps pre-migration rows working).
         "estimateId": r.get("estimate_id"),
         "fileName": r["file_name"],
@@ -672,7 +672,7 @@ def _attachment_out(r: dict) -> dict:
     }
 
 
-# ── Config-table row mappers (Handoff 16 — read-only GET endpoints) ──────────
+# ── Config-table row mappers (read-only GET endpoints) ───────────────────────
 #
 # Shapes match the TS types in studio/src/types/estimating.ts exactly so the
 # frontend swap from config.ts literals is a drop-in. These tables are DATA:
@@ -727,24 +727,24 @@ def _itb_scope_out(r: dict) -> dict:
     }
 
 
-# ── ITB tracker (Handoff 21) ─────────────────────────────────────────────────
+# ── ITB tracker ───────────────────────────────────────────────────────────────
 #
 # Status legend codes: P Pending · C Created Request · S Sent · R Received ·
 # U Updated · X 100% Complete · '-' Non-Applicable.
 ITB_STATUS_CODES = frozenset({"P", "C", "S", "R", "U", "X", "-"})
 
 # Default initial scope status for a freshly auto-generated ITB project:
-# 'P' Pending 
+# 'P' Pending
 DEFAULT_ITB_STATUS = "P"
 
-# Handoff 29 — EST LS $ / EST IR $ auto-split. A line's catalog_items.service_type
+# EST LS $ / EST IR $ auto-split. A line's catalog_items.service_type
 # in this set is classified as Irrigation; everything else is Landscape. A named
 # config set (not a hardcoded branch) so adding a service type is a data change.
 IRRIGATION_SERVICE_TYPES = frozenset({"Irrigation"})
 
 
 def _line_discipline(discipline_override: Optional[str], service_type: Optional[str]) -> str:
-    """'irrigation' or 'landscape' for one section_services line (Handoff 29).
+    """'irrigation' or 'landscape' for one section_services line.
 
     A per-line `discipline` override always wins; otherwise derive from the
     line's catalog item `service_type`. Manual lines (no catalog item, no
@@ -757,7 +757,7 @@ def _line_discipline(discipline_override: Optional[str], service_type: Optional[
 
 async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int) -> tuple[int, int]:
     """Derive (est_ls_cents, est_ir_cents) from an estimate's PERSISTED line
-    items (Handoff 29). Each is summed directly from its classified lines
+    items. Each is summed directly from its classified lines
     (not `total_cents - ir_cents`) so a split can never go negative even when
     lines are added/edited after creation and no longer match the create-time
     `total_cents` snapshot — that snapshot is only used as a fallback when the
@@ -829,9 +829,9 @@ async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int
 
 async def _recompute_itb_split(estimate_id: str) -> None:
     """Re-derive EST LS $ / EST IR $ on the linked itb_projects row whenever an
-    estimate's line items change post-creation (Handoff 29 §4.3 — LOCKED
+    estimate's line items change post-creation (LOCKED
     default: recompute, not a create-time snapshot). No-op if the estimate has
-    no linked ITB project (shouldn't happen per Handoff 21's 1:1 guarantee, but
+    no linked ITB project (shouldn't happen given the 1:1 guarantee, but
     defensive since this runs from several independent CRUD endpoints) — a
     single self-contained call so every call site looks the same.
     """
@@ -896,14 +896,14 @@ def _itb_status_out(r: dict) -> dict:
 
 
 async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> str:
-    """Auto-generate the 1:1 itb_projects row for a new estimate (Handoff 21 §3).
+    """Auto-generate the 1:1 itb_projects row for a new estimate.
 
     LOCKED decision: every estimate created from either intake form gets exactly
     one linked ITB project, plus one itb_scope_status row per itb_scopes row
     (config-driven — a scope added in the DB gets a column with no code change),
     each initialized to DEFAULT_ITB_STATUS. Local-only: no Aspire push here.
 
-    EST LS $ / EST IR $ split (Handoff 29): derived automatically from the
+    EST LS $ / EST IR $ split: derived automatically from the
     estimate's own line items (see _compute_ls_ir_split), unless the caller
     provides estLsCents / estIrCents explicitly — those always win.
     """
@@ -1040,7 +1040,7 @@ async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
     return section_id
 
 
-# ── Production-rate save guard (Handoff 22 §4 — LOCKED decision) ─────────────
+# ── Production-rate save guard (LOCKED decision) ─────────────────────────────
 #
 # Production rates are REQUIRED: a maintenance service line cannot be saved
 # unless its hours are computable. A line resolves when it carries non-null
@@ -1109,9 +1109,9 @@ _UPDATABLE = {
     "assignedIrrEstimator": "assigned_irr_estimator",
     "crmRep": "crm_rep",
     "notes": "notes",
-    # Handoff 24 §3.2 — tracked RFI status (capture/display only; no gating).
+    # Tracked RFI status (capture/display only; no gating).
     "rfiStatus": "rfi_status",
-    # Handoff 27 — manual takeoff metadata (Takeoff Insert). Estimator-entered
+    # Manual takeoff metadata (Takeoff Insert). Estimator-entered
     # today; Beam AI automated takeoff is the eventual source (paused — when it
     # lands it writes these same fields). Acreage/sqft stay derived, never stored.
     "turfAreaAcres": "turf_area_acres",
@@ -1122,17 +1122,17 @@ _UPDATABLE = {
     "lostReasonId": "aspire_lost_reason_id",
 }
 
-# Refined estimate-header PATCH ownership (Handoff 18 §5.2 / Handoff 19 §7):
-#   * targetMargin — approver-only: it's the Handoff-19 approver lever.
+# Refined estimate-header PATCH ownership:
+#   * targetMargin — approver-only: it's the approver lever.
 #   * contractValueCents — estimator OR approver: the value is derived from
 #     line items the estimator legitimately edits (there's no server-side
 #     contract-value rollup), and approver value-adjustments stay audited via
 #     the adjustments POST.
-#   * status — any authenticated role: the transition machine (Handoff 25's
+#   * status — any authenticated role: the transition machine (the
 #     409 guard below) is the enforcement, and privileged transitions have
 #     their own guarded endpoint (approve-handback with tier checks). The
 #     won/lost/send-back edges are legitimately driven by sales and approvers.
-#   * everything else — estimator-owned (Handoff 18 §5.1, same convention as
+#   * everything else — estimator-owned (same convention as
 #     section/service/component mutations).
 _APPROVER_ONLY_FIELDS = frozenset({"targetMargin"})
 _ESTIMATOR_OR_APPROVER_FIELDS = frozenset({"contractValueCents"})
@@ -1160,14 +1160,14 @@ def _require_estimate_patch_ownership(body: dict, user: dict) -> None:
 
 
 class ApproveHandBackBody(BaseModel):
-    # Actor identity comes from the JWT (Handoff 18) — the field is accepted
+    # Actor identity comes from the JWT — the field is accepted
     # for wire compatibility but IGNORED server-side.
     actor: Optional[str] = None
     notifyBmRdOnReturn: Optional[bool] = None
 
 
 class AdjustmentBody(BaseModel):
-    """Handoff 19 §5 — one audited approver lever change (complexity|margin).
+    """One audited approver lever change (complexity|margin).
 
     Values are decimals (0.22 = 22%). The actor is derived from the JWT —
     an `actor` field in the body is accepted for wire compatibility but
@@ -1203,8 +1203,8 @@ def register(app, require_auth) -> None:
         branch: Optional[str] = Query(default=None),
         _user: dict = Depends(require_auth),
     ) -> list:
-        # Branch scope is derived from the AUTHENTICATED user (BRD I-9.5,
-        # Handoff 18) — the client `branch` param is never the authority. It
+        # Branch scope is derived from the AUTHENTICATED user (BRD I-9.5)
+        # — the client `branch` param is never the authority. It
         # survives only as an optional convenience filter for cross-branch
         # (exec/admin) roles.
         scope = await authz.resolve_branch_scope(_user)
@@ -1242,7 +1242,7 @@ def register(app, require_auth) -> None:
                 status_code=400,
                 detail="branch is required — select a branch from the intake form",
             )
-        # Handoff 22 — guard runs BEFORE any INSERT so a reject persists nothing.
+        # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
             await _require_resolvable_maintenance_lines([
                 svc
@@ -1285,7 +1285,7 @@ def register(app, require_auth) -> None:
                 body.get("notes"),
                 body.get("propertyId"),
                 body.get("leadId"),
-                # Handoff 24 §3.2 — RFI status tracked first-class (install).
+                # RFI status tracked first-class (install).
                 body.get("rfiStatus"),
             ],
         )
@@ -1297,10 +1297,10 @@ def register(app, require_auth) -> None:
             await _insert_intake_submission(
                 estimate_id, est_type, intake, user.get("id") or "unknown"
             )
-        # Handoff 21 §3 — auto-generate the 1:1 ITB project (+ its scope-status
+        # Auto-generate the 1:1 ITB project (+ its scope-status
         # rows, one per itb_scopes row) for EITHER intake type. Local-only.
         await _create_itb_project(estimate_id, body, est_type)
-        # Handoff 15 §5.6 — estimate submission is THE (only) trigger for the
+        # Estimate submission is THE (only) trigger for the
         # property's Aspire push: promotion/backfill/create leave properties
         # 'unsynced'; submitting an estimate for one pushes it (pending →
         # synced/failed). The guard skips already-synced/in-flight rows.
@@ -1337,12 +1337,12 @@ def register(app, require_auth) -> None:
         )
         return [_intake_out(r) for r in rows]
 
-    # ── Intake drafts (Handoff 24 §3.3) ──────────────────────────────────────
+    # ── Intake drafts ─────────────────────────────────────────────────────────
     #
     # "Save draft" persists a PARTIAL intake to intake_submissions with
     # is_draft=1 and estimate_id NULL. A draft never creates an estimate and
-    # never triggers any Aspire push (property sync is estimate-submit only,
-    # Handoff 15 §5.6). Drafts are per-user: every route scopes by the JWT
+    # never triggers any Aspire push (property sync is estimate-submit only).
+    # Drafts are per-user: every route scopes by the JWT
     # identity, so a rep can resume from any device but never sees another
     # rep's drafts.
 
@@ -1422,14 +1422,14 @@ def register(app, require_auth) -> None:
     async def update_estimate(
         estimate_id: str, body: dict, background: BackgroundTasks, _user: dict = Depends(require_auth)
     ) -> dict:
-        # C1 — refined Handoff 18 ownership split, enforced server-side (not
+        # C1 — refined ownership split, enforced server-side (not
         # just in the UI): targetMargin is approver-only; contractValueCents
         # is estimator-or-approver (derived from estimator-owned line items);
-        # status is any-authenticated (the Handoff 25 transition machine below
+        # status is any-authenticated (the transition machine below
         # is the enforcement); every other header field — name, dates, notes,
         # assignments, takeoff metadata — is estimator-owned, mirroring the
         # section/service guards. See _require_estimate_patch_ownership.
-        # TODO(Handoff 19 §7 open item): couple approver targetMargin PATCHes
+        # TODO(open item): couple approver targetMargin PATCHes
         # to a persisted estimate_adjustments row so a lever change can never
         # land without its audit row — not built yet, pending that open item.
         # (contractValueCents is now estimator-or-approver since it mirrors
@@ -1452,7 +1452,7 @@ def register(app, require_auth) -> None:
         if isinstance(body.get("approvalSettings"), dict):
             body["notifyBmRdOnReturn"] = body["approvalSettings"].get("notifyBmRdOnReturn")
 
-        # Handoff 25 — every status write goes through the transition machine.
+        # Every status write goes through the transition machine.
         # The generic PATCH used to accept any DB-enum-valid status, bypassing
         # STATUS_TRANSITIONS (only approve-handback enforced it). Reject illegal
         # edges with the same 409 shape as approve-handback. A same-status PATCH
@@ -1488,7 +1488,7 @@ def register(app, require_auth) -> None:
                 _sync_status_bg, estimate_id, target_status, body.get("lostReasonId")
             )
 
-        # Handoff 20 §4.2 — estimate Save triggers ONE batched, best-effort
+        # Estimate Save triggers ONE batched, best-effort
         # push of the takeoff quantities that carry a catalog_item_id. Never
         # blocks the Save; failures are logged inside the task.
         background.add_task(_push_takeoff_qtys_bg, estimate_id)
@@ -1529,7 +1529,7 @@ def register(app, require_auth) -> None:
         estimate_id: str, body: ApproveHandBackBody, _user: dict = Depends(require_auth)
     ) -> dict:
         # Approve is approver-owned, and only within the caller's tier — a
-        # manager cannot approve a >$100k estimate (Handoff 18 §5.2). Identity
+        # manager cannot approve a >$100k estimate. Identity
         # comes from the JWT, never from the client body.
         authz.require_approver(_user)
         rows = await query(
@@ -1597,7 +1597,7 @@ def register(app, require_auth) -> None:
             for r in rows
         ]
 
-    # ── estimate_adjustments (Handoff 19 §5 — approver lever audit, BRD III-1) ─
+    # ── estimate_adjustments (approver lever audit, BRD III-1) ───────────────
     #
     # Complexity/margin are the ONLY approver-owned levers; every change (and
     # every revert back to the original) persists a from/to row here. This is
@@ -1610,7 +1610,7 @@ def register(app, require_auth) -> None:
     async def create_adjustment(
         estimate_id: str, body: AdjustmentBody, _user: dict = Depends(require_auth)
     ) -> dict:
-        # Adjustments are approver-owned (Handoff 18 §5.2) — estimators 403.
+        # Adjustments are approver-owned — estimators 403.
         authz.require_approver(_user)
         if body.field not in ("complexity", "margin"):
             raise HTTPException(
@@ -1651,19 +1651,19 @@ def register(app, require_auth) -> None:
 
     @app.post("/api/estimating/estimates/{estimate_id}/sections", status_code=201)
     async def create_section(estimate_id: str, body: dict, _user: dict = Depends(require_auth)) -> dict:
-        authz.require_estimator(_user)  # sections are estimator-owned (Handoff 18 §5.1)
+        authz.require_estimator(_user)  # sections are estimator-owned
         est_rows = await query(
             "SELECT id, estimate_type FROM estimates WHERE id = %s", [estimate_id]
         )
         if not est_rows:
             raise HTTPException(status_code=404, detail="Not found")
-        # Handoff 22 — nested services must resolve a production rate/hours.
+        # Nested services must resolve a production rate/hours.
         if est_rows[0].get("estimate_type") == "maintenance":
             await _require_resolvable_maintenance_lines(body.get("services") or [])
         idx = await _next_sort_order("estimate_sections", "estimate_id", estimate_id, body)
         section_id = await _insert_section(estimate_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
-        # Handoff 29 §4.3 — a newly added section may carry lines, which shift
+        # A newly added section may carry lines, which shift
         # the ITB LS/IR split.
         await _recompute_itb_split(estimate_id)
         rows = await query("SELECT * FROM estimate_sections WHERE id = %s", [section_id])
@@ -1687,7 +1687,7 @@ def register(app, require_auth) -> None:
         cols = {"name": "name", "squareFeet": "square_feet", "sortOrder": "sort_order"}
         await _apply_updates("estimate_sections", cols, body, section_id)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
-        # Handoff 29 §4.3 — a squareFeet edit changes every maintenance line's
+        # A squareFeet edit changes every maintenance line's
         # sell in this section, which shifts the ITB LS/IR split (recomputed
         # unconditionally, like every other section/service mutation, so the
         # trigger never has to be kept in sync with the split formula's inputs).
@@ -1709,7 +1709,7 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Not found")
         await execute("DELETE FROM estimate_sections WHERE id = %s", [section_id])
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
-        # Handoff 29 §4.3 — deleting a section removes its lines from the split.
+        # Deleting a section removes its lines from the split.
         await _recompute_itb_split(estimate_id)
 
     @app.post(
@@ -1726,7 +1726,7 @@ def register(app, require_auth) -> None:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
-        # Handoff 22 — a maintenance line must resolve a production rate/hours.
+        # A maintenance line must resolve a production rate/hours.
         est_rows = await query(
             "SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id]
         )
@@ -1735,7 +1735,7 @@ def register(app, require_auth) -> None:
         idx = await _next_sort_order("section_services", "section_id", section_id, body)
         service_id = await _insert_service(section_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
-        # Handoff 29 §4.3 — a new line shifts the ITB LS/IR split.
+        # A new line shifts the ITB LS/IR split.
         await _recompute_itb_split(estimate_id)
         svc = await query("SELECT * FROM section_services WHERE id = %s", [service_id])
         comp = await query(
@@ -1764,9 +1764,8 @@ def register(app, require_auth) -> None:
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
         current = rows[0]
-        # Handoff 22 — guard the MERGED line (row + patch): an edit may not
-        # null-out hours or repoint at an unrated kit and leave the line
-        # unresolvable.
+        # Guard the MERGED line (row + patch): an edit may not null-out hours
+        # or repoint at an unrated kit and leave the line unresolvable.
         est_rows = await query(
             "SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id]
         )
@@ -1794,8 +1793,7 @@ def register(app, require_auth) -> None:
         }
         await _apply_updates("section_services", cols, body, service_id)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
-        # Handoff 29 §4.3 — an edited line (qty, sell, discipline, …) shifts
-        # the ITB LS/IR split.
+        # An edited line (qty, sell, discipline, …) shifts the ITB LS/IR split.
         await _recompute_itb_split(estimate_id)
         svc = await query("SELECT * FROM section_services WHERE id = %s", [service_id])
         comp = await query(
@@ -1822,10 +1820,10 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Not found")
         await execute("DELETE FROM section_services WHERE id = %s", [service_id])
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
-        # Handoff 29 §4.3 — a removed line shifts the ITB LS/IR split.
+        # A removed line shifts the ITB LS/IR split.
         await _recompute_itb_split(estimate_id)
 
-    # ── Component CRUD (Handoff 17 §2.2 — the level the editors need) ─────────
+    # ── Component CRUD (the level the editors need) ────────────────────────
     #
     # Kit components (labor/material breakdown) are estimator-owned like the
     # rest of the tree. Every route validates the full ownership chain
@@ -1921,7 +1919,7 @@ def register(app, require_auth) -> None:
         await execute("DELETE FROM section_service_components WHERE id = %s", [component_id])
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
 
-    # ── Lifecycle flip (Handoff 17 §2.3 — audit rides the status edge) ────────
+    # ── Lifecycle flip (audit rides the status edge) ───────────────────────
     #
     # The Bidding↔Won toggle persists here, NOT in a frontend in-memory log.
     # Ownership always derives from lifecycle (won → crm); the edge is recorded
@@ -1967,9 +1965,9 @@ def register(app, require_auth) -> None:
         est = await _load_estimate(estimate_id)
         return {"estimate": est, "transition": record}
 
-    # ── Takeoff-line CRUD (Handoff 20 — Discrepancy Review persistence) ───────
+    # ── Takeoff-line CRUD (Discrepancy Review persistence) ─────────────────
     #
-    # Takeoff is estimator-owned (Handoff 18 §5.1). All qty fields — including
+    # Takeoff is estimator-owned. All qty fields — including
     # opportunity_qty — are writable by the estimator; opportunity_qty is a
     # local value with NO Aspire read dependency, ever. Derived fields come
     # back recomputed via _takeoff_line_out; client-sent derived values are
@@ -2055,7 +2053,7 @@ def register(app, require_auth) -> None:
             "UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id]
         )
 
-    # ── Attachment routes (GCS upload/download, Handoff plan §WP-B) ──────────
+    # ── Attachment routes (GCS upload/download) ─────────────────────────────
 
     @app.post(
         "/api/estimating/estimates/{estimate_id}/attachments/presign",
@@ -2074,8 +2072,8 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Estimate not found")
 
         # 2. Validate content type per kind. Intake docs stay PDF-only; the
-        # Takeoff Insert scan (Handoff 27) is a scanned map image, so the
-        # takeoff_scan kind also accepts common image types.
+        # Takeoff Insert scan is a scanned map image, so the takeoff_scan kind
+        # also accepts common image types.
         kind = body.get("kind", "other")
         if kind not in ("property_map", "rfp", "other", "takeoff_scan"):
             kind = "other"
@@ -2100,8 +2098,8 @@ def register(app, require_auth) -> None:
         if size_bytes > _att_mod.GCS_MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=400, detail="File exceeds the 2 GiB limit")
 
-        # 4. Resolve intake submission for the FK. Takeoff scans (Handoff 27)
-        # are ESTIMATE-scoped, not intake-submission-scoped: they hang directly
+        # 4. Resolve intake submission for the FK. Takeoff scans are
+        # ESTIMATE-scoped, not intake-submission-scoped: they hang directly
         # off intake_attachments.estimate_id and need no submission.
         submission_id: Optional[str] = None
         if kind != "takeoff_scan":
@@ -2233,7 +2231,7 @@ def register(app, require_auth) -> None:
         url = _att_mod.signed_get_url(row["object_key"], row["file_name"])
         return {"url": url, "expiresIn": _att_mod.GCS_SIGNED_URL_TTL_MIN * 60}
 
-    # ── Config-table read APIs (Handoff 16 — READ-ONLY by locked decision) ────
+    # ── Config-table read APIs (READ-ONLY by locked decision) ──────────────
     #
     # No POST/PATCH/DELETE for these tables here: config is edited via SQL/DB
     # for now; an admin editing surface is a separate future handoff.
@@ -2294,22 +2292,22 @@ def register(app, require_auth) -> None:
 
     @app.get("/api/estimating/config/itb-scopes")
     async def list_itb_scopes(_user: dict = Depends(require_auth)) -> list:
-        # Handoff 13 grouping: estimating → outside_dept → vendor_only (enum
-        # order), then the admin-set sort_order within each group.
+        # Group order: estimating → outside_dept → vendor_only (enum order),
+        # then the admin-set sort_order within each group.
         rows = await query(
             "SELECT * FROM itb_scopes ORDER BY scope_group, sort_order", []
         )
         return [_itb_scope_out(r) for r in rows]
 
-    # ── ITB tracker (Handoff 21) ─────────────────────────────────────────────
+    # ── ITB tracker ──────────────────────────────────────────────────────────
 
     @app.get("/api/estimating/itb/projects")
     async def list_itb_projects(_user: dict = Depends(require_auth)) -> list:
-        """All ACTIVE estimates' ITB projects, branch-scoped (Handoff 18).
+        """All ACTIVE estimates' ITB projects, branch-scoped.
 
         "Active" = the linked estimate's status is NOT terminal — NOT IN
-        ('won', 'lost'). handed_back/approved estimates stay visible (Handoff 21
-        §4 default; flagged open item pending Carlos). Every estimate appears
+        ('won', 'lost'). handed_back/approved estimates stay visible by default
+        (flagged open item pending Carlos). Every estimate appears
         (LOCKED: one estimate → one ITB project). Scope definitions come from
         GET /config/itb-scopes; this returns projects + their scope statuses.
         """

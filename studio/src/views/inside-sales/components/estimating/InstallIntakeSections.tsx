@@ -168,7 +168,7 @@ interface RequestorSectionProps {
   form: FormState
   setStr: SetStr
   setBool: SetBool
-  /** Aspire-derived install branch options (Handoff 28). */
+  /** Aspire-derived install branch options. */
   branchOptions: BranchOption[]
 }
 
@@ -200,7 +200,7 @@ export function RequestorSection({ form, setStr, setBool, branchOptions }: Reque
             className="h-8 text-xs"
           />
         </div>
-        {/* Install branch — populated from Aspire config endpoint (Handoff 28) */}
+        {/* Install branch — populated from Aspire config endpoint */}
         <div className="space-y-1">
           <Label htmlFor="ii-install-branch" className="text-xs">Install branch *</Label>
           <select

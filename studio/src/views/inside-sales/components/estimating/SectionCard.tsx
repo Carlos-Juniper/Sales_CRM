@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// SectionCard (Handoff 03) — one self-contained service-region box of the
+// SectionCard — one self-contained service-region box of the
 // maintenance Line-Item Editor. Blue cells (#eff6ff / #bfdbfe) mark the
 // estimator-editable inputs; complexity overrides away from the company
 // default are visually flagged (I-9.7). All pricing math flows through
@@ -45,7 +45,7 @@ export interface SectionCardProps {
   onDuplicate: () => void
   onRemoveRequest: () => void
   /**
-   * Handoff 22 — the addable-service catalog, sourced from GET /catalog-items
+   * The addable-service catalog, sourced from GET /catalog-items
    * by the parent editor. Defaults to the literal (offline fallback).
    */
   catalog?: MaintenanceCatalogService[]

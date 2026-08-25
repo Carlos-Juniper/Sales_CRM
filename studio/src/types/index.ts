@@ -33,8 +33,8 @@ export type LeadStatus =
   | 'op_review'
   | 'approved'
 
-// The nine canonical business roles (Handoff 18 — one role vocabulary,
-// mirrored by backend validation in api/authz.py).
+// The nine canonical business roles — one role vocabulary,
+// mirrored by backend validation in api/authz.py.
 export type UserRole =
   | 'procurement'
   | 'sales'
@@ -109,7 +109,7 @@ export interface Lead {
   distance_miles: number | null
   aspire_opportunity_id: string | null
   division_id: number | null
-  /** Canonical properties.id (Handoff 15 — replaces the removed hoa_property_id). */
+  /** Canonical properties.id (replaces the removed hoa_property_id). */
   property_id?: string | null
   created_at: string
   updated_at: string

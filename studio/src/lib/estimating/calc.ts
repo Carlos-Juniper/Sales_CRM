@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Pure calculation helpers for the Estimating tab (Handoff 00 §5).
+// Pure calculation helpers for the Estimating tab.
 //
 // Both editor engines (maintenance hours-driven, install quantity-driven) and
 // every analysis view share these implementations — there is exactly one.
@@ -81,7 +81,7 @@ export function per1000SfRead(sectionTotalCents: number, sqft: number): number {
 
 /**
  * Takeoff bid quantity: plan qty inflated by the add %, rounded to the
- * NEAREST whole unit (Handoff 20 locked decision: round, not ceil — pending
+ * NEAREST whole unit (locked decision: round, not ceil — pending
  * the Project Summary Template walkthrough confirmation).
  */
 export function bidQty(planQty: number, addPct: number): number {

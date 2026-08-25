@@ -66,7 +66,7 @@ export default function AccountsPage() {
   const [addPanel, setAddPanel] = useState<AccountTab | null>(null)
   const [selectedHOA, setSelectedHOA] = useState<HOAProperty | null>(null)
   const [expandedPM, setExpandedPM] = useState<Set<string>>(new Set())
-  // Handoff 23 §1a — create-lead-first gate: set when "Request estimate" is
+  // Create-lead-first gate: set when "Request estimate" is
   // attempted on a property with no lead; renders the blocking prompt.
   const [leadGateProperty, setLeadGateProperty] = useState<HOAProperty | null>(null)
 
@@ -126,7 +126,7 @@ export default function AccountsPage() {
     navigate(`/inside-sales/bids?leadId=${lead.id}`)
   }
 
-  // Handoff 15 — "Create lead": the promote endpoint find-or-creates the
+  // "Create lead": the promote endpoint find-or-creates the
   // canonical properties row and inserts the lead with property_id (local-only;
   // no Aspire push). Idempotent: re-promoting returns the existing active lead.
   async function handleCreateLead(property: HOAProperty) {
@@ -134,10 +134,10 @@ export default function AccountsPage() {
     navigate('/inside-sales/leads')
   }
 
-  // Handoff 15/23 — "Request estimate": find-or-create the canonical property
+  // "Request estimate": find-or-create the canonical property
   // for this HOA prospect (upsert on sourceType/sourceId, stays 'unsynced' —
   // the Aspire push fires only on estimate submission), then — GATED on the
-  // property having a lead (Handoff 23 §1a, create-lead-first) — launch the
+  // property having a lead (create-lead-first) — launch the
   // estimate intake pre-filled with the property and its REAL lead context.
   async function handleRequestEstimate(property: HOAProperty) {
     const canonical = await propertiesApi.create({
@@ -246,7 +246,7 @@ export default function AccountsPage() {
         />
       )}
 
-      {/* Handoff 23 §1a — create-lead-first gate for "Request estimate" */}
+      {/* Create-lead-first gate for "Request estimate" */}
       <Dialog
         open={leadGateProperty != null}
         onOpenChange={(o) => {

@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
-// Approval & Handoff tab (Handoff 08).
+// Approval & Handoff tab.
 //
 // Value-tiered approval routing for the open estimate:
 //   - Contract value + required tier, computed from the CONFIG approval_tiers
 //     rows via tierForValue (never a hardcoded ladder).
 //   - Install routes through the SAME ladder as maintenance (its own config
-//     rows with mirrored $ bands — Handoff 19 §4).
+//     rows with mirrored $ bands).
 //   - "Approve & hand back to Sales" is an in-platform status change (BRD
 //     Steps 6/8) executed by lib/estimating/transitions.ts server-side;
 //     actor + timestamp are audited (BRD III-1). No lifecycle logic here.
@@ -72,7 +72,7 @@ const TIER_ICONS: Record<ApprovalRoleKey, React.ElementType> = {
 export interface ApprovalHandoffProps {
   /**
    * The approval_tiers config rows (§3.9). Defaults to the API-fetched config
-   * (Handoff 16) with the config.ts seed as offline fallback — the ladder
+   * with the config.ts seed as offline fallback — the ladder
    * re-renders from whatever rows are supplied, with no code change.
    */
   tiers?: ApprovalTier[]

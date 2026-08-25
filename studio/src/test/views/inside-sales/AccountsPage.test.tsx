@@ -12,7 +12,7 @@ const mockCreateManagementCompany = vi.fn().mockResolvedValue(undefined)
 const mockPatchHOAProperty = vi.fn().mockResolvedValue(undefined)
 const mockPromoteHOAProperty = vi.fn().mockResolvedValue({ id: 'lead-9' })
 
-// Handoff 23 — property engagement mocks: navigation + canonical property
+// Property engagement mocks: navigation + canonical property
 // upsert + lead lookup used by "Create lead" / "Request estimate".
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async (importOriginal) => ({
@@ -354,14 +354,14 @@ describe('AccountsPage — filter badge and clear', () => {
   })
 })
 
-// ── Handoff 23 — Property engagement: Create lead & Request estimate ─────────
+// ── Property engagement: Create lead & Request estimate ─────────
 
 async function openDetailPanel(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByText('Pelican Bay'))
   return screen.findByRole('button', { name: /request estimate/i })
 }
 
-describe('AccountsPage — Create lead from a property (Handoff 23)', () => {
+describe('AccountsPage — Create lead from a property', () => {
   it('"Create lead" promotes the HOA (find-or-create property + lead) and routes to leads', async () => {
     const user = userEvent.setup()
     render(<AccountsPage />)
@@ -374,7 +374,7 @@ describe('AccountsPage — Create lead from a property (Handoff 23)', () => {
   })
 })
 
-describe('AccountsPage — Request estimate gating (Handoff 23 §1a)', () => {
+describe('AccountsPage — Request estimate gating', () => {
   it('blocks "Request estimate" when the property has no lead and prompts create-lead-first', async () => {
     const user = userEvent.setup()
     mockLeadsList.mockResolvedValue(emptyLeadsResponse())

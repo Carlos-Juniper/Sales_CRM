@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Approver review logic (Handoff 09 — Approval Queue & Review Drawer).
+// Approver review logic (Approval Queue & Review Drawer).
 //
 // Pure §3 business rules for the approver inbox + drawer:
 //
@@ -166,7 +166,7 @@ export function waitedDays(estimate: Estimate, now: Date = new Date()): number {
 /**
  * The approver inbox source: pending-approval estimates, each routed to the
  * config tier its contract value falls in. Both maintenance AND install route
- * through their own config ladder (mirrored $ bands — Handoff 19 §4).
+ * through their own config ladder (mirrored $ bands).
  */
 export function routeApprovalQueue(
   estimates: Estimate[],
@@ -302,7 +302,7 @@ export function buildAdjustmentRecords(
 
 /**
  * Persist adjustment records through the backend estimate_adjustments
- * endpoint (Handoff 19 §5) — the server is the audit source of truth (the
+ * endpoint — the server is the audit source of truth (the
  * old in-memory adjustmentAuditLog was lost on reload). The actor field
  * travels only as a deprecated mock/wire-compat hint; production derives it
  * from the JWT. Returns the persisted rows (server-assigned id/createdAt).

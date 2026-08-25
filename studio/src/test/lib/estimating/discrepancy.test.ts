@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Handoff 06 — Discrepancy Review: reusable flag service (headless).
+// Discrepancy Review: reusable flag service (headless).
 //
 // Business rules ported from the Project Summary Template (BRD §3.1), with
-// the rounding updated per Handoff 20's locked decision (round, not ceil):
+// the rounding updated per the locked decision (round, not ceil):
 //   bidQty     = round(planQty × (1 + addPct))
 //   isFlagged  = planQty === 0 ? false : |measured − plan| / plan > threshold
 //   deltaVsOpp = measured − opportunityQty
@@ -52,7 +52,7 @@ describe('deriveTakeoffLine', () => {
     expect(d.bidQty).toBe(110)
   })
 
-  it('rounds bid qty to the NEAREST unit (Handoff 20: round, not ceil)', () => {
+  it('rounds bid qty to the NEAREST unit (round, not ceil)', () => {
     expect(deriveTakeoffLine(line({ planQty: 9, addPct: 0.1 }), 0.1).bidQty).toBe(10) // 9.9 → 10
     expect(deriveTakeoffLine(line({ planQty: 24, addPct: 0.05 }), 0.1).bidQty).toBe(25) // 25.2 → 25
   })

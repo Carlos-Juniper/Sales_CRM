@@ -1,6 +1,4 @@
 // ---------------------------------------------------------------------------
-// Handoff 11 — Maintenance Intake Modal
-//
 // Opened from EstimateQueue's "Maintenance intake" CTA. Pipeline-sourced only
 // (banner shows CRM lead context). Submitting creates a maintenance estimate
 // (estimateType='maintenance' — immutable), persists the intake payload, starts
@@ -11,7 +9,7 @@
 // I-6.4: home-counting guidance; I-9.2: takeoff & scope intake.
 //
 // jsdom lacks hasPointerCapture, so customer type and contract structure use
-// styled native <select> elements (Handoff 03/04 precedent).
+// styled native <select> elements.
 // ---------------------------------------------------------------------------
 
 import { useEffect, useState, useRef, type ChangeEvent } from 'react'
@@ -48,7 +46,7 @@ import { useAttachmentUpload } from '@/lib/estimating/useAttachmentUpload'
 
 // ----- Types -----------------------------------------------------------------
 
-// Handoff 23 — the CRM lead context type + mapper live in lib (react-refresh:
+// The CRM lead context type + mapper live in lib (react-refresh:
 // component files export only components). Re-exported for existing importers.
 export type { CrmLeadContext }
 
@@ -56,7 +54,7 @@ export interface MaintenanceIntakeModalProps {
   open: boolean
   onClose: () => void
   /**
-   * REAL CRM lead context (Handoff 23 — the L-TBD stub is gone). Provided when
+   * REAL CRM lead context (the L-TBD stub is gone). Provided when
    * the caller already resolved the property's lead ("Request estimate" flow);
    * when absent the modal sources it from leads.property_id once a property is
    * selected.
@@ -65,7 +63,7 @@ export interface MaintenanceIntakeModalProps {
   /** Called after successful create so the queue can refresh. */
   onCreated: (estimate: Estimate) => void
   /**
-   * Handoff 15 — "Request estimate" from the property/Accounts UI launches the
+   * "Request estimate" from the property/Accounts UI launches the
    * modal pre-filled with the canonical property. Null ⇒ intake starts blank.
    */
   initialProperty?: Property | null
@@ -79,7 +77,7 @@ interface FormState {
   company: string
   phone: string
   email: string
-  // Branch (Handoff 28 — required, populated from Aspire config)
+  // Branch (required, populated from Aspire config)
   branch: string
   // Property
   propertyAddress: string
@@ -88,7 +86,7 @@ interface FormState {
   contractStructure: ContractStructure
   homesBudget: string
   commonAreaBudget: string
-  /** Handoff 24 §3.1 — unit/home COUNT (I-6.4), distinct from budget dollars. */
+  /** Unit/home COUNT (I-6.4), distinct from budget dollars. */
   homeCount: string
   // Scope & dates
   scopeOfWork: string
@@ -108,7 +106,7 @@ export function MaintenanceIntakeModal({
   onCreated,
   initialProperty = null,
 }: MaintenanceIntakeModalProps) {
-  const { setOpenEstimate, setActiveTab } = useEstimatingShell()
+  const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
   const { upload: uploadFile } = useAttachmentUpload()
 
@@ -142,10 +140,10 @@ export function MaintenanceIntakeModal({
   // (→ DivisionID). Optional at intake; the backend defaults/pends what's missing.
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(initialProperty)
   const [serviceLine, setServiceLine] = useState<string>(DEFAULT_SERVICE_LINE.maintenance)
-  // Handoff 28 — Aspire-derived maintenance branch options.
+  // Aspire-derived maintenance branch options.
   const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
 
-  // Handoff 15: adopt an incoming property ("Request estimate" pre-fill) when
+  // Adopt an incoming property ("Request estimate" pre-fill) when
   // the modal (re)opens with one. Render-phase derived-state pattern — no effect.
   const [wasOpen, setWasOpen] = useState(open)
   if (open !== wasOpen) {
@@ -153,7 +151,7 @@ export function MaintenanceIntakeModal({
     if (open && initialProperty) setSelectedProperty(initialProperty)
   }
 
-  // Handoff 23 §4 — REAL lead context. When the caller didn't resolve it, source
+  // REAL lead context. When the caller didn't resolve it, source
   // it from the selected property via leads.property_id (there is always a lead
   // on the "Request estimate" path — the action is gated on it, §1a).
   const [fetchedLead, setFetchedLead] = useState<CrmLeadContext | null>(null)
@@ -266,7 +264,7 @@ export function MaintenanceIntakeModal({
           homesBudget: form.homesBudget,
           commonAreaBudget: form.commonAreaBudget,
         }),
-        // Handoff 24 §3.1 — unit/home COUNT (I-6.4: count only units in the
+        // Unit/home COUNT (I-6.4: count only units in the
         // proposed scope). Distinct from the budget dollars above.
         homeCount: form.homeCount || null,
         scopeOfWork: form.scopeOfWork,
@@ -325,8 +323,7 @@ export function MaintenanceIntakeModal({
 
       show('Maintenance estimate created — opening editor…')
       onCreated(created)
-      setOpenEstimate(created)
-      setActiveTab('editor')
+      openEstimateAt(created, 'editor')
       onClose()
     } catch {
       show('Failed to create estimate — please try again.')
@@ -426,7 +423,7 @@ export function MaintenanceIntakeModal({
                   className="h-8 text-xs"
                 />
               </div>
-              {/* Branch — populated from Aspire config endpoint (Handoff 28) */}
+              {/* Branch — populated from Aspire config endpoint */}
               <div className="space-y-1 sm:col-span-2">
                 <Label htmlFor="mi-branch" className="text-xs">
                   Branch *
@@ -562,7 +559,7 @@ export function MaintenanceIntakeModal({
                 </div>
               )}
 
-              {/* Handoff 24 §3.1 — unit/home COUNT, distinct from the budget
+              {/* Unit/home COUNT, distinct from the budget
                   dollars above. Carries the I-6.4 counting guidance. */}
               <div className="space-y-1 max-w-[220px]">
                 <Label htmlFor="mi-home-count" className="text-xs">

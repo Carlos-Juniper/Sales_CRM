@@ -1,5 +1,5 @@
 """
-Tests for scripts/migrate.py — migration runner (Handoff 34).
+Tests for scripts/migrate.py — migration runner.
 
 Unit tests run without a real database (monkeypatching DB helpers).
 Integration tests require a reachable MySQL instance and are skipped otherwise;

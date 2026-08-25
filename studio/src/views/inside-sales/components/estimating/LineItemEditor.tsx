@@ -1,12 +1,12 @@
 // ---------------------------------------------------------------------------
-// Line-Item Editor (Handoffs 03/04) — the engine dispatcher.
+// Line-Item Editor — the engine dispatcher.
 //
 // HARD REQUIREMENT (product owner): there is NO manual Maintenance/Install
 // mode toggle — no switch, no tab, no dropdown, ever. The engine is chosen
 // implicitly from the open estimate's immutable `estimateType`:
 //
-//   'maintenance' → <MaintenanceEditor>  (Handoff 03 — hours-driven, sections)
-//   'install'     → <InstallEditor>      (Handoff 04 — quantity-driven kits)
+//   'maintenance' → <MaintenanceEditor>  (hours-driven, sections)
+//   'install'     → <InstallEditor>      (quantity-driven kits)
 // ---------------------------------------------------------------------------
 
 import { Calculator } from 'lucide-react'

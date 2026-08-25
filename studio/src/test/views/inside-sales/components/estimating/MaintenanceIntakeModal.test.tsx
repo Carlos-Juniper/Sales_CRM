@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 11 — Maintenance Intake Modal tests (Acceptance Criteria §3).
+// Maintenance Intake Modal tests (Acceptance Criteria §3).
 //
 // Modal is opened from EstimateQueue's "Maintenance intake" CTA. Submitting
 // creates a maintenance estimate (estimateType='maintenance'), persists the
@@ -48,7 +48,7 @@ interface RenderModalOptions {
   shell?: EstimatingShellApi
   /** Fake CRM pipeline context injected by the queue */
   crmLead?: { leadNumber: string; rep: string; winProbability: number }
-  /** Handoff 15 — "Request estimate" launches the modal pre-filled with a property. */
+  /** "Request estimate" launches the modal pre-filled with a property. */
   initialProperty?: import('@/types/estimating').Property | null
 }
 
@@ -92,7 +92,7 @@ async function fillMinimumFields(
   await user.type(q(/property address/i), '123 Desert Way, Phoenix, AZ')
   await user.type(q(/county/i), 'Maricopa')
   await user.type(q(/scope of work/i), 'Full grounds maintenance')
-  // Handoff 28 — branch is now required; wait for async options then select one.
+  // Branch is now required; wait for async options then select one.
   await screen.findByRole('option', { name: 'Bradenton, FL' })
   await user.selectOptions(q(/^branch/i) as HTMLSelectElement, 'Bradenton, FL')
 }
@@ -251,11 +251,11 @@ describe('MaintenanceIntakeModal — cancel behavior (AC §3 bullet 6)', () => {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Handoff 24 §3.1 — unit/home-count field, distinct from budget dollars, with
+// Unit/home-count field, distinct from budget dollars, with
 // the I-6.4 "count only units in the proposed scope" guidance.
 // ---------------------------------------------------------------------------
 
-describe('MaintenanceIntakeModal — home count (Handoff 24 §3.1)', () => {
+describe('MaintenanceIntakeModal — home count', () => {
   it('renders a numeric unit/home-count field with the I-6.4 guidance', () => {
     renderModal()
     const count = screen.getByLabelText(/home \/ unit count/i)
@@ -511,7 +511,7 @@ describe('MaintenanceIntakeModal — file attachments (AC §3 bullet 2)', () => 
 // EstimatingPage integration — queue refresh after intake
 // ---------------------------------------------------------------------------
 
-describe('MaintenanceIntakeModal — incoming property (Handoff 15 "Request estimate")', () => {
+describe('MaintenanceIntakeModal — incoming property ("Request estimate")', () => {
   it('pre-fills the property selector with the incoming property', () => {
     renderModal({
       initialProperty: {
@@ -528,7 +528,7 @@ describe('MaintenanceIntakeModal — incoming property (Handoff 15 "Request esti
   })
 })
 
-describe('MaintenanceIntakeModal — EstimatingPage integration (Handoff 11 seam)', () => {
+describe('MaintenanceIntakeModal — EstimatingPage integration', () => {
   it('EstimatingPage wires onMaintenanceIntake to open the modal', async () => {
     const user = userEvent.setup()
     render(<EstimatingPage />)
@@ -576,7 +576,7 @@ describe('MaintenanceIntakeModal — EstimatingPage integration (Handoff 11 seam
 })
 
 // ---------------------------------------------------------------------------
-// Handoff 23 — real lead context (stub removed): crmLead is optional; when the
+// Real lead context (stub removed): crmLead is optional; when the
 // intake opens from a property, lead context is sourced from leads.property_id
 // via the leads API. L-TBD never appears.
 // ---------------------------------------------------------------------------
@@ -620,7 +620,7 @@ function renderModalRaw(props: Partial<React.ComponentProps<typeof MaintenanceIn
   )
 }
 
-describe('MaintenanceIntakeModal — real lead context (Handoff 23 §4)', () => {
+describe('MaintenanceIntakeModal — real lead context', () => {
   it('with no crmLead and no property, shows the pipeline banner without any stub lead (no L-TBD)', () => {
     renderModalRaw({ crmLead: null })
     expect(screen.getByText(/sourced from crm pipeline/i)).toBeInTheDocument()
@@ -727,10 +727,10 @@ describe('MaintenanceIntakeModal — leadId (Pipeline kanban redesign)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Handoff 28 — Branch field populated from Aspire config endpoint
+// Branch field populated from Aspire config endpoint
 // ---------------------------------------------------------------------------
 
-describe('MaintenanceIntakeModal — Aspire-derived maintenance branch (Handoff 28)', () => {
+describe('MaintenanceIntakeModal — Aspire-derived maintenance branch', () => {
   it('starts with no branch selected (empty placeholder)', () => {
     renderModal()
     const select = screen.getByLabelText(/branch/i) as HTMLSelectElement

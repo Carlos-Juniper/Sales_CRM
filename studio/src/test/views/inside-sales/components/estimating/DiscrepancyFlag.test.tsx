@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 06 — Discrepancy Review tab (DiscrepancyFlag component).
+// Discrepancy Review tab (DiscrepancyFlag component).
 //
 // Acceptance criteria under test:
 //  - Threshold slider (1–25%, default 10%) is config-backed and re-evaluates
@@ -36,6 +36,7 @@ function shellApi(): EstimatingShellApi {
     setActiveTab: () => {},
     openEstimate: install,
     setOpenEstimate: () => {},
+    openEstimateAt: () => {},
   }
 }
 
@@ -232,7 +233,7 @@ describe('DiscrepancyFlag — CRM banner & surface action', () => {
   })
 })
 
-describe('DiscrepancyFlag — API persistence (Handoff 20)', () => {
+describe('DiscrepancyFlag — API persistence', () => {
   it('loads its lines from GET …/takeoff-lines when no initialLines seam is given', async () => {
     render(
       <Wrap>

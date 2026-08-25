@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Takeoff Insert (Handoffs 10 + 27) — maintenance-only.
+// Takeoff Insert — maintenance-only.
 //
 // The SINGLE artifact Estimating hands to the CRM (the salesperson — a
 // person, not a system) for maintenance estimates: the scanned/hand-drawn
@@ -12,7 +12,7 @@
 // INTERPRETATION IS NEEDED" — hence the permanent "Manual takeoff — human
 // interpreted" badge. Full boundary automation is explicitly not wanted.
 //
-// Handoff 27 made the tab durable:
+// The tab is durable:
 //   * The uploaded scan persists through the real GCS attachment flow
 //     (presign → PUT → confirm) as an estimate-scoped `takeoff_scan`
 //     attachment; on mount the stored scan is reloaded via the signed
@@ -40,7 +40,7 @@ interface UploadedScan {
   persisted: boolean
 }
 
-/** Manual takeoff metadata field (Handoff 27) persisted on the estimate. */
+/** Manual takeoff metadata field persisted on the estimate. */
 type MetaField = 'turfAreaAcres' | 'curbMiles'
 
 function formatAcres(acres: number): string {
@@ -83,9 +83,9 @@ function TakeoffInsertBody({
   const [handingOff, setHandingOff] = useState(false)
   const { upload, state: uploadState } = useAttachmentUpload()
 
-  // ── Manual takeoff metadata (Handoff 27) ──────────────────────────────────
+  // ── Manual takeoff metadata ──────────────────────────────────────────────
   //
-  // ⚙️  BEAM SLOT — Beam AI automated takeoff (Handoffs 14/14b, PAUSED) is the
+  // ⚙️  BEAM SLOT — Beam AI automated takeoff (PAUSED) is the
   //     eventual source of turf area & curb miles. When the integration lands
   //     it should PATCH these same estimate fields (turfAreaAcres, curbMiles);
   //     the manual blue-cell inputs below then become estimator overrides.
@@ -105,7 +105,7 @@ function TakeoffInsertBody({
     uploadState.status === 'uploading' ||
     uploadState.status === 'confirming'
 
-  // Reload the persisted scan (survives reload — Handoff 27). A locally
+  // Reload the persisted scan (survives reload). A locally
   // uploaded scan always wins over the fetched one (functional set guard).
   useEffect(() => {
     let cancelled = false
@@ -198,7 +198,7 @@ function TakeoffInsertBody({
 
   /**
    * Attach the insert to the estimate/opportunity and advance handoff state.
-   * The scan itself is already durable (persisted at upload time, Handoff 27);
+   * The scan itself is already durable (persisted at upload time);
    * this advances the estimate to `handed_back` via the standard PATCH
    * endpoint (transition-machine enforced server-side).
    */
@@ -327,7 +327,7 @@ function TakeoffInsertBody({
         </div>
 
         {/* Stat grid — acreage/sqft DERIVED from sections; turf/curb MANUAL
-            blue-cell entry persisted on the estimate (Handoff 27).
+            blue-cell entry persisted on the estimate.
             BEAM SLOT: Beam AI automated takeoff (paused) will populate
             turfAreaAcres/curbMiles later — same fields, no UI change needed. */}
         <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">

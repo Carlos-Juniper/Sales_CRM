@@ -1,13 +1,13 @@
 // ---------------------------------------------------------------------------
-// Estimating tab registry (Handoff 01).
+// Estimating tab registry.
 //
 // The tab bar is CONFIG-DRIVEN: every Estimating workspace registers here as a
 // data row (key, label, icon, visibleForTypes) — never as hardcoded JSX in the
-// page. Later handoffs plug their feature component into the matching slot in
+// page. Each feature component plugs into the matching slot in
 // EstimatingPage's tab-content switch; this file should only change to add or
 // re-order tabs.
 //
-// Per-`estimateType` visibility (Handoff 01 §1, open item confirmed defaults):
+// Per-`estimateType` visibility (open item confirmed defaults):
 //   - Takeoff Insert is maintenance-only.
 //   - Materials Calculator + Discrepancy Review are install-only.
 //   - Everything else is visible for both types.
@@ -28,15 +28,15 @@ import {
 import type { EstimateType } from '@/types/estimating'
 
 export type EstimatingTabKey =
-  | 'queue' // Handoff 02 — Estimate Queue
-  | 'editor' // Handoffs 03/04 — Line-Item Editor (auto by estimateType)
-  | 'takeoff' // Handoff 10 — Takeoff Insert (maintenance)
-  | 'materials' // Handoff 05 — Materials Calculator (install)
-  | 'margins' // Handoff 07 — Margin Analysis
-  | 'discrepancy' // Handoff 06 — Discrepancy Review (install)
-  | 'approval' // Handoff 08 — Approval & Handoff
-  | 'approvalQueue' // Handoff 09 — Approval Queue & Review Drawer
-  | 'itb' // Handoff 13 — ITB Tracker
+  | 'queue' // Estimate Queue
+  | 'editor' // Line-Item Editor (auto by estimateType)
+  | 'takeoff' // Takeoff Insert (maintenance)
+  | 'materials' // Materials Calculator (install)
+  | 'margins' // Margin Analysis
+  | 'discrepancy' // Discrepancy Review (install)
+  | 'approval' // Approval & Handoff
+  | 'approvalQueue' // Approval Queue & Review Drawer
+  | 'itb' // ITB Tracker
 
 export interface EstimatingTabConfig {
   key: EstimatingTabKey

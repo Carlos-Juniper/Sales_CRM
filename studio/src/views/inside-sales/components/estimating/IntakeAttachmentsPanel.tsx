@@ -23,7 +23,7 @@ const KIND_LABEL: Record<AttachmentKind, string> = {
   property_map: 'Property Map',
   rfp: 'RFP',
   other: 'Other',
-  // Handoff 27 — the Takeoff Insert scanned boundary map (estimate-scoped).
+  // The Takeoff Insert scanned boundary map (estimate-scoped).
   takeoff_scan: 'Takeoff Scan',
 }
 

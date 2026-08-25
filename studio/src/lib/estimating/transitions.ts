@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Estimate status-transition handler (Handoff 08; seam for Handoff 09).
+// Estimate status-transition handler.
 //
 // THE single place lifecycle rules live. UI never mutates status/lifecycle/
 // ownership directly — it asks this module for a patch + audit records and
@@ -13,7 +13,7 @@
 //   - "Approve & hand back to Sales" (BRD Steps 6/8) is an in-platform status
 //     change, not an email: approveAndHandBack() chains → approved →
 //     handed_back and returns one merged patch + per-step audit records.
-//     Handoff 09's approval queue drives its approve action through the same
+//     The approval queue drives its approve action through the same
 //     functions.
 // ---------------------------------------------------------------------------
 
@@ -21,7 +21,7 @@ import type { AspireOwner, Estimate, EstimateLifecycle, EstimateStatus } from '@
 
 /**
  * A lifecycle (Bidding↔Won) edge riding the ONE status-transition audit trail
- * (Handoff 17 §2.3 — no separate audit table). The `lifecycle:` prefix keeps
+ * (no separate audit table). The `lifecycle:` prefix keeps
  * lifecycle edges distinguishable from status edges in the same table.
  */
 export type LifecycleEdge = `lifecycle:${EstimateLifecycle}`

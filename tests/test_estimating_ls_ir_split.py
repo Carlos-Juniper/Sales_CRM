@@ -1,8 +1,7 @@
-"""Handoff 29 — ITB EST LS $ / EST IR $ Auto-Split by Discipline.
+"""ITB EST LS $ / EST IR $ Auto-Split by Discipline.
 
 DB fully mocked — patch api.estimating.query/execute, matching the pattern in
-tests/test_estimating_itb.py. Covers the acceptance criteria in
-handoffs/29-itb-ls-ir-discipline-split.md.
+tests/test_estimating_itb.py.
 
 The split is derived from PERSISTED section_services (not the create body —
 both intake forms POST sections: [] and add lines afterward via the
@@ -236,7 +235,7 @@ class TestAutoSplitOnCreate:
         assert mock_query.call_count == 2  # estimate_sections lookup (empty) + itb_scopes
 
 
-# ── Recompute on line-item edit (Handoff 29 §4.3 — LOCKED default) ──────────
+# ── Recompute on line-item edit (LOCKED default) ─────────────────────────────
 
 class TestRecomputeOnEdit:
     @patch("api.estimating.execute", new_callable=AsyncMock)

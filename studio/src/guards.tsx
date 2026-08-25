@@ -4,7 +4,7 @@ import type { UserRole } from '@/types'
 // The inside-sales workspace hosts the lead/bid views AND the estimating tab
 // (queue, editors, approvals), so every business role that participates in
 // that flow may enter. Real permissions (estimator-owned vs approver-owned,
-// branch scope, approval tiers) are enforced SERVER-side (Handoff 18);
+// branch scope, approval tiers) are enforced SERVER-side;
 // `admin` passes every gate via useRole's canAccess super-role.
 const INSIDE_SALES_ROLES: UserRole[] = [
   'sales',

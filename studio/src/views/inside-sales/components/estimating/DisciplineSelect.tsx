@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// DisciplineSelect (Handoff 29) — per-line LS/IR override for the ITB EST
+// DisciplineSelect — per-line LS/IR override for the ITB EST
 // LS $ / EST IR $ split. Shared by SectionCard (maintenance) and
 // InstallEditor (install) — the one place this control is defined.
 // ---------------------------------------------------------------------------

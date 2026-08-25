@@ -1,10 +1,10 @@
-"""Handoff 24 — Intake Modal Completions (backend).
+"""Intake Modal Completions (backend).
 
 DB fully mocked — no MySQL. Contract under test:
 
   POST   /api/estimating/intake/drafts        → persist a partial intake to
          intake_submissions with is_draft=1. Creates NO estimate and fires NO
-         Aspire push (property sync is estimate-submit only, Handoff 15 §5.6).
+         Aspire push (property sync is estimate-submit only).
   GET    /api/estimating/intake/drafts        → list the caller's drafts
          (per-user, device-independent resume).
   DELETE /api/estimating/intake/drafts/{id}   → discard a draft (e.g. after a
@@ -211,7 +211,7 @@ class TestRfiStatusFirstClass:
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_create_persists_rfi_status(self, mock_query, mock_exec, mock_load, mock_bg, authed):
-        mock_query.return_value = []  # itb_scopes read (Handoff 21 auto-gen)
+        mock_query.return_value = []  # itb_scopes read (auto-gen)
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield", "clientName": "LLC",

@@ -1,20 +1,21 @@
 
 // ---------------------------------------------------------------------------
-// Handoff 16 — Config-Table Read APIs (frontend fetch layer).
+// Config-Table Read APIs (frontend fetch layer).
 //
 // The five config sets (approval tiers, margin bands, material calcs, ITB
-// scopes, catalog items) are fetched from the API once per session and cached
-// in module memory — the DB is the source of truth, so editing a row changes
-// the UI without a frontend deploy. The config.ts literals remain ONLY as a
-// typed fallback used while the fetch is in flight or when it fails, so the
-// UI degrades gracefully offline.
+// scopes, catalog items) are fetched from the API and cached via TanStack
+// Query — the DB is the source of truth, so editing a row changes the UI
+// without a frontend deploy, and `invalidateQueries([ESTIMATING_CONFIG_KEY])`
+// after an admin edit picks it up immediately (no page reload needed). The
+// config.ts literals remain ONLY as `placeholderData`, shown while the fetch
+// is in flight or if it fails, so the UI degrades gracefully offline.
 //
 // The material_calcs nuance: the API returns compute_type + factors (data);
 // the formula math stays in the frontend registry (config.ts FORMULA_ENGINE /
 // buildMaterialCalc), applied to the API-supplied factors.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { estimatingConfigApi } from '@/api/estimating'
 import {
   APPROVAL_TIER_SEED,
@@ -37,7 +38,7 @@ export interface EstimatingConfig {
   marginBands: MarginBands
   materialCalcs: MaterialCalcRow[]
   itbScopes: ItbScope[]
-  /** Kits. Empty until Handoff 22 populates catalog_items. */
+  /** Kits. Empty until catalog_items is populated. */
   catalogItems: CatalogItem[]
   /** True once the API responded; false ⇒ the typed fallback literals. */
   loaded: boolean
@@ -59,10 +60,7 @@ function canonicalBands(rows: MarginBandRow[]): MarginBands {
   return row ? { goodMin: row.goodMin, okMin: row.okMin } : DEFAULT_MARGIN_BANDS
 }
 
-// Session-scoped module cache: config is loaded once and shared by every
-// consumer; no new state library (per the handoff).
-let cache: EstimatingConfig | null = null
-let inflight: Promise<EstimatingConfig> | null = null
+export const ESTIMATING_CONFIG_KEY = 'estimating-config'
 
 async function fetchConfig(): Promise<EstimatingConfig> {
   // Each set falls back independently so one failing endpoint cannot blank
@@ -86,46 +84,21 @@ async function fetchConfig(): Promise<EstimatingConfig> {
   }
 }
 
-/** Load (or reuse) the session config. Exported for non-hook callers. */
-export function loadEstimatingConfig(): Promise<EstimatingConfig> {
-  if (cache) return Promise.resolve(cache)
-  if (!inflight) {
-    inflight = fetchConfig().then((cfg) => {
-      // Cache only a (fully or partially) successful load; a total failure
-      // stays uncached so the next mount retries instead of pinning the
-      // fallback for the whole session.
-      if (cfg.loaded) cache = cfg
-      inflight = null
-      return cfg
-    })
-  }
-  return inflight
-}
-
-/** Test seam: clear the session cache between tests. */
-export function resetEstimatingConfigCache(): void {
-  cache = null
-  inflight = null
-}
-
 /**
- * The app-wide estimating config. Returns the fallback literals immediately,
- * then re-renders with the API values once the (session-cached) fetch lands.
+ * The app-wide estimating config. Returns the fallback literals immediately
+ * (as `placeholderData`), then re-renders with the API values once the fetch
+ * lands. Query-cached (not module-cached), so a Settings-UI edit followed by
+ * `queryClient.invalidateQueries({ queryKey: [ESTIMATING_CONFIG_KEY] })`
+ * updates every consumer — no full page reload required.
  */
 export function useEstimatingConfig(): EstimatingConfig {
-  const [config, setConfig] = useState<EstimatingConfig>(() => cache ?? FALLBACK_ESTIMATING_CONFIG)
-  useEffect(() => {
-    if (cache) {
-      setConfig(cache)
-      return
-    }
-    let alive = true
-    loadEstimatingConfig().then((cfg) => {
-      if (alive) setConfig(cfg)
-    })
-    return () => {
-      alive = false
-    }
-  }, [])
-  return config
+  // fetchConfig() never rejects — each set catches independently — so a
+  // total outage resolves as a `loaded: false` success, not a query error.
+  const { data } = useQuery({
+    queryKey: [ESTIMATING_CONFIG_KEY],
+    queryFn: fetchConfig,
+    staleTime: 5 * 60_000,
+    placeholderData: FALLBACK_ESTIMATING_CONFIG,
+  })
+  return data ?? FALLBACK_ESTIMATING_CONFIG
 }

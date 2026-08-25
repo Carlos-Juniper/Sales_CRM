@@ -1,7 +1,7 @@
 """Tests for api/properties.py — app-owned canonical property records.
 
 Local table is the SOURCE OF TRUTH: search reads local; create writes local
-ONLY (aspire_sync_status='unsynced', NO auto-push — Handoff 15: the only Aspire
+ONLY (aspire_sync_status='unsynced', NO auto-push — the only Aspire
 trigger is estimate submission). Create is an upsert on (source_type, source_id)
 so promotion is idempotent. The Aspire opportunity-history proxy is best-effort
 and returns [] when sync is disabled. DB + port fully mocked.
@@ -71,7 +71,7 @@ class TestCreate:
     @patch("api.properties.query", new_callable=AsyncMock)
     @patch("api.properties.execute", new_callable=AsyncMock)
     def test_create_is_local_only_no_aspire_push(self, mock_exec, mock_query, mock_bg, authed):
-        """Handoff 15: create never auto-pushes; the row stays unsynced until an
+        """Create never auto-pushes; the row stays unsynced until an
         estimate submission triggers the sync."""
         mock_query.return_value = [_prop_row(source_type="manual", source_id=None,
                                              property_type="hoa")]   # reload after insert

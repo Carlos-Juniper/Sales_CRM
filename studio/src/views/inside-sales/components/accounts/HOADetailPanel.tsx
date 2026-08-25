@@ -14,9 +14,9 @@ interface HOADetailPanelProps {
   isOpen: boolean
   onClose: () => void
   onCreateBid: (property: HOAProperty) => void
-  /** Handoff 15 — promote to a canonical property + lead (create-lead-from-property). */
+  /** Promote to a canonical property + lead (create-lead-from-property). */
   onCreateLead: (property: HOAProperty) => void
-  /** Handoff 15 — launch the estimate intake pre-filled with this property. */
+  /** Launch the estimate intake pre-filled with this property. */
   onRequestEstimate: (property: HOAProperty) => void
 }
 
@@ -127,7 +127,7 @@ export function HOADetailPanel({ property, company, managementCompanies, isOpen,
         </section>
       </div>
 
-      {/* Footer — engagement actions (Handoff 15: promoting creates the
+      {/* Footer — engagement actions (promoting creates the
           canonical property; the estimate intake is pre-filled from it) */}
       <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2">
         <Button size="sm" variant="outline" onClick={() => onCreateLead(property)}>

@@ -16,7 +16,7 @@ export interface LeadQueryParams {
   search?: string
   states?: string
   min_score?: number
-  /** Canonical properties.id (Handoff 23) — look up the lead(s) for one property. */
+  /** Canonical properties.id — look up the lead(s) for one property. */
   property_id?: string
   page?: number
   page_size?: number
@@ -36,7 +36,7 @@ export interface CreateLeadPayload {
   units?: number
   contact_name?: string
   contact_email?: string
-  /** Canonical properties.id (Handoff 15) — optional create-lead-from-property link. */
+  /** Canonical properties.id — optional create-lead-from-property link. */
   property_id?: string | null
 }
 

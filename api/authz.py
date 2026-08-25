@@ -1,4 +1,4 @@
-"""Canonical role model + server-side authorization (Handoff 18).
+"""Canonical role model + server-side authorization.
 
 One role vocabulary for the whole app (nine business roles), the
 estimator/approver ownership split enforced server-side, the approval-tier
@@ -18,7 +18,7 @@ from fastapi import HTTPException
 
 from db import query
 
-# ── Canonical role set (Handoff 18 §2, LOCKED) ───────────────────────────────
+# ── Canonical role set (§2, LOCKED) ───────────────────────────────
 
 CANONICAL_ROLES = frozenset({
     "procurement",
@@ -44,12 +44,12 @@ ESTIMATOR_ROLES = frozenset({"maintenance_estimating", "install_estimating", "ad
 # Approver-owned scope: complexity/margin adjustments + approve/hand-back.
 APPROVER_ROLES = frozenset({"manager", "regional_director", "vice_president", "ceo", "admin"})
 
-# Widened edit scope (Handoff 28): managers and above may also mutate line items,
+# Widened edit scope: managers and above may also mutate line items,
 # not just approve them. Approver edit rights and approval-tier ceilings are
 # independently gated — editing and approving are separate checks.
 LINE_ITEM_EDIT_ROLES = ESTIMATOR_ROLES | APPROVER_ROLES
 
-# Roles that see every branch. Default per Handoff 18 §5.3: admin/VP/CEO see
+# Roles that see every branch. Default per §5.3: admin/VP/CEO see
 # all; everyone else (incl. regional_director, procurement) is scoped to their
 # own branch until Carlos confirms the cross-branch matrix (§7 open item).
 CROSS_BRANCH_ROLES = frozenset({"admin", "vice_president", "ceo"})
@@ -57,7 +57,7 @@ CROSS_BRANCH_ROLES = frozenset({"admin", "vice_president", "ceo"})
 # Approval-authority ceilings in integer cents (mirrors the approval-tier
 # ladder: manager <$100k · RD ≤$250k · VP ≤$1M · CEO/admin unlimited). A role
 # may approve any estimate at or under its ceiling; over-ceiling requests 403
-# (Handoff 19 adds the auto-route to the higher tier). None = unlimited.
+# (the auto-route to the higher tier is added separately). None = unlimited.
 APPROVAL_CEILING_CENTS: dict[str, Optional[int]] = {
     "manager": 10_000_000,
     "regional_director": 25_000_000,
@@ -97,7 +97,7 @@ def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
 # ── Request guards (layered on require_auth) ─────────────────────────────────
 
 def require_estimator(user: dict) -> None:
-    """403 unless the JWT role may edit line items/sections/takeoff (Handoff 28).
+    """403 unless the JWT role may edit line items/sections/takeoff.
 
     Allows estimators AND approver-tier roles (manager, RD, VP, CEO, admin).
     Approval-tier ceilings are separately enforced by require_approval_authority.

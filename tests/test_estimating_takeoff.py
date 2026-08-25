@@ -1,4 +1,4 @@
-"""Handoff 20 — Takeoff Lines Backend & Aspire Qty Push.
+"""Takeoff Lines Backend & Aspire Qty Push.
 
 DB fully mocked via an in-memory FakeDb (same style as
 tests/test_estimating_line_items.py) — no MySQL, no live Aspire. Contract:
@@ -7,13 +7,13 @@ tests/test_estimating_line_items.py) — no MySQL, no live Aspire. Contract:
     persist estimator-owned takeoff rows; plan/add%/measured/opportunity qty
     and catalog_item_id are all writable (opportunity_qty is a LOCAL value —
     never read from Aspire).
-  * Derived fields (bidQty/flagged/deltaVsOpp) are recomputed server-side per
-    Handoff 00 §3.8 — client-sent derived values are ignored. bidQty now uses
-    round (Handoff 20 locked decision), not ceil.
+  * Derived fields (bidQty/flagged/deltaVsOpp) are recomputed server-side —
+    client-sent derived values are ignored. bidQty uses
+    round (locked decision), not ceil.
   * On estimate Save (PATCH /estimates/{id}) the lines that carry a
     catalog_item_id are pushed to Aspire ONCE as a batch, best-effort — an
     Aspire failure never fails the Save.
-  * Estimator-ownership RBAC (Handoff 18) on every mutation route.
+  * Estimator-ownership RBAC on every mutation route.
 """
 from __future__ import annotations
 
@@ -357,7 +357,7 @@ class TestTakeoffCrud:
 class TestTakeoffRbac:
     def test_sales_can_read_but_not_write(self, sales):
         # Estimate creation is open to sales (intake); takeoff writes are
-        # estimator-owned (Handoff 18 §5.1 — takeoff is estimator scope).
+        # estimator-owned (takeoff is estimator scope).
         eid = _create_estimate()
         assert client.get(_url(eid)).status_code == 200
         assert client.post(_url(eid), json=_line_payload()).status_code == 403

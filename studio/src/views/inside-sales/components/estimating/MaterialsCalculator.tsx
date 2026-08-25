@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
-// MaterialsCalculator (Handoff 05) — install-only config-driven formula engine.
+// MaterialsCalculator — install-only config-driven formula engine.
 //
 // Principles:
 //   • Rendered only when openEstimate.estimateType === 'install'. The tab bar
 //     already hides the tab for maintenance; the component also guards itself.
 //   • Each material card is driven by a MaterialCalcRow from the API-fetched
-//     material_calcs config (Handoff 16; MATERIAL_FORMULA_ROWS is the offline
+//     material_calcs config (MATERIAL_FORMULA_ROWS is the offline
 //     fallback) or the `rows` prop. Adding a material = a DB row, zero code edits.
 //   • All compute_type formulas live in buildMaterialCalc (lib/estimating/config):
 //     the API supplies compute_type + factors (data); the math stays here.
@@ -288,7 +288,7 @@ function MaterialCard({ row, inputState, bands, onInput }: MaterialCardProps) {
 export interface MaterialsCalculatorProps {
   /**
    * Config rows to render. Defaults to the API-fetched material_calcs config
-   * (Handoff 16; MATERIAL_FORMULA_ROWS is the offline fallback). Accepting
+   * (MATERIAL_FORMULA_ROWS is the offline fallback). Accepting
    * this as a prop makes the component config-extensible in tests without
    * code edits — a new row in the array renders a new card.
    */

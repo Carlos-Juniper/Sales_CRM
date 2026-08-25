@@ -1,5 +1,6 @@
 # Python
 venv/
+/venv
 .venv/
 __pycache__/
 *.py[cod]
@@ -27,7 +28,8 @@ studio/coverage/
 
 
 # One-time Azure→GCP data migration — kept local, never committed/pushed
-migrations/
+# (anchored to repo root; sql/migrations/ holds committed schema migrations)
+/migrations/
 migration_loader.py
 migration_runner.py
 inspect_azure_schema.py
@@ -42,3 +44,8 @@ tests/test_data_migration.py
 tests/test_migration_loader.py
 tests/test_migration_runner.py
 tests/test_schema_validator.py
+
+business docs/
+estimating-tab-redesign-handoff/
+handoffs/
+/docs/

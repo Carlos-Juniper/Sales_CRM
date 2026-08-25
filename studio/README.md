@@ -79,7 +79,7 @@ All use password: **`demo`**
 | File | Description |
 |------|-------------|
 | `authStore.ts` | Persisted store (localStorage key `studio-auth`). Holds the authenticated `AuthUser` (id, name, email, role, token). Exposes `login`, `logout`, `setLoading`. Token is excluded from persistence. |
-| `leadsStore.ts` | Ephemeral store for the Lead Feed UI state: active filters (search, lead types, states, min score, assigned/unassigned toggles), sort field + direction, current page, and an optimistic-update cache keyed by lead id. |
+| `leadsStore.ts` | Ephemeral store for the Public Leads UI state: active filters (search, lead types, states, min score, assigned/unassigned toggles), sort field + direction, and current page. Optimistic updates are handled by TanStack Query in `useLeads.ts` via `onMutate`/`onSuccess`. |
 | `uiStore.ts` | Global UI state: theme (`light`/`dark`/`system`), sidebar collapsed state, selected lead id, and a toast queue with auto-dismiss at 4.5 s. |
 
 ---
@@ -245,14 +245,14 @@ Thin wrappers around Radix UI primitives with Tailwind styling applied via CVA (
 | `hooks/useBids.test.ts` | Tests for `useBids`, `useCreateBid`, `useUpdateBid`, `useUsers`, and `useInsideSalesDashboard`. |
 | `hooks/useAnalytics.test.ts` | Tests for `useRevenueAnalytics`. |
 | `stores/authStore.test.ts` | Tests for login, logout, persistence behavior, and token exclusion from localStorage. |
-| `stores/leadsStore.test.ts` | Tests for filter mutations, sort toggle logic, page reset on filter change, and optimistic update cache. |
+| `stores/leadsStore.test.ts` | Tests for filter mutations, sort toggle logic, and page reset on filter change. |
 | `stores/uiStore.test.ts` | Tests for theme, sidebar, toast queue, and lead selection. |
 | `lib/utils.test.ts` | Unit tests for every helper in `utils.ts`. |
 | `lib/constants.test.ts` | Snapshot / structure tests for constants. |
 | `components/shared/` | Per-component unit tests for `LeadCard`, `ScoreMeter`, `StatusBadge`, `LeadTypeBadge`, `DeadlineChip`, `EmptyState`. |
 | `views/auth/LoginPage.test.tsx` | Integration tests for login form submission, validation, error display, and demo account shortcuts. |
 | `views/auth/RoleGate.test.tsx` | Tests for redirect behavior when unauthenticated or wrong role. |
-| `views/inside-sales/` | Page-level integration tests for Dashboard, Lead Feed, Outreach Queue, Bid Tracker, Pipeline, and Estimating pages. |
+| `views/inside-sales/` | Page-level integration tests for Dashboard, Public Leads, Outreach Queue, Bid Tracker, Pipeline, and Estimating pages. |
 | `views/inside-sales/components/` | Tests for `LeadDetailPanel` and `LeadFilters`. |
 | `router.test.tsx` | Route-level tests verifying default redirect, auth guard, and role-guard redirects. |
 | `edge-cases.test.tsx` | Cross-cutting edge-case tests (empty states, loading states, error boundaries). |

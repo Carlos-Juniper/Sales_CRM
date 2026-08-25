@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 os.environ.setdefault("GCP_PROJECT", "test-project")
-os.environ.setdefault("BQ_DATASET", "crm")
 
 import api.seed_auth as seed_auth  # noqa: E402
 
@@ -48,7 +47,7 @@ def test_provision_inserts_new_user():
     values = list(params)
     assert "new.rep@juniperlandscaping.com" in values
     assert "New Rep" in values
-    assert "inside_sales" in values
+    assert "sales" in values  # legacy inside_sales normalizes to sales (Handoff 18)
     assert "b1" in values
 
 
@@ -89,9 +88,45 @@ def test_provision_rejects_unknown_role():
             existing=[],
             email="x@juniperlandscaping.com",
             name="X",
-            role="ceo",
+            role="astronaut",
             branch_id="b1",
         )
+
+
+def test_valid_roles_are_the_nine_canonical_roles():
+    # Handoff 18 §2 — one canonical role vocabulary, backend-validated.
+    assert seed_auth.VALID_ROLES == frozenset({
+        "procurement", "sales", "admin", "manager", "regional_director",
+        "maintenance_estimating", "install_estimating", "vice_president", "ceo",
+    })
+
+
+def test_provision_accepts_new_canonical_roles():
+    _, execute_mock = _run(
+        existing=[],
+        email="exec@juniperlandscaping.com",
+        name="Big Exec",
+        role="ceo",
+        branch_id=None,
+    )
+    sql, params = execute_mock.await_args[0]
+    assert "INSERT" in sql.upper()
+    assert "ceo" in list(params)
+
+
+def test_provision_normalizes_legacy_roles_to_sales():
+    # Legacy inside_sales/outside_sales collapse into `sales` (Handoff 18).
+    for legacy in ("inside_sales", "outside_sales"):
+        _, execute_mock = _run(
+            existing=[],
+            email=f"{legacy}@juniperlandscaping.com",
+            name="Legacy Rep",
+            role=legacy,
+            branch_id=None,
+        )
+        params = list(execute_mock.await_args[0][1])
+        assert "sales" in params
+        assert legacy not in params
 
 
 def test_provision_requires_branch_for_manager():

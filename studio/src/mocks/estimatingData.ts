@@ -1,4 +1,18 @@
-import type { EstimateQueueItem, Estimate, LineItem, BidOutcomeLog } from '@/types/estimating'
+import type {
+  CatalogItem,
+  EstimateQueueItem,
+  LegacyEstimate,
+  LineItem,
+  BidOutcomeLog,
+  Estimate,
+  MaintenanceEstimate,
+  InstallEstimate,
+  EstimateSection,
+  SectionService,
+  SectionServiceComponent,
+  TakeoffLine,
+  IntakeAttachment,
+} from '@/types/estimating'
 
 function li(
   id: string,
@@ -23,7 +37,7 @@ function li(
   }
 }
 
-function computeEstimateTotals(est: Estimate): Estimate {
+function computeEstimateTotals(est: LegacyEstimate): LegacyEstimate {
   const cost = est.line_items.reduce((s, l) => s + l.total_cost, 0)
   const price = est.line_items.reduce((s, l) => s + l.total_price, 0)
   const overhead = cost * (est.overhead_pct / 100)
@@ -160,7 +174,7 @@ export const mockEstimateQueue: EstimateQueueItem[] = [
   },
 ]
 
-export const mockEstimates: Estimate[] = [
+export const mockEstimates: LegacyEstimate[] = [
   computeEstimateTotals({
     id: 'est1',
     queue_item_id: 'eq2',
@@ -226,7 +240,7 @@ export const mockEstimates: Estimate[] = [
     margin_pct: 0,
     target_margin_pct: 20,
     notes: 'Premium HOA. White-glove service tier expected. Premium materials pricing applied. Lighting upgrade potential add-on scope (~$18K).',
-    status: 'draft',
+    status: 'in_progress',
     created_at: new Date(Date.now() - 86400000).toISOString(),
     updated_at: new Date(Date.now() - 86400000).toISOString(),
   }),
@@ -407,3 +421,324 @@ export const mockBidOutcomes: BidOutcomeLog[] = [
     logged_by: 'Amanda Torres',
   },
 ]
+
+// ---------------------------------------------------------------------------
+// Handoff 00 fixtures — the new single-source estimate model.
+// One full maintenance estimate and one full install estimate, built through
+// shared builders so tests and MSW handlers stay consistent.
+// ---------------------------------------------------------------------------
+
+import { contractTotal } from '@/lib/estimating/calc'
+import { INSTALL_KIT_CATALOG } from '@/lib/estimating/install'
+import type { CreateEstimatePayload } from '@/api/estimating'
+
+let fixtureSeq = 0
+function fid(prefix: string): string {
+  fixtureSeq += 1
+  return `${prefix}-${fixtureSeq}`
+}
+
+function svc(
+  sectionId: string,
+  overrides: Partial<SectionService> & Pick<SectionService, 'label' | 'qty' | 'uom'>,
+): SectionService {
+  return {
+    id: fid('svc'),
+    sectionId,
+    catalogItemId: null,
+    complexityPct: 0,
+    unitSellCents: null,
+    embeddedCostCents: null,
+    targetGm: null,
+    hours: null,
+    sortOrder: 0,
+    components: [],
+    ...overrides,
+  }
+}
+
+function comp(
+  sectionServiceId: string,
+  kind: SectionServiceComponent['kind'],
+  label: string,
+  qty: number,
+  unitCostCents: number,
+  hours: number | null = null,
+  sortOrder = 0,
+): SectionServiceComponent {
+  return { id: fid('cmp'), sectionServiceId, kind, label, qty, unitCostCents, hours, sortOrder }
+}
+
+const DAY = 86400000
+
+/** A full maintenance estimate: section-based, hours-driven services. */
+export function buildMaintenanceEstimate(
+  overrides: Partial<MaintenanceEstimate> = {},
+): MaintenanceEstimate {
+  const estimateId = fid('est-maint')
+  const s1: EstimateSection = {
+    id: fid('sec'),
+    estimateId,
+    name: 'Common Area',
+    squareFeet: 120000,
+    sortOrder: 0,
+    services: [],
+  }
+  s1.services = [
+    svc(s1.id, { label: 'Mowing', qty: 42, uom: '/yr', complexityPct: 0.1, unitSellCents: 450, hours: 1.6, sortOrder: 0 }),
+    svc(s1.id, { label: 'Detail / Bed Maintenance', qty: 26, uom: '/yr', complexityPct: 0.05, unitSellCents: 320, hours: 2.2, sortOrder: 1 }),
+    svc(s1.id, { label: 'Irrigation Inspection', qty: 12, uom: '/yr', complexityPct: 0, unitSellCents: 180, hours: 0.8, sortOrder: 2 }),
+  ]
+  const s2: EstimateSection = {
+    id: fid('sec'),
+    estimateId,
+    name: 'Entry & Medians',
+    squareFeet: 45000,
+    sortOrder: 1,
+    services: [],
+  }
+  s2.services = [
+    svc(s2.id, { label: 'Mowing', qty: 42, uom: '/yr', complexityPct: 0.15, unitSellCents: 450, hours: 0.7, sortOrder: 0 }),
+    svc(s2.id, { label: 'Seasonal Color Rotation', qty: 3, uom: '/yr', complexityPct: 0, unitSellCents: 2200, hours: 6, sortOrder: 1 }),
+  ]
+
+  const base: MaintenanceEstimate = {
+    id: estimateId,
+    estimateType: 'maintenance',
+    name: 'Dobson Ranch HOA — Grounds Maintenance',
+    aspireNumber: 'ASP-48211',
+    aspireOpportunityId: 630956,
+    aspireSyncStatus: 'synced',
+    propertyId: null,
+    leadId: null,
+    clientName: 'Dobson Ranch HOA',
+    branch: 'Phoenix-Desert',
+    customerType: 'hoa',
+    acreage: null,
+    contractValueCents: 0,
+    targetMargin: 0.22,
+    status: 'in_progress',
+    lifecycle: 'bidding',
+    aspireOwner: 'estimating',
+    priority: 'high',
+    winProbability: 0.6,
+    siteWalkDate: new Date(Date.now() - 4 * DAY).toISOString(),
+    dueBackDate: new Date(Date.now() + 10 * DAY).toISOString(),
+    anticipatedCloseDate: new Date(Date.now() + 45 * DAY).toISOString(),
+    serviceStartDate: null,
+    assignedLsEstimator: 'u5',
+    assignedIrrEstimator: null,
+    crmRep: 'u2',
+    sections: [s1, s2],
+    createdAt: new Date(Date.now() - 6 * DAY).toISOString(),
+    updatedAt: new Date(Date.now() - DAY).toISOString(),
+  }
+  const merged = { ...base, ...overrides }
+  merged.contractValueCents = overrides.contractValueCents ?? contractTotal(merged)
+  return merged
+}
+
+/** A full install estimate: quantity-driven kits with labor/material components. */
+export function buildInstallEstimate(
+  overrides: Partial<InstallEstimate> = {},
+): InstallEstimate {
+  const estimateId = fid('est-inst')
+  const s1: EstimateSection = {
+    id: fid('sec'),
+    estimateId,
+    name: 'Phase 1 — Streetscape',
+    squareFeet: 68000,
+    sortOrder: 0,
+    services: [],
+  }
+  const trees = svc(s1.id, {
+    label: "Mahogany 10'-12' — Installed",
+    qty: 24,
+    uom: 'ea',
+    unitSellCents: 125000,
+    embeddedCostCents: 68750,
+    targetGm: 0.45,
+    hours: 3.5,
+    sortOrder: 0,
+  })
+  trees.components = [
+    comp(trees.id, 'material', "Mahogany 10'-12' (30g)", 1, 42500, null, 0),
+    comp(trees.id, 'labor', 'Install crew', 3.5, 5200, 3.5, 1),
+    comp(trees.id, 'material', 'Backfill + staking kit', 1, 8050, null, 2),
+  ]
+  const irrigation = svc(s1.id, {
+    label: 'Irrigation lateral line',
+    qty: 1400,
+    uom: 'FT',
+    unitSellCents: 250,
+    embeddedCostCents: 138,
+    targetGm: 0.45,
+    hours: 0.02,
+    sortOrder: 1,
+  })
+  irrigation.components = [
+    comp(irrigation.id, 'material', '1" PVC lateral pipe', 1, 62, null, 0),
+    comp(irrigation.id, 'labor', 'Trench + lay + backfill', 0.02, 3800, 0.02, 1),
+  ]
+  s1.services = [trees, irrigation]
+
+  const s2: EstimateSection = {
+    id: fid('sec'),
+    estimateId,
+    name: 'Phase 2 — Amenity Center',
+    squareFeet: 22000,
+    sortOrder: 1,
+    services: [],
+  }
+  const sod = svc(s2.id, {
+    label: 'Bermuda Sod — Installed',
+    qty: 48,
+    uom: 'plt',
+    unitSellCents: 41500,
+    embeddedCostCents: 26900,
+    targetGm: 0.35,
+    hours: 1.1,
+    sortOrder: 0,
+  })
+  sod.components = [
+    comp(sod.id, 'material', 'Bermuda sod pallet (450 SF)', 1, 19500, null, 0),
+    comp(sod.id, 'labor', 'Grade + lay crew', 1.1, 5200, 1.1, 1),
+  ]
+  s2.services = [sod]
+
+  const base: InstallEstimate = {
+    id: estimateId,
+    estimateType: 'install',
+    name: 'Silverleaf — Phase 2 Installation',
+    aspireNumber: 'ASP-51077',
+    aspireOpportunityId: 631077,
+    aspireSyncStatus: 'synced',
+    propertyId: null,
+    leadId: null,
+    clientName: 'Silverleaf Development LLC',
+    branch: 'Phoenix-Desert',
+    customerType: 'commercial',
+    acreage: 2.1,
+    contractValueCents: 0,
+    targetMargin: 0.22,
+    status: 'in_progress',
+    lifecycle: 'bidding',
+    aspireOwner: 'estimating',
+    priority: 'urgent',
+    winProbability: 0.5,
+    siteWalkDate: new Date(Date.now() - 2 * DAY).toISOString(),
+    dueBackDate: new Date(Date.now() + 7 * DAY).toISOString(),
+    anticipatedCloseDate: new Date(Date.now() + 30 * DAY).toISOString(),
+    serviceStartDate: new Date(Date.now() + 90 * DAY).toISOString(),
+    assignedLsEstimator: 'u5',
+    assignedIrrEstimator: 'u6',
+    crmRep: 'u2',
+    sections: [s1, s2],
+    createdAt: new Date(Date.now() - 3 * DAY).toISOString(),
+    updatedAt: new Date(Date.now() - DAY).toISOString(),
+  }
+  const merged = { ...base, ...overrides }
+  merged.contractValueCents = overrides.contractValueCents ?? contractTotal(merged)
+  return merged
+}
+
+/** Takeoff lines for the install fixture (Discrepancy Review sample data). */
+export function buildTakeoffLines(estimateId: string): TakeoffLine[] {
+  return [
+    { id: fid('tk'), estimateId, description: "Mahogany 10'-12'", uom: 'ea', planQty: 24, addPct: 0.05, measuredQty: 24, opportunityQty: 24 },
+    { id: fid('tk'), estimateId, description: 'Irrigation lateral line', uom: 'FT', planQty: 1400, addPct: 0.1, measuredQty: 1640, opportunityQty: 1400 },
+    { id: fid('tk'), estimateId, description: 'Bermuda sod', uom: 'SF', planQty: 21600, addPct: 0.05, measuredQty: 22100, opportunityQty: 21600 },
+  ]
+}
+
+/** Strip server-assigned fields so a fixture can be POSTed as a create payload. */
+export function toCreatePayload(estimate: Estimate): CreateEstimatePayload {
+  const payload: Partial<Estimate> = { ...estimate }
+  delete payload.id
+  delete payload.createdAt
+  delete payload.updatedAt
+  return payload as CreateEstimatePayload
+}
+
+/** Seed data for the MSW in-memory store. */
+export const mockEstimatesV2: Estimate[] = [buildMaintenanceEstimate(), buildInstallEstimate()]
+export const mockTakeoffLines: TakeoffLine[] = buildTakeoffLines(mockEstimatesV2[1].id)
+
+// ---------------------------------------------------------------------------
+// Handoff 22 — catalog_items seed for GET /catalog-items. The maintenance
+// rows mirror real workbook kits from sql/migrations/009_seed_catalog_items.sql
+// (rated + deliberately UNRATED rows, so the production-rate save guard is
+// exercisable in dev); the install rows reuse the kit literals (same ids, so
+// editor fixtures resolve whether the config API has loaded or not).
+// ---------------------------------------------------------------------------
+
+const maintKit = (over: Partial<CatalogItem> & Pick<CatalogItem, 'id' | 'description'>): CatalogItem => ({
+  uom: 'Sq. Ft.',
+  unitCostCents: 0,
+  unitSellCents: 0,
+  targetGm: 0.22,
+  kitType: 'maintenance_hours',
+  productionRate: null,
+  branch: 'All Branches',
+  active: true,
+  serviceType: '',
+  ...over,
+})
+
+export const CATALOG_ITEM_SEED: CatalogItem[] = [
+  // maintenance_hours (production-rated — units per labor hour)
+  maintKit({ id: 'kit-maint-3422', description: 'Standard Production Mowing', unitCostCents: 1750, productionRate: 67650, serviceType: 'Turf Area' }),
+  maintKit({ id: 'kit-maint-3431', description: 'Bed Area Maintenance', unitCostCents: 1750, productionRate: 3000, serviceType: 'Bed Area' }),
+  maintKit({ id: 'kit-maint-3432', description: 'Additional Round Up', unitCostCents: 1750, productionRate: 5000, serviceType: 'Bed Area' }),
+  // maintenance_hours (UNRATED — saving a null-hours line against these must be
+  // blocked by the guard until an estimator enters hours)
+  maintKit({ id: 'kit-maint-3435', description: 'Prune Easy', serviceType: 'Bed Area' }),
+  maintKit({ id: 'kit-maint-3440', description: 'Turf Area Fertilization', serviceType: 'Fertilization & Pest Control' }),
+  // install_quantity — the literal rows ARE CatalogItems (plus vendor quotes)
+  ...INSTALL_KIT_CATALOG.map((kit) => {
+    const item: CatalogItem & { vendorPricesCents?: number[] } = { ...kit }
+    delete item.vendorPricesCents
+    return item as CatalogItem
+  }),
+]
+
+/** Build a stored attachment fixture for tests. */
+export function buildStoredAttachment(
+  estimateId: string,
+  submissionId: string,
+  overrides?: Partial<IntakeAttachment>,
+): IntakeAttachment {
+  return {
+    id: `att-test-${Date.now()}`,
+    intakeSubmissionId: submissionId,
+    estimateId: null,
+    fileName: 'site_plan.pdf',
+    contentType: 'application/pdf',
+    sizeBytes: 512_000,
+    kind: 'property_map',
+    uploadedBy: 'u1',
+    status: 'stored',
+    objectKey: `estimating/${estimateId}/att-test.pdf`,
+    downloadable: true,
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  }
+}
+
+/** Build a legacy (name-only) attachment fixture for tests. */
+export function buildLegacyAttachment(submissionId: string): IntakeAttachment {
+  return {
+    id: `att-legacy-${Date.now()}`,
+    intakeSubmissionId: submissionId,
+    estimateId: null,
+    fileName: 'old_rfp.pdf',
+    contentType: '',
+    sizeBytes: 0,
+    kind: 'rfp',
+    uploadedBy: null,
+    status: 'stored',
+    objectKey: null,
+    downloadable: false,
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+  }
+}

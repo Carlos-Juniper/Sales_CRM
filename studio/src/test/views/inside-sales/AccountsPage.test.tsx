@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@/test/utils'
 import AccountsPage from '@/views/inside-sales/AccountsPage'
@@ -10,6 +10,33 @@ import type { HOAProperty, ManagementCompany } from '@/types/accounts'
 const mockCreateHOAProperty = vi.fn().mockResolvedValue(undefined)
 const mockCreateManagementCompany = vi.fn().mockResolvedValue(undefined)
 const mockPatchHOAProperty = vi.fn().mockResolvedValue(undefined)
+const mockPromoteHOAProperty = vi.fn().mockResolvedValue({ id: 'lead-9' })
+
+// Handoff 23 — property engagement mocks: navigation + canonical property
+// upsert + lead lookup used by "Create lead" / "Request estimate".
+const mockNavigate = vi.fn()
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-router-dom')>()),
+  useNavigate: () => mockNavigate,
+}))
+
+const mockPropertiesCreate = vi.fn()
+vi.mock('@/api/estimating', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/estimating')>()
+  return {
+    ...actual,
+    propertiesApi: { ...actual.propertiesApi, create: (...args: unknown[]) => mockPropertiesCreate(...args) },
+  }
+})
+
+const mockLeadsList = vi.fn()
+vi.mock('@/api/leads', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/leads')>()
+  return {
+    ...actual,
+    leadsApi: { ...actual.leadsApi, list: (...args: unknown[]) => mockLeadsList(...args) },
+  }
+})
 
 // Shared mutation shape returned by useMutation hooks
 const makemutation = (fn: ReturnType<typeof vi.fn>) => ({
@@ -95,7 +122,7 @@ vi.mock('@/hooks/useHOAProperties', () => ({
   }),
   useCreateHOAProperty: () => makemutation(mockCreateHOAProperty),
   usePatchHOAProperty: () => makemutation(mockPatchHOAProperty),
-  usePromoteHOAProperty: () => makemutation(vi.fn()),
+  usePromoteHOAProperty: () => makemutation(mockPromoteHOAProperty),
 }))
 
 vi.mock('@/hooks/useManagementCompanies', () => ({
@@ -114,10 +141,47 @@ vi.mock('@/hooks/useManagementCompanies', () => ({
 
 // ── Tests ─────────────────────────────────────────────────────────
 
+const canonicalProperty = {
+  id: 'prop-1',
+  name: 'Pelican Bay',
+  propertyType: 'hoa',
+  sourceType: 'hoa',
+  sourceId: 'h1',
+  address1: '6620 Pelican Bay Blvd',
+  address2: null,
+  city: 'Naples',
+  state: 'FL',
+  zip: '34108',
+  branchCity: 'Naples',
+  customerType: 'hoa',
+  managementCompanyId: 'pm1',
+  aspirePropertyId: null,
+  aspireSyncStatus: 'unsynced',
+  createdAt: null,
+  updatedAt: null,
+}
+
+const sampleLead = {
+  id: 'lead-77',
+  property_name: 'Pelican Bay',
+  status: 'new',
+  assigned_to: 'Marisol Vega',
+  score: 65,
+  property_id: 'prop-1',
+}
+
+function emptyLeadsResponse() {
+  return { data: [], total: 0, page: 1, page_size: 25, total_pages: 0 }
+}
+
 beforeEach(() => {
   mockCreateHOAProperty.mockClear().mockResolvedValue(undefined)
   mockCreateManagementCompany.mockClear().mockResolvedValue(undefined)
   mockPatchHOAProperty.mockClear().mockResolvedValue(undefined)
+  mockPromoteHOAProperty.mockClear().mockResolvedValue({ id: 'lead-9' })
+  mockNavigate.mockClear()
+  mockPropertiesCreate.mockClear().mockResolvedValue(canonicalProperty)
+  mockLeadsList.mockClear().mockResolvedValue(emptyLeadsResponse())
 })
 
 describe('AccountsPage — default HOA tab', () => {
@@ -287,5 +351,84 @@ describe('AccountsPage — filter badge and clear', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /clear all/i })).not.toBeInTheDocument()
     })
+  })
+})
+
+// ── Handoff 23 — Property engagement: Create lead & Request estimate ─────────
+
+async function openDetailPanel(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByText('Pelican Bay'))
+  return screen.findByRole('button', { name: /request estimate/i })
+}
+
+describe('AccountsPage — Create lead from a property (Handoff 23)', () => {
+  it('"Create lead" promotes the HOA (find-or-create property + lead) and routes to leads', async () => {
+    const user = userEvent.setup()
+    render(<AccountsPage />)
+    await openDetailPanel(user)
+
+    await user.click(screen.getByRole('button', { name: /create lead/i }))
+
+    await waitFor(() => expect(mockPromoteHOAProperty).toHaveBeenCalledWith('h1'))
+    expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/leads')
+  })
+})
+
+describe('AccountsPage — Request estimate gating (Handoff 23 §1a)', () => {
+  it('blocks "Request estimate" when the property has no lead and prompts create-lead-first', async () => {
+    const user = userEvent.setup()
+    mockLeadsList.mockResolvedValue(emptyLeadsResponse())
+    render(<AccountsPage />)
+    await openDetailPanel(user)
+
+    await user.click(screen.getByRole('button', { name: /request estimate/i }))
+
+    // Lead lookup is keyed by the canonical property id
+    await waitFor(() =>
+      expect(mockLeadsList).toHaveBeenCalledWith(expect.objectContaining({ property_id: 'prop-1' })),
+    )
+    // Gate prompt appears; no navigation to estimating
+    expect(await screen.findByText(/create a lead first/i)).toBeInTheDocument()
+    expect(mockNavigate).not.toHaveBeenCalledWith('/inside-sales/estimating', expect.anything())
+  })
+
+  it('the gate prompt offers "Create lead" which promotes and routes to leads', async () => {
+    const user = userEvent.setup()
+    mockLeadsList.mockResolvedValue(emptyLeadsResponse())
+    render(<AccountsPage />)
+    await openDetailPanel(user)
+
+    await user.click(screen.getByRole('button', { name: /request estimate/i }))
+    await screen.findByText(/create a lead first/i)
+
+    const dialog = screen.getByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: /create lead/i }))
+
+    await waitFor(() => expect(mockPromoteHOAProperty).toHaveBeenCalledWith('h1'))
+    expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/leads')
+  })
+
+  it('once a lead exists, "Request estimate" navigates to estimating with the property AND real lead context', async () => {
+    const user = userEvent.setup()
+    mockLeadsList.mockResolvedValue({
+      data: [sampleLead], total: 1, page: 1, page_size: 25, total_pages: 1,
+    })
+    render(<AccountsPage />)
+    await openDetailPanel(user)
+
+    await user.click(screen.getByRole('button', { name: /request estimate/i }))
+
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/estimating', {
+        state: {
+          requestEstimateProperty: expect.objectContaining({ id: 'prop-1' }),
+          requestEstimateLead: expect.objectContaining({ id: 'lead-77' }),
+        },
+      }),
+    )
+    // Property was upserted (idempotent on sourceType/sourceId), never re-created blindly
+    expect(mockPropertiesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceType: 'hoa', sourceId: 'h1', propertyType: 'hoa' }),
+    )
   })
 })

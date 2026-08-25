@@ -9,25 +9,38 @@ import { useUIStore } from '@/store/uiStore'
 import { useRole } from '@/hooks/useRole'
 import { cn } from '@/lib/utils'
 import { AssigneeAvatar } from '@/components/shared/AssigneeAvatar'
-import type { User } from '@/types'
+import type { User, UserRole } from '@/types'
 
 interface NavItem {
   label: string
   icon: React.ElementType
   href: string
   badge?: number
-  roles: string[]
+  roles: UserRole[]
 }
 
+// Canonical roles (Handoff 18). `admin` sees everything via canAccess.
+const SALES_NAV: UserRole[] = ['sales', 'manager']
+const ESTIMATING_NAV: UserRole[] = [
+  'sales',
+  'manager',
+  'maintenance_estimating',
+  'install_estimating',
+  'regional_director',
+  'vice_president',
+  'ceo',
+  'procurement',
+]
+
 const navItems: NavItem[] = [
-  { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: ['inside_sales', 'manager'] },
-  { label: 'Lead Feed', icon: Inbox, href: '/inside-sales/leads', roles: ['inside_sales', 'manager'] },
-  { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: ['inside_sales', 'manager'] },
-  { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: ['inside_sales', 'manager'] },
-  { label: 'Calendar', icon: Calendar, href: '/inside-sales/calendar', roles: ['inside_sales', 'manager'] },
-  { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: ['inside_sales', 'manager'] },
-  { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: ['inside_sales', 'manager'] },
-  { label: 'Estimating', icon: Calculator, href: '/inside-sales/estimating', roles: ['inside_sales', 'manager'] },
+  { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: SALES_NAV },
+  { label: 'Public Leads', icon: Inbox, href: '/inside-sales/leads', roles: SALES_NAV },
+  { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: SALES_NAV },
+  { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: SALES_NAV },
+  { label: 'Calendar', icon: Calendar, href: '/inside-sales/calendar', roles: SALES_NAV },
+  { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: SALES_NAV },
+  { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: SALES_NAV },
+  { label: 'Estimating', icon: Calculator, href: '/inside-sales/estimating', roles: ESTIMATING_NAV },
 ]
 
 function NavItemComp({ item, collapsed, overdueBadge }: { item: NavItem; collapsed: boolean; overdueBadge?: number }) {
@@ -67,11 +80,11 @@ export function Sidebar() {
     user: useAuthStore((s) => s.user),
     logout: useAuthStore((s) => s.logout),
   }
-  const { role } = useRole()
+  const { role, canAccess } = useRole()
 
   const visibleItems = navItems.filter((item) => {
     if (!role) return false
-    return item.roles.includes(role)
+    return canAccess(item.roles)
   })
 
   const user_ = user as User | null

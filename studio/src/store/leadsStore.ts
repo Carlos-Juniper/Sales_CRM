@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Lead, LeadType } from '@/types'
+import type { LeadType } from '@/types'
 
 interface LeadFilters {
   search: string
@@ -20,11 +20,6 @@ interface LeadsState {
   resetFilters: () => void
   setSort: (field: LeadsState['sortBy']) => void
   setPage: (page: number) => void
-
-  // Optimistic update cache
-  optimisticUpdates: Record<string, Partial<Lead>>
-  applyOptimistic: (id: string, patch: Partial<Lead>) => void
-  clearOptimistic: (id: string) => void
 }
 
 const defaultFilters: LeadFilters = {
@@ -41,7 +36,6 @@ export const useLeadsStore = create<LeadsState>()((set) => ({
   sortBy: 'score',
   sortDir: 'desc',
   page: 1,
-  optimisticUpdates: {},
 
   setFilter: (key, value) =>
     set((s) => ({ filters: { ...s.filters, [key]: value }, page: 1 })),
@@ -56,15 +50,6 @@ export const useLeadsStore = create<LeadsState>()((set) => ({
     })),
 
   setPage: (page) => set({ page }),
-
-  applyOptimistic: (id, patch) =>
-    set((s) => ({ optimisticUpdates: { ...s.optimisticUpdates, [id]: { ...s.optimisticUpdates[id], ...patch } } })),
-
-  clearOptimistic: (id) =>
-    set((s) => {
-      const { [id]: _, ...rest } = s.optimisticUpdates
-      return { optimisticUpdates: rest }
-    }),
 }))
 
 export type { LeadFilters }

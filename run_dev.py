@@ -41,8 +41,9 @@ CLOUD_SQL_INSTANCE = os.environ.get(
 )
 MYSQL_PORT    = os.environ.get("MYSQL_PORT", "3306")
 
-VENV_PYTHON   = ROOT / ".venv" / "bin" / "python"
-VENV_UVICORN  = ROOT / ".venv" / "bin" / "uvicorn"
+_HOME = Path.home()
+VENV_PYTHON   = _HOME / ".venvs" / "feat-estimating" / "bin" / "python"
+VENV_UVICORN  = _HOME / ".venvs" / "feat-estimating" / "bin" / "uvicorn"
 STUDIO_DIR    = ROOT / "studio"
 
 procs: list[subprocess.Popen] = []
@@ -55,7 +56,31 @@ def start(label: str, cmd: list[str], **kwargs) -> subprocess.Popen:
     return p
 
 
+def ensure_gcloud_auth() -> None:
+    """Ensure Application Default Credentials are valid before the proxy starts.
+
+    The cloud-sql-proxy authenticates to the Cloud SQL Admin API via ADC. When
+    those credentials are expired (or hit a reauth/invalid_rapt error), the proxy
+    starts but drops every connection mid-handshake. Forcing a token refresh here
+    surfaces the problem up front and runs the interactive login only when needed.
+    """
+    print("[run_dev] checking gcloud ADC…")
+    check = subprocess.run(
+        ["gcloud", "auth", "application-default", "print-access-token"],
+        capture_output=True,
+        text=True,
+    )
+    if check.returncode == 0:
+        print("[run_dev] ADC OK")
+        return
+    print("[run_dev] ADC invalid or expired — launching interactive login…")
+    subprocess.run(["gcloud", "auth", "application-default", "login"], check=True)
+
+
 try:
+    # 0. Verify GCP credentials (proxy needs valid ADC to reach Cloud SQL)
+    ensure_gcloud_auth()
+
     # 1. Cloud SQL Auth Proxy
     proxy = start(
         "cloud-sql-proxy",
@@ -75,13 +100,13 @@ try:
     # 3. Vite frontend
     vite_bin = STUDIO_DIR / "node_modules" / ".bin" / "vite"
     start(
-        "vite (frontend :5173)",
+        "vite (frontend :5174)",
         [str(vite_bin)],
         cwd=str(STUDIO_DIR),
     )
 
     print("\n[run_dev] all services started")
-    print("  Frontend → http://localhost:5173")
+    print("  Frontend → http://localhost:5174")
     print("  API      → http://localhost:8000")
     print("  Press Ctrl+C to stop all.\n")
 

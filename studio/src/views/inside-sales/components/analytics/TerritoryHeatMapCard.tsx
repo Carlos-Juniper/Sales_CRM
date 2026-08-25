@@ -5,20 +5,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { useAllLeads } from '@/hooks/useLeads'
 import { formatCurrency } from '@/lib/utils'
+import { PIPELINE_STAGES, stageForStatus } from '@/lib/pipelineStages'
 import type { LeadStatus } from '@/types'
 
 const PHOENIX_CENTER: [number, number] = [33.45, -112.07]
 
-const STATUS_COLORS: Record<LeadStatus, string> = {
-  new:           '#94a3b8',
-  reviewed:      '#94a3b8',
-  contacted:     '#fbbf24',
-  qualified:     '#60a5fa',
+// Hidden/terminal statuses aren't a kanban stage, so they keep their own
+// marker color; active statuses resolve through PIPELINE_STAGES.
+const HIDDEN_STATUS_COLORS: Partial<Record<LeadStatus, string>> = {
   proposal_sent: '#818cf8',
   won:           '#34d399',
   lost:          '#f87171',
-  disqualified:  '#f87171',
-  handed_off:    '#a78bfa',
+  disqualified:  '#94a3b8',
+}
+
+function colorForStatus(status: LeadStatus): string {
+  return stageForStatus(status)?.hexColor ?? HIDDEN_STATUS_COLORS[status] ?? '#94a3b8'
 }
 
 function markerRadius(value: number) {
@@ -26,10 +28,8 @@ function markerRadius(value: number) {
 }
 
 const LEGEND = [
-  { color: '#94a3b8', label: 'New' },
-  { color: '#fbbf24', label: 'Contacted' },
-  { color: '#60a5fa', label: 'Qualified' },
-  { color: '#818cf8', label: 'Proposal' },
+  ...PIPELINE_STAGES.map((stage) => ({ color: stage.hexColor, label: stage.label })),
+  { color: '#818cf8', label: 'Proposal Sent' },
   { color: '#34d399', label: 'Won' },
   { color: '#f87171', label: 'Lost' },
 ]
@@ -72,7 +72,7 @@ export function TerritoryHeatMapCard() {
                   center={[lead.lat, lead.lng]}
                   radius={markerRadius(lead.estimated_contract_value)}
                   pathOptions={{
-                    fillColor: STATUS_COLORS[lead.status] ?? '#94a3b8',
+                    fillColor: colorForStatus(lead.status),
                     fillOpacity: 0.75,
                     color: '#fff',
                     weight: 1.5,

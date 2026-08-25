@@ -23,10 +23,11 @@ const TYPE_COLORS: Record<string, string> = {
 
 const STATUS_OPACITY: Record<string, number> = {
   new: 1, contacted: 1, qualified: 1, proposal_sent: 1,
-  won: 0.6, lost: 0.35, disqualified: 0.25, handed_off: 0.5,
+  won: 0.6, lost: 0.35, disqualified: 0.25,
+  estimating: 0.5, op_review: 0.5, approved: 0.5,
 }
 
-const LEAD_TYPE_FILTERS = ['HOA', 'commercial', 'commercial'] as const
+const LEAD_TYPE_FILTERS = ['HOA', 'commercial', 'deathcare', 'resort'] as const
 
 function markerRadius(value: number) {
   return Math.max(9, Math.min(20, Math.sqrt(value / 8000)))

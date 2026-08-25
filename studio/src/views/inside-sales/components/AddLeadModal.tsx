@@ -9,12 +9,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { LEAD_TYPES } from '@/types'
 import type { LeadStatus, LeadType } from '@/types'
-
-const COLUMN_TITLES: Partial<Record<LeadStatus, string>> = {
-  new: 'New Leads',
-  contacted: 'Contacted',
-  proposal_sent: 'Proposal Sent',
-}
+import { stageForStatus } from '@/lib/pipelineStages'
 
 interface AddLeadModalProps {
   open: boolean
@@ -64,7 +59,7 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
     }
   }
 
-  const colLabel = COLUMN_TITLES[defaultStatus] ?? defaultStatus
+  const colLabel = stageForStatus(defaultStatus)?.label ?? defaultStatus
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>

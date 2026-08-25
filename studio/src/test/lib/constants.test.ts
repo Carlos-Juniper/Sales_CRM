@@ -48,7 +48,7 @@ describe('BID_STATUS_LABELS', () => {
 
 describe('LEAD_STATUS_LABELS', () => {
   it('covers core statuses', () => {
-    const expected = ['new', 'contacted', 'qualified', 'proposal_sent', 'won', 'lost', 'handed_off', 'disqualified']
+    const expected = ['new', 'contacted', 'qualified', 'proposal_sent', 'won', 'lost', 'estimating', 'op_review', 'approved', 'disqualified']
     for (const s of expected) {
       expect(LEAD_STATUS_LABELS).toHaveProperty(s)
     }
@@ -65,8 +65,10 @@ describe('LEAD_STATUS_LABELS', () => {
     expect(LEAD_STATUS_LABELS.proposal_sent).toBe('Proposal Sent')
   })
 
-  it('handed_off label is "Handed Off"', () => {
-    expect(LEAD_STATUS_LABELS.handed_off).toBe('Handed Off')
+  it('estimate write-back statuses label correctly', () => {
+    expect(LEAD_STATUS_LABELS.estimating).toBe('Estimating')
+    expect(LEAD_STATUS_LABELS.op_review).toBe('OP Review')
+    expect(LEAD_STATUS_LABELS.approved).toBe('Approved')
   })
 })
 
@@ -89,7 +91,7 @@ describe('LEAD_TYPE_COLORS', () => {
 
 describe('STATUS_COLORS', () => {
   it('has entries for all pipeline statuses', () => {
-    const statuses = ['new', 'contacted', 'qualified', 'proposal_sent', 'won', 'lost', 'handed_off', 'disqualified']
+    const statuses = ['new', 'contacted', 'qualified', 'proposal_sent', 'won', 'lost', 'estimating', 'op_review', 'approved', 'disqualified']
     for (const s of statuses) {
       expect(STATUS_COLORS).toHaveProperty(s)
     }
@@ -108,12 +110,12 @@ describe('KANBAN_COLUMNS', () => {
     expect(KANBAN_COLUMNS).toHaveLength(4)
   })
 
-  it('columns include new, contacted, proposal_sent, won', () => {
+  it('columns are the four pipeline stages (estimate write-back model)', () => {
     const ids = KANBAN_COLUMNS.map(c => c.id)
-    expect(ids).toContain('new')
-    expect(ids).toContain('contacted')
-    expect(ids).toContain('proposal_sent')
-    expect(ids).toContain('won')
+    expect(ids).toContain('qualifying')
+    expect(ids).toContain('estimating')
+    expect(ids).toContain('op_review')
+    expect(ids).toContain('approved')
   })
 
   it('each column has a non-empty title and color', () => {

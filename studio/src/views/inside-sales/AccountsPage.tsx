@@ -10,6 +10,17 @@ import { PMList } from './components/accounts/PMList'
 import { AddHOAPanel } from './components/accounts/AddHOAPanel'
 import { AddPMPanel } from './components/accounts/AddPMPanel'
 import { HOADetailPanel } from './components/accounts/HOADetailPanel'
+import { propertiesApi } from '@/api/estimating'
+import { leadsApi } from '@/api/leads'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import type { FilterState } from '@/hooks/useAccountFilters'
 import type { AccountTab, HOAProperty } from '@/types/accounts'
 
@@ -29,7 +40,7 @@ export default function AccountsPage() {
   const [hoaFilters, setHoaFilters] = useState<FilterState>(emptyFilters())
   const [pmFilters, setPmFilters] = useState<FilterState>(emptyFilters())
 
-  // Debounce search so typing doesn't fire a BigQuery call on every keystroke
+  // Debounce search so typing doesn't fire an API call on every keystroke
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 400)
     return () => clearTimeout(t)
@@ -55,6 +66,9 @@ export default function AccountsPage() {
   const [addPanel, setAddPanel] = useState<AccountTab | null>(null)
   const [selectedHOA, setSelectedHOA] = useState<HOAProperty | null>(null)
   const [expandedPM, setExpandedPM] = useState<Set<string>>(new Set())
+  // Handoff 23 §1a — create-lead-first gate: set when "Request estimate" is
+  // attempted on a property with no lead; renders the blocking prompt.
+  const [leadGateProperty, setLeadGateProperty] = useState<HOAProperty | null>(null)
 
   // PM filtering is client-side (3K rows is fine)
   const q = search.trim().toLowerCase()
@@ -110,6 +124,46 @@ export default function AccountsPage() {
   async function handleCreateBid(property: HOAProperty) {
     const lead = await promoteHOAProperty.mutateAsync(property.id)
     navigate(`/inside-sales/bids?leadId=${lead.id}`)
+  }
+
+  // Handoff 15 — "Create lead": the promote endpoint find-or-creates the
+  // canonical properties row and inserts the lead with property_id (local-only;
+  // no Aspire push). Idempotent: re-promoting returns the existing active lead.
+  async function handleCreateLead(property: HOAProperty) {
+    await promoteHOAProperty.mutateAsync(property.id)
+    navigate('/inside-sales/leads')
+  }
+
+  // Handoff 15/23 — "Request estimate": find-or-create the canonical property
+  // for this HOA prospect (upsert on sourceType/sourceId, stays 'unsynced' —
+  // the Aspire push fires only on estimate submission), then — GATED on the
+  // property having a lead (Handoff 23 §1a, create-lead-first) — launch the
+  // estimate intake pre-filled with the property and its REAL lead context.
+  async function handleRequestEstimate(property: HOAProperty) {
+    const canonical = await propertiesApi.create({
+      name: property.property_name,
+      propertyType: 'hoa',
+      sourceType: 'hoa',
+      sourceId: property.id,
+      address1: property.address,
+      city: property.city,
+      state: property.state,
+      zip: property.zip,
+      branchCity: property.branch,
+      customerType: 'hoa',
+      managementCompanyId: property.management_company_id,
+    })
+    const res = await leadsApi.list({ property_id: canonical.id, page_size: 100 })
+    const lead =
+      res.data.find((l) => l.status !== 'won' && l.status !== 'lost') ?? res.data[0]
+    if (!lead) {
+      // No lead yet → block; there is no estimate-only path from a bare property.
+      setLeadGateProperty(property)
+      return
+    }
+    navigate('/inside-sales/estimating', {
+      state: { requestEstimateProperty: canonical, requestEstimateLead: lead },
+    })
   }
 
   const filterOptions = {
@@ -192,6 +246,40 @@ export default function AccountsPage() {
         />
       )}
 
+      {/* Handoff 23 §1a — create-lead-first gate for "Request estimate" */}
+      <Dialog
+        open={leadGateProperty != null}
+        onOpenChange={(o) => {
+          if (!o) setLeadGateProperty(null)
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Create a lead first</DialogTitle>
+            <DialogDescription>
+              Every estimate traces back to a lead.{' '}
+              {leadGateProperty?.property_name ?? 'This property'} has no lead yet —
+              create one, then request the estimate.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setLeadGateProperty(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={async () => {
+                const property = leadGateProperty
+                setLeadGateProperty(null)
+                if (property) await handleCreateLead(property)
+              }}
+            >
+              Create lead
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {selectedHOA && (
         <HOADetailPanel
           isOpen
@@ -200,6 +288,8 @@ export default function AccountsPage() {
           managementCompanies={pmCompanies}
           onClose={() => setSelectedHOA(null)}
           onCreateBid={handleCreateBid}
+          onCreateLead={handleCreateLead}
+          onRequestEstimate={handleRequestEstimate}
         />
       )}
     </div>

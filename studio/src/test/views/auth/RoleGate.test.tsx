@@ -1,12 +1,18 @@
+// ---------------------------------------------------------------------------
+// RoleGate under the canonical 9-role model (Handoff 18):
+//   * legacy inside_sales/outside_sales normalize to `sales`
+//   * `admin` is the super-role; `manager` narrows to its approval tier
+// ---------------------------------------------------------------------------
+
 import { describe, it, expect, beforeEach } from 'vitest'
 import { screen } from '@testing-library/react'
 import { render } from '@/test/utils'
 import { RoleGate } from '@/views/auth/RoleGate'
 import { useAuthStore } from '@/store/authStore'
 import { makeUser } from '@/test/utils'
-import type { UserRole } from '@/types'
+import type { LegacyUserRole, UserRole } from '@/types'
 
-function setUser(role: UserRole) {
+function setUser(role: UserRole | LegacyUserRole) {
   useAuthStore.setState({ user: makeUser({ role }) })
 }
 
@@ -16,9 +22,9 @@ describe('RoleGate', () => {
   })
 
   it('renders children when user has allowed role', () => {
-    setUser('inside_sales')
+    setUser('sales')
     render(
-      <RoleGate roles={['inside_sales']}>
+      <RoleGate roles={['sales']}>
         <div>Protected Content</div>
       </RoleGate>,
     )
@@ -27,7 +33,7 @@ describe('RoleGate', () => {
 
   it('redirects to /login when no user is authenticated', () => {
     render(
-      <RoleGate roles={['inside_sales']}>
+      <RoleGate roles={['sales']}>
         <div>Protected Content</div>
       </RoleGate>,
       { initialEntries: ['/inside-sales'] },
@@ -35,50 +41,54 @@ describe('RoleGate', () => {
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
   })
 
-  it('redirects outside_sales user away from inside-sales routes', () => {
-    setUser('outside_sales')
-    render(
-      <RoleGate roles={['inside_sales']}>
-        <div>Protected Content</div>
-      </RoleGate>,
-    )
-    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
+  it('legacy inside_sales/outside_sales users normalize to sales and pass sales gates', () => {
+    for (const legacy of ['inside_sales', 'outside_sales'] as const) {
+      useAuthStore.setState({ user: null })
+      setUser(legacy)
+      const { unmount } = render(
+        <RoleGate roles={['sales']}>
+          <div>Sales Content {legacy}</div>
+        </RoleGate>,
+      )
+      expect(screen.getByText(`Sales Content ${legacy}`)).toBeInTheDocument()
+      unmount()
+    }
   })
 
-  it('allows manager to access any route', () => {
-    setUser('manager')
+  it('admin is the super-role and passes any gate', () => {
+    setUser('admin')
     render(
-      <RoleGate roles={['inside_sales']}>
+      <RoleGate roles={['manager']}>
         <div>Protected Content</div>
       </RoleGate>,
     )
     expect(screen.getByText('Protected Content')).toBeInTheDocument()
   })
 
-  it('uses custom redirectTo when role is denied', () => {
-    setUser('outside_sales')
+  it('manager is NOT a super-role: denied on gates that exclude it', () => {
+    setUser('manager')
     render(
-      <RoleGate roles={['inside_sales']} redirectTo="/outside-sales">
+      <RoleGate roles={['sales']} redirectTo="/inside-sales">
         <div>Protected Content</div>
       </RoleGate>,
     )
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
   })
 
-  it('renders children when role matches inside roles list', () => {
-    setUser('inside_sales')
+  it('estimating roles pass estimating gates', () => {
+    setUser('maintenance_estimating')
     render(
-      <RoleGate roles={['outside_sales', 'inside_sales']}>
-        <span>Allowed</span>
+      <RoleGate roles={['maintenance_estimating', 'install_estimating']}>
+        <div>Estimating Content</div>
       </RoleGate>,
     )
-    expect(screen.getByText('Allowed')).toBeInTheDocument()
+    expect(screen.getByText('Estimating Content')).toBeInTheDocument()
   })
 
-  it('denies inside_sales user when only outside_sales is allowed', () => {
-    setUser('inside_sales')
+  it('denies a role not in the allowed list', () => {
+    setUser('procurement')
     render(
-      <RoleGate roles={['outside_sales']}>
+      <RoleGate roles={['manager']}>
         <div>Protected</div>
       </RoleGate>,
     )

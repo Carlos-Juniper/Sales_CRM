@@ -14,7 +14,11 @@ export function createQueryClient() {
   })
 }
 
-export function createWrapper(initialEntries?: string[]) {
+// Router entries may carry state (Handoff 23 — "Request estimate" passes the
+// canonical property + its lead via location.state).
+export type TestRouterEntry = string | { pathname: string; state?: unknown }
+
+export function createWrapper(initialEntries?: TestRouterEntry[]) {
   const queryClient = createQueryClient()
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
@@ -29,7 +33,7 @@ export function createWrapper(initialEntries?: string[]) {
 }
 
 interface CustomRenderOptions extends Omit<RenderOptions, 'wrapper'> {
-  initialEntries?: string[]
+  initialEntries?: TestRouterEntry[]
 }
 
 export function render(ui: React.ReactElement, options: CustomRenderOptions = {}) {

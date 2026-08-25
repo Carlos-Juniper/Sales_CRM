@@ -149,6 +149,7 @@ class TestLineItemEditMutations:
         mock_query.side_effect = [
             [{"id": "est-1", "estimate_type": "install"}],
             [{"c": 0}],
+            [],  # itb_projects lookup (Handoff 29 recompute) -- no linked project, no-op
             [section_row],
             [],
         ]
@@ -161,7 +162,11 @@ class TestLineItemEditMutations:
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_regional_director_can_delete_section(self, mock_query, mock_exec, as_role):
         as_role("regional_director")
-        mock_query.return_value = [{"id": "sec-1"}]
+        mock_query.side_effect = [
+            [{"id": "sec-1"}],
+            [{"estimate_type": "install"}],
+            [],  # itb_projects lookup (Handoff 29 recompute) -- no linked project, no-op
+        ]
         resp = client.delete("/api/estimating/estimates/est-1/sections/sec-1")
         assert resp.status_code == 204
 
@@ -176,6 +181,7 @@ class TestLineItemEditMutations:
         mock_query.side_effect = [
             [{"id": "est-1", "estimate_type": "maintenance"}],
             [{"c": 0}],
+            [],  # itb_projects lookup (Handoff 29 recompute) -- no linked project, no-op
             [section_row],
             [],
         ]

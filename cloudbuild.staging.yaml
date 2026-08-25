@@ -1,13 +1,22 @@
 options:
   logging: CLOUD_LOGGING_ONLY
 
+# Staging DB credentials — injected into the run-migrations step via secretEnv.
+availableSecrets:
+  secretManager:
+  - versionName: projects/juniper-crm-498215-p5/secrets/MYSQL_USER_STAGING/versions/latest
+    env: 'MYSQL_USER'
+  - versionName: projects/juniper-crm-498215-p5/secrets/MYSQL_PASSWORD_STAGING/versions/latest
+    env: 'MYSQL_PASSWORD'
+  - versionName: projects/juniper-crm-498215-p5/secrets/MYSQL_DB_STAGING/versions/latest
+    env: 'MYSQL_DB'
+
 steps:
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        gcloud secrets versions access latest --secret=GITHUB_TOKEN --project=juniper-crm-498215-p5 > /workspace/github_token
         gcloud secrets versions access latest --secret=ENTRA_CLIENT_ID --project=juniper-crm-498215-p5 > /workspace/entra_client_id
         gcloud secrets versions access latest --secret=ENTRA_TENANT_ID --project=juniper-crm-498215-p5 > /workspace/entra_tenant_id
 
@@ -17,7 +26,6 @@ steps:
       - '-c'
       - |
         DOCKER_BUILDKIT=1 docker build \
-          --secret id=github_token,src=/workspace/github_token \
           --build-arg VITE_ENTRA_CLIENT_ID=$(cat /workspace/entra_client_id) \
           --build-arg VITE_ENTRA_TENANT_ID=$(cat /workspace/entra_tenant_id) \
           -t us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app-staging \
@@ -27,6 +35,16 @@ steps:
     args:
       - push
       - us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app-staging
+
+  # Apply pending migrations before traffic shifts to the new revision.
+  # Non-zero exit from scripts/migrate.py fails this step and blocks the deploy.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: run-migrations
+    entrypoint: 'bash'
+    args: ['scripts/run_migrations_ci.sh']
+    env:
+      - 'CLOUDSQL_INSTANCE=juniper-crm-498215-p5:us-central1:juniper-dev'
+    secretEnv: ['MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_DB']
 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     args:
@@ -46,6 +64,6 @@ steps:
       # URL (legacy -<hash>-uc.a.run.app form for this project, NOT the
       # -<project-number>.<region>.run.app form); append any custom domain here
       # AND in the bucket CORS config.
-      - --set-env-vars=MYSQL_SOCKET_PATH=/cloudsql/juniper-crm-498215-p5:us-central1:juniper-dev,ENVIRONMENT=staging,KMS_GRAPH_TOKEN_KEY=projects/juniper-crm-498215-p5/locations/us-central1/keyRings/juniper-crm/cryptoKeys/graph-tokens,ASPIRE_ENV=sandbox,ASPIRE_SANDBOX_BASE_URL=https://cloudsandbox.youraspire.com,ASPIRE_SYNC_ENABLED=true,GCS_ATTACHMENTS_BUCKET=juniper-crm-attachments-staging,GCS_SIGNER_SA_EMAIL=${PROJECT_NUMBER}-compute@developer.gserviceaccount.com,GCS_MAX_UPLOAD_BYTES=2147483648,GCS_SIGNED_URL_TTL_MIN=10,CORS_EXTRA_ORIGINS=https://juniper-crm-staging-3776pu4ezq-uc.a.run.app
+      - --set-env-vars=MYSQL_SOCKET_PATH=/cloudsql/juniper-crm-498215-p5:us-central1:juniper-dev,ENVIRONMENT=staging,KMS_GRAPH_TOKEN_KEY=projects/juniper-crm-498215-p5/locations/us-central1/keyRings/juniper-crm/cryptoKeys/graph-tokens,ASPIRE_ENV=sandbox,ASPIRE_SANDBOX_BASE_URL=https://cloudsandbox-api.youraspire.com,ASPIRE_SYNC_ENABLED=true,GCS_ATTACHMENTS_BUCKET=juniper-crm-attachments-staging,GCS_SIGNER_SA_EMAIL=${PROJECT_NUMBER}-compute@developer.gserviceaccount.com,GCS_MAX_UPLOAD_BYTES=2147483648,GCS_SIGNED_URL_TTL_MIN=10,CORS_EXTRA_ORIGINS=https://juniper-crm-staging-3776pu4ezq-uc.a.run.app
       - --set-secrets=JWT_SECRET=JWT_SECRET:latest,ENTRA_CLIENT_ID=ENTRA_CLIENT_ID:latest,ENTRA_TENANT_ID=ENTRA_TENANT_ID:latest,ENTRA_CLIENT_SECRET=ENTRA_CLIENT_SECRET:latest,MYSQL_USER=MYSQL_USER_STAGING:latest,MYSQL_PASSWORD=MYSQL_PASSWORD_STAGING:latest,MYSQL_DB=MYSQL_DB_STAGING:latest,ASPIRE_SANDBOX_CLIENT_ID=ASPIRE_SANDBOX_CLIENT_ID:latest,ASPIRE_SANDBOX_SECRET=ASPIRE_SANDBOX_SECRET:latest
       - --project=juniper-crm-498215-p5

@@ -38,7 +38,7 @@ from db import (
     set_hoa_property_status,
     count_active_leads_for_property,
     has_won_lead_for_property,
-    close_pool, run_migrations,
+    close_pool,
 )
 SESSION_DURATION = 28800  # 8 hours in seconds
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
@@ -51,7 +51,8 @@ if _extra_origins:
 
 @asynccontextmanager
 async def lifespan(app):
-    await run_migrations()
+    # Schema migrations are applied via scripts/migrate.py before each deploy,
+    # not at app boot. See handoffs/35-migration-deploy-wiring-and-live-apply.md.
     sweep_task = None
     # Durability sweep for best-effort Aspire pushes — only when sync is enabled,
     # so tests and standalone runs never spawn it.

@@ -105,7 +105,8 @@ class TestAutoGeneration:
     def test_create_estimate_creates_exactly_one_itb_project(
         self, mock_query, mock_exec, mock_load, mock_bg, authed, est_type
     ):
-        mock_query.return_value = _scope_id_rows()
+        # [] → estimate_sections (no lines → fallback total,0); _scope_id_rows → itb_scopes
+        mock_query.side_effect = [[], _scope_id_rows()]
         mock_load.return_value = {"id": "est-1", "estimateType": est_type}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": est_type, "name": "Greenfield", "clientName": "LLC",
@@ -124,7 +125,8 @@ class TestAutoGeneration:
     def test_itb_project_row_links_estimate_and_carries_intake_fields(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        mock_query.return_value = _scope_id_rows()
+        # [] → estimate_sections (no lines → fallback total,0); _scope_id_rows → itb_scopes
+        mock_query.side_effect = [[], _scope_id_rows()]
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield Estate",
@@ -156,7 +158,8 @@ class TestAutoGeneration:
     def test_scope_status_rows_initialized_for_every_scope_with_default_code(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        mock_query.return_value = _scope_id_rows()
+        # [] → estimate_sections (no lines → fallback total,0); _scope_id_rows → itb_scopes
+        mock_query.side_effect = [[], _scope_id_rows()]
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "HOA", "clientName": "HOA LLC",
@@ -181,7 +184,8 @@ class TestAutoGeneration:
     ):
         """Adding a row to itb_scopes yields one more status row at creation
         with NO code edit (Handoff 13 / BRD §2.1)."""
-        mock_query.return_value = _scope_id_rows() + [{"id": "scope-brand-new"}]
+        # [] → estimate_sections (no lines → fallback total,0); extended list → itb_scopes
+        mock_query.side_effect = [[], _scope_id_rows() + [{"id": "scope-brand-new"}]]
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "X", "clientName": "Y",

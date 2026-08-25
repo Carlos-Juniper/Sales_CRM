@@ -38,7 +38,7 @@ class OpportunityInput:
     branch_city: str             # key into ASPIRE_BRANCH_MAP  (e.g. "Orlando, FL")
     is_install: bool
     aspire_property_id: Optional[int]        # None ⇒ property not synced yet
-    aspire_rep_contact_id: Optional[int] = None   # Aspire ContactID → SalesRepContactID
+    aspire_rep_contact_id: Optional[int] = None   # Aspire ContactID → SalesRepID
     sales_type: Optional[str] = None         # "HOA" | "commercial"
     lead_source: Optional[str] = None
 
@@ -53,6 +53,7 @@ class PropertyInput:
     branch_city: str             # key into ASPIRE_BRANCH_MAP (e.g. "Orlando, FL")
     is_install: bool = False
     address2: Optional[str] = None
+    industry_id: Optional[int] = None
 
 
 # ── Neutral results ──────────────────────────────────────────────────────────
@@ -145,7 +146,7 @@ def build_opportunity_payload(inp: OpportunityInput) -> dict:
         "OpportunityType": cfg.ASPIRE_OPPORTUNITY_TYPE_DEFAULT,
     }
     if inp.aspire_rep_contact_id is not None:
-        payload["SalesRepContactID"] = inp.aspire_rep_contact_id
+        payload["SalesRepID"] = inp.aspire_rep_contact_id
     if inp.sales_type is not None and inp.sales_type in cfg.ASPIRE_SALES_TYPE_MAP:
         payload["SalesTypeID"] = cfg.ASPIRE_SALES_TYPE_MAP[inp.sales_type]
     if inp.lead_source is not None and inp.lead_source in cfg.ASPIRE_LEAD_SOURCE_MAP:
@@ -167,6 +168,8 @@ def build_property_payload(inp: PropertyInput) -> dict:
     }
     if inp.address2:
         payload["AddressLine2"] = inp.address2
+    if inp.industry_id is not None:
+        payload["IndustryID"] = inp.industry_id
     return payload
 
 
@@ -180,7 +183,11 @@ async def _fetch_opportunity_number(client: AspireClient, opp_id: int) -> Option
     `/Opportunities/{id}` path. Isolated so a read failure does NOT discard the
     successfully-created opportunity's id — losing the id would make the sweep
     re-POST and create a duplicate.
-    TODO(aspire-live): drop this follow-up entirely if POST proves to return the number.
+
+    Confirmed 2026-08-24 (sandbox smoke test + prod Aspire API swagger v1):
+    POST /Opportunities returns only a bare integer OpportunityID — no
+    MasterOpportunityNumber or OpportunityNumber in the POST response body —
+    so this follow-up GET is always necessary.
     """
     try:
         data = await client.get("/Opportunities", params={"$filter": f"OpportunityID eq {opp_id}"})
@@ -202,11 +209,12 @@ async def push_new_opportunity(
 
     owns, client = _resolve_client(client)
     try:
-        created = await client.post("/Opportunity", build_opportunity_payload(inp))
-        opp_id = created.get("OpportunityID")
-        number = extract_aspire_number(created)
-        if number is None and opp_id is not None:
-            number = await _fetch_opportunity_number(client, opp_id)
+        # POST /Opportunities returns a bare integer OpportunityID (confirmed 2026-08-24).
+        created = await client.post("/Opportunities", build_opportunity_payload(inp))
+        opp_id = created if isinstance(created, int) else (
+            created.get("OpportunityID") if isinstance(created, dict) else None
+        )
+        number = await _fetch_opportunity_number(client, opp_id) if opp_id is not None else None
         return SyncResult(status="synced", aspire_opportunity_id=opp_id, aspire_number=number)
     except AspireError as exc:
         return SyncResult(status="failed", error=str(exc))
@@ -221,41 +229,43 @@ async def push_status(
     lost_reason_id: Optional[int] = None,
     client: Optional[AspireClient] = None,
 ) -> SyncResult:
-    """Write a terminal status (won/lost) back to Aspire. Terminal-only by design."""
+    """Write a terminal status (won/lost) back to Aspire. Terminal-only by design.
+
+    NOT IMPLEMENTED (2026-08-24, confirmed via swagger v1 + sandbox smoke test):
+    Aspire API v1 has no PUT or PATCH endpoint for individual opportunities.
+    POST /Opportunities/QuickTickets creates work tickets, not a status update.
+    This function validates inputs and returns status="failed" until a working
+    update mechanism is identified (contact Aspire support or check API v2+).
+    """
     if not sync_enabled():
         return SyncResult(status="disabled")
     if aspire_opportunity_id is None:
         return SyncResult(status="pending", error="opportunity not yet synced")
 
-    body: dict = {}
+    # Validate before failing so data errors are surfaced eagerly.
     if new_status == "won":
-        body["OpportunityStatusID"] = cfg.ASPIRE_OPPORTUNITY_STATUS_WON
+        pass
     elif new_status == "lost":
-        body["OpportunityStatusID"] = cfg.ASPIRE_OPPORTUNITY_STATUS_LOST
-        if lost_reason_id is not None:
-            if lost_reason_id not in cfg.ASPIRE_LOST_REASONS:
-                return SyncResult(
-                    status="failed",
-                    error=f"lost reason {lost_reason_id} is not an active Aspire reason",
-                )
-            # TODO(aspire-live): confirm field name for lost reason on write.
-            body["OpportunityLostReasonID"] = lost_reason_id
+        if lost_reason_id is not None and lost_reason_id not in cfg.ASPIRE_LOST_REASONS:
+            return SyncResult(
+                status="failed",
+                error=f"lost reason {lost_reason_id} is not an active Aspire reason",
+            )
     else:
         return SyncResult(status="failed", error=f"non-terminal status {new_status!r} not written")
 
-    owns, client = _resolve_client(client)
-    path = f"/Opportunity/{aspire_opportunity_id}"
-    try:
-        if cfg.ASPIRE_STATUS_WRITE_VERB == "PUT":
-            await client.put(path, body)
-        else:
-            await client.patch(path, body)
-        return SyncResult(status="synced", aspire_opportunity_id=aspire_opportunity_id)
-    except AspireError as exc:
-        return SyncResult(status="failed", error=str(exc))
-    finally:
-        if owns:
-            await client.close()
+    # Confirmed 2026-08-24 (swagger v1): no endpoint exists to update opportunity
+    # status. LostReason write field is `LostReason` (string), not `OpportunityLostReasonID`.
+    # Use cfg.ASPIRE_LOST_REASONS[lost_reason_id] if a working endpoint is found.
+    return SyncResult(
+        status="failed",
+        aspire_opportunity_id=aspire_opportunity_id,
+        error=(
+            "Aspire API v1 has no endpoint to update opportunity status "
+            "(confirmed 2026-08-24 via swagger v1); "
+            "contact Aspire support or check API v2+ for the correct mechanism"
+        ),
+    )
 
 
 def _records(data) -> list[dict]:
@@ -270,17 +280,12 @@ async def push_opportunity_service_item_qty(
     lines: list[TakeoffQtyLine],
     client: Optional[AspireClient] = None,
 ) -> QtyPushResult:
-    """One-way, batched, best-effort push of takeoff qtys (Handoff 20 §4.2).
+    """One-way, best-effort push of takeoff qtys (Handoff 20 §4.2).
 
-    Writes each line's locally-owned opportunity qty to
-    OpportunityServiceItem.ItemQuantity via the §2 join
-    (OpportunityServiceID → OpportunityService.OpportunityID), matched by
-    CatalogItemID with the UOM sanity-checked against AllocationUnitTypeName.
-
-    Same shape as push_status: never raises — transient failures return
-    status="failed" and are logged by the caller; unmatched/UOM-mismatched
-    lines are counted in `skipped`, never treated as an error. This module
-    never READS a quantity back — opportunity_qty stays locally owned.
+    NOT IMPLEMENTED (2026-08-24, confirmed via swagger v1 + sandbox smoke test):
+    Aspire API v1 has no PUT or PATCH endpoint for OpportunityServiceItems.
+    This function validates inputs and returns status="failed" until a working
+    update mechanism is identified (contact Aspire support or check API v2+).
     """
     if not sync_enabled():
         return QtyPushResult(status="disabled")
@@ -289,50 +294,16 @@ async def push_opportunity_service_item_qty(
     if not lines:
         return QtyPushResult(status="synced")
 
-    owns, client = _resolve_client(client)
-    try:
-        services = _records(await client.get(
-            "/OpportunityServices",
-            params={"$filter": f"OpportunityID eq {aspire_opportunity_id}"},
-        ))
-        items_by_catalog: dict[str, dict] = {}
-        for svc in services:
-            svc_id = svc.get("OpportunityServiceID")
-            if svc_id is None:
-                continue
-            items = _records(await client.get(
-                "/OpportunityServiceItems",
-                params={"$filter": f"OpportunityServiceID eq {svc_id}"},
-            ))
-            for item in items:
-                cat = item.get("CatalogItemID")
-                if cat is not None:
-                    items_by_catalog.setdefault(str(cat), item)
-
-        pushed = skipped = 0
-        for line in lines:
-            item = items_by_catalog.get(str(line.catalog_item_id))
-            item_id = None if item is None else item.get("OpportunityServiceItemID")
-            aspire_uom = None if item is None else item.get("AllocationUnitTypeName")
-            if item is None or item_id is None:
-                skipped += 1
-                continue
-            if line.uom and aspire_uom and line.uom != aspire_uom:
-                skipped += 1  # UOM disagreement — never write a mismatched qty
-                continue
-            path = f"/OpportunityServiceItem/{item_id}"
-            body = {"ItemQuantity": line.qty}
-            if cfg.ASPIRE_STATUS_WRITE_VERB == "PUT":
-                await client.put(path, body)
-            else:
-                await client.patch(path, body)
-            pushed += 1
-        return QtyPushResult(status="synced", pushed=pushed, skipped=skipped)
-    except AspireError as exc:
-        return QtyPushResult(status="failed", error=str(exc))
-    finally:
-        if owns:
-            await client.close()
+    # Confirmed 2026-08-24 (swagger v1): no endpoint exists to update
+    # OpportunityServiceItem quantity.
+    return QtyPushResult(
+        status="failed",
+        error=(
+            "Aspire API v1 has no endpoint to update OpportunityServiceItem quantity "
+            "(confirmed 2026-08-24 via swagger v1); "
+            "contact Aspire support or check API v2+ for the correct mechanism"
+        ),
+    )
 
 
 async def list_opportunities_for_property(
@@ -368,8 +339,11 @@ async def push_property(
 
     owns, client = _resolve_client(client)
     try:
-        created = await client.post("/Property", build_property_payload(inp))
-        prop_id = created.get("PropertyID")
+        # POST /Properties returns a bare integer PropertyID (confirmed 2026-08-24).
+        created = await client.post("/Properties", build_property_payload(inp))
+        prop_id = created if isinstance(created, int) else (
+            created.get("PropertyID") if isinstance(created, dict) else None
+        )
         if prop_id is None:
             # Without an id we cannot link — leave failed for the sweep to retry.
             return PropertySyncResult(status="failed", error="no PropertyID returned")

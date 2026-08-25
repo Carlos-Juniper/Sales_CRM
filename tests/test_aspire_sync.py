@@ -120,7 +120,7 @@ class TestOpportunityPayloadBuilder:
         assert payload["DivisionID"] == 1574
         assert payload["BranchID"] == 3668
         assert payload["OpportunityStatusID"] == cfg.ASPIRE_OPPORTUNITY_STATUS_NEW
-        assert payload["SalesRepContactID"] == 278690
+        assert payload["SalesRepID"] == 278690
         assert payload["SalesTypeID"] == 1684
         assert payload["OpportunityType"] == cfg.ASPIRE_OPPORTUNITY_TYPE_DEFAULT
 
@@ -135,7 +135,7 @@ class TestOpportunityPayloadBuilder:
         payload = sync.build_opportunity_payload(
             _opp(aspire_rep_contact_id=None, sales_type=None)
         )
-        assert "SalesRepContactID" not in payload
+        assert "SalesRepID" not in payload
         assert "SalesTypeID" not in payload
 
 
@@ -157,8 +157,9 @@ class TestPushNewOpportunity:
 
     async def test_success_stores_id_and_coalesced_number(self):
         client = FakeClient()
-        client.post_returns = [{"OpportunityID": 630956}]          # POST returns id only
-        client.get_returns = [                                     # collection GET → list of records
+        # POST /Opportunities returns a bare integer (confirmed 2026-08-24, swagger v1).
+        client.post_returns = [630956]
+        client.get_returns = [
             [{"MasterOpportunityNumber": None, "OpportunityNumber": 8}]
         ]
         res = await sync.push_new_opportunity(_opp(), client=client)
@@ -166,9 +167,8 @@ class TestPushNewOpportunity:
         assert res.aspire_opportunity_id == 630956
         assert res.aspire_number == "8"
         assert client.calls[0][0] == "post"
-        assert client.calls[0][1] == "/Opportunity"
-        # defensive follow-up hits the verified collection endpoint + id filter,
-        # NOT a guessed /Opportunities/{id} path.
+        assert client.calls[0][1] == "/Opportunities"
+        # follow-up GET always hits the verified collection endpoint + id filter.
         verb, path, params = client.calls[1]
         assert verb == "get"
         assert path == "/Opportunities"
@@ -178,19 +178,26 @@ class TestPushNewOpportunity:
         # A read failure must NOT discard the created id — else the sweep would
         # re-POST and duplicate the opportunity.
         client = FakeClient()
-        client.post_returns = [{"OpportunityID": 630956}]  # no number in POST
+        client.post_returns = [630956]  # bare int, as confirmed by swagger v1
         client.raise_on["get"] = AspireHTTPError(503, "read down")
         res = await sync.push_new_opportunity(_opp(), client=client)
         assert res.status == "synced"
         assert res.aspire_opportunity_id == 630956
         assert res.aspire_number is None
 
-    async def test_skips_followup_get_when_post_returns_number(self):
+    async def test_bare_int_post_always_fetches_number_via_get(self):
+        # POST /Opportunities returns a bare int — follow-up GET is always needed.
         client = FakeClient()
-        client.post_returns = [{"OpportunityID": 700, "MasterOpportunityNumber": 408123}]
+        client.post_returns = [630956]
+        client.get_returns = [
+            [{"MasterOpportunityNumber": 408123, "OpportunityNumber": 630001}]
+        ]
         res = await sync.push_new_opportunity(_opp(), client=client)
+        assert res.status == "synced"
+        assert res.aspire_opportunity_id == 630956
         assert res.aspire_number == "408123"
-        assert all(c[0] != "get" for c in client.calls)
+        get_calls = [c for c in client.calls if c[0] == "get"]
+        assert len(get_calls) == 1
 
     async def test_http_error_marks_failed(self):
         client = FakeClient()
@@ -209,22 +216,22 @@ class TestPushNewOpportunity:
 # ── push_status ──────────────────────────────────────────────────────────────
 
 class TestPushStatus:
-    async def test_won_writes_won_status(self):
+    async def test_won_returns_failed_no_endpoint(self):
+        # Aspire API v1 has no endpoint to update opportunity status (confirmed 2026-08-24).
         client = FakeClient()
         res = await sync.push_status(630956, "won", client=client)
-        assert res.status == "synced"
-        verb, path, body = client.calls[0]
-        assert verb == "patch"                       # default ASPIRE_STATUS_WRITE_VERB
-        assert path == "/Opportunity/630956"
-        assert body["OpportunityStatusID"] == cfg.ASPIRE_OPPORTUNITY_STATUS_WON
+        assert res.status == "failed"
+        assert res.aspire_opportunity_id == 630956
+        assert "no endpoint" in res.error.lower()
+        assert client.calls == []
 
-    async def test_lost_writes_lost_status_and_reason(self):
+    async def test_lost_returns_failed_no_endpoint(self):
         client = FakeClient()
         res = await sync.push_status(630956, "lost", lost_reason_id=13, client=client)
-        assert res.status == "synced"
-        body = client.calls[0][2]
-        assert body["OpportunityStatusID"] == cfg.ASPIRE_OPPORTUNITY_STATUS_LOST
-        assert body["OpportunityLostReasonID"] == 13
+        assert res.status == "failed"
+        assert res.aspire_opportunity_id == 630956
+        assert "no endpoint" in res.error.lower()
+        assert client.calls == []
 
     async def test_lost_rejects_deprecated_reason(self):
         client = FakeClient()
@@ -245,18 +252,6 @@ class TestPushStatus:
         res = await sync.push_status(630956, "won", client=client)
         assert res.status == "disabled"
         assert client.calls == []
-
-    async def test_respects_put_write_verb(self, monkeypatch):
-        monkeypatch.setattr(cfg, "ASPIRE_STATUS_WRITE_VERB", "PUT")
-        client = FakeClient()
-        await sync.push_status(630956, "won", client=client)
-        assert client.calls[0][0] == "put"
-
-    async def test_http_error_marks_failed(self):
-        client = FakeClient()
-        client.raise_on["patch"] = AspireHTTPError(409, "bad transition")
-        res = await sync.push_status(630956, "won", client=client)
-        assert res.status == "failed"
 
 
 # ── push_property ────────────────────────────────────────────────────────────
@@ -285,7 +280,8 @@ class TestPushProperty:
 
     async def test_success_returns_property_id(self):
         client = FakeClient()
-        client.post_returns = [{"PropertyID": 715389}]
+        # POST /Properties returns a bare integer (confirmed 2026-08-24, swagger v1).
+        client.post_returns = [715389]
         res = await sync.push_property(_prop(), client=client)
         assert isinstance(res, PropertySyncResult)
         assert res.status == "synced"
@@ -300,6 +296,17 @@ class TestPushProperty:
         client.raise_on["post"] = AspireUnreachable("down")
         res = await sync.push_property(_prop(), client=client)
         assert res.status == "failed"
+
+    async def test_industry_id_included_when_provided(self):
+        client = FakeClient()
+        client.post_returns = [715389]
+        res = await sync.push_property(_prop(industry_id=2204), client=client)
+        assert res.status == "synced"
+        assert client.calls[0][2]["IndustryID"] == 2204
+
+    def test_industry_id_omitted_when_none(self):
+        payload = sync.build_property_payload(_prop())
+        assert "IndustryID" not in payload
 
 
 # ── Handoff 20 §4.2 — one-way takeoff qty push ───────────────────────────────
@@ -337,52 +344,11 @@ class TestPushOpportunityServiceItemQty:
         assert res.pushed == 0
         assert client.calls == []
 
-    async def test_batched_push_matches_catalog_item_and_writes_item_quantity(self):
+    async def test_enabled_returns_failed_no_endpoint(self):
+        # Aspire API v1 has no endpoint to update OpportunityServiceItem quantity
+        # (confirmed 2026-08-24 via swagger v1).
         client = FakeClient()
-        client.get_returns = [
-            # OpportunityServices for the opportunity (the §2 join).
-            [{"OpportunityServiceID": 71}, {"OpportunityServiceID": 72}],
-            # Items per service, matched by CatalogItemID.
-            [{"OpportunityServiceItemID": 811, "CatalogItemID": 501,
-              "AllocationUnitTypeName": "ea"}],
-            [{"OpportunityServiceItemID": 822, "CatalogItemID": 502,
-              "AllocationUnitTypeName": "FT"}],
-        ]
-        res = await sync.push_opportunity_service_item_qty(9001, _qty_lines(), client=client)
-        assert res.status == "synced"
-        assert res.pushed == 2
-        assert res.skipped == 0
-
-        get_calls = [c for c in client.calls if c[0] == "get"]
-        assert get_calls[0][1] == "/OpportunityServices"
-        assert get_calls[0][2] == {"$filter": "OpportunityID eq 9001"}
-        assert get_calls[1][1] == "/OpportunityServiceItems"
-
-        writes = {c[1]: c[2] for c in client.calls if c[0] in ("patch", "put")}
-        assert writes["/OpportunityServiceItem/811"] == {"ItemQuantity": 110}
-        assert writes["/OpportunityServiceItem/822"] == {"ItemQuantity": 1640}
-
-    async def test_uom_mismatch_and_unmatched_lines_are_skipped_not_failed(self):
-        client = FakeClient()
-        client.get_returns = [
-            [{"OpportunityServiceID": 71}],
-            # CatalogItemID 501 exists but the Aspire UOM disagrees with ours.
-            [{"OpportunityServiceItemID": 811, "CatalogItemID": 501,
-              "AllocationUnitTypeName": "FT"}],
-        ]
-        lines = [
-            sync.TakeoffQtyLine(catalog_item_id="501", qty=110, uom="ea"),   # uom mismatch
-            sync.TakeoffQtyLine(catalog_item_id="999", qty=5, uom="ea"),     # no match
-        ]
-        res = await sync.push_opportunity_service_item_qty(9001, lines, client=client)
-        assert res.status == "synced"
-        assert res.pushed == 0
-        assert res.skipped == 2
-        assert [c for c in client.calls if c[0] in ("patch", "put")] == []
-
-    async def test_aspire_error_returns_failed_never_raises(self):
-        client = FakeClient()
-        client.raise_on["get"] = AspireUnreachable("down")
         res = await sync.push_opportunity_service_item_qty(9001, _qty_lines(), client=client)
         assert res.status == "failed"
-        assert "down" in (res.error or "")
+        assert "no endpoint" in res.error.lower()
+        assert client.calls == []

@@ -301,9 +301,12 @@ describe('EstimateQueue — card fields', () => {
     expect(within(bravo).getByText('$400K')).toBeInTheDocument()
     expect(within(bravo).getByText(/^Walk:/)).toBeInTheDocument()
     expect(within(bravo).getByText('2d left — SLA risk')).toBeInTheDocument()
-    // Assigned rep: fixture assigns u5 → Casey Nguyen (CN).
-    expect(within(bravo).getByText('CN')).toBeInTheDocument()
-    expect(within(bravo).getByText(/Casey/)).toBeInTheDocument()
+    // Assigned rep: fixture assigns u5 → Casey Nguyen (CN). User data loads
+    // via a separate useUsers() query, so wait for it to settle.
+    await waitFor(() => {
+      expect(within(bravo).getByText('CN')).toBeInTheDocument()
+      expect(within(bravo).getByText(/Casey/)).toBeInTheDocument()
+    })
     // Optional italic notes line.
     expect(within(bravo).getByText(/Board meets monthly/)).toBeInTheDocument()
   })

@@ -10,15 +10,20 @@ _pool: aiomysql.Pool | None = None
 
 
 def _cfg() -> dict:
-    return dict(
-        host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
-        port=int(os.environ.get("MYSQL_PORT", "3306")),
+    cfg: dict[str, Any] = dict(
         user=os.environ.get("MYSQL_USER", "crmadmin"),
         password=os.environ.get("MYSQL_PASSWORD", ""),
         db=os.environ.get("MYSQL_DB", "crm"),
         autocommit=True,
         cursorclass=aiomysql.DictCursor,
     )
+    socket_path = os.environ.get("MYSQL_SOCKET_PATH")
+    if socket_path:
+        cfg["unix_socket"] = socket_path
+    else:
+        cfg["host"] = os.environ.get("MYSQL_HOST", "127.0.0.1")
+        cfg["port"] = int(os.environ.get("MYSQL_PORT", "3306"))
+    return cfg
 
 
 async def _get_pool() -> aiomysql.Pool:
@@ -77,12 +82,9 @@ async def has_won_lead_for_property(property_id: str) -> bool:
     return bool(rows)
 
 
-async def run_migrations() -> None:
-    """No-op: schema managed via sql/ files applied manually.
-
-    Migrations are hand-run against the `crm` database — see
-    sql/migrations/README.md (numbered .sql files, no `juniper.` prefix).
-    """
+# run_migrations() removed — schema is now managed by scripts/migrate.py.
+# See handoffs/34-migration-runner-and-state-reconciliation.md (tool) and
+# handoffs/35-migration-deploy-wiring-and-live-apply.md (CI wiring).
 
 
 async def close_pool() -> None:

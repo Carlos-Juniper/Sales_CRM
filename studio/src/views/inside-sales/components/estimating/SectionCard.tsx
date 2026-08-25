@@ -11,6 +11,7 @@ import { Copy, Plus, TriangleAlert, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { DisciplineSelect } from './DisciplineSelect'
 import type { EstimateSection, SectionService } from '@/types/estimating'
 import {
   acresFromSqft,
@@ -81,7 +82,7 @@ function ServiceRow({
   return (
     <div
       data-testid={`service-row-${svc.label}`}
-      className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 gap-y-1 px-4 py-2 border-t border-[hsl(var(--border))]"
+      className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 px-4 py-2 border-t border-[hsl(var(--border))]"
     >
       <div className="min-w-0">
         <p className="text-sm text-[hsl(var(--fg))] truncate">{svc.label}</p>
@@ -145,6 +146,13 @@ function ServiceRow({
           </span>
         )}
       </div>
+
+      <DisciplineSelect
+        label={svc.label}
+        value={svc.discipline ?? null}
+        onChange={(discipline) => onServiceChange(svc.id, { discipline })}
+        className={cn(cellInput, BLUE_CELL)}
+      />
 
       <div className="text-right">
         <p className="text-sm font-semibold tabular-nums text-[hsl(var(--fg))]">
@@ -238,10 +246,11 @@ export function SectionCard({
         </div>
 
         {/* Column headers */}
-        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))]">
+        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))]">
           <span>Service</span>
           <span>Occurrences</span>
           <span>Complexity</span>
+          <span>Discipline</span>
           <span className="text-right">Line total</span>
         </div>
 

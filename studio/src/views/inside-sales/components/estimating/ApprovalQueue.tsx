@@ -35,7 +35,7 @@ import {
   type SendBackReason,
 } from '@/lib/estimating/approvalReview'
 import { useAuthStore } from '@/store/authStore'
-import { mockUsers } from '@/mocks/data'
+import { useUsers } from '@/hooks/useUsers'
 import { cn } from '@/lib/utils'
 import type { ApprovalRoleKey, ApprovalTier, Estimate } from '@/types/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
@@ -79,11 +79,6 @@ function waitedLabel(days: number): string {
   return days === 1 ? '1 day waiting' : `${days} days waiting`
 }
 
-function estimatorName(estimate: Estimate): string {
-  return (
-    mockUsers.find((u) => u.id === estimate.assignedLsEstimator)?.name ?? 'the estimator'
-  )
-}
 
 export interface ApprovalQueueProps {
   /**
@@ -102,6 +97,7 @@ export function ApprovalQueue({ tiers: tiersProp, estimates }: ApprovalQueueProp
   const { show } = useToast()
   const user = useAuthStore((s) => s.user)
 
+  const { findUser } = useUsers()
   const [role, setRole] = useState<ApprovalRoleKey>('manager')
   const [items, setItems] = useState<Estimate[]>(estimates ?? [])
   const [selected, setSelected] = useState<{ id: string; sendBack: boolean } | null>(null)
@@ -165,10 +161,11 @@ export function ApprovalQueue({ tiers: tiersProp, estimates }: ApprovalQueueProp
       const { estimate: updated } = await estimatingApi.approveAndHandBack(estimate.id, { actor })
       replaceItem(updated) // no longer pending_approval → leaves every queue
       setSelected(null)
+      const estimatorName = findUser(estimate.assignedLsEstimator)?.name ?? 'the estimator'
       show(
         changed
           ? `Adjustment saved & ${estimate.name} approved`
-          : `${estimate.name} approved & handed back to Sales`,
+          : `${estimate.name} approved & handed back to Sales (${estimatorName})`,
       )
     } finally {
       setBusy(false)
@@ -208,7 +205,7 @@ export function ApprovalQueue({ tiers: tiersProp, estimates }: ApprovalQueueProp
       const updated = await estimatingApi.update(estimate.id, patch)
       replaceItem(updated)
       setSelected(null)
-      show(`Sent back to ${estimatorName(estimate)} — ${reason}${note ? ' · note attached' : ''}`)
+      show(`Sent back to ${findUser(estimate.assignedLsEstimator)?.name ?? 'the estimator'} — ${reason}${note ? ' · note attached' : ''}`)
     } finally {
       setBusy(false)
     }
@@ -301,7 +298,7 @@ export function ApprovalQueue({ tiers: tiersProp, estimates }: ApprovalQueueProp
         {mine.map(({ estimate, tier, waitedDays }) => {
           const note = escalationNote(tier)
           const severity = waitSeverity(waitedDays)
-          const builtBy = estimatorName(estimate)
+          const builtBy = findUser(estimate.assignedLsEstimator)?.name ?? 'the estimator'
           // baseline chips: weighted complexity + target margin
           const { comp0Pct, margin0Pct } = reviewBaseline(estimate)
           return (
@@ -417,7 +414,7 @@ export function ApprovalQueue({ tiers: tiersProp, estimates }: ApprovalQueueProp
           tier={selectedRouted.tier}
           approverTier={drawerApproverTier}
           tiers={tiers.filter((t) => t.estimateType === selectedRouted.estimate.estimateType)}
-          builtBy={estimatorName(selectedRouted.estimate)}
+          builtBy={findUser(selectedRouted.estimate.assignedLsEstimator)?.name ?? 'the estimator'}
           initialSendBack={selected?.sendBack ?? false}
           onClose={() => setSelected(null)}
           onApprove={(live, changed) => handleApprove(selectedRouted.estimate, live, changed)}

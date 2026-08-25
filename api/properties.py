@@ -1,4 +1,4 @@
-"""Properties API — /api/properties/* routes (Handoff 15: canonical model).
+"""Properties API — /api/properties/* routes (canonical model).
 
 App-owned CANONICAL property records are the SOURCE OF TRUTH; Aspire is
 downstream. Every vertical prospecting table (hoa_properties, …) feeds into
@@ -91,7 +91,7 @@ async def _persist_property_result(property_id: str, res) -> None:
 
 
 async def _sync_property_bg(property_id: str) -> None:
-    """Push one property to Aspire (the reusable trigger — Handoff 15 §5.4).
+    """Push one property to Aspire (the reusable trigger).
 
     Invoked from estimate submission, NEVER from create_property. Sets
     aspire_sync_status='pending' at the start of the push; the result flips it
@@ -239,7 +239,7 @@ def register(app, require_auth) -> None:
     async def promote_property(
         property_id: str, _user: dict = Depends(require_auth)
     ) -> dict:
-        """Create-lead-from-property (generalized promote — Handoff 15 §5.5)."""
+        """Create-lead-from-property (generalized promote)."""
         try:
             lead = await pipeline.promote_property_to_lead(property_id)
         except ValueError as exc:

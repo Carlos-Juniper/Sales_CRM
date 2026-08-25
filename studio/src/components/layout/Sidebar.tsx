@@ -19,7 +19,7 @@ interface NavItem {
   roles: UserRole[]
 }
 
-// Canonical roles (Handoff 18). `admin` sees everything via canAccess.
+// Canonical roles. `admin` sees everything via canAccess.
 const SALES_NAV: UserRole[] = ['sales', 'manager']
 const ESTIMATING_NAV: UserRole[] = [
   'sales',

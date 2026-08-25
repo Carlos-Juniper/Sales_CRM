@@ -1,4 +1,4 @@
-"""Tests for api/pipeline.py — canonical-properties promote flow (Handoff 15).
+"""Tests for api/pipeline.py — canonical-properties promote flow.
 
 Promotion is a LOCAL operation: it find-or-creates a canonical `properties`
 row (source_type='hoa', source_id=<hoa id>, aspire_sync_status='unsynced') and

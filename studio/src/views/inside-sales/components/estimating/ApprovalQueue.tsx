@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Approval Queue tab (Handoff 09) — the approver-facing inbox.
+// Approval Queue tab — the approver-facing inbox.
 //
 // Estimates in pending_approval are routed to a tier by contract value via
 // the CONFIG approval_tiers ladder (tierForValue) — never a hardcoded matrix.
@@ -8,7 +8,7 @@
 // audited levers (complexity → hours/cost, margin → price) live. There is no
 // "Escalate" action: an over-ceiling adjustment simply saves (audited, no
 // approve) and the value-driven tier recompute re-routes the estimate to the
-// correct queue automatically (Handoff 19 §4).
+// correct queue automatically.
 //
 // Status changes always go through lib/estimating/transitions (approve =
 // approveAndHandBack server-side; send-back = applyTransition → in_progress).
@@ -83,7 +83,7 @@ function waitedLabel(days: number): string {
 export interface ApprovalQueueProps {
   /**
    * approval_tiers config rows (§3.9). Defaults to the API-fetched config
-   * table (Handoff 16); the config.ts seed is only the offline fallback.
+   * table; the config.ts seed is only the offline fallback.
    */
   tiers?: ApprovalTier[]
   /** Test/deep-link seam; when absent the pending set is fetched. */
@@ -93,7 +93,7 @@ export interface ApprovalQueueProps {
 export function ApprovalQueue({ tiers: tiersProp, estimates }: ApprovalQueueProps) {
   const { approvalTiers } = useEstimatingConfig()
   const tiers = tiersProp ?? approvalTiers
-  const { setOpenEstimate, setActiveTab } = useEstimatingShell()
+  const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
   const user = useAuthStore((s) => s.user)
 
@@ -212,8 +212,7 @@ export function ApprovalQueue({ tiers: tiersProp, estimates }: ApprovalQueueProp
   }
 
   function handleOpenEstimate(estimate: Estimate) {
-    setOpenEstimate(estimate)
-    setActiveTab('editor')
+    openEstimateAt(estimate, 'editor')
   }
 
   return (

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Install engine helpers (Handoff 04 — Line-Item Editor, install).
+// Install engine helpers (Line-Item Editor, install).
 //
 // Pure logic + config for the QUANTITY-driven kit editor (BRD II-6.8):
 //   • TP = QTY × unit sell price; each line carries an embedded SUB COST and
@@ -10,8 +10,8 @@
 //   • Labor/material component split + same-production-rate labor grouping
 //     (II-9.7 — landscape gets the parts/labor split irrigation already has).
 //
-// The install pipeline stays INDEPENDENT of the maintenance engine (written
-// handoff §2c) — nothing here imports from ./maintenance, and all pricing
+// The install pipeline stays INDEPENDENT of the maintenance engine (§2c) —
+// nothing here imports from ./maintenance, and all pricing
 // math flows through ./calc (single source of truth).
 // ---------------------------------------------------------------------------
 
@@ -245,7 +245,7 @@ export const INSTALL_KIT_CATALOG: InstallCatalogKit[] = [
 ]
 
 /**
- * Handoff 22 — the editors read kits from GET /catalog-items (Handoff 16).
+ * The editors read kits from GET /catalog-items.
  * Adapts install_quantity CatalogItems into the editor's kit shape; the API
  * row carries a single blended unit cost, which stands in as the one vendor
  * quote until per-vendor pricing lands. The INSTALL_KIT_CATALOG literal

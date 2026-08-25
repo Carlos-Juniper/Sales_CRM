@@ -1,4 +1,4 @@
-"""Handoff 22 — Kit Catalog loader (scripts/load_catalog_items.py).
+"""Kit Catalog loader (scripts/load_catalog_items.py).
 
 The loader parses the real Aspire kit workbook Carlos provided
 (`business docs/Juniper_Aspire_Kit_Review.xlsx` — pulled live from Aspire,
@@ -75,7 +75,7 @@ class TestMaintenanceKitExtraction:
 
     def test_unsampled_items_keep_null_production_rate(self):
         # "Not sampled" rows land with NULL production_rate — the save guard
-        # (this handoff) then blocks estimates against them until the team
+        # then blocks estimates against them until the team
         # supplies a rate. That is the intended behavior, not a data bug.
         rows = loader.extract_maintenance_kits(WORKBOOK)
         by_id = {r.id: r for r in rows}

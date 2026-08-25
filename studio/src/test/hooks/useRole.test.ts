@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 18 — canonical 9-role model on the frontend.
+// Canonical 9-role model on the frontend.
 //
 //   * UserRole covers the nine business roles; legacy inside_sales /
 //     outside_sales normalize to `sales`.
@@ -94,8 +94,8 @@ describe('useRole', () => {
     expect(canAccess('manager')).toBe(false)
   })
 
-  it('maps estimating roles: line-item edit set (Handoff 28) vs approvers (mirrors api/authz.py)', () => {
-    // Handoff 28: manager-tier roles added to ESTIMATOR_ROLES (line-item edit set).
+  it('maps estimating roles: line-item edit set vs approvers (mirrors api/authz.py)', () => {
+    // Manager-tier roles added to ESTIMATOR_ROLES (line-item edit set).
     expect(withRole('maintenance_estimating').isEstimator).toBe(true)
     expect(withRole('install_estimating').isEstimator).toBe(true)
     expect(withRole('admin').isEstimator).toBe(true)

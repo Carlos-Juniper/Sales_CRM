@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Maintenance engine helpers (Handoff 03 — Line-Item Editor, maintenance).
+// Maintenance engine helpers (Line-Item Editor, maintenance).
 //
 // Pure logic + config for the hours-driven, section-based editor:
 //   • service catalog (sq-ft basis ENFORCED — BRD I-6.5's $3M–$42M acre bug)
@@ -64,7 +64,7 @@ export interface MaintenanceCatalogService {
   basis: ServiceBasis
   /**
    * Blended $/1,000-SF proxy rate (integer cents) from the prototype. Open
-   * item (Handoff 00 §3.6): replace with real Aspire production-rate kits —
+   * item: replace with real Aspire production-rate kits —
    * never flat QTY × price.
    */
   rateCentsPer1000Sf: number
@@ -96,7 +96,7 @@ export const MAINTENANCE_SERVICE_CATALOG: MaintenanceCatalogService[] = [
 ]
 
 /**
- * Handoff 22 — derive a sell rate (integer cents / 1,000 SF) from a kit's
+ * Derive a sell rate (integer cents / 1,000 SF) from a kit's
  * production rate when the catalog row carries no explicit unit sell:
  * cost/1,000 SF = (1,000 ÷ rate) hours × loaded crew rate, marked up to the
  * kit's target GM. Keeps hours-driven kits priced from hours, never a guess.
@@ -112,7 +112,7 @@ export function sellRateCentsPer1000Sf(
 }
 
 /**
- * Handoff 22 — the editors read kits from GET /catalog-items (Handoff 16).
+ * The editors read kits from GET /catalog-items.
  * Adapts maintenance_hours CatalogItems to the editor's catalog-row shape,
  * keeping the sq-ft-only basis rule: only ACTIVE, sq-ft, production-rated
  * kits are addable (a line seeded from one always passes the save guard).
@@ -146,7 +146,7 @@ export function maintenanceCatalogFromItems(
 }
 
 /**
- * Handoff 22 — client half of the production-rate save guard (the server
+ * Client half of the production-rate save guard (the server
  * enforces the same rule with a 422). Returns the labels of maintenance lines
  * that resolve NEITHER explicit hours NOR a production-rated kit. With the
  * catalog not loaded (offline/in-flight) kit-carrying lines get the benefit
@@ -233,7 +233,7 @@ export function catalogToService(
 
 /**
  * Default new section, seeded with the core region-template services.
- * `catalog` comes from GET /catalog-items (Handoff 22); the literal is the
+ * `catalog` comes from GET /catalog-items; the literal is the
  * offline fallback. API catalogs (whose keys are kit ids, not the literal
  * seed keys) seed the first three rows.
  */
@@ -285,7 +285,7 @@ export function removeSection(sections: EstimateSection[], sectionId: string): E
 /**
  * Ownership always DERIVES from lifecycle — it cannot be set independently.
  * Client-side reference implementation of the derivation rule (BRD §8.1); the
- * lifecycle flip itself persists via `estimatingApi.setLifecycle` (Handoff 17),
+ * lifecycle flip itself persists via `estimatingApi.setLifecycle`,
  * and the server records the edge in estimate_status_transitions
  * (`lifecycle:` prefix). The old in-memory transitionLifecycle/
  * lifecycleAuditLog helpers were deleted once that path landed.
@@ -328,7 +328,7 @@ export function assertCanEdit(role: EstimatingRole, field: OwnedField): void {
 }
 
 /**
- * Map the canonical auth roles (Handoff 18, mirrors api/authz.py) onto the
+ * Map the canonical auth roles (mirrors api/authz.py) onto the
  * estimating ownership roles. `admin` holds BOTH scopes. This mapping is
  * advisory for the UI — the server enforces it on every mutation.
  */

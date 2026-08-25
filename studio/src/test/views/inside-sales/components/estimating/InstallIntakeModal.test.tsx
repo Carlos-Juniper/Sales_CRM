@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 12 — Install Proposal Request Modal tests (Acceptance Criteria §3).
+// Install Proposal Request Modal tests (Acceptance Criteria §3).
 //
 // Opened from EstimateQueue's "Install intake" CTA. Submitting creates an
 // install estimate (estimateType='install', status='new_from_sales'), starts
@@ -79,7 +79,7 @@ function fillMinimumFieldsFast() {
   fireEvent.change(screen.getByLabelText(/contact person/i), { target: { value: 'Morgan Pierce' } })
 }
 
-/** Wait for async branch options to appear then select one — required before submit (Handoff 28). */
+/** Wait for async branch options to appear then select one — required before submit. */
 async function selectInstallBranch() {
   await screen.findByRole('option', { name: 'Bradenton, FL' })
   fireEvent.change(screen.getByLabelText(/install branch/i), { target: { value: 'Bradenton, FL' } })
@@ -231,10 +231,10 @@ describe('InstallIntakeModal — field rendering (AC §3 bullet 1)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Handoff 28 — Branch field populated from Aspire config endpoint
+// Branch field populated from Aspire config endpoint
 // ---------------------------------------------------------------------------
 
-describe('InstallIntakeModal — Aspire-derived install branch (Handoff 28)', () => {
+describe('InstallIntakeModal — Aspire-derived install branch', () => {
   it('starts with no branch selected (empty placeholder)', () => {
     renderModal()
     const select = screen.getByLabelText(/install branch/i) as HTMLSelectElement
@@ -342,7 +342,7 @@ describe('InstallIntakeModal — RFI status (AC §3 bullet 2)', () => {
     expect(payload.rfiStatus).toBe('Awaiting GC response on storm drain details')
   })
 
-  it('sends rfiStatus as a first-class tracked field on the create payload (Handoff 24 §3.2)', async () => {
+  it('sends rfiStatus as a first-class tracked field on the create payload (§3.2)', async () => {
     const created: CreateEstimatePayload[] = []
     const fakeEstimate = buildInstallEstimate({ status: 'new_from_sales' })
 
@@ -664,12 +664,12 @@ describe('InstallIntakeModal — Save Draft (AC §3 bullet 5)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Handoff 24 §3.3 — Save draft persists to the BACKEND (device-independent);
+// Save draft persists to the BACKEND (device-independent);
 // replaces the old localStorage path. A draft never creates an estimate and
 // never triggers an Aspire push.
 // ---------------------------------------------------------------------------
 
-describe('InstallIntakeModal — backend Save Draft (Handoff 24 §3.3)', () => {
+describe('InstallIntakeModal — backend Save Draft (§3.3)', () => {
   it('POSTs the draft to /api/estimating/intake/drafts, not to localStorage', async () => {
     const user = userEvent.setup()
     const draftPosts: Array<Record<string, unknown>> = []
@@ -836,7 +836,7 @@ describe('InstallIntakeModal — cancel behavior', () => {
 // EstimatingPage integration — onInstallIntake wiring
 // ---------------------------------------------------------------------------
 
-describe('InstallIntakeModal — EstimatingPage integration (Handoff 12 seam)', () => {
+describe('InstallIntakeModal — EstimatingPage integration (seam)', () => {
   it('EstimatingPage wires onInstallIntake to open the Install modal', async () => {
     const user = userEvent.setup()
     render(<EstimatingPage />)

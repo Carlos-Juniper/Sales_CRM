@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 04 — Install engine (quantity-driven kits). Rendered automatically
+// Install engine (quantity-driven kits). Rendered automatically
 // when `estimateType === 'install'`; NO mode toggle exists anywhere.
 //
 // Fixture display math (buildInstallEstimate — see install.test.ts):
@@ -26,7 +26,7 @@ function renderInstall(estimate: Estimate = buildInstallEstimate()) {
   const utils = render(
     <EstimatingToastProvider>
       <EstimatingShellContext.Provider
-        value={{ activeTab: 'editor', setActiveTab: vi.fn(), openEstimate: estimate, setOpenEstimate }}
+        value={{ activeTab: 'editor', setActiveTab: vi.fn(), openEstimate: estimate, setOpenEstimate, openEstimateAt: vi.fn() }}
       >
         <LineItemEditor />
       </EstimatingShellContext.Provider>
@@ -276,7 +276,7 @@ describe('InstallEditor — add kit line from catalog (II-6.5 / II-9.5)', () => 
   })
 })
 
-describe('InstallEditor — install routes through the tier ladder (Handoff 19 §4)', () => {
+describe('InstallEditor — install routes through the tier ladder (§4)', () => {
   it('no longer shows the "no approval matrix defined" note — install approvals are config-routed', () => {
     renderInstall()
     expect(screen.queryByTestId('install-approval-note')).not.toBeInTheDocument()
@@ -320,7 +320,7 @@ describe('InstallEditor — empty / saving / save-error states', () => {
   })
 })
 
-// ----- Save persists the full tree, then reloads (Handoff 17) ----------------
+// ----- Save persists the full tree, then reloads ----------------------------
 
 describe('InstallEditor — Save persists line-item and component edits', () => {
   it('blue-cell component edits survive a reload after Save', async () => {
@@ -376,9 +376,9 @@ describe('InstallEditor — Save persists line-item and component edits', () => 
   })
 })
 
-// ----- RFI status surfaced in the editor (Handoff 24 §3.2) -------------------
+// ----- RFI status surfaced in the editor (§3.2) ------------------------------
 
-describe('InstallEditor — RFI status surfaced (Handoff 24 §3.2)', () => {
+describe('InstallEditor — RFI status surfaced (§3.2)', () => {
   it('shows the tracked RFI status in the header when present', () => {
     renderInstall(
       buildInstallEstimate({ rfiStatus: 'Awaiting GC response on storm drain details' }),

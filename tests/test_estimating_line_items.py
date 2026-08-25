@@ -1,11 +1,11 @@
-"""Handoff 17 — Line-Item Editor Persistence (backend).
+"""Line-Item Editor Persistence (backend).
 
 DB fully mocked via an in-memory FakeDb that interprets the exact SQL shapes
 api/estimating.py issues — no MySQL. Contract under test:
 
   * Round-trip: build a full maintenance estimate and a full install estimate
     via the API (POST with a nested sections→services→components tree), reload
-    with GET, and assert the tree matches (Handoff 00 §6 repository criterion).
+    with GET, and assert the tree matches (repository criterion).
   * Section/service CRUD endpoints persist adds/edits/deletes; deleting a
     section cascades its services/components (FK ON DELETE CASCADE emulated).
   * NEW component CRUD (POST/PATCH/DELETE .../components[/{id}]) — the level
@@ -14,7 +14,7 @@ api/estimating.py issues — no MySQL. Contract under test:
     lifecycle + derived aspire_owner and persists the edge to
     estimate_status_transitions as lifecycle:bidding → lifecycle:won — the
     in-memory frontend lifecycleAuditLog is no longer the source of truth.
-  * Estimator-ownership RBAC (Handoff 18) on every new mutation route.
+  * Estimator-ownership RBAC on every new mutation route.
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ _CHILDREN = {
 class FakeDb:
     def __init__(self) -> None:
         # defaultdict keeps the fake tolerant of tables touched by adjacent
-        # features (e.g. itb_projects from Handoff 21) without modeling them.
+        # features (e.g. itb_projects) without modeling them.
         from collections import defaultdict
 
         self.tables: dict[str, dict[str, dict]] = defaultdict(dict)
@@ -264,7 +264,7 @@ def _maintenance_payload() -> dict:
                 "squareFeet": 120_000,
                 "sortOrder": 0,
                 "services": [
-                    # hours present — the Handoff 22 production-rate guard
+                    # hours present — the production-rate guard
                     # requires every maintenance line to resolve hours.
                     {"label": "Mowing", "qty": 42, "uom": "/yr", "complexityPct": 0.10,
                      "unitSellCents": 450, "hours": 1.5, "sortOrder": 0, "components": []},
@@ -331,7 +331,7 @@ def _get(estimate_id: str) -> dict:
     return resp.json()
 
 
-# ── Round-trip (Handoff 00 §6 repository criterion) ──────────────────────────
+# ── Round-trip (repository criterion) ──────────────────────────
 
 class TestRoundTrip:
     def test_maintenance_estimate_round_trips_full_tree(self, estimator):
@@ -436,7 +436,7 @@ class TestSectionServicePersistence:
         assert [sv["label"] for sv in fetched["sections"][0]["services"]] == ["Bed detail"]
 
 
-# ── Component CRUD (the missing level — Handoff 17 §2.2) ─────────────────────
+# ── Component CRUD (the missing level) ─────────────────────
 
 def _install_ids(est: dict) -> tuple[str, str, str]:
     section = est["sections"][0]

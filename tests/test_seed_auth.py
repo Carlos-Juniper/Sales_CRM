@@ -47,7 +47,7 @@ def test_provision_inserts_new_user():
     values = list(params)
     assert "new.rep@juniperlandscaping.com" in values
     assert "New Rep" in values
-    assert "sales" in values  # legacy inside_sales normalizes to sales (Handoff 18)
+    assert "sales" in values  # legacy inside_sales normalizes to sales
     assert "b1" in values
 
 
@@ -94,7 +94,7 @@ def test_provision_rejects_unknown_role():
 
 
 def test_valid_roles_are_the_nine_canonical_roles():
-    # Handoff 18 §2 — one canonical role vocabulary, backend-validated.
+    # One canonical role vocabulary, backend-validated.
     assert seed_auth.VALID_ROLES == frozenset({
         "procurement", "sales", "admin", "manager", "regional_director",
         "maintenance_estimating", "install_estimating", "vice_president", "ceo",
@@ -115,7 +115,7 @@ def test_provision_accepts_new_canonical_roles():
 
 
 def test_provision_normalizes_legacy_roles_to_sales():
-    # Legacy inside_sales/outside_sales collapse into `sales` (Handoff 18).
+    # Legacy inside_sales/outside_sales collapse into `sales`.
     for legacy in ("inside_sales", "outside_sales"):
         _, execute_mock = _run(
             existing=[],

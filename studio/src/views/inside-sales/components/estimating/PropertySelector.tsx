@@ -14,7 +14,7 @@ import type { AspireOpportunitySummary, CreatePropertyPayload, Property } from '
 import { BranchPicker } from './AspirePickers'
 
 /**
- * Canonical-origin fields for a newly created property (Handoff 15). When the
+ * Canonical-origin fields for a newly created property. When the
  * property originates from an HOA prospect, pass
  * `{ propertyType: 'hoa', sourceType: 'hoa', sourceId: <hoa id> }`; omitted
  * fields default to 'manual' / null.
@@ -147,7 +147,7 @@ function CreatePropertyForm({
   const sourceType = origin?.sourceType ?? 'manual'
   const [form, setForm] = useState<CreatePropertyPayload>({
     name: defaultName,
-    // Canonical origin (Handoff 15): propertyType drives estimating/Aspire
+    // Canonical origin: propertyType drives estimating/Aspire
     // logic; sourceType/sourceId trace provenance (manual ⇒ no sourceId).
     propertyType: origin?.propertyType ?? (sourceType !== 'manual' ? sourceType : 'manual'),
     sourceType,

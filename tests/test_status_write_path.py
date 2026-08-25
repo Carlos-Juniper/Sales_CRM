@@ -1,4 +1,4 @@
-"""Handoff 25 — Status Write-Path Hardening.
+"""Status Write-Path Hardening.
 
 The generic PATCH /api/estimating/estimates/{id} must route status writes
 through the transition machine (STATUS_TRANSITIONS): illegal edges are rejected
@@ -22,7 +22,7 @@ from api.server import app, require_auth  # noqa: E402
 
 client = TestClient(app)
 
-# Canonical estimator role (Handoff 18) — status PATCHes are open to any
+# Canonical estimator role — status PATCHes are open to any
 # authenticated role (the transition machine enforces edges), but the scalar
 # fields some tests send are estimator-owned, so authenticate as an estimator.
 _USER = {"id": "u1", "name": "Carlos", "email": "c@x.com",

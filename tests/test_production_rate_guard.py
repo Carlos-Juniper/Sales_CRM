@@ -1,4 +1,4 @@
-"""Handoff 22 — Production-rate save guard (backend, server-side enforcement).
+"""Production-rate save guard (backend, server-side enforcement).
 
 Locked decision: production rates are REQUIRED — a maintenance line cannot be
 saved with a null production rate / unresolvable hours. A line resolves when:

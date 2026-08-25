@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// MarginAnalysis (Handoff 07) — manager-facing profitability gut-check for
+// MarginAnalysis — manager-facing profitability gut-check for
 // the OPEN estimate, before approval. Not a pricing rule.
 //
 //   • KPIs + service-group panel derive from the single live estimate model
@@ -197,7 +197,7 @@ const VERDICT_SUB: Record<BenchmarkStatus, (perAcre: string, band: string) => st
 
 export function MarginAnalysis() {
   const { openEstimate } = useEstimatingShell()
-  // The ONE canonical band set — API-fetched (Handoff 16); literal = fallback.
+  // The ONE canonical band set — API-fetched; literal = fallback.
   const { marginBands, catalogItems } = useEstimatingConfig()
 
   if (!openEstimate) {

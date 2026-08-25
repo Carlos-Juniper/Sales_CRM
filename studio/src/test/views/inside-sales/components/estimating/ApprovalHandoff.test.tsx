@@ -1,7 +1,3 @@
-// ---------------------------------------------------------------------------
-// Handoff 08 — Approval & Handoff tab (Acceptance Criteria).
-// ---------------------------------------------------------------------------
-
 import { describe, it, expect, beforeEach } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -24,7 +20,7 @@ function Harness({ estimate, tiers }: { estimate: Estimate | null; tiers?: Appro
   return (
     <EstimatingToastProvider>
       <EstimatingShellContext.Provider
-        value={{ activeTab: 'approval', setActiveTab: () => {}, openEstimate, setOpenEstimate }}
+        value={{ activeTab: 'approval', setActiveTab: () => {}, openEstimate, setOpenEstimate, openEstimateAt: () => {} }}
       >
         <ApprovalHandoff tiers={tiers} />
       </EstimatingShellContext.Provider>
@@ -81,7 +77,7 @@ describe('ApprovalHandoff — tier routing (config-driven)', () => {
   })
 })
 
-describe('ApprovalHandoff — install routes through the same tier ladder (Handoff 19 §4)', () => {
+describe('ApprovalHandoff — install routes through the same tier ladder', () => {
   it('computes the required tier for an install estimate from the install ladder — no "no approval matrix" state', () => {
     // $150K install → Regional Director band ($100K–$250K), same as maintenance.
     render(<Harness estimate={buildInstallEstimate({ contractValueCents: 15_000_000, status: 'pending_approval' })} />)

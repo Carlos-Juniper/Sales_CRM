@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Discrepancy Review tab (Handoff 06) — reconcile plan vs measured vs Aspire
+// Discrepancy Review tab — reconcile plan vs measured vs Aspire
 // opportunity quantities and surface flagged lines to the CRM for the
 // qualifying-notes decision (BRD II-6.4).
 //
@@ -65,7 +65,7 @@ export function DiscrepancyFlag({ initialLines }: DiscrepancyFlagProps) {
   const { openEstimate } = useEstimatingShell()
   const { show } = useToast()
 
-  // Handoff 20 — lines load from GET …/takeoff-lines and edits PATCH back, so
+  // Lines load from GET …/takeoff-lines and edits PATCH back, so
   // state survives a reload. `initialLines` stays a test/deep-link seam that
   // skips the fetch. The live recompute below stays local (threshold slider);
   // the server independently recomputes derived fields it returns.
@@ -96,7 +96,7 @@ export function DiscrepancyFlag({ initialLines }: DiscrepancyFlagProps) {
   const { anyFlagged, flaggedCount } = review
 
   function updateLine(id: string, patch: UpdateTakeoffLinePayload) {
-    // Optimistic local recompute (live), then persist the edit (Handoff 20).
+    // Optimistic local recompute (live), then persist the edit.
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
     if (openEstimate) {
       estimatingApi.updateTakeoffLine(openEstimate.id, id, patch).catch(() => {
@@ -107,7 +107,7 @@ export function DiscrepancyFlag({ initialLines }: DiscrepancyFlagProps) {
 
   function surfaceToCrm() {
     // TODO(crm): wire the real CRM handoff — push review.flaggedLines to the
-    // CRM's qualifying-notes queue (integration target open, Handoff 06 §5).
+    // CRM's qualifying-notes queue (integration target open).
     show(
       anyFlagged
         ? `${flaggedCount} discrepancy line(s) surfaced to CRM`

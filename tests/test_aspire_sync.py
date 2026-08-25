@@ -309,7 +309,7 @@ class TestPushProperty:
         assert "IndustryID" not in payload
 
 
-# ── Handoff 20 §4.2 — one-way takeoff qty push ───────────────────────────────
+# ── One-way takeoff qty push ─────────────────────────────────────────────────
 #
 # push_opportunity_service_item_qty writes our locally-owned opportunity_qty
 # into OpportunityServiceItem.ItemQuantity, joined OpportunityServiceID →

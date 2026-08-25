@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// SLA helpers (Handoff 02 — BRD I-6.2).
+// SLA helpers (BRD I-6.2).
 //
 // Estimating requests a MINIMUM 14-calendar-day return window; the clock
 // starts at estimate creation/intake and `dueBackDate` marks its end. The
@@ -15,7 +15,7 @@ export interface SlaConfig {
   atRiskThresholdDays: number
 }
 
-/** TODO(carlos): confirm the at-risk threshold (Handoff 02 §4 open item). */
+/** TODO(carlos): confirm the at-risk threshold (open item). */
 export const SLA_CONFIG: SlaConfig = {
   returnWindowDays: 14,
   atRiskThresholdDays: 4,

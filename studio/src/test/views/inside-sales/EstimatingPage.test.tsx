@@ -96,11 +96,11 @@ describe('EstimatingPage shell', () => {
   })
 
   // Placeholder tab tests are removed as each feature is implemented:
-  // - Materials Calculator — Handoff 05 (MaterialsCalculator)
-  // - Discrepancy Review — Handoff 06 (DiscrepancyFlag)
-  // - Approval & Handoff — Handoff 08 (ApprovalHandoff)
-  // - Approval Queue — Handoff 09 (ApprovalQueue)
-  // - ITB Tracker — Handoff 13 (ItbTracker)
+  // - Materials Calculator (MaterialsCalculator)
+  // - Discrepancy Review (DiscrepancyFlag)
+  // - Approval & Handoff (ApprovalHandoff)
+  // - Approval Queue (ApprovalQueue)
+  // - ITB Tracker (ItbTracker)
   // All feature tabs are now implemented; no placeholder tabs remain.
 })
 
@@ -109,7 +109,7 @@ describe('EstimatingPage feature tabs (existing components)', () => {
     seedUser()
   })
 
-  // Handoff 07 — Margin Analysis reads the OPEN estimate from the shell.
+  // Margin Analysis reads the OPEN estimate from the shell.
   it('switches to Margin Analysis tab on click (empty state while browsing)', async () => {
     const user = userEvent.setup()
     render(<EstimatingPage />)
@@ -118,7 +118,7 @@ describe('EstimatingPage feature tabs (existing components)', () => {
     expect(await screen.findByTestId('margin-empty')).toBeInTheDocument()
   })
 
-  // Handoff 03 — Line-Item Editor mounted through the shell.
+  // Line-Item Editor mounted through the shell.
   it('Line-Item Editor: shows an empty state when no estimate is open', async () => {
     const user = userEvent.setup()
     render(<EstimatingPage />)
@@ -172,7 +172,7 @@ describe('EstimatingPage feature tabs (existing components)', () => {
   })
 })
 
-// ── Handoff 23 — real CRM lead context (stub removed) ────────────────────────
+// ── Real CRM lead context (stub removed) ────────────────────────
 
 const requestEstimateProperty = {
   id: 'prop-1',
@@ -203,7 +203,7 @@ const requestEstimateLead = {
   property_id: 'prop-1',
 }
 
-describe('EstimatingPage — property engagement lead context (Handoff 23)', () => {
+describe('EstimatingPage — property engagement lead context', () => {
   beforeEach(() => {
     seedUser()
   })

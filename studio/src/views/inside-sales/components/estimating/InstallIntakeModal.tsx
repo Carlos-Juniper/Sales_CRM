@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 12 — Install Proposal Request Modal
+// Install Proposal Request Modal
 //
 // Opened from EstimateQueue's "Install intake" CTA. This is a fully editable,
 // Sales-authored form — unlike the maintenance intake it is NOT pipeline-sourced.
@@ -14,7 +14,7 @@
 // Reference: New Install Proposal Request Form.xlsx.
 //
 // jsdom lacks hasPointerCapture — all dropdowns use styled native <select>
-// (same pattern as Handoff 03/04/11).
+// (same pattern as elsewhere in the estimating intake forms).
 // ---------------------------------------------------------------------------
 
 import { useEffect, useState, useRef, type ChangeEvent } from 'react'
@@ -60,7 +60,7 @@ export interface InstallIntakeModalProps {
   /** Called after successful create so the queue can refresh. */
   onCreated: (estimate: Estimate) => void
   /**
-   * Handoff 15 — "Request estimate" from the property/Accounts UI launches the
+   * "Request estimate" from the property/Accounts UI launches the
    * modal pre-filled with the canonical property. Null ⇒ intake starts blank.
    */
   initialProperty?: Property | null
@@ -69,7 +69,7 @@ export interface InstallIntakeModalProps {
 // ----- Component -------------------------------------------------------------
 
 export function InstallIntakeModal({ open, onClose, onCreated, initialProperty = null }: InstallIntakeModalProps) {
-  const { setOpenEstimate, setActiveTab } = useEstimatingShell()
+  const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
   const { upload: uploadFile } = useAttachmentUpload()
 
@@ -166,10 +166,10 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
   })
 
   const [form, setForm] = useState<FormState>(defaultForm)
-  // Handoff 24 §3.3 — backend Save-draft. The id of the server draft this form
+  // Backend Save-draft. The id of the server draft this form
   // is bound to (created on first save / adopted on resume); null ⇒ none yet.
   const [draftId, setDraftId] = useState<string | null>(null)
-  // Handoff 28 — Aspire-derived install branch options.
+  // Aspire-derived install branch options.
   const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
 
   // Resume the latest saved draft from the BACKEND when the modal opens —
@@ -213,7 +213,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(initialProperty)
   const [serviceLine, setServiceLine] = useState<string>(DEFAULT_SERVICE_LINE.install)
 
-  // Handoff 15: adopt an incoming property ("Request estimate" pre-fill) when
+  // Adopt an incoming property ("Request estimate" pre-fill) when
   // the modal (re)opens with one. Render-phase derived-state pattern — no effect.
   const [wasOpen, setWasOpen] = useState(open)
   if (open !== wasOpen) {
@@ -392,7 +392,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
         assignedLsEstimator: null,
         assignedIrrEstimator: null,
         crmRep: form.requestedBy || null,
-        // Handoff 24 §3.2 — RFI status is tracked first-class on the estimate
+        // RFI status is tracked first-class on the estimate
         // row (surfaced in queue/editor), in addition to the verbatim payload.
         rfiStatus: form.rfiStatus || null,
         // Structured intake goes to its own table (never notes); leave notes for a
@@ -416,8 +416,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       }
       show('Install request sent to Estimating.')
       onCreated(created)
-      setOpenEstimate(created)
-      setActiveTab('editor')
+      openEstimateAt(created, 'editor')
       onClose()
     } catch {
       show('Failed to create estimate — please try again.')
@@ -427,7 +426,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
   }
 
   async function handleSaveDraft() {
-    // Handoff 24 §3.3 — persist serializable form fields to the backend so the
+    // Persist serializable form fields to the backend so the
     // rep can resume on any device. Saves NO estimate and fires NO Aspire push.
     // (Attachments are File objects and can't ride along; they re-attach on
     // resume, same as the old localStorage path.)

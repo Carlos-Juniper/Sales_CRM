@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 05 — Materials Calculator tests (TDD: red → green → refactor)
+// Materials Calculator tests (TDD: red → green → refactor)
 //
 // Acceptance criteria under test:
 //  1. Renders only for estimateType === 'install' (hidden for maintenance).
@@ -46,6 +46,7 @@ function shellFor(estimateOrNull: typeof install | typeof maintenance | null, ta
     setActiveTab: () => {},
     openEstimate: estimateOrNull,
     setOpenEstimate: () => {},
+    openEstimateAt: () => {},
   }
 }
 

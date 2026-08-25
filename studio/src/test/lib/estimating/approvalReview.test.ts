@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 09 — Approval Queue & Review Drawer: pure logic (§3 business rules).
+// Approval Queue & Review Drawer: pure logic (business rules).
 //
 //   effCost   = cost0 × (1 + (comp − comp0))
 //   liveValue = effCost / (1 − margin)
@@ -160,7 +160,7 @@ describe('routeApprovalQueue / queueForRole', () => {
     expect(queueForRole(routed, 'ceo')).toHaveLength(0)
   })
 
-  it('routes INSTALL estimates through the install ladder — same bands as maintenance (Handoff 19 §4)', () => {
+  it('routes INSTALL estimates through the install ladder — same bands as maintenance', () => {
     const inst = buildInstallEstimate({ status: 'pending_approval', contractValueCents: 15_000_000 })
     const routed = routeApprovalQueue([inst], APPROVAL_TIER_SEED)
     expect(routed).toHaveLength(1)

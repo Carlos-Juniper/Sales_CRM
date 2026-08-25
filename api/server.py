@@ -52,7 +52,7 @@ if _extra_origins:
 @asynccontextmanager
 async def lifespan(app):
     # Schema migrations are applied via scripts/migrate.py before each deploy,
-    # not at app boot. See handoffs/35-migration-deploy-wiring-and-live-apply.md.
+    # not at app boot.
     sweep_task = None
     # Durability sweep for best-effort Aspire pushes — only when sync is enabled,
     # so tests and standalone runs never spawn it.
@@ -152,7 +152,7 @@ class CreateLeadBody(BaseModel):
     status: str = "new"
     contact_name: Optional[str] = None
     contact_email: Optional[str] = None
-    # Canonical properties.id (Handoff 15) — optional: manual leads may have none.
+    # Canonical properties.id — optional: manual leads may have none.
     property_id: Optional[str] = None
 
 
@@ -326,7 +326,7 @@ async def require_auth(session: Optional[str] = Cookie(default=None)) -> dict:
     return payload
 
 
-# ── Estimating (Handoff 00 + 08) ───────────────────────────────────────────────
+# ── Estimating ───────────────────────────────────────────────────────────────
 # Routes live in api/estimating.py; registered here so they share require_auth.
 from api import estimating as _estimating  # noqa: E402
 from api import properties as _properties  # noqa: E402
@@ -389,7 +389,7 @@ async def list_leads(
         conditions.append("score >= %s")
         params.append(min_score)
 
-    # Handoff 23 — property engagement: look up the lead(s) hanging off one
+    # Property engagement: look up the lead(s) hanging off one
     # canonical properties.id ("Request estimate" gating + intake lead context).
     if property_id:
         conditions.append("property_id = %s")
@@ -497,7 +497,7 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
 
     new_status = data.get("status")
     if new_status and new_status != current.get("status"):
-        # Handoff 15 reverse-lookup: lead → canonical property → (if the
+        # Reverse-lookup: lead → canonical property → (if the
         # property came from an HOA prospect) hoa_properties via source_id.
         prop_id = current.get("property_id")
         if prop_id and new_status == "won":
@@ -1417,7 +1417,7 @@ async def patch_bid(bid_id: str, body: PatchBidBody, _user: dict = Depends(requi
                     "SELECT property_id FROM leads WHERE id = %s",
                     [lead_id_for_bid],
                 )
-                # Handoff 15 reverse-lookup: lead → canonical property → (if
+                # Reverse-lookup: lead → canonical property → (if
                 # HOA-sourced) hoa_properties via source_id.
                 prop_id = lead_rows[0].get("property_id") if lead_rows else None
                 if prop_id:

@@ -49,10 +49,10 @@ const API = '/api'
 const leads = [...mockLeads]
 const bids = [...mockBids]
 
-// In-memory store for the new estimating model (Handoff 00).
+// In-memory store for the new estimating model.
 const estimates: Estimate[] = structuredClone(mockEstimatesV2)
 
-// In-memory CANONICAL property store (Handoff 15: source of truth; a row is
+// In-memory CANONICAL property store (source of truth; a row is
 // local-only/'unsynced' until an estimate submission triggers the Aspire push).
 interface MockProperty {
   id: string
@@ -75,17 +75,17 @@ interface MockProperty {
 }
 const properties: MockProperty[] = []
 
-// Status-transition audit log (Handoff 08 — actor + timestamp per change).
+// Status-transition audit log (actor + timestamp per change).
 const statusTransitions: StatusTransitionRecord[] = []
 
-// Persisted approver-lever audit (Handoff 19 — estimate_adjustments).
+// Persisted approver-lever audit (estimate_adjustments).
 const estimateAdjustments: EstimateAdjustment[] = []
 let adjustmentSeq = 0
 
 // Structured intake submissions (persisted verbatim; NEVER in estimate.notes).
 const intakeSubmissions: IntakeSubmission[] = []
 
-// Handoff 24 §3.3 — server-side intake drafts ("Save draft"). Per-user and
+// Server-side intake drafts ("Save draft"). Per-user and
 // device-independent; a draft never creates an estimate or fires an Aspire push.
 const intakeDrafts: IntakeDraft[] = []
 
@@ -103,7 +103,7 @@ function attachmentBelongsTo(a: IntakeAttachment, estimateId: string): boolean {
   )
 }
 
-// Handoff 20 — takeoff lines (Discrepancy Review persistence). Lazily seeded
+// Takeoff lines (Discrepancy Review persistence). Lazily seeded
 // per estimate with the sample fixture on first GET so the dev experience
 // matches the old fixture-seeded tab; derived fields are recomputed on the
 // way out (mirrors the backend, which never trusts client-sent derived values).
@@ -126,7 +126,7 @@ function notFound() {
 }
 
 // ---------------------------------------------------------------------------
-// Handoff 21 — ITB tracker store. One project per estimate, AUTO-GENERATED at
+// ITB tracker store. One project per estimate, AUTO-GENERATED at
 // estimate creation (LOCKED decision — either intake form). Scope statuses are
 // initialized to DEFAULT_ITB_STATUS for every config scope.
 // ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ function quarterFor(isoDate: string): string {
   return `Q${Math.floor((month - 1) / 3) + 1}`
 }
 
-/** Mirror the server's auto-generation (Handoff 21 §3): estimate → ITB row. */
+/** Mirror the server's auto-generation: estimate → ITB row. */
 function itbProjectForEstimate(e: Estimate): MockItbProject {
   const id = eid('itb')
   const due = (e.dueBackDate ?? new Date().toISOString()).slice(0, 10)
@@ -216,7 +216,7 @@ const allHandlers = [
       filtered = filtered.filter(l => stateList.includes(l.state))
     }
     if (minScore) filtered = filtered.filter(l => l.score !== null && l.score >= parseInt(minScore))
-    // Handoff 23 — property engagement: leads queryable by canonical property_id
+    // Property engagement: leads queryable by canonical property_id
     const propertyId = url.searchParams.get('property_id')
     if (propertyId) filtered = filtered.filter(l => l.property_id === propertyId)
 
@@ -376,7 +376,7 @@ const allHandlers = [
   }),
 
   // ---------------------------------------------------------------------
-  // Estimating config read APIs (Handoff 16) — read-only; the seeded config
+  // Estimating config read APIs — read-only; the seeded config
   // tables mirrored here. Tests override with server.use() to simulate DB
   // row edits reaching the UI with no code change.
   // ---------------------------------------------------------------------
@@ -409,7 +409,7 @@ const allHandlers = [
     return HttpResponse.json([...ITB_SCOPE_SEED].sort((a, b) => a.order - b.order))
   }),
 
-  // GET /api/estimating/config/branches?kind=install|maintenance (Handoff 28)
+  // GET /api/estimating/config/branches?kind=install|maintenance
   // Returns a representative subset of the Aspire branch map for tests.
   http.get(`${API}/estimating/config/branches`, async ({ request }) => {
     await delay(50)
@@ -430,7 +430,7 @@ const allHandlers = [
   }),
 
   // ---------------------------------------------------------------------
-  // ITB tracker (Handoff 21) — read + scope-status update. Projects are
+  // ITB tracker — read + scope-status update. Projects are
   // auto-generated (no create endpoint); "active" = the linked estimate's
   // status is not won/lost.
   // ---------------------------------------------------------------------
@@ -469,7 +469,7 @@ const allHandlers = [
     },
   ),
 
-  // GET /api/estimating/catalog-items — Handoff 22 kit catalog (seeded from
+  // GET /api/estimating/catalog-items — kit catalog (seeded from
   // the workbook rows; mirrors the backend's branch/kit_type/active filters).
   http.get(`${API}/estimating/catalog-items`, async ({ request }) => {
     await delay(50)
@@ -485,7 +485,7 @@ const allHandlers = [
   }),
 
   // ---------------------------------------------------------------------
-  // Estimating (Handoff 00) — single-source estimate model
+  // Estimating — single-source estimate model
   // ---------------------------------------------------------------------
 
   // GET /api/estimating/estimates
@@ -555,7 +555,7 @@ const allHandlers = [
       updatedAt: now,
     } as Estimate
     estimates.push(created)
-    // Handoff 21 §3 — auto-generate the 1:1 ITB project for EITHER intake type.
+    // Auto-generate the 1:1 ITB project for EITHER intake type.
     itbProjects.push(itbProjectForEstimate(created))
     if (intake?.payload) {
       intakeSubmissions.push({
@@ -588,7 +588,7 @@ const allHandlers = [
   }),
 
   // PATCH /api/estimating/estimates/:id
-  // `estimateType` is IMMUTABLE (Handoff 00 §2): any attempt to change it is
+  // `estimateType` is IMMUTABLE: any attempt to change it is
   // rejected at the data-access layer, mirroring the DB trigger in
   // sql/estimating.sql.
   http.patch(`${API}/estimating/estimates/:id`, async ({ params, request }) => {
@@ -603,7 +603,7 @@ const allHandlers = [
       )
     }
     delete body.estimateType
-    // Handoff 25 — the mock mirrors the server: every status write walks the
+    // The mock mirrors the server: every status write walks the
     // ONE transition module. Illegal edges 409 (same shape as approve-handback);
     // re-sending the current status is an idempotent no-op.
     const currentStatus = estimates[idx].status
@@ -625,7 +625,7 @@ const allHandlers = [
     return HttpResponse.json(estimates[idx])
   }),
 
-  // POST /api/estimating/estimates/:id/approve-handback (Handoff 08)
+  // POST /api/estimating/estimates/:id/approve-handback
   // Walks the status machine via the ONE transition module — side effects and
   // auditability are enforced here, never in the UI.
   http.post(`${API}/estimating/estimates/:id/approve-handback`, async ({ params, request }) => {
@@ -634,7 +634,7 @@ const allHandlers = [
     if (idx === -1) return notFound()
     const body = (await request.json()) as ApproveHandBackPayload
     try {
-      // In production the server derives the actor from the JWT (Handoff 18);
+      // In production the server derives the actor from the JWT;
       // the mock falls back to a session placeholder when the client omits it.
       const { patch, records } = approveAndHandBack(estimates[idx], {
         actor: body.actor ?? 'Session Approver',
@@ -664,7 +664,7 @@ const allHandlers = [
     return HttpResponse.json(statusTransitions.filter((t) => t.estimateId === params.id))
   }),
 
-  // POST /api/estimating/estimates/:id/adjustments (Handoff 19 §5)
+  // POST /api/estimating/estimates/:id/adjustments
   // Persists one audited approver lever change (complexity|margin). In
   // production the server derives the actor from the JWT and enforces the
   // approver-only guard; the mock mirrors the wire shape and falls back to a
@@ -707,7 +707,7 @@ const allHandlers = [
     return HttpResponse.json(intakeSubmissions.filter((s) => s.estimateId === params.id))
   }),
 
-  // ── Intake drafts (Handoff 24 §3.3) ────────────────────────────────────────
+  // ── Intake drafts ────────────────────────────────────────────────────────
   // "Save draft" persists a partial intake server-side (per-user, resumable on
   // any device). Never creates an estimate; never fires an Aspire push.
 
@@ -883,7 +883,7 @@ const allHandlers = [
     },
   ),
 
-  // ── Component CRUD (Handoff 17 §2.2 — kit labor/material breakdown) ────────
+  // ── Component CRUD (kit labor/material breakdown) ──────────────────────────
 
   // POST /api/estimating/estimates/:id/sections/:sectionId/services/:serviceId/components
   http.post(
@@ -941,7 +941,7 @@ const allHandlers = [
     },
   ),
 
-  // POST /api/estimating/estimates/:id/lifecycle (Handoff 17 §2.3)
+  // POST /api/estimating/estimates/:id/lifecycle
   // Persists the Bidding↔Won flip: derives aspireOwner from the lifecycle and
   // records the edge in the ONE status-transition audit trail (`lifecycle:`
   // prefix). This server-side trail is the ONLY audit source (the old
@@ -972,7 +972,7 @@ const allHandlers = [
     return HttpResponse.json({ estimate, transition })
   }),
 
-  // ── Takeoff-line CRUD (Handoff 20 — Discrepancy Review persistence) ───────
+  // ── Takeoff-line CRUD (Discrepancy Review persistence) ────────────────────
   // opportunityQty is a LOCAL, estimator-editable value (never read from
   // Aspire); the Aspire qty push rides estimate Save on the real backend.
 
@@ -1079,7 +1079,7 @@ const allHandlers = [
     return HttpResponse.json([])
   }),
 
-  // POST /api/properties — LOCAL-ONLY create (Handoff 15): upsert on
+  // POST /api/properties — LOCAL-ONLY create: upsert on
   // (sourceType, sourceId); the row stays 'unsynced' — NO auto Aspire push.
   // The only sync trigger is estimate submission.
   http.post(`${API}/properties`, async ({ request }) => {
@@ -1140,7 +1140,7 @@ allHandlers.push(
     }
     const kind = body.kind ?? 'other'
 
-    // Handoff 27: takeoff scans are estimate-scoped (no intake submission
+    // Takeoff scans are estimate-scoped (no intake submission
     // needed) and may be images; intake kinds stay submission-linked + PDF-only.
     const scanTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp']
     if (kind === 'takeoff_scan') {

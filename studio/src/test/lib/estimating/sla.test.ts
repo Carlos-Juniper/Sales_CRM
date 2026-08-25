@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 02 — SLA helpers (BRD I-6.2: 14-calendar-day minimum return window).
+// SLA helpers (BRD I-6.2: 14-calendar-day minimum return window).
 // The "at risk" threshold is CONFIG, never hardcoded in views.
 // ---------------------------------------------------------------------------
 

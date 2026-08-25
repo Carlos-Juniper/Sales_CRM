@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoffs 03/04 — engine selection. The Line-Item Editor is keyed
+// Engine selection. The Line-Item Editor is keyed
 // AUTOMATICALLY off `estimate.estimateType`; there is NO mode toggle anywhere
 // (hard product requirement).
 // ---------------------------------------------------------------------------
@@ -18,7 +18,7 @@ export function renderEditor(openEstimate: Estimate | null) {
   const utils = render(
     <EstimatingToastProvider>
       <EstimatingShellContext.Provider
-        value={{ activeTab: 'editor', setActiveTab: vi.fn(), openEstimate, setOpenEstimate }}
+        value={{ activeTab: 'editor', setActiveTab: vi.fn(), openEstimate, setOpenEstimate, openEstimateAt: vi.fn() }}
       >
         <LineItemEditor />
       </EstimatingShellContext.Provider>

@@ -1,7 +1,7 @@
 import type { EstimatingTabConfig } from './estimatingTabs'
 
 /**
- * Graceful placeholder for Estimating tabs whose feature (Handoffs 02–13)
+ * Graceful placeholder for Estimating tabs whose feature
  * hasn't been built yet, so the shell ships independently.
  */
 export function TabPlaceholder({ tab }: { tab: EstimatingTabConfig }) {

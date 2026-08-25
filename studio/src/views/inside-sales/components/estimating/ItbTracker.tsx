@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// ITB Tracker (Handoff 13) — cross-project Invitation-to-Bid status matrix.
+// ITB Tracker — cross-project Invitation-to-Bid status matrix.
 //
 // Replaces the Excel ITB scheduler. Every active bid across the company, with
 // per-scope completion status across a CONFIG-DRIVEN set of scope columns,
@@ -12,7 +12,7 @@
 //   - Rebid de-duplication for L10 metrics (II-9.2).
 //   - CRM status export: stubs with TODO until the real integration target lands.
 //   - Status legend codes: P·C·S·R·U·X·–·E·I (BRD II-9.12; pending confirmation
-//     with Carlos — see open item in Handoff 13 §4).
+//     with Carlos — see open item below).
 //
 // Open items:
 //   - Final status legend codes (validate vs ITB 2026.xlsx with Carlos).
@@ -230,7 +230,7 @@ export function ItbTracker({ projects, scopes, statuses }: ItbTrackerProps) {
   }, [filteredProjects])
 
   function handleExport() {
-    // TODO(crm): wire the real CRM export integration (integration target TBD, Handoff 13 §4).
+    // TODO(crm): wire the real CRM export integration (integration target TBD).
     // Stub: toast the row count as proof of concept.
     show(`${filteredProjects.length} project(s) exported to CRM`)
   }

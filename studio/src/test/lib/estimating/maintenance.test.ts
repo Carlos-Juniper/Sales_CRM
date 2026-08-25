@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 03 — maintenance engine pure helpers.
+// Maintenance engine pure helpers.
 // Business rules under test: sq-ft basis enforcement (BRD I-6.5), company-
 // default complexity + override detection (I-9.7), section CRUD semantics,
 // the pure aspireOwner-from-lifecycle derivation (BRD §8.1),
@@ -132,8 +132,8 @@ describe('section operations', () => {
 })
 
 describe('aspireOwner derivation (BRD §8.1)', () => {
-  // The lifecycle flip itself persists server-side (estimatingApi.setLifecycle,
-  // Handoff 17); the pure derivation rule stays client-side as the reference.
+  // The lifecycle flip itself persists server-side (estimatingApi.setLifecycle);
+  // the pure derivation rule stays client-side as the reference.
   it('won hands ownership to the CRM', () => {
     expect(aspireOwnerFor('won')).toBe('crm')
   })
@@ -166,7 +166,7 @@ describe('field ownership (estimator vs approver) — logic-level enforcement', 
   })
 })
 
-describe('canonical auth role → estimating role mapping (Handoff 18 §3)', () => {
+describe('canonical auth role → estimating role mapping', () => {
   it('estimators = maintenance/install estimating (+ admin)', () => {
     expect(estimatingRolesForUser('maintenance_estimating')).toContain('estimator')
     expect(estimatingRolesForUser('install_estimating')).toContain('estimator')
@@ -213,7 +213,7 @@ describe('display reads', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Handoff 22 — the editor reads kits from GET /catalog-items; the literal is
+// The editor reads kits from GET /catalog-items; the literal is
 // only the offline fallback. Plus the client half of the save guard.
 // ---------------------------------------------------------------------------
 
@@ -230,7 +230,7 @@ const kit = (over: Partial<CatalogItem> & Pick<CatalogItem, 'id' | 'description'
   ...over,
 })
 
-describe('Handoff 22 — maintenanceCatalogFromItems (API catalog adapter)', () => {
+describe('maintenanceCatalogFromItems (API catalog adapter)', () => {
   const rated = kit({ id: 'kit-1', description: 'Standard Production Mowing', productionRate: 67650 })
 
   it('falls back to the literal when the API returned no usable kits', () => {
@@ -272,7 +272,7 @@ describe('Handoff 22 — maintenanceCatalogFromItems (API catalog adapter)', () 
   })
 })
 
-describe('Handoff 22 — unresolvedProductionRateLabels (client save guard)', () => {
+describe('unresolvedProductionRateLabels (client save guard)', () => {
   const rated = kit({ id: 'kit-1', description: 'Mow', productionRate: 67650 })
   const unrated = kit({ id: 'kit-2', description: 'Prune Easy' })
 

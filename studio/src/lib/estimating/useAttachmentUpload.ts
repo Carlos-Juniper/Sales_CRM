@@ -14,7 +14,7 @@ import type { AttachmentKind, IntakeAttachment } from '@/types/estimating'
 const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024 // 2 GiB — mirrors GCS_MAX_UPLOAD_BYTES
 
 // Per-kind content-type allowlist (mirrors the backend presign validation).
-// Intake docs stay PDF-only; the takeoff scan (Handoff 27) is a scanned map
+// Intake docs stay PDF-only; the takeoff scan is a scanned map
 // image, so it also accepts common image types.
 const SCAN_CONTENT_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp']
 

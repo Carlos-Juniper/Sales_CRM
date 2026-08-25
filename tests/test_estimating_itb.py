@@ -1,4 +1,4 @@
-"""Handoff 21 — ITB Tracker Backend & Auto-Generation.
+"""ITB Tracker Backend & Auto-Generation.
 
 DB fully mocked — patch api.estimating.query/execute and api.authz.query.
 
@@ -8,19 +8,19 @@ Contract under test:
   form (maintenance or install) auto-creates exactly ONE linked itb_projects
   row (itb_projects.estimate_id FK, 1:1) plus one itb_scope_status row per
   itb_scopes row, each initialized to the default status code 'P' (Pending —
-  pending final legend confirmation with Carlos, Handoff 00 §3.10).
+  pending final legend confirmation with Carlos).
 
   GET   /api/estimating/itb/projects
         → all ACTIVE estimates' projects. "Active" = estimates.status NOT IN
-          ('won','lost') (Handoff 21 §4 default; include handed_back/approved).
-          Branch-scoped per Handoff 18 (scope from the JWT, never the client).
+          ('won','lost') (default; include handed_back/approved).
+          Branch-scoped (scope from the JWT, never the client).
           Each project embeds its scope statuses.
 
   PATCH /api/estimating/itb/projects/{id}/scopes/{scope_id}
         → update one scope's status code; body {"statusCode": "X"}; upserts so
           scopes added AFTER a project was created still accept status.
 
-  Scopes themselves come from Handoff 16's GET /config/itb-scopes — NOT
+  Scopes themselves come from GET /config/itb-scopes — NOT
   re-exposed here.
 """
 from __future__ import annotations
@@ -183,7 +183,7 @@ class TestAutoGeneration:
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
         """Adding a row to itb_scopes yields one more status row at creation
-        with NO code edit (Handoff 13 / BRD §2.1)."""
+        with NO code edit (BRD §2.1)."""
         # [] → estimate_sections (no lines → fallback total,0); extended list → itb_scopes
         mock_query.side_effect = [[], _scope_id_rows() + [{"id": "scope-brand-new"}]]
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}

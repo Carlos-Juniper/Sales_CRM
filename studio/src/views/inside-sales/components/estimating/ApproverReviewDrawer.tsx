@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Approver Review Drawer (Handoff 09, "Option B") — right slide-out, ~560px.
+// Approver Review Drawer ("Option B") — right slide-out, ~560px.
 //
 // The approver reviews the estimate READ-ONLY (line items / takeoff / scope
 // are estimator-owned) and applies exactly two audited levers:
@@ -11,7 +11,7 @@
 // Approve is no longer available — the primary action becomes a plain
 // "Save adjustment" (persist without approving); the value-driven tier
 // recompute re-routes the estimate to the higher tier's queue automatically.
-// There is NO explicit "Escalate" action (Handoff 19 §4).
+// There is NO explicit "Escalate" action.
 // ---------------------------------------------------------------------------
 
 import { useMemo, useState } from 'react'

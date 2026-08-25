@@ -50,8 +50,21 @@ export const router = createBrowserRouter([
         path: 'inside-sales/map',
         element: <InsideSalesGuard><MapPage /></InsideSalesGuard>,
       },
+      // The open estimate + active tab are real URL segments (not local
+      // state) so a deep link / refresh / back-navigation never loses them —
+      // see EstimatingPage.tsx + useEstimatingShell.ts. Three concrete routes
+      // (rather than react-router's `:param?` optional-segment syntax) keep
+      // matching unambiguous while all three share one element.
       {
         path: 'inside-sales/estimating',
+        element: <InsideSalesGuard><EstimatingPage /></InsideSalesGuard>,
+      },
+      {
+        path: 'inside-sales/estimating/:estimateId',
+        element: <InsideSalesGuard><EstimatingPage /></InsideSalesGuard>,
+      },
+      {
+        path: 'inside-sales/estimating/:estimateId/:tab',
         element: <InsideSalesGuard><EstimatingPage /></InsideSalesGuard>,
       },
       {

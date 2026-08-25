@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Margin Analysis logic (Handoff 07) — a manager gut-check BEFORE approval,
+// Margin Analysis logic — a manager gut-check BEFORE approval,
 // not a pricing rule.
 //
 //   • Re-aggregates the open estimate BY SERVICE across all sections
@@ -29,8 +29,7 @@ import {
 /**
  * Loaded crew-hour rate (labor + equipment burden) used to cost maintenance
  * hours, integer cents/hr. PROVISIONAL demo config — TODO(carlos): replace
- * with real branch crew rates (kit production-rate migration, Handoff 00
- * §3.6) before ship.
+ * with real branch crew rates (kit production-rate migration) before ship.
  */
 export const MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR = 18_000
 
@@ -116,7 +115,7 @@ export function medianCents(values: number[]): number {
 // ----- Line cost bases ---------------------------------------------------------
 
 /**
- * Handoff 22 — per-occurrence hours for a maintenance line. The line's own
+ * Per-occurrence hours for a maintenance line. The line's own
  * hours win; a null-hours line derives them from its kit's production rate
  * (units per labor hour → section sqft ÷ rate). Null when neither resolves —
  * a state the save guard (frontend + backend 422) prevents from persisting.
@@ -143,8 +142,8 @@ export function maintenanceLineHours(
 }
 
 /**
- * Maintenance line cost, integer cents — ALWAYS hours × loaded crew rate
- * (Handoff 22). Hours resolve from the line or its kit's production rate; the
+ * Maintenance line cost, integer cents — ALWAYS hours × loaded crew rate.
+ * Hours resolve from the line or its kit's production rate; the
  * old `price × (1 − targetMargin)` fallback is GONE — it was circular (it
  * assumed the line was priced exactly at target, so over/under-pricing could
  * never flag). An unresolvable line (blocked from saving by the guard) costs
@@ -215,7 +214,7 @@ export interface ServiceGroupMargin {
 }
 
 /**
- * THE Handoff 07 pivot: re-aggregate the section-organized estimate BY
+ * Re-aggregate the section-organized estimate BY
  * SERVICE across all sections, on a cost basis. Reads the same live model the
  * editors mutate — editing a line flows straight into these numbers.
  */

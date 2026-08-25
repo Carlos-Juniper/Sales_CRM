@@ -117,7 +117,7 @@ describe('HOADetailPanel — property details', () => {
   })
 })
 
-describe('HOADetailPanel — property engagement actions (Handoff 15)', () => {
+describe('HOADetailPanel — property engagement actions', () => {
   it('renders "Create lead" and "Request estimate" actions in the footer', () => {
     renderPanel()
     expect(screen.getByRole('button', { name: /create lead/i })).toBeInTheDocument()

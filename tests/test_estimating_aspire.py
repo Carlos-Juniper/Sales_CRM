@@ -134,7 +134,7 @@ class TestCreateSchedulesSync:
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_create_persists_property_link_and_schedules(self, mock_query, mock_exec, mock_load, mock_bg, mock_prop_sync, authed):
-        mock_query.return_value = []  # itb_scopes read (Handoff 21 auto-gen)
+        mock_query.return_value = []  # itb_scopes read (auto-gen)
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
@@ -147,7 +147,7 @@ class TestCreateSchedulesSync:
         assert "prop-1" in insert_params
 
 
-# ── HTTP: create is THE property-sync trigger (Handoff 15) ───────────────────
+# ── HTTP: create is THE property-sync trigger ────────────────────────────────
 
 class TestCreateTriggersPropertySync:
     """A property pushes to Aspire ONLY on estimate submission: unsynced/failed
@@ -165,7 +165,7 @@ class TestCreateTriggersPropertySync:
         self, mock_query, mock_exec, mock_load, mock_opp_bg, mock_pquery, mock_pexec, mock_sync, mock_persist, authed
     ):
         from api.aspire_sync import PropertySyncResult
-        mock_query.return_value = []  # itb_scopes read (Handoff 21 auto-gen)
+        mock_query.return_value = []  # itb_scopes read (auto-gen)
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         mock_pquery.side_effect = [
             [{"aspire_sync_status": "unsynced"}],   # guard read
@@ -200,7 +200,7 @@ class TestCreateTriggersPropertySync:
     def test_submission_skips_already_synced_property(
         self, mock_query, mock_exec, mock_load, mock_opp_bg, mock_pquery, mock_push, authed
     ):
-        mock_query.return_value = []  # itb_scopes read (Handoff 21 auto-gen)
+        mock_query.return_value = []  # itb_scopes read (auto-gen)
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         mock_pquery.return_value = [{"aspire_sync_status": "synced"}]
 
@@ -218,7 +218,7 @@ class TestCreateTriggersPropertySync:
     def test_submission_without_property_does_not_touch_property_sync(
         self, mock_query, mock_exec, mock_load, mock_opp_bg, mock_needed, authed
     ):
-        mock_query.return_value = []  # itb_scopes read (Handoff 21 auto-gen)
+        mock_query.return_value = []  # itb_scopes read (auto-gen)
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
@@ -251,7 +251,7 @@ class TestWonLostWriteBack:
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_illegal_jump_to_won_does_not_write_back(self, mock_query, mock_exec, mock_load, mock_bg, authed):
-        # in_progress → won is NOT a legal terminal transition; since Handoff 25
+        # in_progress → won is NOT a legal terminal transition, so
         # the PATCH itself is rejected (409) and no Aspire write-back fires.
         mock_query.return_value = [{"estimate_type": "maintenance", "status": "in_progress",
                                     "aspire_opportunity_id": 7}]

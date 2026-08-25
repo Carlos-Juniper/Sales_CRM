@@ -1,4 +1,4 @@
-"""Deploy-config guard for the GCS intake-attachment feature (Handoff 26).
+"""Deploy-config guard for the GCS intake-attachment feature.
 
 api/attachments.py reads five env vars at import time. This test pins the
 ops contract: every var must be documented in .env.example and set on the

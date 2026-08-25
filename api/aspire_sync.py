@@ -73,7 +73,7 @@ class PropertySyncResult:
     error: Optional[str] = None
 
 
-# ── Takeoff qty push (Handoff 20 §4.2) ───────────────────────────────────────
+# ── Takeoff qty push ──────────────────────────────────────────────────────────
 
 @dataclass
 class TakeoffQtyLine:
@@ -280,7 +280,7 @@ async def push_opportunity_service_item_qty(
     lines: list[TakeoffQtyLine],
     client: Optional[AspireClient] = None,
 ) -> QtyPushResult:
-    """One-way, best-effort push of takeoff qtys (Handoff 20 §4.2).
+    """One-way, best-effort push of takeoff qtys.
 
     NOT IMPLEMENTED (2026-08-24, confirmed via swagger v1 + sandbox smoke test):
     Aspire API v1 has no PUT or PATCH endpoint for OpportunityServiceItems.

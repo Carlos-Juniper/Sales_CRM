@@ -1,5 +1,5 @@
 """
-Pipeline functions for promoting prospects into sales Leads (Handoff 15).
+Pipeline functions for promoting prospects into sales Leads.
 
 Canonical-properties model: every vertical prospecting table (hoa_properties
 today; hospitals/cemeteries/parks later) feeds into the canonical `properties`
@@ -173,7 +173,7 @@ async def promote_hoa_to_lead(hoa_property_id: str) -> Lead:
     Resolves (find-or-create) the canonical `properties` row first, then
     creates the lead keyed by `property_id`. If an active (non-won, non-lost)
     lead already exists for the property, it is returned instead of a
-    duplicate. No Aspire push happens here (Handoff 15 §5.1).
+    duplicate. No Aspire push happens here (§5.1).
     """
     rows = await query(
         "SELECT * FROM hoa_properties WHERE id = %s",
@@ -221,7 +221,7 @@ def _lead_type_for_property(property_type: Optional[str]) -> str:
 
 async def promote_property_to_lead(property_id: str) -> Lead:
     """Create a sales Lead from a canonical `properties` row (generalized
-    promote — Handoff 15 §5.5). Dedups on an existing active lead. Local-only;
+    promote — §5.5). Dedups on an existing active lead. Local-only;
     no Aspire push."""
     rows = await query("SELECT * FROM properties WHERE id = %s", [property_id])
     if not rows:
@@ -254,7 +254,7 @@ async def set_property_contacted(hoa_property_id: str) -> None:
     """Mark an HOA property as contacted.
 
     Called when a bid moves to pursuing — the first real contact event.
-    Callers resolve the HOA id via properties.source_id (Handoff 15 §5.3).
+    Callers resolve the HOA id via properties.source_id (§5.3).
     Idempotent: safe to call if already contacted.
     """
     await execute(

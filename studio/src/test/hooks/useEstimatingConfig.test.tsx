@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 16 — Config-Table Read APIs (frontend fetch layer).
+// Config-Table Read APIs (frontend fetch layer).
 //
 // The five config sets come from the API; the config.ts literals are used
 // ONLY as an offline fallback (fetch failed / in flight). The DB (mocked via
@@ -12,12 +12,9 @@ import { http, HttpResponse } from 'msw'
 import { renderHook, waitFor, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { server } from '@/mocks/server'
-import { render, makeUser } from '@/test/utils'
+import { render, createWrapper, makeUser } from '@/test/utils'
 import { useAuthStore } from '@/store/authStore'
-import {
-  useEstimatingConfig,
-  resetEstimatingConfigCache,
-} from '@/hooks/useEstimatingConfig'
+import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import {
   APPROVAL_TIER_SEED,
   DEFAULT_MARGIN_BANDS,
@@ -31,13 +28,13 @@ import { EstimatingToastProvider } from '@/views/inside-sales/components/estimat
 import { EstimatingShellContext } from '@/views/inside-sales/components/estimating/useEstimatingShell'
 
 beforeEach(() => {
-  resetEstimatingConfigCache()
   useAuthStore.setState({ user: makeUser({ name: 'Rita Delgado', role: 'inside_sales' }) })
 })
 
 describe('useEstimatingConfig — fetch with literal fallback', () => {
   it('starts from the typed fallback literals while the fetch is in flight', () => {
-    const { result } = renderHook(() => useEstimatingConfig())
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useEstimatingConfig(), { wrapper })
     expect(result.current.loaded).toBe(false)
     expect(result.current.approvalTiers).toEqual(APPROVAL_TIER_SEED)
     expect(result.current.marginBands).toEqual(DEFAULT_MARGIN_BANDS)
@@ -47,7 +44,8 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
   })
 
   it('loads all five config sets from the API', async () => {
-    const { result } = renderHook(() => useEstimatingConfig())
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useEstimatingConfig(), { wrapper })
     await waitFor(() => expect(result.current.loaded).toBe(true))
     expect(result.current.approvalTiers.length).toBeGreaterThan(0)
     expect(result.current.itbScopes.length).toBeGreaterThan(0)
@@ -55,7 +53,7 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
     expect(result.current.marginBands.goodMin).toBeGreaterThan(result.current.marginBands.okMin)
   })
 
-  it('a NEW approval_tiers row in the DB reaches the hook with no code edit (Handoff 00 §6)', async () => {
+  it('a NEW approval_tiers row in the DB reaches the hook with no code edit', async () => {
     const installTier: ApprovalTier = {
       id: 'tier-inst-custom',
       roleKey: 'manager',
@@ -70,7 +68,8 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
         HttpResponse.json([...APPROVAL_TIER_SEED, installTier]),
       ),
     )
-    const { result } = renderHook(() => useEstimatingConfig())
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useEstimatingConfig(), { wrapper })
     await waitFor(() => expect(result.current.loaded).toBe(true))
     expect(result.current.approvalTiers).toContainEqual(installTier)
   })
@@ -81,7 +80,8 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
         HttpResponse.json([{ id: 'mb-default', name: 'default', goodMin: 0.34, okMin: 0.28 }]),
       ),
     )
-    const { result } = renderHook(() => useEstimatingConfig())
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useEstimatingConfig(), { wrapper })
     await waitFor(() => expect(result.current.loaded).toBe(true))
     expect(result.current.marginBands).toEqual({ goodMin: 0.34, okMin: 0.28 })
   })
@@ -95,7 +95,8 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
       http.get('/api/estimating/config/itb-scopes', fail),
       http.get('/api/estimating/catalog-items', fail),
     )
-    const { result } = renderHook(() => useEstimatingConfig())
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useEstimatingConfig(), { wrapper })
     // Give the (failing) fetch a tick to settle, then confirm fallback holds.
     await waitFor(() => expect(result.current.approvalTiers).toEqual(APPROVAL_TIER_SEED))
     expect(result.current.marginBands).toEqual(DEFAULT_MARGIN_BANDS)
@@ -104,7 +105,7 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
     expect(result.current.catalogItems).toEqual([])
   })
 
-  it('caches per session — a second hook mount does not refetch', async () => {
+  it('caches per query client — a second hook mount does not refetch', async () => {
     let hits = 0
     server.use(
       http.get('/api/estimating/config/approval-tiers', () => {
@@ -112,10 +113,14 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
         return HttpResponse.json(APPROVAL_TIER_SEED)
       }),
     )
-    const first = renderHook(() => useEstimatingConfig())
+    // Same wrapper (same QueryClient) for both mounts — this is what makes
+    // the cache hit; a fresh QueryClient per mount would refetch, which is
+    // the correct behavior for a real navigation-triggered remount too.
+    const { wrapper } = createWrapper()
+    const first = renderHook(() => useEstimatingConfig(), { wrapper })
     await waitFor(() => expect(first.result.current.loaded).toBe(true))
     first.unmount()
-    const second = renderHook(() => useEstimatingConfig())
+    const second = renderHook(() => useEstimatingConfig(), { wrapper })
     expect(second.result.current.loaded).toBe(true)
     expect(hits).toBe(1)
   })
@@ -130,7 +135,7 @@ function Harness({ estimate }: { estimate: Estimate | null }) {
   return (
     <EstimatingToastProvider>
       <EstimatingShellContext.Provider
-        value={{ activeTab: 'approval', setActiveTab: () => {}, openEstimate, setOpenEstimate }}
+        value={{ activeTab: 'approval', setActiveTab: () => {}, openEstimate, setOpenEstimate, openEstimateAt: () => {} }}
       >
         {/* No tiers prop: the component must fetch the ladder itself. */}
         <ApprovalHandoff />

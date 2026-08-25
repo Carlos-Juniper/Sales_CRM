@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// MaintenanceEditor (Handoff 03) — the hours-driven, section-based engine of
+// MaintenanceEditor — the hours-driven, section-based engine of
 // the Line-Item Editor. Rendered automatically when the open estimate's
 // `estimateType === 'maintenance'` (see LineItemEditor.tsx); never toggled.
 //
@@ -54,10 +54,10 @@ export interface MaintenanceEditorProps {
 export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   const { setOpenEstimate } = useEstimatingShell()
   const toast = useToast()
-  // Actor identity for the lifecycle audit comes from the JWT server-side
-  // (Handoff 18) — the client no longer sends or records it.
-  // approval_tiers + catalog_items from the API-fetched config (Handoffs 16 +
-  // 22); the config.ts / maintenance.ts literals are only the offline fallback.
+  // Actor identity for the lifecycle audit comes from the JWT server-side —
+  // the client no longer sends or records it.
+  // approval_tiers + catalog_items come from the API-fetched config;
+  // the config.ts / maintenance.ts literals are only the offline fallback.
   const { approvalTiers, catalogItems } = useEstimatingConfig()
 
   const [draft, setDraft] = useState<MaintenanceEstimate>(estimate)
@@ -75,7 +75,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     () => tiersForType(approvalTiers, 'maintenance'),
     [approvalTiers],
   )
-  // Handoff 22 — kits come from GET /catalog-items; literal = offline fallback.
+  // Kits come from GET /catalog-items; literal = offline fallback.
   const maintCatalog = useMemo(() => maintenanceCatalogFromItems(catalogItems), [catalogItems])
   const tier = tierForValue(contractCents, maintenanceTiers)
   const removeTarget = draft.sections.find((s) => s.id === confirmRemoveId) ?? null
@@ -101,7 +101,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   async function handleLifecycle(to: EstimateLifecycle) {
     if (draft.lifecycle === to) return // no-op — never spam the audit trail
     try {
-      // Persisted server-side (Handoff 17 §2.3): the server flips lifecycle,
+      // Persisted server-side: the server flips lifecycle,
       // derives aspireOwner, and records the edge in estimate_status_transitions.
       const res = await estimatingApi.setLifecycle(draft.id, to)
       const flip = {
@@ -128,7 +128,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   }
 
   async function handleSave() {
-    // Handoff 22 save guard (client half — the server enforces it with a 422):
+    // Save guard (client half — the server enforces it with a 422):
     // every maintenance line must resolve a production rate (kit) or hours.
     const unresolved = unresolvedProductionRateLabels(draft.sections, catalogItems)
     if (unresolved.length > 0) {
@@ -142,11 +142,11 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     setSaveError(null)
     const toSave: MaintenanceEstimate = { ...draft, contractValueCents: contractTotal(draft) }
     try {
-      // Handoff 17: persist the FULL tree (diff-and-apply against the last
+      // Persist the FULL tree (diff-and-apply against the last
       // server-loaded state), then the scalar fields, then reload from the
       // server so the editor reflects persisted state — never local state.
       await persistEstimateTree(toSave.id, savedRef.current.sections, toSave.sections)
-      // Handoff 18 ownership split: targetMargin/contractValueCents are
+      // Ownership split: targetMargin/contractValueCents are
       // approver-owned levers server-side (an estimator PATCH touching them
       // 403s). Only send them when this Save actually changed them so the
       // routine estimator Save never trips the approver guard.

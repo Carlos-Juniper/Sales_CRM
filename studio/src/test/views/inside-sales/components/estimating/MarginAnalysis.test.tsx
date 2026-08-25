@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 07 — Margin Analysis tab (MarginAnalysis component).
+// Margin Analysis tab (MarginAnalysis component).
 //
 // Acceptance criteria under test:
 //  - KPIs compute from the live estimate model (same source as the editor);
@@ -43,6 +43,7 @@ function Wrap({ estimate, children }: { estimate: Estimate | null; children: Rea
     setActiveTab: () => {},
     openEstimate: estimate,
     setOpenEstimate: () => {},
+    openEstimateAt: () => {},
   }
   return (
     <EstimatingToastProvider>

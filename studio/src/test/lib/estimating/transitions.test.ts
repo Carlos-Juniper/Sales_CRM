@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 08 — status-transition module (pure lib).
+// Status-transition module (pure lib).
 //
 // Lifecycle side-effects (e.g. WON → aspireOwner flips to 'crm') are enforced
 // HERE, in the transition handler, never in the UI. Every transition carries

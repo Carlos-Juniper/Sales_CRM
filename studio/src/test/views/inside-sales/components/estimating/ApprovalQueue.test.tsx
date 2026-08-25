@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 09 — Approval Queue & Review Drawer (Acceptance Criteria).
+// Approval Queue & Review Drawer (Acceptance Criteria).
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'

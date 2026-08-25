@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 21 — ITB Tracker data (frontend fetch layer).
+// ITB Tracker data (frontend fetch layer).
 //
 // GET /api/estimating/itb/projects returns one AUTO-GENERATED project per
 // active estimate (status not won/lost, branch-scoped server-side), each

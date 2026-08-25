@@ -1,11 +1,11 @@
-"""Handoff 18 / 28 — Roles, Permissions & Branch Scoping (server-side RBAC).
+"""Roles, Permissions & Branch Scoping (server-side RBAC).
 
 Acceptance criteria under test:
   * The 9 canonical roles exist in backend validation; legacy
     inside_sales/outside_sales map to sales.
   * An estimator-role session cannot POST adjustments (require_approver guard)
     or call approve-handback; a manager cannot approve a >$100k estimate (403).
-  * Handoff 28: manager/RD/VP/CEO/admin CAN mutate sections/services/components
+  * manager/RD/VP/CEO/admin CAN mutate sections/services/components
     (previously 403). sales and procurement remain blocked.
   * list_estimates derives branch scope from the JWT, ignoring any client
     `branch` query param for non-cross-branch roles; exec/admin see all.
@@ -88,7 +88,7 @@ class TestRoleModel:
         assert exc.value.status_code == 403
 
     def test_require_estimator_allows_approver_roles(self):
-        # Handoff 28: manager-tier roles now pass require_estimator.
+        # manager-tier roles now pass require_estimator.
         for role in ("manager", "regional_director", "vice_president", "ceo"):
             authz.require_estimator(_user(role))  # must not raise
 
@@ -111,10 +111,10 @@ class TestRoleModel:
         assert authz.approval_ceiling_cents("admin") is None
 
 
-# ── Line-item edit mutations (Handoff 28 widened role set) ───────────────────
+# ── Line-item edit mutations (widened role set) ──────────────────────────────
 
 class TestLineItemEditMutations:
-    """Handoff 28: manager-tier roles may now mutate sections/services/takeoff.
+    """manager-tier roles may now mutate sections/services/takeoff.
 
     sales and procurement are still blocked.  Approval-tier ceilings and the
     approve-handback guard are independently tested in TestApproverOwnedActions.
@@ -149,7 +149,7 @@ class TestLineItemEditMutations:
         mock_query.side_effect = [
             [{"id": "est-1", "estimate_type": "install"}],
             [{"c": 0}],
-            [],  # itb_projects lookup (Handoff 29 recompute) -- no linked project, no-op
+            [],  # itb_projects lookup (recompute) -- no linked project, no-op
             [section_row],
             [],
         ]
@@ -165,7 +165,7 @@ class TestLineItemEditMutations:
         mock_query.side_effect = [
             [{"id": "sec-1"}],
             [{"estimate_type": "install"}],
-            [],  # itb_projects lookup (Handoff 29 recompute) -- no linked project, no-op
+            [],  # itb_projects lookup (recompute) -- no linked project, no-op
         ]
         resp = client.delete("/api/estimating/estimates/est-1/sections/sec-1")
         assert resp.status_code == 204
@@ -181,7 +181,7 @@ class TestLineItemEditMutations:
         mock_query.side_effect = [
             [{"id": "est-1", "estimate_type": "maintenance"}],
             [{"c": 0}],
-            [],  # itb_projects lookup (Handoff 29 recompute) -- no linked project, no-op
+            [],  # itb_projects lookup (recompute) -- no linked project, no-op
             [section_row],
             [],
         ]
@@ -284,10 +284,10 @@ def _patch_row(status="in_progress"):
 @patch("api.estimating.execute", new_callable=AsyncMock)
 @patch("api.estimating.query", new_callable=AsyncMock)
 class TestEstimatePatchOwnershipSplit:
-    """The generic estimate PATCH enforces the refined Handoff 18/19 ownership
-    split: targetMargin is approver-only (the Handoff 19 lever);
+    """The generic estimate PATCH enforces the refined ownership
+    split: targetMargin is approver-only (the approval-tier lever);
     contractValueCents is estimator-or-approver (derived from estimator-owned
-    line items); status is any authenticated role (the Handoff 25 transition
+    line items); status is any authenticated role (the transition
     machine is the enforcement); all other scalar fields are estimator-owned
     (same convention as sections). Mixed bodies require every touched group's
     check (strictest-per-group)."""
@@ -414,7 +414,7 @@ class TestEstimatePatchOwnershipSplit:
     def test_approver_can_patch_plain_estimator_fields(
         self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
     ):
-        # Handoff 28: manager-tier roles now pass require_estimator for all
+        # manager-tier roles now pass require_estimator for all
         # estimator-owned fields, including top-level estimate scalars like name.
         as_role("regional_director")
         self._ok_mocks(mock_query, mock_load)
@@ -518,7 +518,7 @@ class TestBranchScoping:
         mock_est_query.assert_not_awaited()
 
 
-# ── Config branches endpoint (Handoff 28) ────────────────────────────────────
+# ── Config branches endpoint ──────────────────────────────────────────────────
 
 class TestConfigBranches:
     def test_install_branches_excludes_fallback_cities(self, as_role):

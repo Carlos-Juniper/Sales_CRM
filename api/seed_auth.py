@@ -36,7 +36,7 @@ from typing import Optional
 from db import execute, query
 from api.authz import CANONICAL_ROLES, normalize_role
 
-# The nine canonical business roles (Handoff 18 — single role vocabulary).
+# The nine canonical business roles (single role vocabulary).
 # Legacy inputs inside_sales/outside_sales are accepted and stored as `sales`.
 VALID_ROLES = CANONICAL_ROLES
 

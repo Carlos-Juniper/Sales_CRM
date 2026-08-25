@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Estimating config seeds (Handoff 00 §3.7 / §3.9 / §3.10 / §3.13).
+// Estimating config seeds (§3.7 / §3.9 / §3.10 / §3.13).
 //
 // Approval tiers, ITB scopes, material formulas, margin bands, and the
 // discrepancy threshold are DATA ROWS, not literals scattered in code.
@@ -24,8 +24,8 @@ import type {
 /**
  * The one canonical band set every view reads — resolves the prototype's
  * three conflicting definitions (18/10, 20/12, 34/28).
- * TODO(carlos): confirm final thresholds before ship. Seeded per Handoff 00
- * defaults: good ≥ 20%, ok ≥ 12%.
+ * TODO(carlos): confirm final thresholds before ship. Seeded defaults:
+ * good ≥ 20%, ok ≥ 12%.
  */
 export const DEFAULT_MARGIN_BANDS: MarginBands = {
   goodMin: 0.2,
@@ -49,9 +49,9 @@ export const DISCREPANCY_THRESHOLD = {
 /**
  * Ladder per BRD I-7: Manager <$100K · RD $100K–$250K · VP $250K–$1M ·
  * CEO >$1M. Values in integer cents; min inclusive, max exclusive, null max
- * unbounded. Role keys equal the canonical auth roles (Handoffs 18/19).
+ * unbounded. Role keys equal the canonical auth roles.
  *
- * Install uses the SAME ladder as maintenance (Handoff 19 §4) — its own rows
+ * Install uses the SAME ladder as maintenance — its own rows
  * with mirrored $ bands, so either can diverge later as a data change.
  */
 export const APPROVAL_TIER_SEED: ApprovalTier[] = [
@@ -104,8 +104,8 @@ function table(factors: MaterialCalcRow['factors'], key: string): Record<string,
  * is a data change (a new row); the engine never needs editing for that.
  *
  * All formulas apply the estimator's `addPct` waste factor (default 0) before
- * computing order quantity. This matches the handoff §2 specification where
- * every formula is `ceil(measurement × (1+add%) / conversion)`.
+ * computing order quantity, where every formula is
+ * `ceil(measurement × (1+add%) / conversion)`.
  */
 const FORMULA_ENGINE: Record<
   MaterialComputeType,
@@ -155,7 +155,7 @@ export function buildMaterialCalc(row: MaterialCalcRow): MaterialCalc {
 }
 
 /**
- * Seed rows for every material key in Handoff 00 §3.7. Factors are the
+ * Seed rows for every material key (§3.7). Factors are the
  * configurable knobs; freight tables / 44,000 SF+ volume-quote thresholds are
  * future config via `volumeQuoteThresholdSf`.
  */

@@ -53,7 +53,7 @@ def _gcs() -> storage.Client:
 
 
 # Extension derived from the VALIDATED content type — never from the user
-# filename. Handoff 27 adds image types for the takeoff_scan kind; intake
+# filename. Image types are added for the takeoff_scan kind; intake
 # kinds remain PDF-only at the endpoint layer.
 _EXT_BY_CONTENT_TYPE = {
     "application/pdf": "pdf",

@@ -57,7 +57,7 @@ class TestCreateWritesBackEstimating:
     def test_create_with_lead_id_writes_back_estimating(
         self, mock_query, mock_exec, mock_load, mock_bg, as_estimator
     ):
-        mock_query.return_value = []  # itb_scopes read (Handoff 21 auto-gen)
+        mock_query.return_value = []  # itb_scopes read (auto-gen)
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",

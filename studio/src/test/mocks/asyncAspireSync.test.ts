@@ -22,7 +22,7 @@ describe('async Aspire sync simulation (MSW)', () => {
     })
   })
 
-  it('property create is local-only: returns unsynced and never auto-pushes (Handoff 15)', async () => {
+  it('property create is local-only: returns unsynced and never auto-pushes', async () => {
     const created = await propertiesApi.create({ name: 'Async Prop', branchCity: 'Orlando, FL' })
     expect(created.aspireSyncStatus).toBe('unsynced')
     expect(created.aspirePropertyId).toBeNull()

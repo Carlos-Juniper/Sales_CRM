@@ -62,7 +62,7 @@ export interface IntakeSubmissionInput {
 
 /**
  * `estimateType` is intentionally absent — it is immutable after creation
- * (Handoff 00 §2) and the data-access layer exposes no update path for it.
+ * and the data-access layer exposes no update path for it.
  */
 export type UpdateEstimatePayload = Partial<{
   name: string
@@ -85,9 +85,9 @@ export type UpdateEstimatePayload = Partial<{
   assignedLsEstimator: string | null
   assignedIrrEstimator: string | null
   crmRep: string | null
-  /** Handoff 24 §3.2 — tracked RFI status (capture/display only; never gates approval). */
+  /** Tracked RFI status (capture/display only; never gates approval). */
   rfiStatus: string | null
-  /** Handoff 27 — manual takeoff metadata (Beam AI is the future source; paused). */
+  /** Manual takeoff metadata (Beam AI is the future source; paused). */
   turfAreaAcres: number | null
   curbMiles: number | null
   approvalSettings: EstimateApprovalSettings
@@ -98,7 +98,7 @@ export type UpdateEstimatePayload = Partial<{
   lostReasonId: number
 }>
 
-/** Handoff 24 §3.3 — body for POST /api/estimating/intake/drafts. */
+/** Body for POST /api/estimating/intake/drafts. */
 export interface SaveIntakeDraftPayload {
   estimateType: EstimateType
   /** Partial intake form state, persisted verbatim. */
@@ -107,10 +107,10 @@ export interface SaveIntakeDraftPayload {
   draftId?: string
 }
 
-/** Handoff 08 — "Approve & hand back to Sales" (in-platform, not email). */
+/** "Approve & hand back to Sales" (in-platform, not email). */
 export interface ApproveHandBackPayload {
   /**
-   * DEPRECATED (Handoff 18): the server derives the actor from the JWT and
+   * DEPRECATED: the server derives the actor from the JWT and
    * ignores this field. Kept optional for wire compatibility only.
    */
   actor?: string
@@ -124,14 +124,14 @@ export interface ApproveHandBackResponse {
   transitions: StatusTransitionRecord[]
 }
 
-/** Handoff 19 §5 — body for POST /estimates/:id/adjustments (one lever change). */
+/** Body for POST /estimates/:id/adjustments (one lever change). */
 export interface CreateAdjustmentPayload {
   field: import('@/types/estimating').AdjustmentField
   /** Decimals (0.22 = 22%). Revert-to-original is a reversing row (current → original). */
   fromValue: number
   toValue: number
   /**
-   * DEPRECATED (Handoff 18/19): the server derives the actor from the JWT and
+   * DEPRECATED: the server derives the actor from the JWT and
    * ignores this field. Kept optional for wire compatibility only.
    */
   actor?: string
@@ -139,7 +139,7 @@ export interface CreateAdjustmentPayload {
 
 // Create payloads carry NO ids anywhere in the tree — the server assigns them
 // down every level (sections → services → components) and the editors reload
-// after Save, so local draft ids never leak to the wire (Handoff 17).
+// after Save, so local draft ids never leak to the wire.
 export type CreateComponentPayload = Omit<SectionServiceComponent, 'id' | 'sectionServiceId'>
 export type UpdateComponentPayload = Partial<CreateComponentPayload>
 export type CreateServicePayload = Omit<SectionService, 'id' | 'sectionId' | 'components'> & {
@@ -152,7 +152,7 @@ export type CreateSectionPayload = Omit<EstimateSection, 'id' | 'estimateId' | '
 export type UpdateSectionPayload = Partial<Omit<EstimateSection, 'id' | 'estimateId' | 'services'>>
 
 /**
- * Handoff 20 — takeoff lines. Derived fields come back RECOMPUTED server-side
+ * Takeoff lines. Derived fields come back RECOMPUTED server-side
  * (client-sent derived values are ignored); the Discrepancy Review tab still
  * re-derives live against its threshold slider via lib/estimating/discrepancy.
  */
@@ -165,7 +165,7 @@ export type CreateTakeoffLinePayload = Omit<TakeoffLine, 'id' | 'estimateId'>
 export type UpdateTakeoffLinePayload = Partial<CreateTakeoffLinePayload>
 
 /**
- * Handoff 17 §2.3 — response of the persisted Bidding↔Won flip. `transition`
+ * Response of the persisted Bidding↔Won flip. `transition`
  * is null when the flip was a no-op (already in the requested lifecycle).
  * Lifecycle edges ride the ONE status-transition audit trail with a
  * `lifecycle:` prefix — there is no separate audit table.
@@ -179,8 +179,8 @@ export interface ListEstimatesParams {
   estimateType?: EstimateType
   status?: EstimateStatus
   /**
-   * Row-level scope (BRD I-9.5) is derived SERVER-side from the session
-   * (Handoff 18); this param is ignored for non-exec roles and survives only
+   * Row-level scope (BRD I-9.5) is derived SERVER-side from the session;
+   * this param is ignored for non-exec roles and survives only
    * as an optional narrowing filter for cross-branch (admin/VP/CEO) roles.
    */
   branch?: string
@@ -211,7 +211,7 @@ export const estimatingApi = {
   },
 
   /**
-   * Handoff 08: approve the estimate and hand it back to the salesperson via
+   * Approve the estimate and hand it back to the salesperson via
    * status change. The server walks the transition machine
    * (lib/estimating/transitions.ts) and writes one audit record per step.
    */
@@ -225,7 +225,7 @@ export const estimatingApi = {
     apiClient.get<StatusTransitionRecord[]>(`/estimating/estimates/${id}/status-transitions`),
 
   /**
-   * Handoff 19 §5 — persist one audited approver lever change (complexity or
+   * Persist one audited approver lever change (complexity or
    * margin) to estimate_adjustments. Approver-only server-side; the actor is
    * derived from the JWT. This is the audited companion of the estimate PATCH
    * that moves targetMargin/contractValueCents — one approver action may write
@@ -247,7 +247,7 @@ export const estimatingApi = {
     apiClient.get<IntakeSubmission[]>(`/estimating/estimates/${id}/intake`),
 
   /**
-   * Handoff 24 §3.3 — backend Save-draft (replaces localStorage). A draft is a
+   * Backend Save-draft (replaces localStorage). A draft is a
    * partial intake persisted per-user (device-independent); it creates no
    * estimate and triggers no Aspire push. Pass `draftId` to update in place.
    */
@@ -325,7 +325,7 @@ export const estimatingApi = {
       `/estimating/estimates/${estimateId}/sections/${sectionId}/services/${serviceId}`,
     ),
 
-  // Component CRUD (Handoff 17 §2.2) — the kit labor/material breakdown level.
+  // Component CRUD — the kit labor/material breakdown level.
   createComponent: (
     estimateId: string,
     sectionId: string,
@@ -357,7 +357,7 @@ export const estimatingApi = {
       `/estimating/estimates/${estimateId}/sections/${sectionId}/services/${serviceId}/components/${componentId}`,
     ),
 
-  // Takeoff-line CRUD (Handoff 20 — Discrepancy Review persistence). All qty
+  // Takeoff-line CRUD (Discrepancy Review persistence). All qty
   // fields, including opportunityQty, are estimator-writable local values —
   // opportunityQty is NEVER read from Aspire. The Aspire qty push happens
   // backend-side on estimate Save (PATCH update), not from these calls.
@@ -379,7 +379,7 @@ export const estimatingApi = {
     apiClient.delete<void>(`/estimating/estimates/${estimateId}/takeoff-lines/${lineId}`),
 
   /**
-   * Handoff 17 §2.3 — persist the Bidding↔Won flip server-side. The server
+   * Persist the Bidding↔Won flip server-side. The server
    * derives aspireOwner from the lifecycle and records the edge in
    * estimate_status_transitions (actor from the JWT) — the ONE audit trail
    * (the old client-side in-memory log was deleted).
@@ -388,7 +388,7 @@ export const estimatingApi = {
     apiClient.post<LifecycleTransitionResult>(`/estimating/estimates/${id}/lifecycle`, { to }),
 }
 
-/** Filters for GET /api/estimating/catalog-items (empty until Handoff 22 populates the table). */
+/** Filters for GET /api/estimating/catalog-items (empty until the table is populated). */
 export interface ListCatalogItemsParams {
   branch?: string
   kitType?: KitType
@@ -396,7 +396,7 @@ export interface ListCatalogItemsParams {
 }
 
 /**
- * Handoff 16 — Config-Table Read APIs. The seeded config tables
+ * Config-Table Read APIs. The seeded config tables
  * (approval_tiers, margin_bands, material_calcs, itb_scopes, catalog_items)
  * are the source of truth; the config.ts literals are only the offline
  * fallback. READ-ONLY by locked decision — there are no write endpoints.
@@ -409,7 +409,7 @@ export const estimatingConfigApi = {
   marginBands: () => apiClient.get<MarginBandRow[]>('/estimating/config/margin-bands'),
   materialCalcs: () => apiClient.get<MaterialCalcRow[]>('/estimating/config/material-calcs'),
   itbScopes: () => apiClient.get<ItbScope[]>('/estimating/config/itb-scopes'),
-  /** Handoff 28 — Aspire-derived branch list for the intake dropdowns. */
+  /** Aspire-derived branch list for the intake dropdowns. */
   branches: (kind: 'install' | 'maintenance') =>
     apiClient.get<BranchOption[]>(`/estimating/config/branches?kind=${kind}`),
   catalogItems: (params?: ListCatalogItemsParams) => {
@@ -428,10 +428,10 @@ export interface ItbProjectWithStatuses extends ItbProject {
 }
 
 /**
- * Handoff 21 — ITB tracker backend. Projects are AUTO-GENERATED (one per
+ * ITB tracker backend. Projects are AUTO-GENERATED (one per
  * estimate, at intake); there is no create endpoint. `projects` returns all
  * ACTIVE estimates' projects (status not won/lost), branch-scoped server-side.
- * Scope DEFINITIONS come from estimatingConfigApi.itbScopes (Handoff 16).
+ * Scope DEFINITIONS come from estimatingConfigApi.itbScopes.
  */
 export const estimatingItbApi = {
   projects: () => apiClient.get<ItbProjectWithStatuses[]>('/estimating/itb/projects'),
@@ -443,7 +443,7 @@ export const estimatingItbApi = {
 }
 
 /**
- * CANONICAL properties data-access layer (Handoff 15). The LOCAL table is the
+ * CANONICAL properties data-access layer. The LOCAL table is the
  * source of truth: search reads it; create writes it LOCAL-ONLY as an upsert on
  * (sourceType, sourceId) — the row stays 'unsynced' and the Aspire push fires
  * only when an estimate is submitted for it. `opportunities` is a best-effort

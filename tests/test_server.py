@@ -134,7 +134,7 @@ def test_list_leads_returns_paginated_structure(authed):
 
 
 def test_list_leads_filters_by_property_id(authed):
-    """Handoff 23 — leads are queryable by canonical property_id so the
+    """Leads are queryable by canonical property_id so the
     property engagement UI can gate "Request estimate" on a lead existing
     and source real CRM lead context for the intake."""
     with patch("api.server.query", new_callable=AsyncMock) as mock_query:
@@ -261,7 +261,7 @@ def test_patch_lead_status_change_logs_action(authed):
 
 
 def test_patch_lead_won_updates_hoa_source_property_via_reverse_lookup(authed):
-    """Handoff 15: lead → properties.source_type/source_id → hoa_properties."""
+    """Lead → properties.source_type/source_id → hoa_properties."""
     lead_row = {**_LEAD_ROW, "status": "qualified", "property_id": "prop-1"}
     updated_row = {**lead_row, "status": "won"}
     with patch("api.server.set_hoa_property_status", new_callable=AsyncMock) as mock_set, \
@@ -387,7 +387,7 @@ def test_patch_bid_returns_updated_bid(authed):
 
 
 def test_patch_bid_pursuing_marks_hoa_contacted_via_reverse_lookup(authed):
-    """Handoff 15: bid → lead.property_id → properties.source_id → hoa_properties."""
+    """Bid → lead.property_id → properties.source_id → hoa_properties."""
     updated_bid = {**_BID_ROW, "status": "pursuing"}
     with patch("api.pipeline.set_property_contacted", new_callable=AsyncMock) as mock_contacted, \
          patch("api.server.query", new_callable=AsyncMock) as mock_query, \

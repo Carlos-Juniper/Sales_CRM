@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 17 — Line-Item Editor Persistence: diff-and-apply save.
+// Line-Item Editor Persistence: diff-and-apply save.
 //
 // The editors keep edits in local React state; on Save they reconcile the
 // draft tree against the last server-loaded tree and issue the section /
@@ -10,7 +10,7 @@
 //   node in saved but not draft   → delete   (DELETE; children cascade)
 //
 // Diff (not full-replace) was chosen to preserve server ids and the audit
-// trail (Handoff 17 §4). sortOrder is diffed like any other field, so
+// trail. sortOrder is diffed like any other field, so
 // reordering persists. After persistEstimateTree the caller MUST re-fetch the
 // estimate — the server is authoritative (ids, rollups, timestamps).
 //

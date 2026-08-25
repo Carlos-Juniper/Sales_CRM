@@ -35,7 +35,7 @@ describe('discrepancy threshold config', () => {
 })
 
 describe('approval tiers config', () => {
-  it('seeds the maintenance ladder from BRD I-7 with the canonical role keys (Handoff 19): MGR <$100K, RD $100K–$250K, VP $250K–$1M, CEO >$1M', () => {
+  it('seeds the maintenance ladder from BRD I-7 with the canonical role keys: MGR <$100K, RD $100K–$250K, VP $250K–$1M, CEO >$1M', () => {
     const maint = tiersForType(APPROVAL_TIER_SEED, 'maintenance')
     expect(maint.map((t) => t.roleKey)).toEqual(['manager', 'regional_director', 'vice_president', 'ceo'])
     expect(tierForValue(9_999_900, maint)?.roleKey).toBe('manager')
@@ -44,7 +44,7 @@ describe('approval tiers config', () => {
     expect(tierForValue(200_000_000, maint)?.roleKey).toBe('ceo')
   })
 
-  it('seeds an INSTALL ladder mirroring the maintenance $ bands (Handoff 19 §4)', () => {
+  it('seeds an INSTALL ladder mirroring the maintenance $ bands', () => {
     const maint = tiersForType(APPROVAL_TIER_SEED, 'maintenance')
     const install = tiersForType(APPROVAL_TIER_SEED, 'install')
     expect(install.map((t) => [t.roleKey, t.minValueCents, t.maxValueCents, t.order])).toEqual(

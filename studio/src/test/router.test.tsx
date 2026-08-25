@@ -60,7 +60,7 @@ function renderRoute(initialEntries: string[], user: AuthUser | null = null) {
   )
 }
 
-describe('Router - Auth & Role Guards (canonical 9-role model, Handoff 18)', () => {
+describe('Router - Auth & Role Guards (canonical 9-role model)', () => {
   beforeEach(() => {
     useAuthStore.setState({ user: null })
   })

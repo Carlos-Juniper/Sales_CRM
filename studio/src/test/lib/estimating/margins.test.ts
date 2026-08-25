@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
-// Handoff 07 — Margin Analysis lib (margins.ts).
+// Margin Analysis lib (margins.ts).
 //
-// Business rules under test (handoff §2):
+// Business rules under test:
 //   groupMargin(price, cost) = (price − cost) / price     (via calc.ts)
 //   $/acre = contractValue / acres
 //   benchmarkStatus = value < min ? 'low' : value > max ? 'high' : 'ok'
@@ -60,7 +60,7 @@ describe('maintenance cost basis (hours-driven)', () => {
     )
   })
 
-  it('Handoff 22 — a null-hours line derives hours from its kit production rate (sqft ÷ rate)', () => {
+  it('a null-hours line derives hours from its kit production rate (sqft ÷ rate)', () => {
     const s1 = maint.sections[0] // 120,000 SF
     const noHours = { ...s1.services[0], hours: null, catalogItemId: MOWING_KIT.id }
     // hours/occurrence = 120,000 / 60,000 = 2 h → 2 × 42 × 1.1 = 92.4 h/yr
@@ -70,7 +70,7 @@ describe('maintenance cost basis (hours-driven)', () => {
     )
   })
 
-  it('Handoff 22 — the circular price × (1 − targetMargin) fallback is GONE: an unresolvable line costs 0, never “priced at target”', () => {
+  it('the circular price × (1 − targetMargin) fallback is GONE: an unresolvable line costs 0, never “priced at target”', () => {
     const s1 = maint.sections[0]
     const noHours = { ...s1.services[0], hours: null, catalogItemId: null }
     expect(resolveOccurrenceHours(s1, noHours)).toBeNull()
@@ -80,7 +80,7 @@ describe('maintenance cost basis (hours-driven)', () => {
     expect(maintenanceLineCost(s1, noHours)).not.toBe(Math.round(2_494_800 * 0.78))
   })
 
-  it('Handoff 22 — a mispriced line now flags: cost from production rate diverges from price-at-target', () => {
+  it('a mispriced line now flags: cost from production rate diverges from price-at-target', () => {
     const s1 = maint.sections[0]
     // Same price either way; real cost = 92.4 h × $180/h = $16,632.
     const line = { ...s1.services[0], hours: null, catalogItemId: MOWING_KIT.id }

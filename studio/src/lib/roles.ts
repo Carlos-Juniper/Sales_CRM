@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
-// Canonical frontend role sets — single source of truth (Handoff 28).
+// Canonical frontend role sets — single source of truth.
 // These mirror api/authz.py exactly. Import from here; do NOT redeclare inline.
 // ---------------------------------------------------------------------------
 
 import type { UserRole } from '@/types'
 
-/** Roles that may edit line items, sections, and takeoff (Handoff 28). */
+/** Roles that may edit line items, sections, and takeoff. */
 export const ESTIMATOR_ROLES: readonly UserRole[] = [
   'maintenance_estimating',
   'install_estimating',

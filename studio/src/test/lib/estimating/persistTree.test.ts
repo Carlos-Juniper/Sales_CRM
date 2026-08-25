@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 17 — Line-Item Editor Persistence: diff-and-apply save.
+// Line-Item Editor Persistence: diff-and-apply save.
 //
 // diffEstimateTree(saved, draft) reconciles the editor's local draft tree
 // against the last server-loaded tree and emits the minimal CRUD op list:

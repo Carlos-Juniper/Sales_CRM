@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { TopNav } from '@/components/layout/TopNav'
 import { EstimateQueue } from './components/estimating/EstimateQueue'
 import { LineItemEditor } from './components/estimating/LineItemEditor'
@@ -17,55 +18,77 @@ import {
   type EstimatingTabConfig,
   type EstimatingTabKey,
 } from './components/estimating/estimatingTabs'
-// Handoff 05 — Materials Calculator
 import { MaterialsCalculator } from './components/estimating/MaterialsCalculator'
-// Handoff 11 — Maintenance Intake Modal
 import { MaintenanceIntakeModal } from './components/estimating/MaintenanceIntakeModal'
-// Handoff 23 — real CRM lead context (replaces the L-TBD stub)
+// real CRM lead context (replaces the L-TBD stub)
 import { crmLeadFromLead } from '@/lib/estimating/crmLead'
-// Handoff 12 — Install Intake Modal
 import { InstallIntakeModal } from './components/estimating/InstallIntakeModal'
-// Handoff 13 — ITB Tracker
 import { ItbTracker } from './components/estimating/ItbTracker'
-// Handoff 16 — config-table read APIs (itb_scopes et al.), literals as fallback
+// config-table read APIs (itb_scopes et al.), literals as fallback
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
-// Handoff 21 — ITB projects + scope statuses from the API (auto-generated per estimate)
+// ITB projects + scope statuses from the API (auto-generated per estimate)
 import { useItbProjects } from '@/hooks/useItbProjects'
+import { ESTIMATES_KEY, useEstimate } from '@/hooks/useEstimate'
 import type { Estimate, Property } from '@/types/estimating'
 import type { Lead } from '@/types'
 import { cn } from '@/lib/utils'
 
 interface EstimatingPageProps {
   /**
-   * Seam for tests/deep-links. At runtime the open estimate is set by feature
-   * tabs through `useEstimatingShell().setOpenEstimate` (Handoff 02's queue).
+   * Test-only seam: seeds the query cache with this estimate on first render
+   * so a bare `<EstimatingPage initialOpenEstimate={...} />` (rendered with no
+   * router match, i.e. no `:estimateId` in the URL) still opens with it. Real
+   * navigation always drives the open estimate from the URL — this prop is
+   * never read again after the initial seed.
    */
   initialOpenEstimate?: Estimate | null
 }
 
 /**
- * Estimating shell (Handoff 01): header, config-driven tab bar, shared toast,
+ * Estimating shell: header, config-driven tab bar, shared toast,
  * and the host that mounts each feature tab. The app sidebar is rendered by
  * `AppShell` (components/layout) — not duplicated here.
  *
- * Handoffs 02–13 plug in by swapping their tab's `TabPlaceholder` branch in
+ * Feature tabs plug in by swapping their tab's `TabPlaceholder` branch in
  * `renderTab()` below for the real component (tab slots are registered in
  * estimatingTabs.ts).
  */
 export default function EstimatingPage({
   initialOpenEstimate = null,
 }: EstimatingPageProps) {
-  const [activeTab, setActiveTab] = useState<EstimatingTabKey>('queue')
-  const [openEstimate, setOpenEstimate] = useState<Estimate | null>(initialOpenEstimate)
-  // API-fetched config (Handoff 16); config.ts seeds only as offline fallback.
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const { estimateId: routeEstimateId, tab: routeTab } = useParams<{
+    estimateId?: string
+    tab?: string
+  }>()
+
+  // Test-only seam (see EstimatingPageProps.initialOpenEstimate doc): seed the
+  // cache once, synchronously, so a direct render with no route match still
+  // opens with it. Real navigation always supplies `:estimateId` instead.
+  const [seededEstimateId] = useState<string | null>(() => {
+    if (initialOpenEstimate) {
+      queryClient.setQueryData([ESTIMATES_KEY, initialOpenEstimate.id], initialOpenEstimate)
+      return initialOpenEstimate.id
+    }
+    return null
+  })
+
+  const estimateId = routeEstimateId ?? seededEstimateId
+  // The ONE source of truth for the open estimate — React Query cache, keyed
+  // by the URL id. Never a detached local-state snapshot (see
+  // useEstimatingShell.ts for why that used to go stale).
+  const { data: openEstimate = null } = useEstimate(estimateId)
+
+  // API-fetched config; config.ts seeds only as offline fallback.
   const { itbScopes } = useEstimatingConfig()
-  // Handoff 21 — real ITB data: one auto-generated project per active estimate.
+  // Real ITB data: one auto-generated project per active estimate.
   const { projects: itbProjects, statuses: itbStatuses } = useItbProjects()
 
-  // Handoff 15/23 — "Request estimate" from the property/Accounts UI navigates
+  // "Request estimate" from the property/Accounts UI navigates
   // here with the canonical property AND its lead in router state; the
   // maintenance intake modal opens pre-filled with both. The action is gated on
-  // a lead existing (Handoff 23 §1a), so property arrivals always carry one.
+  // a lead existing, so property arrivals always carry one.
   const location = useLocation()
   const navState = location.state as {
     requestEstimateProperty?: Property
@@ -73,35 +96,67 @@ export default function EstimatingPage({
   } | null
   const incomingProperty = navState?.requestEstimateProperty ?? null
   const incomingLead = navState?.requestEstimateLead ?? null
-  // REAL CRM lead context (Handoff 23 — the L-TBD stub is gone). Null when the
+  // REAL CRM lead context (the L-TBD stub is gone). Null when the
   // intake is opened from the queue CTA; the modal then sources the lead from
   // leads.property_id once a property is selected.
   const incomingCrmLead = incomingLead ? crmLeadFromLead(incomingLead) : null
 
-  // Handoff 11 — Maintenance Intake Modal state
   const [maintIntakeOpen, setMaintIntakeOpen] = useState(incomingProperty != null)
-  // Handoff 12 — Install Intake Modal state
   const [installIntakeOpen, setInstallIntakeOpen] = useState(false)
   // Queue refresh key: bump after successful intake to trigger re-fetch.
   const [queueKey, setQueueKey] = useState(0)
 
   const tabs = visibleTabs(openEstimate?.estimateType ?? null)
-  // If the open estimate's type hides the active tab, fall back to the queue.
-  const currentTab: EstimatingTabKey = tabs.some((t) => t.key === activeTab)
-    ? activeTab
+  const requestedTab = (routeTab as EstimatingTabKey | undefined) ?? 'queue'
+  // If the open estimate's type hides the requested tab, fall back to the queue.
+  const currentTab: EstimatingTabKey = tabs.some((t) => t.key === requestedTab)
+    ? requestedTab
     : 'queue'
 
+  function estimateUrl(id: string, tab: EstimatingTabKey): string {
+    return `/inside-sales/estimating/${id}/${tab}`
+  }
+
+  /** Tab-bar clicks and feature tabs both drive the tab through the URL. */
+  function setActiveTab(tab: EstimatingTabKey) {
+    navigate(estimateId ? estimateUrl(estimateId, tab) : '/inside-sales/estimating')
+  }
+
+  /**
+   * In-place update for the estimate that's ALREADY open (post-save/mutation
+   * result) — writes straight into the query cache, no navigation. Passing
+   * `null` closes the workspace back to the queue.
+   */
+  function setOpenEstimate(estimate: Estimate | null) {
+    if (!estimate) {
+      navigate('/inside-sales/estimating')
+      return
+    }
+    queryClient.setQueryData([ESTIMATES_KEY, estimate.id], estimate)
+    // The detail cache above already has the fresh data (no wasted refetch);
+    // only the separate list query needs to know it might be stale.
+    queryClient.invalidateQueries({ queryKey: [ESTIMATES_KEY, 'list'] })
+  }
+
+  /** Open a (possibly different/just-created) estimate and jump to one of its tabs. */
+  function openEstimateAt(estimate: Estimate, tab: EstimatingTabKey) {
+    queryClient.setQueryData([ESTIMATES_KEY, estimate.id], estimate)
+    queryClient.invalidateQueries({ queryKey: [ESTIMATES_KEY, 'list'] })
+    navigate(estimateUrl(estimate.id, tab))
+  }
+
   const shell: EstimatingShellApi = useMemo(
-    () => ({ activeTab: currentTab, setActiveTab, openEstimate, setOpenEstimate }),
-    [currentTab, openEstimate],
+    () => ({ activeTab: currentTab, setActiveTab, openEstimate, setOpenEstimate, openEstimateAt }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentTab, openEstimate, estimateId],
   )
 
   function renderTab(tab: EstimatingTabConfig) {
     switch (tab.key) {
       case 'queue':
-        // Handoff 02 — opens estimates via the shell (setOpenEstimate + editor tab).
-        // Handoff 11: onMaintenanceIntake opens the Maintenance Intake Modal.
-        // Handoff 12: onInstallIntake handled by that handoff (do not touch here).
+        // Opens estimates via the shell (setOpenEstimate + editor tab).
+        // onMaintenanceIntake opens the Maintenance Intake Modal.
+        // onInstallIntake handled elsewhere (do not touch here).
         return (
           <EstimateQueue
             key={queueKey}
@@ -110,10 +165,10 @@ export default function EstimatingPage({
           />
         )
       case 'editor':
-        // Handoffs 03/04 — engine keyed automatically off openEstimate.estimateType.
+        // Engine keyed automatically off openEstimate.estimateType.
         return <LineItemEditor />
       case 'margins':
-        // Handoff 07 — reads the open estimate from the shell context.
+        // Reads the open estimate from the shell context.
         return <MarginAnalysis />
       case 'takeoff':
         return <TakeoffInsert />
@@ -122,15 +177,15 @@ export default function EstimatingPage({
       case 'approval':
         return <ApprovalHandoff />
       case 'approvalQueue':
-        // Handoff 09 — approver inbox + review drawer (config-tier routing).
+        // Approver inbox + review drawer (config-tier routing).
         return <ApprovalQueue />
       case 'materials':
-        // Handoff 05 — Materials Calculator (install-only).
+        // Materials Calculator (install-only).
         return <MaterialsCalculator />
       case 'itb':
-        // Handoff 13 — ITB Tracker. Scopes from the config API (admin-extensible
-        // without migration; Handoff 16); projects + scope statuses from the ITB
-        // endpoints (Handoff 21 — auto-generated, all active estimates).
+        // ITB Tracker. Scopes from the config API (admin-extensible
+        // without migration); projects + scope statuses from the ITB
+        // endpoints (auto-generated, all active estimates).
         return <ItbTracker projects={itbProjects} scopes={itbScopes} statuses={itbStatuses} />
       default:
         return <TabPlaceholder tab={tab} />
@@ -182,7 +237,7 @@ export default function EstimatingPage({
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">{renderTab(activeConfig)}</div>
         </div>
 
-        {/* Handoff 11 — Maintenance Intake Modal (mounted outside tab content so it
+        {/* Maintenance Intake Modal (mounted outside tab content so it
             survives tab switches; controlled by queue's CTA via onMaintenanceIntake) */}
         <MaintenanceIntakeModal
           open={maintIntakeOpen}
@@ -192,7 +247,7 @@ export default function EstimatingPage({
           initialProperty={incomingProperty}
         />
 
-        {/* Handoff 12 — Install Intake Modal (Sales-authored; controlled by queue's
+        {/* Install Intake Modal (Sales-authored; controlled by queue's
             CTA via onInstallIntake; survives tab switches by mounting outside tab content) */}
         <InstallIntakeModal
           open={installIntakeOpen}

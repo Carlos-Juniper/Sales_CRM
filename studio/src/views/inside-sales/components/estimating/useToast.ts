@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// The ONE shared Estimating toast hook (Handoff 01 / shared conventions).
+// The ONE shared Estimating toast hook (shared conventions).
 // Every Estimating feature calls `useToast().show(message)` — do NOT
 // reimplement toasts per feature. The provider lives in EstimatingToast.tsx
 // and is mounted once by EstimatingPage.

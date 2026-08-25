@@ -83,8 +83,6 @@ async def has_won_lead_for_property(property_id: str) -> bool:
 
 
 # run_migrations() removed — schema is now managed by scripts/migrate.py.
-# See handoffs/34-migration-runner-and-state-reconciliation.md (tool) and
-# handoffs/35-migration-deploy-wiring-and-live-apply.md (CI wiring).
 
 
 async def close_pool() -> None:

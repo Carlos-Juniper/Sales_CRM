@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 13 — ITB Tracker (Acceptance Criteria tests).
+// ITB Tracker (Acceptance Criteria tests).
 //
 // TDD approach: all tests written first (red), implementation makes them green.
 //
@@ -76,6 +76,7 @@ function Harness({ projects, scopes, statuses, ...rest }: Partial<ItbTrackerProp
           setActiveTab: vi.fn(),
           openEstimate: null,
           setOpenEstimate: vi.fn(),
+          openEstimateAt: vi.fn(),
         }}
       >
         <ItbTracker

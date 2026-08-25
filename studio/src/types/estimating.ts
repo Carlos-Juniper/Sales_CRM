@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Estimating domain model (Handoff 00 — Data Schema & Types)
+// Estimating domain model
 //
 // Single source of truth for the Estimating tab. Every queue, editor engine,
 // margin view, approval flow, and discrepancy review reads these types.
@@ -49,7 +49,7 @@ export type AspireOwner = 'estimating' | 'crm'
 export type AspireSyncStatus = 'unsynced' | 'pending' | 'synced' | 'failed'
 
 /**
- * CANONICAL app-owned property record (Handoff 15) — the single source of
+ * CANONICAL app-owned property record — the single source of
  * truth for every physical location, across verticals. `propertyType` drives
  * estimating/Aspire logic; `sourceType`/`sourceId` trace provenance back to
  * the vertical prospecting table the row was promoted from ('manual' when
@@ -81,7 +81,7 @@ export interface Property {
 
 export interface CreatePropertyPayload {
   name: string
-  /** Canonical origin fields (Handoff 15); default 'manual' on the server. */
+  /** Canonical origin fields; default 'manual' on the server. */
   propertyType?: string | null
   sourceType?: string | null
   sourceId?: string | null
@@ -121,7 +121,7 @@ export type InstallCustomerType =
 
 export type CustomerType = MaintenanceCustomerType | InstallCustomerType
 
-// ----- Approval settings (Handoff 08) ---------------------------------------
+// ----- Approval settings ---------------------------------------
 
 /**
  * Per-estimate on-approval settings. BRD I-7 note: BM + RD are typically both
@@ -183,15 +183,15 @@ export interface EstimateBase {
   /** Optional queue-card notes (e.g. intake context from Sales, walk notes). */
   notes?: string | null
   /**
-   * Handoff 24 §3.2 — install RFI status, tracked as a first-class field and
+   * §3.2 — install RFI status, tracked as a first-class field and
    * surfaced in the queue/editor. Capture/display only: nothing gates approval
    * on it. Null/absent for maintenance and legacy rows.
    */
   rfiStatus?: string | null
   /**
-   * Handoff 27 — manual takeoff metadata (Takeoff Insert stat grid). Manual
+   * Manual takeoff metadata (Takeoff Insert stat grid). Manual
    * estimator entry today, persisted on the estimate. Beam AI automated
-   * takeoff (paused — Handoffs 14/14b) is the eventual source and will write
+   * takeoff (paused) is the eventual source and will write
    * these same fields. Acreage & sqft stay DERIVED from sections.
    */
   turfAreaAcres?: number | null
@@ -364,19 +364,19 @@ export interface TakeoffLine {
   measuredQty: number
   /**
    * LOCALLY-set, manually-editable opportunity qty (drives Δ vs Opp). Never
-   * read from Aspire (Handoff 20 locked decision); on estimate Save the
+   * read from Aspire (locked decision); on estimate Save the
    * backend pushes it one-way to OpportunityServiceItem.ItemQuantity for
    * lines that carry a catalogItemId.
    */
   opportunityQty: number
-  /** Nullable kit link enabling the Aspire qty push (Handoff 20). */
+  /** Nullable kit link enabling the Aspire qty push. */
   catalogItemId?: string | null
 }
 
 // ----- Approval tiers (config-driven) ----------------------------------------
 
 /**
- * Handoff 19: tier role keys equal the canonical auth roles (Handoff 18), so
+ * Tier role keys equal the canonical auth roles, so
  * the JWT role checks directly against the routed tier.
  */
 export type ApprovalRoleKey = 'manager' | 'regional_director' | 'vice_president' | 'ceo'
@@ -391,7 +391,7 @@ export interface ApprovalTier {
   order: number
   /**
    * Which estimate type this ladder applies to. Install uses the same
-   * ladder as maintenance (its own rows, mirrored $ bands — Handoff 19).
+   * ladder as maintenance (its own rows, mirrored $ bands).
    */
   estimateType: EstimateType
 }
@@ -425,7 +425,7 @@ export interface ItbScopeStatus {
 export interface ItbProject {
   id: string
   /**
-   * Handoff 21: the estimate that auto-generated this project (1:1 LOCKED —
+   * The estimate that auto-generated this project (1:1 LOCKED —
    * one estimate → one ITB project, created at intake from either form).
    * Optional/null only for legacy rows seeded before auto-generation.
    */
@@ -463,7 +463,7 @@ export interface IntakeSubmission {
 }
 
 /**
- * Handoff 24 §3.3 — a "Save draft" row: a partial intake persisted server-side
+ * §3.3 — a "Save draft" row: a partial intake persisted server-side
  * (intake_submissions, is_draft=1) BEFORE any estimate exists. Per-user and
  * device-independent; saving/resuming a draft never creates an estimate and
  * never triggers an Aspire push.
@@ -478,7 +478,7 @@ export interface IntakeDraft {
   createdAt: string
 }
 
-// 'takeoff_scan' (Handoff 27) — the Takeoff Insert scanned boundary map;
+// 'takeoff_scan' — the Takeoff Insert scanned boundary map;
 // estimate-scoped (no intake submission) and may be an image, not just PDF.
 export type AttachmentKind = 'property_map' | 'rfp' | 'other' | 'takeoff_scan'
 export type AttachmentStatus = 'pending' | 'stored' | 'failed'
@@ -488,7 +488,7 @@ export interface IntakeAttachment {
   id: string
   /** Null for estimate-scoped rows (takeoff scans have no intake submission). */
   intakeSubmissionId: string | null
-  /** Direct estimate link (takeoff scans, Handoff 27); null for legacy intake rows. */
+  /** Direct estimate link (takeoff scans); null for legacy intake rows. */
   estimateId: string | null
   fileName: string
   contentType: string
@@ -530,8 +530,8 @@ export interface MarginBands {
 export type MarginBandLabel = 'good' | 'ok' | 'low'
 
 /**
- * A margin_bands config row as returned by GET /api/estimating/config/margin-bands
- * (Handoff 16). The canonical set the UI consumes is the row named 'default'.
+ * A margin_bands config row as returned by GET /api/estimating/config/margin-bands.
+ * The canonical set the UI consumes is the row named 'default'.
  */
 export interface MarginBandRow extends MarginBands {
   id: string
@@ -541,7 +541,7 @@ export interface MarginBandRow extends MarginBands {
 // ---------------------------------------------------------------------------
 // Legacy types (pre-redesign prototype). Deprecated — retained only so the
 // existing EstimateQueue / LineItemEditor / MarginAnalysis / ProposalExport
-// components keep compiling until Handoffs 02–07 replace them.
+// components keep compiling until they are replaced.
 // ---------------------------------------------------------------------------
 
 /** @deprecated Use {@link EstimatePriority}. */

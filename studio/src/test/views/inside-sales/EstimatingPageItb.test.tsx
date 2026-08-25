@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Handoff 21 — ITB tab renders REAL bids (no more empty arrays).
+// ITB tab renders REAL bids (no more empty arrays).
 //
 // EstimatingPage feeds ItbTracker from GET /api/estimating/itb/projects (via
-// useItbProjects) and scopes from the Handoff 16 config API. The tracker's own
+// useItbProjects) and scopes from the config API. The tracker's own
 // grouping/filter/legend logic is covered by ItbTracker.test.tsx — here we
 // prove the wiring: seeded active estimates appear as rows with their
 // auto-initialized scope statuses.
@@ -15,7 +15,7 @@ import { render, makeUser } from '@/test/utils'
 import { useAuthStore } from '@/store/authStore'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 
-describe('EstimatingPage — ITB Tracker tab (Handoff 21 wiring)', () => {
+describe('EstimatingPage — ITB Tracker tab (wiring)', () => {
   beforeEach(() => {
     useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'inside_sales' }) })
   })

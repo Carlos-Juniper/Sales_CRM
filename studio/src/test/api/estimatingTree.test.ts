@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 17 — component CRUD + lifecycle endpoints on the typed client
+// Component CRUD + lifecycle endpoints on the typed client
 // (MSW round-trip). Mirrors the backend surface added in api/estimating.py.
 // ---------------------------------------------------------------------------
 
@@ -14,7 +14,7 @@ async function createInstall() {
   return { created, sec, svc }
 }
 
-describe('estimatingApi — component CRUD (Handoff 17)', () => {
+describe('estimatingApi — component CRUD', () => {
   it('creates a component and it survives a reload', async () => {
     const { created, sec, svc } = await createInstall()
     const comp = await estimatingApi.createComponent(created.id, sec.id, svc.id, {
@@ -65,7 +65,7 @@ describe('estimatingApi — component CRUD (Handoff 17)', () => {
   })
 })
 
-describe('estimatingApi — lifecycle flip persists server-side (Handoff 17 §2.3)', () => {
+describe('estimatingApi — lifecycle flip persists server-side', () => {
   it('WON flip updates lifecycle + aspireOwner and writes an audit edge', async () => {
     const created = await estimatingApi.create(toCreatePayload(buildMaintenanceEstimate()))
     const res = await estimatingApi.setLifecycle(created.id, 'won')

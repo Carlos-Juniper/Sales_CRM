@@ -6,7 +6,7 @@ import { EstimatingToastContext } from './useToast'
 export const TOAST_DURATION_MS = 2600
 
 /**
- * The single shared Estimating toast (Handoff 01): bottom-center dark pill
+ * The single shared Estimating toast: bottom-center dark pill
  * with a green check, auto-dismissing after ~2.6s. Mounted once by
  * EstimatingPage; features trigger it via `useToast().show(message)`.
  */

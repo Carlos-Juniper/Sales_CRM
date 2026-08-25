@@ -177,7 +177,7 @@ describe('useAttachmentUpload', () => {
     expect(result.current.state.status).toBe('error')
   })
 
-  // ── Handoff 27 — takeoff_scan kind (scanned map images, estimate-scoped) ──
+  // ── takeoff_scan kind (scanned map images, estimate-scoped) ──
 
   it('uploads a PNG takeoff scan and returns the estimate-scoped attachment', async () => {
     const estimateId = await createEstimateWithIntake()

@@ -165,7 +165,7 @@ describe('per1000SfRead', () => {
 })
 
 describe('bidQty', () => {
-  it('rounds plan qty inflated by add pct to the nearest unit (Handoff 20: round, not ceil)', () => {
+  it('rounds plan qty inflated by add pct to the nearest unit (round, not ceil)', () => {
     expect(bidQty(100, 0.1)).toBe(110)
     expect(bidQty(101, 0.1)).toBe(111) // 111.1 -> 111 (ceil would say 112)
     expect(bidQty(24, 0.05)).toBe(25) // 25.2 -> 25 (ceil would say 26)

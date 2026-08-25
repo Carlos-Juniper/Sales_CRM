@@ -10,7 +10,7 @@ What this checks
 2. What is the correct write-back field name for the lost reason?
    Resolves aspire_sync.py TODO #2 (OpportunityLostReasonID).
 
-Also spot-checks (§2.2 from handoff 36):
+Also spot-checks:
 3. Does POST /Property (prod path) / POST /Properties (sandbox path) return
    PropertyID directly in the response?
 

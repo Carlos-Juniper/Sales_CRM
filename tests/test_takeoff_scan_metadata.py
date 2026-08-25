@@ -1,4 +1,4 @@
-"""Handoff 27 — Takeoff Insert persistence & manual metadata.
+"""Takeoff Insert persistence & manual metadata.
 
 Two feature slices, DB and GCS fully mocked:
 

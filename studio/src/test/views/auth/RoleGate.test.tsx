@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// RoleGate under the canonical 9-role model (Handoff 18):
+// RoleGate under the canonical 9-role model:
 //   * legacy inside_sales/outside_sales normalize to `sales`
 //   * `admin` is the super-role; `manager` narrows to its approval tier
 // ---------------------------------------------------------------------------

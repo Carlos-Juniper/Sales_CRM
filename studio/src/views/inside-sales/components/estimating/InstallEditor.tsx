@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// InstallEditor (Handoff 04) — the QUANTITY-driven kit engine of the
+// InstallEditor — the QUANTITY-driven kit engine of the
 // Line-Item Editor. Rendered automatically when the open estimate's
 // `estimateType === 'install'` (see LineItemEditor.tsx); never toggled.
 //
@@ -15,7 +15,7 @@
 //   • All math via lib/estimating/install + calc; margin bands from the one
 //     canonical config (never the prototype's 34/28 literals).
 //
-// Materials Calculator seam (Handoff 05): material component lines ingest
+// Materials Calculator seam: material component lines ingest
 // through `buildComponent(serviceId, 'material')` + a patch of qty/unitCost —
 // see handleAddComponent below.
 // ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ const cellInput =
 /** Shared 9-column grid: Item | Qty | Comp | Hrs | U/P | TP | Tax | Sub cost | GM % */
 const GRID = 'grid grid-cols-[2.6fr_0.9fr_0.5fr_0.6fr_0.9fr_0.9fr_0.5fr_0.9fr_0.7fr] gap-1.5 items-center'
 
-/** GM% text color from the ONE canonical margin-band config (API-fetched, Handoff 16). */
+/** GM% text color from the ONE canonical margin-band config (API-fetched). */
 function gmClass(gm: number, bands: MarginBands): string {
   const band = marginBand(gm, bands)
   if (band === 'good') return 'text-[#2E7D52]'
@@ -304,7 +304,7 @@ function GroupRows({
   onAddComponent: (serviceId: string, kind: ComponentKind) => void
   onGroupLabor: (serviceId: string) => void
   onAddKit: (kitId: string) => void
-  /** Handoff 22 — kits from GET /catalog-items (literal = offline fallback). */
+  /** Kits from GET /catalog-items (literal = offline fallback). */
   kits: InstallCatalogKit[]
 }) {
   return (
@@ -376,8 +376,8 @@ function GroupRows({
 export function InstallEditor({ estimate }: InstallEditorProps) {
   const { setOpenEstimate } = useEstimatingShell()
   const toast = useToast()
-  // The ONE canonical margin-band set + kit catalog — API-fetched config
-  // (Handoffs 16 + 22); the literals are only the offline fallback.
+  // The ONE canonical margin-band set + kit catalog — API-fetched config;
+  // the literals are only the offline fallback.
   const { marginBands, catalogItems } = useEstimatingConfig()
   const kitCatalog = useMemo(() => installKitCatalogFromItems(catalogItems), [catalogItems])
 
@@ -470,11 +470,11 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
     setSaveError(null)
     const toSave: InstallEstimate = { ...draft, contractValueCents: contractCents }
     try {
-      // Handoff 17: persist the FULL tree (diff-and-apply against the last
+      // Persist the FULL tree (diff-and-apply against the last
       // server-loaded state), then the scalar fields, then reload from the
       // server so the editor reflects persisted state — never local state.
       await persistEstimateTree(toSave.id, savedRef.current.sections, toSave.sections)
-      // Handoff 18 ownership split: targetMargin/contractValueCents are
+      // Ownership split: targetMargin/contractValueCents are
       // approver-owned levers server-side (an estimator PATCH touching them
       // 403s). Only send them when this Save actually changed them so the
       // routine estimator Save never trips the approver guard.
@@ -517,7 +517,7 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
             <span className="font-medium text-[hsl(var(--fg))]">{formatCents(contractCents)}</span>{' '}
             · {totalHours.toFixed(2)} hrs planned
           </p>
-          {/* Handoff 24 §3.2 — tracked RFI status, display only (no gating). */}
+          {/* §3.2 — tracked RFI status, display only (no gating). */}
           {draft.rfiStatus && (
             <p
               data-testid="install-rfi-status"

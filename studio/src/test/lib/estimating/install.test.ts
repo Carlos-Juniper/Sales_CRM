@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 04 — Install engine pure logic (lib/estimating/install.ts).
+// Install engine pure logic (lib/estimating/install.ts).
 //
 // Fixture math (buildInstallEstimate, all integer cents):
 //   Phase 1 — Streetscape:
@@ -212,11 +212,11 @@ describe('buildComponent / coerceNum / formatGmPct', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Handoff 22 — the editor reads install kits from GET /catalog-items; the
+// The editor reads install kits from GET /catalog-items; the
 // INSTALL_KIT_CATALOG literal is only the offline fallback.
 // ---------------------------------------------------------------------------
 
-describe('Handoff 22 — installKitCatalogFromItems (API catalog adapter)', () => {
+describe('installKitCatalogFromItems (API catalog adapter)', () => {
   it('falls back to the literal when the API returned no install kits', () => {
     expect(installKitCatalogFromItems([])).toBe(INSTALL_KIT_CATALOG)
     // maintenance kits alone don't count

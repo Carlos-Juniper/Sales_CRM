@@ -1,11 +1,11 @@
-"""Handoff 19 — estimate_adjustments persistence (approver lever audit).
+"""estimate_adjustments persistence (approver lever audit).
 
 Acceptance criteria under test:
   * POST /api/estimating/estimates/{id}/adjustments persists a row to
     estimate_adjustments with the actor taken from the JWT, never the client.
   * GET /api/estimating/estimates/{id}/adjustments returns the audit trail
     (camelCase, ordered by created_at) — reload shows persisted adjustments.
-  * The POST is approver-only (Handoff 18 §5.2): estimator roles get 403.
+  * The POST is approver-only: estimator roles get 403.
   * field is restricted to complexity|margin; anything else is rejected.
   * The adjustment write never touches the estimate row itself (status /
     margin PATCH stays a separate call), so "Save adjustment & approve" can

@@ -1,4 +1,4 @@
-"""Handoff 16 — Config-Table Read APIs (read-only GET endpoints).
+"""Config-Table Read APIs (read-only GET endpoints).
 
 DB fully mocked — patch api.estimating.query; no real MySQL.
 
@@ -174,7 +174,7 @@ class TestApprovalTiers:
         assert res.status_code == 400
 
     def test_config_driven_through_the_db(self, authed):
-        """Handoff 00 §6 AC: a NEW row inserted in the DB comes straight back
+        """AC: a NEW row inserted in the DB comes straight back
         through the API — no code edit, no hardcoded ladder."""
         new_install_tier = _tier_row(
             id="tier-inst-mgr2", role_key="manager", label="Install Manager",

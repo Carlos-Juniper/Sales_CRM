@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Handoff 03 — Maintenance engine (hours-driven, section-based).
+// Maintenance engine (hours-driven, section-based).
 // Fixture math (buildMaintenanceEstimate, all cents, via maintServiceLine):
 //   Common Area (120,000 SF):
 //     Mowing        120 × 450 × 42 × 1.10 = 2,494,800
@@ -22,7 +22,6 @@ import { render } from '@/test/utils'
 import type { CatalogItem, Estimate, MaintenanceEstimate } from '@/types/estimating'
 import { buildMaintenanceEstimate, mockEstimatesV2, toCreatePayload } from '@/mocks/estimatingData'
 import { estimatingApi } from '@/api/estimating'
-import { resetEstimatingConfigCache } from '@/hooks/useEstimatingConfig'
 import { LineItemEditor } from '@/views/inside-sales/components/estimating/LineItemEditor'
 import { EstimatingToastProvider } from '@/views/inside-sales/components/estimating/EstimatingToast'
 import { EstimatingShellContext } from '@/views/inside-sales/components/estimating/useEstimatingShell'
@@ -32,7 +31,7 @@ function renderMaint(estimate: Estimate = buildMaintenanceEstimate()) {
   const utils = render(
     <EstimatingToastProvider>
       <EstimatingShellContext.Provider
-        value={{ activeTab: 'editor', setActiveTab: vi.fn(), openEstimate: estimate, setOpenEstimate }}
+        value={{ activeTab: 'editor', setActiveTab: vi.fn(), openEstimate: estimate, setOpenEstimate, openEstimateAt: vi.fn() }}
       >
         <LineItemEditor />
       </EstimatingShellContext.Provider>
@@ -49,8 +48,9 @@ function sectionCard(name: string): HTMLElement {
 }
 
 beforeEach(() => {
-  resetEstimatingConfigCache()
-  // Handoff 22 — these specs exercise the OFFLINE-FALLBACK catalog (the
+  // Each render() call gets its own fresh QueryClient (test/utils.tsx), so
+  // there's no cross-test config cache to reset.
+  // These specs exercise the OFFLINE-FALLBACK catalog (the
   // maintenance.ts literal). The API-driven catalog + save-guard specs at the
   // bottom override this handler per test.
   server.use(http.get('/api/estimating/catalog-items', () => HttpResponse.json([])))
@@ -102,7 +102,7 @@ describe('MaintenanceEditor — structure', () => {
     renderMaint()
     expect(screen.getByTestId('rollup-sections')).toHaveTextContent('2')
     expect(screen.getByTestId('rollup-sqft')).toHaveTextContent('165,000')
-    // $50,773.95 < $100K ⇒ Manager tier (config-driven tier table, Handoff 19 keys)
+    // $50,773.95 < $100K ⇒ Manager tier (config-driven tier table)
     expect(screen.getByTestId('rollup-approval')).toHaveTextContent('Manager')
   })
 
@@ -302,7 +302,7 @@ describe('MaintenanceEditor — lifecycle & ownership (BRD §8.1)', () => {
     expect(screen.getByTestId('ownership-banner')).toHaveTextContent(/Estimating owns Aspire/i)
   })
 
-  it('clicking Won persists the flip server-side (Handoff 17 §2.3), swaps the banner, and records the edge in the status-transition audit', async () => {
+  it('clicking Won persists the flip server-side, swaps the banner, and records the edge in the status-transition audit', async () => {
     const user = userEvent.setup()
     // server-seeded so the persistence round-trip is real (MSW store)
     const created = (await estimatingApi.create(
@@ -368,7 +368,7 @@ describe('MaintenanceEditor — Reset / Save', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/saved/i)
   })
 
-  it('Save persists an added section (tree diff) and reloads server state (Handoff 17)', async () => {
+  it('Save persists an added section (tree diff) and reloads server state', async () => {
     const user = userEvent.setup()
     const created = (await estimatingApi.create(
       toCreatePayload(buildMaintenanceEstimate()),
@@ -389,7 +389,7 @@ describe('MaintenanceEditor — Reset / Save', () => {
     expect(screen.getByDisplayValue('New region')).toBeInTheDocument()
   })
 
-  it('Save persists qty edits and section removal — gone/changed after reload (Handoff 17)', async () => {
+  it('Save persists qty edits and section removal — gone/changed after reload', async () => {
     const user = userEvent.setup()
     const created = (await estimatingApi.create(
       toCreatePayload(buildMaintenanceEstimate()),
@@ -435,11 +435,11 @@ describe('MaintenanceEditor — Reset / Save', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Handoff 22 — kits come from GET /catalog-items; every maintenance line must
+// Kits come from GET /catalog-items; every maintenance line must
 // resolve a production rate (or explicit hours) before Save.
 // ---------------------------------------------------------------------------
 
-describe('MaintenanceEditor — Handoff 22 kit catalog + production-rate save guard', () => {
+describe('MaintenanceEditor — kit catalog + production-rate save guard', () => {
   it('feeds the add-line dropdown from GET /catalog-items, not the literal', async () => {
     server.use(
       http.get('/api/estimating/catalog-items', () => HttpResponse.json([RATED_KIT])),

@@ -2307,7 +2307,7 @@ def register(app, require_auth) -> None:
 
         "Active" = the linked estimate's status is NOT terminal — NOT IN
         ('won', 'lost'). handed_back/approved estimates stay visible by default
-        (flagged open item pending Carlos). Every estimate appears
+        (LOCKED: confirmed with Carlos). Every estimate appears
         (LOCKED: one estimate → one ITB project). Scope definitions come from
         GET /config/itb-scopes; this returns projects + their scope statuses.
         """

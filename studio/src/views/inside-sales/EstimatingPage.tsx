@@ -113,13 +113,20 @@ export default function EstimatingPage({
     ? requestedTab
     : 'queue'
 
-  function estimateUrl(id: string, tab: EstimatingTabKey): string {
-    return `/inside-sales/estimating/${id}/${tab}`
+  /**
+   * Builds the shell URL for a tab, with or without an open estimate. The
+   * literal `tab/` segment for the no-estimate case disambiguates it from
+   * `:estimateId` — see router.tsx.
+   */
+  function tabUrl(id: string | null, tab: EstimatingTabKey): string {
+    if (id) return `/inside-sales/estimating/${id}/${tab}`
+    if (tab === 'queue') return '/inside-sales/estimating'
+    return `/inside-sales/estimating/tab/${tab}`
   }
 
   /** Tab-bar clicks and feature tabs both drive the tab through the URL. */
   function setActiveTab(tab: EstimatingTabKey) {
-    navigate(estimateId ? estimateUrl(estimateId, tab) : '/inside-sales/estimating')
+    navigate(tabUrl(estimateId, tab))
   }
 
   /**
@@ -142,7 +149,7 @@ export default function EstimatingPage({
   function openEstimateAt(estimate: Estimate, tab: EstimatingTabKey) {
     queryClient.setQueryData([ESTIMATES_KEY, estimate.id], estimate)
     queryClient.invalidateQueries({ queryKey: [ESTIMATES_KEY, 'list'] })
-    navigate(estimateUrl(estimate.id, tab))
+    navigate(tabUrl(estimate.id, tab))
   }
 
   const shell: EstimatingShellApi = useMemo(

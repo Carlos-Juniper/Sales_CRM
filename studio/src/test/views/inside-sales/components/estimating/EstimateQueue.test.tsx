@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Handoff 02 — Estimate Queue tests (Acceptance Criteria §3).
+// Estimate Queue tests (Acceptance Criteria §3).
 //
 // The queue is the estimator's landing view: live stat cards, filter/sort bar
-// with the branch-scope lock-chip, the two intake CTAs (Handoffs 11/12 seams),
+// with the branch-scope lock-chip, the two intake CTAs,
 // and clickable estimate cards that open the Line-Item Editor with the engine
 // keyed off `estimateType` (no mode prompt, ever).
 // ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ function fixtures(): Estimate[] {
 
 /**
  * Scoped-query mock: the SERVER applies row-level branch scope from the
- * session (BRD I-9.5, Handoff 18) — pass `serverScope` to simulate it. The
+ * session (BRD I-9.5) — pass `serverScope` to simulate it. The
  * client sends no branch param.
  */
 function seedScopedList(estimates: Estimate[], serverScope?: string) {
@@ -111,6 +111,7 @@ function renderQueue({ estimates = fixtures(), serverScope, ...props }: RenderQu
     setActiveTab: vi.fn(),
     openEstimate: null,
     setOpenEstimate: vi.fn(),
+    openEstimateAt: vi.fn(),
   }
   render(
     <EstimatingToastProvider>
@@ -139,7 +140,9 @@ describe('EstimateQueue — summary stat cards', () => {
 
     const total = await screen.findByTestId('stat-total-queue')
     expect(within(total).getByText('Total Queue')).toBeInTheDocument()
-    expect(within(total).getByText('4')).toBeInTheDocument()
+    // The list is now a React Query fetch (useEstimates) — wait for it to
+    // resolve rather than asserting on the initial "0" render.
+    await within(total).findByText('4')
 
     // At risk = within the config threshold OR past due (Bravo + Charlie).
     const sla = screen.getByTestId('stat-sla-at-risk')
@@ -253,10 +256,10 @@ describe('EstimateQueue — sorting', () => {
   })
 })
 
-// ----- Intake CTAs (AC 3) — Handoff 11/12 seams -------------------------------
+// ----- Intake CTAs (AC 3) -------------------------------
 
 describe('EstimateQueue — intake CTAs', () => {
-  it('invokes the Maintenance intake seam (Handoff 11 modal opener)', async () => {
+  it('invokes the Maintenance intake seam (modal opener)', async () => {
     const user = userEvent.setup()
     const onMaintenanceIntake = vi.fn()
     renderQueue({ onMaintenanceIntake })
@@ -266,7 +269,7 @@ describe('EstimateQueue — intake CTAs', () => {
     expect(onMaintenanceIntake).toHaveBeenCalledTimes(1)
   })
 
-  it('invokes the Install Intake seam (Handoff 12 modal opener)', async () => {
+  it('invokes the Install Intake seam (modal opener)', async () => {
     const user = userEvent.setup()
     const onInstallIntake = vi.fn()
     renderQueue({ onInstallIntake })
@@ -282,7 +285,7 @@ describe('EstimateQueue — intake CTAs', () => {
     await screen.findAllByTestId('queue-card')
 
     await user.click(screen.getByRole('button', { name: /maintenance intake/i }))
-    expect(await screen.findByText(/Maintenance intake .*Handoff 11/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Maintenance intake modal is not wired up yet/i)).toBeInTheDocument()
   })
 })
 
@@ -311,7 +314,7 @@ describe('EstimateQueue — card fields', () => {
     expect(within(bravo).getByText(/Board meets monthly/)).toBeInTheDocument()
   })
 
-  it('shows the "New — from Sales" status badge for Handoff-12 submissions', async () => {
+  it('shows the "New — from Sales" status badge for install submissions', async () => {
     renderQueue()
     const cards = await screen.findAllByTestId('queue-card')
     const delta = cards.find((c) => within(c).queryByText('Delta Amenity Center'))!
@@ -341,11 +344,11 @@ describe('EstimateQueue — opening an estimate', () => {
     await screen.findAllByTestId('queue-card')
     await user.click(screen.getByText('Alpha Ranch HOA'))
 
-    expect(shell.setOpenEstimate).toHaveBeenCalledTimes(1)
-    const opened = vi.mocked(shell.setOpenEstimate).mock.calls[0][0]!
+    expect(shell.openEstimateAt).toHaveBeenCalledTimes(1)
+    const [opened, tab] = vi.mocked(shell.openEstimateAt).mock.calls[0]!
     expect(opened.id).toBe('q-m1')
     expect(opened.estimateType).toBe('maintenance')
-    expect(shell.setActiveTab).toHaveBeenCalledWith('editor')
+    expect(tab).toBe('editor')
     // The queue never asks the user to pick an engine/mode.
     expect(screen.queryByText(/select .*mode|choose .*mode|editor mode/i)).not.toBeInTheDocument()
   })
@@ -356,16 +359,16 @@ describe('EstimateQueue — opening an estimate', () => {
     await screen.findAllByTestId('queue-card')
     await user.click(screen.getByText('Charlie Streetscape'))
 
-    const opened = vi.mocked(shell.setOpenEstimate).mock.calls[0][0]!
+    const [opened, tab] = vi.mocked(shell.openEstimateAt).mock.calls[0]!
     expect(opened.id).toBe('q-i1')
     expect(opened.estimateType).toBe('install')
-    expect(shell.setActiveTab).toHaveBeenCalledWith('editor')
+    expect(tab).toBe('editor')
   })
 })
 
 // ----- Branch scoping (AC 6) -----------------------------------------------------
 
-describe('EstimateQueue — role & branch scoping (BRD I-9.5 / Handoff 18)', () => {
+describe('EstimateQueue — role & branch scoping (BRD I-9.5)', () => {
   it('sends NO branch param — scope is derived server-side from the session', async () => {
     const { requests } = renderQueue()
     await screen.findAllByTestId('queue-card')
@@ -474,9 +477,9 @@ describe('EstimateQueue — Aspire sync status', () => {
   })
 })
 
-// ----- RFI status surfaced on the queue card (Handoff 24 §3.2) ---------------
+// ----- RFI status surfaced on the queue card (§3.2) ---------------
 
-describe('EstimateQueue — RFI status surfaced (Handoff 24 §3.2)', () => {
+describe('EstimateQueue — RFI status surfaced (§3.2)', () => {
   it('shows the tracked RFI status on the queue card when present', async () => {
     renderQueue({
       estimates: [

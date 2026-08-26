@@ -22,7 +22,6 @@ import {
 import { EstimatingToastProvider } from '@/views/inside-sales/components/estimating/EstimatingToast'
 import { InstallIntakeModal } from '@/views/inside-sales/components/estimating/InstallIntakeModal'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
-import type { Estimate } from '@/types/estimating'
 import type { CreateEstimatePayload } from '@/api/estimating'
 
 // jsdom stubs for Radix Dialog
@@ -38,6 +37,7 @@ function makeShell(overrides?: Partial<EstimatingShellApi>): EstimatingShellApi 
     setActiveTab: vi.fn(),
     openEstimate: null,
     setOpenEstimate: vi.fn(),
+    openEstimateAt: vi.fn(),
     ...overrides,
   }
 }
@@ -526,10 +526,10 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
-    await waitFor(() => expect(shell.setOpenEstimate).toHaveBeenCalled())
-    const opened = vi.mocked(shell.setOpenEstimate).mock.calls[0][0] as Estimate
+    await waitFor(() => expect(shell.openEstimateAt).toHaveBeenCalled())
+    const [opened, tab] = vi.mocked(shell.openEstimateAt).mock.calls[0]!
     expect(opened.estimateType).toBe('install')
-    expect(shell.setActiveTab).toHaveBeenCalledWith('editor')
+    expect(tab).toBe('editor')
     // No mode prompt
     expect(screen.queryByText(/select.*mode|choose.*mode|editor mode/i)).not.toBeInTheDocument()
   })

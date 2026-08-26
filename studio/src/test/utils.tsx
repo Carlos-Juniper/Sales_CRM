@@ -34,6 +34,7 @@ export function createWrapper(initialEntries?: TestRouterEntry[]) {
           */}
           <Routes>
             <Route path="/inside-sales/estimating" element={children} />
+            <Route path="/inside-sales/estimating/tab/:tab" element={children} />
             <Route path="/inside-sales/estimating/:estimateId" element={children} />
             <Route path="/inside-sales/estimating/:estimateId/:tab" element={children} />
             <Route path="*" element={children} />

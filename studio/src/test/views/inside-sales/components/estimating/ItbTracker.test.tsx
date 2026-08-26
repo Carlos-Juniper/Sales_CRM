@@ -10,11 +10,11 @@
 //   3. Status cells render code badges with tooltips; legend is config-driven.
 //   4. Quarter / estimator / CRM filters work; stat cards + roll-ups aggregate filtered set.
 //   5. Rebid de-duplication prevents double-counted dollars in metrics.
-//   6. "CRM status export" produces export (or stub) and toasts row count.
+//   6. "Export Status" downloads a CSV of the filtered view and toasts row count.
 //   7. Sticky header + first columns; horizontal scroll contained.
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@/test/utils'
@@ -364,27 +364,60 @@ describe('ItbTracker — rebid de-duplication', () => {
 })
 
 // ---------------------------------------------------------------------------
-// AC 6: CRM status export
+// AC 6: Export Status (real CSV download, not a fake CRM push)
 // ---------------------------------------------------------------------------
 
-describe('ItbTracker — CRM status export', () => {
-  it('renders the "CRM status export" button', () => {
-    render(<Harness />)
-    expect(screen.getByRole('button', { name: /crm status export/i })).toBeInTheDocument()
+describe('ItbTracker — Export Status', () => {
+  // jsdom implements neither createObjectURL nor revokeObjectURL.
+  const createObjectURL = vi.fn((_blob: Blob) => 'blob:mock-itb-export')
+  const revokeObjectURL = vi.fn((_url: string) => {})
+  let anchorClick: ReturnType<typeof vi.fn<() => void>>
+  let capturedAnchor: HTMLAnchorElement | undefined
+
+  beforeEach(() => {
+    URL.createObjectURL = createObjectURL
+    URL.revokeObjectURL = revokeObjectURL
+    anchorClick = vi.fn<() => void>()
+    capturedAnchor = undefined
+    const originalCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      const el = originalCreateElement(tag)
+      if (tag === 'a') {
+        el.click = anchorClick
+        capturedAnchor = el as HTMLAnchorElement
+      }
+      return el
+    })
   })
 
-  it('clicking export shows a toast with the row count', async () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    createObjectURL.mockClear()
+    revokeObjectURL.mockClear()
+  })
+
+  it('renders the "Export Status" button (not CRM-branded)', () => {
+    render(<Harness />)
+    expect(screen.getByRole('button', { name: /export status/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /crm status export/i })).not.toBeInTheDocument()
+  })
+
+  it('clicking export downloads a CSV file and shows a confirmation toast', async () => {
     const user = userEvent.setup()
     const projects = [makeProject({ id: 'e1' }), makeProject({ id: 'e2' })]
     render(<Harness projects={projects} />)
 
-    await user.click(screen.getByRole('button', { name: /crm status export/i }))
+    await user.click(screen.getByRole('button', { name: /export status/i }))
 
-    // Toast is shown at the bottom of the toast provider
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    const blob = createObjectURL.mock.calls[0][0]
+    expect(blob.type).toContain('csv')
+    expect(anchorClick).toHaveBeenCalledTimes(1)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-itb-export')
     expect(await screen.findByText(/2 project\(s\) exported/i)).toBeInTheDocument()
   })
 
-  it('export toast reflects filtered project count', async () => {
+  it('export reflects filtered project count, not the full unfiltered set', async () => {
     const user = userEvent.setup()
     const projects = [
       makeProject({ id: 'f1', quarter: 'Q1' }),
@@ -394,9 +427,62 @@ describe('ItbTracker — CRM status export', () => {
 
     const quarterSelect = screen.getByTestId('filter-quarter')
     await user.selectOptions(quarterSelect, 'Q1')
-    await user.click(screen.getByRole('button', { name: /crm status export/i }))
+    await user.click(screen.getByRole('button', { name: /export status/i }))
 
     expect(await screen.findByText(/1 project\(s\) exported/i)).toBeInTheDocument()
+  })
+
+  it('CSV includes every fixed column plus one column per scope, driven off the scopes prop', async () => {
+    const user = userEvent.setup()
+    const project = makeProject({
+      id: 'csv-1',
+      name: 'CSV Test Project',
+      aspireNumber: 'ASP-999',
+      branch: 'Raleigh',
+      salesRep: 'Sam Sales',
+      lsEstimator: 'Lee LS',
+      irrEstimator: 'Ira IRR',
+      irrDesigner: 'Dana Designer',
+      bidNumber: 'BID-777',
+      itbDate: '2026-03-01',
+      dueDate: '2026-04-01',
+      rebid: true,
+      estTotalCents: 10_000_00,
+      estLsCents: 6_000_00,
+      estIrCents: 4_000_00,
+      client: 'CSV Client LLC',
+      quarter: 'Q1',
+      notes: 'Some notes, with a comma',
+    })
+    const statuses: ItbScopeStatus[] = [makeStatus('csv-1', 'sc-1', 'X')]
+    render(<Harness projects={[project]} scopes={SCOPES} statuses={statuses} />)
+
+    await user.click(screen.getByRole('button', { name: /export status/i }))
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    const blob = createObjectURL.mock.calls[0][0]
+    const text = await blob.text()
+
+    const header = text.split('\n')[0]
+    for (const col of ['Name', 'Branch', 'Sales Rep', 'LS Estimator', 'IRR Estimator', 'IRR Designer', 'Bid Number', 'ITB Date', 'Due Date', 'Rebid', 'Est Total', 'Est LS $', 'Est IR $', 'Client', 'Quarter', 'Notes']) {
+      expect(header).toContain(col)
+    }
+    for (const scope of SCOPES) {
+      expect(header).toContain(scope.label)
+    }
+
+    expect(text).toContain('CSV Test Project')
+    expect(text).toContain('ASP-999')
+    expect(text).toContain('"Some notes, with a comma"')
+  })
+
+  it('CSV filename is set on the download anchor', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    await user.click(screen.getByRole('button', { name: /export status/i }))
+
+    expect(capturedAnchor?.download).toMatch(/^itb-tracker-.*\.csv$/)
   })
 })
 

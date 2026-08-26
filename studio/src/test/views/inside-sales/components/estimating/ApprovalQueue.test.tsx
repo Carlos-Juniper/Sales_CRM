@@ -18,6 +18,7 @@ import { EstimatingShellContext } from '@/views/inside-sales/components/estimati
 
 const setActiveTab = vi.fn()
 const setOpenEstimateSpy = vi.fn()
+const openEstimateAtSpy = vi.fn()
 
 function Harness({ estimates }: { estimates: Estimate[] }) {
   const [openEstimate, setOpenEstimate] = useState<Estimate | null>(null)
@@ -30,6 +31,10 @@ function Harness({ estimates }: { estimates: Estimate[] }) {
           openEstimate,
           setOpenEstimate: (e) => {
             setOpenEstimateSpy(e)
+            setOpenEstimate(e)
+          },
+          openEstimateAt: (e, tab) => {
+            openEstimateAtSpy(e, tab)
             setOpenEstimate(e)
           },
         }}
@@ -323,7 +328,6 @@ describe('ApprovalQueue — actions', () => {
     render(<Harness estimates={[est]} />)
     const card = screen.getByTestId(`aq-card-${est.id}`)
     await userEvent.click(within(card).getByRole('button', { name: /open estimate/i }))
-    expect(setOpenEstimateSpy).toHaveBeenCalledWith(expect.objectContaining({ id: est.id }))
-    expect(setActiveTab).toHaveBeenCalledWith('editor')
+    expect(openEstimateAtSpy).toHaveBeenCalledWith(expect.objectContaining({ id: est.id }), 'editor')
   })
 })

@@ -10,14 +10,10 @@
 //     change to add/remove a scope column (BRD §2.1 / II-9.12).
 //   - Scope group ordering: estimating → outside_dept → vendor_only.
 //   - Rebid de-duplication for L10 metrics (II-9.2).
-//   - CRM status export: stubs with TODO until the real integration target lands.
-//   - Status legend codes: P·C·S·R·U·X·–·E·I (BRD II-9.12; pending confirmation
-//     with Carlos — see open item below).
-//
-// Open items:
-//   - Final status legend codes (validate vs ITB 2026.xlsx with Carlos).
-//   - Relationship between ITB projects and Queue estimates (auto-populate?).
-//   - Real CRM export target and L10 metric definitions.
+//   - Export Status: downloads the current (filtered) tracker view as a CSV
+//     file — Excel-openable, no new dependency. There is no real CRM
+//     integration target for this button.
+//   - Status legend codes: P·C·S·R·U·X·– (BRD II-9.12, confirmed 2026-08-06).
 // ---------------------------------------------------------------------------
 
 import { useMemo, useState } from 'react'
@@ -86,6 +82,18 @@ function daysToDue(dueDate: string): number {
   const due = new Date(dueDate).getTime()
   const now = Date.now()
   return Math.round((due - now) / 86_400_000)
+}
+
+/** Quote a CSV field only when it contains a comma, quote, or newline (RFC 4180). */
+function csvField(value: string): string {
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`
+  }
+  return value
+}
+
+function csvRow(values: string[]): string {
+  return values.map(csvField).join(',')
 }
 
 // ---------------------------------------------------------------------------
@@ -229,10 +237,49 @@ export function ItbTracker({ projects, scopes, statuses }: ItbTrackerProps) {
     return { estTotal, dedupTotal, estLs, estIr, rebidCount, projectCount: filteredProjects.length }
   }, [filteredProjects])
 
+  /** Download the current (filtered) tracker view as an Excel-openable CSV. */
   function handleExport() {
-    // TODO(crm): wire the real CRM export integration (integration target TBD).
-    // Stub: toast the row count as proof of concept.
-    show(`${filteredProjects.length} project(s) exported to CRM`)
+    const header = [
+      'Name', 'Aspire #', 'Branch', 'Sales Rep', 'LS Estimator', 'IRR Estimator',
+      'IRR Designer', 'Bid Number', 'ITB Date', 'Due Date', 'Rebid',
+      'Est Total', 'Est LS $', 'Est IR $', 'Client', 'Quarter', 'Notes',
+      ...orderedScopes.map((s) => s.label),
+    ]
+
+    const rows = filteredProjects.map((project) => {
+      const fixed = [
+        project.name,
+        project.aspireNumber ?? '',
+        project.branch,
+        project.salesRep ?? '',
+        project.lsEstimator ?? '',
+        project.irrEstimator ?? '',
+        project.irrDesigner ?? '',
+        project.bidNumber ?? '',
+        project.itbDate,
+        project.dueDate,
+        project.rebid ? 'Yes' : 'No',
+        centsToDollars(project.estTotalCents).toFixed(2),
+        centsToDollars(project.estLsCents).toFixed(2),
+        centsToDollars(project.estIrCents).toFixed(2),
+        project.client,
+        project.quarter,
+        project.notes ?? '',
+      ]
+      const scopeCodes = orderedScopes.map((scope) => statusLookup.get(`${project.id}|${scope.id}`) ?? '-')
+      return csvRow([...fixed, ...scopeCodes])
+    })
+
+    const csv = [csvRow(header), ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    const suffix = filterQuarter !== 'all' ? filterQuarter : new Date().toISOString().slice(0, 10)
+    anchor.download = `itb-tracker-${suffix}.csv`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    show(`${filteredProjects.length} project(s) exported`)
   }
 
   // Column header styles (rotated text for scope columns)
@@ -296,7 +343,7 @@ export function ItbTracker({ projects, scopes, statuses }: ItbTrackerProps) {
             className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-[#2E7D52] px-3 text-[11.5px] font-semibold text-white hover:bg-[#256844] cursor-pointer"
           >
             <Download className="h-3.5 w-3.5" />
-            CRM status export
+            Export Status
           </button>
         </div>
       </div>
@@ -508,12 +555,6 @@ export function ItbTracker({ projects, scopes, statuses }: ItbTrackerProps) {
           </span>
         ))}
       </div>
-
-      {/* Open items note */}
-      <p className="text-[10px] text-[hsl(var(--muted-fg))]">
-        ⚠ Open items: final status legend codes (validate vs ITB 2026.xlsx with Carlos) · relationship
-        between ITB projects and Queue estimates · real CRM export target.
-      </p>
     </div>
   )
 }

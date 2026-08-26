@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Estimate Queue (Handoff 02) — the estimator's landing/worklist view.
+// Estimate Queue — the estimator's landing/worklist view.
 //
 // Replaces the shared Excel "list" with a role-and-branch-scoped queue visible
 // only to Estimating/managers (BRD I-9.3 / I-9.5 / I-9.6). Estimates land here
@@ -10,13 +10,13 @@
 // SLA (BRD I-6.2): 14-calendar-day return window; countdown + at-risk state
 // computed from `dueBackDate` against SLA_CONFIG (lib/estimating/sla.ts).
 //
-// ── Handoff 11/12 seams ──────────────────────────────────────────────────
+// ── Intake CTA seams ──────────────────────────────────────────────────
 // The two intake CTAs accept opener callbacks:
 //   <EstimateQueue onMaintenanceIntake={openMaintModal} onInstallIntake={openInstallModal} />
-// Until those modal handoffs attach, clicking shows a clearly-marked stub toast.
+// Until those modals attach, clicking shows a clearly-marked stub toast.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   AlertTriangle,
   Calendar,
@@ -44,7 +44,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { estimatingApi } from '@/api/estimating'
+import { useEstimates } from '@/hooks/useEstimate'
 import { SyncStatusBadge } from './SyncStatusBadge'
 import { acresFromSqft } from '@/lib/estimating/calc'
 import { SLA_CONFIG, slaCountdownLabel, slaDaysLeft, slaStateFor, type SlaState } from '@/lib/estimating/sla'
@@ -57,7 +57,7 @@ import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
 
 // ----- Branch scope ----------------------------------------------------------
-// The scope is enforced SERVER-side from the JWT (BRD I-9.5, Handoff 18): the
+// The scope is enforced SERVER-side from the JWT (BRD I-9.5): the
 // API derives the branch from the authenticated user and ignores any client
 // `branch` param for non-exec roles, so the client sends nothing. The
 // lock-chip only *displays* the applied scope.
@@ -141,11 +141,11 @@ function compareBy(key: SortKey, a: Estimate, b: Estimate): number {
 // ----- Component -----------------------------------------------------------------
 
 export interface EstimateQueueProps {
-  /** Handoff 11 seam — opens the Maintenance Intake modal (`estimateType: 'maintenance'`). */
+  /** Opens the Maintenance Intake modal (`estimateType: 'maintenance'`). */
   onMaintenanceIntake?: () => void
-  /** Handoff 12 seam — opens the Install Proposal Request modal (`estimateType: 'install'`). */
+  /** Opens the Install Proposal Request modal (`estimateType: 'install'`). */
   onInstallIntake?: () => void
-  /** CTA label is configurable per Handoff 02 §1. */
+  /** CTA label is configurable. */
   installCtaLabel?: string
 }
 
@@ -154,40 +154,19 @@ export function EstimateQueue({
   onInstallIntake,
   installCtaLabel = 'Install Intake',
 }: EstimateQueueProps) {
-  const { setOpenEstimate, setActiveTab } = useEstimatingShell()
+  const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
   const user = useAuthStore((s) => s.user)
   const { seesAllBranches } = useRole()
   const branchScope = branchScopeLabel(seesAllBranches, user?.branch_id)
   const { findUser } = useUsers()
 
-  const [estimates, setEstimates] = useState<Estimate[] | null>(null)
+  // Branch scope is applied server-side from the session — no branch param.
+  const { data: estimatesData, isError, refetch } = useEstimates()
+  const estimates = estimatesData ?? (isError ? [] : null)
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortKey, setSortKey] = useState<SortKey>('priority')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
-
-  // Branch scope is applied server-side from the session — no branch param.
-  const reload = useCallback(() => {
-    return estimatingApi
-      .list()
-      .then(setEstimates)
-      .catch(() => setEstimates([]))
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    estimatingApi
-      .list()
-      .then((data) => {
-        if (!cancelled) setEstimates(data)
-      })
-      .catch(() => {
-        if (!cancelled) setEstimates([])
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -200,18 +179,17 @@ export function EstimateQueue({
 
   function openEstimate(estimate: Estimate) {
     // The editor auto-selects its engine from `estimateType` — no mode prompt.
-    setOpenEstimate(estimate)
-    setActiveTab('editor')
+    openEstimateAt(estimate, 'editor')
   }
 
-  // Handoff 11/12 stubs — replaced by the real modal openers when they land.
+  // Stubs — replaced by the real modal openers when they land.
   function handleMaintenanceIntake() {
     if (onMaintenanceIntake) onMaintenanceIntake()
-    else show('Maintenance intake modal arrives with Handoff 11')
+    else show('Maintenance intake modal is not wired up yet')
   }
   function handleInstallIntake() {
     if (onInstallIntake) onInstallIntake()
-    else show('Install intake modal arrives with Handoff 12')
+    else show('Install intake modal is not wired up yet')
   }
 
   const items = useMemo(() => {
@@ -327,7 +305,7 @@ export function EstimateQueue({
           </p>
         ) : (
           items.map((estimate) => (
-            <QueueCard key={estimate.id} estimate={estimate} onOpen={openEstimate} onRetried={reload} findUser={findUser} />
+            <QueueCard key={estimate.id} estimate={estimate} onOpen={openEstimate} onRetried={() => void refetch()} findUser={findUser} />
           ))
         )}
       </div>
@@ -462,7 +440,7 @@ function QueueCard({
           </div>
         </div>
 
-        {/* Handoff 24 §3.2 — tracked RFI status, surfaced for visibility only
+        {/* Tracked RFI status, surfaced for visibility only
             (nothing gates approval on it). */}
         {estimate.rfiStatus && (
           <p

@@ -348,6 +348,8 @@ export interface ProposalPreviewSlotProps {
   lead: Lead
   estimate: Estimate
   onBack: () => void
+  /** The saved proposal id — null when the proposal has not yet been persisted. */
+  proposalId?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -925,6 +927,7 @@ export function ProposalBuilder({ lead, estimate, proposalId, onClose }: Proposa
           lead={lead}
           estimate={estimate}
           onBack={() => setStep('form')}
+          proposalId={proposalId ?? createMutation.data?.id ?? null}
           allTeamMembers={allBranchTeamMembers}
           teamMembers={allBranchTeamMembers.filter((m) =>
             formState.teamMemberIds.includes(m.id),

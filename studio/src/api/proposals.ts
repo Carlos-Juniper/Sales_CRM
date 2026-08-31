@@ -3,6 +3,7 @@ import type {
   BranchProfile,
   ClientReference,
   PortfolioProperty,
+  ProposalRender,
   ProposalRequest,
   TeamMember,
   TeamMemberType,
@@ -125,4 +126,26 @@ export const proposalsApi = {
     const qs = new URLSearchParams({ leadId: params.leadId })
     return apiClient.get<ProposalRequest[]>(`/proposals?${qs.toString()}`)
   },
+
+  /**
+   * POST /api/proposals/:id/render
+   * Triggers a server-side headless Chromium PDF render.
+   * Returns the render result with a signed download URL.
+   */
+  render: (id: string) =>
+    apiClient.post<ProposalRender>(`/proposals/${id}/render`, {}),
+
+  /**
+   * GET /api/proposals/:id/renders
+   * Lists all PDF renders for a proposal, ordered by version DESC.
+   */
+  listRenders: (id: string) =>
+    apiClient.get<ProposalRender[]>(`/proposals/${id}/renders`),
+
+  /**
+   * Constructs the redirect URL for downloading a specific render version.
+   * The API returns 302 → signed GCS URL; open directly in new tab.
+   */
+  renderDownloadUrl: (id: string, version: number) =>
+    `/api/proposals/${id}/renders/${version}/download`,
 }

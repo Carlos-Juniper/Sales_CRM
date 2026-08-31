@@ -119,6 +119,20 @@ export interface StartupPlanInput {
   ongoing: string[]
 }
 
+/** Server-side PDF render result — one row per render attempt stored in proposal_renders. */
+export interface ProposalRender {
+  id: string
+  proposalId: string
+  version: number
+  objectKey: string
+  pageCount: number | null
+  status: 'complete' | 'pending' | 'failed'
+  errorMessage: string | null
+  renderedBy: string
+  durationMs: number | null
+  renderedAt: string
+}
+
 /** Persisted row — every generated proposal is saved so it can be reopened/edited (no ephemeral-only state, per CLAUDE.md). */
 export interface ProposalRequest {
   id: string

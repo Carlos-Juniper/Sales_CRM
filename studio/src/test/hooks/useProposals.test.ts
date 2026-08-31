@@ -22,12 +22,15 @@ import {
   useProposalsByLead,
   useCreateProposal,
   useUpdateProposal,
+  useRenderProposal,
+  useProposalRenders,
   PROPOSAL_CONFIG_KEY,
 } from '@/hooks/useProposals'
 import type {
   BranchProfile,
   ClientReference,
   PortfolioProperty,
+  ProposalRender,
   ProposalRequest,
   TeamMember,
 } from '@/types/proposal'
@@ -370,5 +373,90 @@ describe('useUpdateProposal — mutation and dual invalidation', () => {
 describe('PROPOSAL_CONFIG_KEY constant', () => {
   it('is exported and equals "proposals-config"', () => {
     expect(PROPOSAL_CONFIG_KEY).toBe('proposals-config')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// useRenderProposal — mutation
+// ---------------------------------------------------------------------------
+
+const mockRender: ProposalRender = {
+  id: 'pr-abc123def456',
+  proposalId: 'prop-001',
+  version: 1,
+  objectKey: 'proposal/generated/prop-001/v1.pdf',
+  pageCount: 22,
+  status: 'complete',
+  errorMessage: null,
+  renderedBy: 'user-001',
+  durationMs: 12345,
+  renderedAt: '2026-08-31T10:00:00Z',
+}
+
+describe('useRenderProposal — mutation and invalidation', () => {
+  it('fires POST /api/proposals/:id/render with the proposal id', async () => {
+    let capturedUrl = ''
+    server.use(
+      http.post('/api/proposals/prop-001/render', ({ request }) => {
+        capturedUrl = request.url
+        return HttpResponse.json(mockRender, { status: 200 })
+      }),
+      http.get('/api/proposals/prop-001/renders', () => HttpResponse.json([])),
+    )
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useRenderProposal(), { wrapper })
+
+    act(() => { result.current.mutate('prop-001') })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(capturedUrl).toContain('/api/proposals/prop-001/render')
+    expect(result.current.data?.version).toBe(1)
+  })
+
+  it('isError is true when the server returns 503', async () => {
+    server.use(
+      http.post('/api/proposals/prop-001/render', () =>
+        HttpResponse.json({ detail: 'Browser not started' }, { status: 503 }),
+      ),
+    )
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useRenderProposal(), { wrapper })
+
+    act(() => { result.current.mutate('prop-001') })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// useProposalRenders — query key ['proposals', id, 'renders']
+// ---------------------------------------------------------------------------
+
+describe('useProposalRenders — query key scoping and polling', () => {
+  it('is disabled (idle) when id is null', () => {
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useProposalRenders(null), { wrapper })
+    expect(result.current.fetchStatus).toBe('idle')
+  })
+
+  it('fetches renders for a proposal id', async () => {
+    server.use(
+      http.get('/api/proposals/prop-001/renders', () => HttpResponse.json([mockRender])),
+    )
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useProposalRenders('prop-001'), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toHaveLength(1)
+    expect(result.current.data?.[0].id).toBe('pr-abc123def456')
+  })
+
+  it('returns an empty array when no renders exist', async () => {
+    server.use(
+      http.get('/api/proposals/prop-001/renders', () => HttpResponse.json([])),
+    )
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useProposalRenders('prop-001'), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toHaveLength(0)
   })
 })

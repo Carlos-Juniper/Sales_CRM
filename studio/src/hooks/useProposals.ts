@@ -19,6 +19,7 @@ import type {
   BranchProfile,
   ClientReference,
   PortfolioProperty,
+  ProposalRender,
   ProposalRequest,
   TeamMember,
   TeamMemberType,
@@ -213,5 +214,46 @@ export function useUpdateProposal() {
       qc.invalidateQueries({ queryKey: ['proposals', 'list', updated.leadId] })
     },
     onError: () => toast('Failed to save proposal', { variant: 'error' }),
+  })
+}
+
+/**
+ * Trigger a server-side PDF render for a proposal.
+ * On success invalidates the renders list for the proposal.
+ * Query key for renders list: ['proposals', id, 'renders']
+ */
+export function useRenderProposal() {
+  const qc = useQueryClient()
+  const toast = useUIStore((s) => s.toast)
+
+  return useMutation<ProposalRender, Error, string>({
+    mutationFn: (proposalId: string) => proposalsApi.render(proposalId),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['proposals', result.proposalId, 'renders'] })
+      toast('PDF generated successfully', { variant: 'success' })
+    },
+    onError: () => toast('Failed to generate PDF — please try again', { variant: 'error' }),
+  })
+}
+
+/**
+ * List all PDF renders for a proposal, ordered by version DESC.
+ * Polls every 5 seconds when any render has status 'pending'.
+ * Disabled when id is null.
+ * Query key: ['proposals', id, 'renders']
+ */
+export function useProposalRenders(id: string | null) {
+  return useQuery<ProposalRender[]>({
+    queryKey: ['proposals', id, 'renders'],
+    queryFn: () => proposalsApi.listRenders(id!),
+    enabled: !!id,
+    staleTime: 10_000,
+    refetchInterval: (query) => {
+      const renders = query.state.data
+      if (Array.isArray(renders) && renders.some((r) => r.status === 'pending')) {
+        return 5_000
+      }
+      return false
+    },
   })
 }

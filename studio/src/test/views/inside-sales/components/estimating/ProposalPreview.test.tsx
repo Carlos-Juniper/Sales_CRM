@@ -40,6 +40,7 @@ import type { ProposalFormState } from '@/views/inside-sales/components/estimati
 vi.mock('@/hooks/useProposals', () => ({
   useProposalConfig: vi.fn(),
   useProposalMediaUrl: vi.fn(),
+  useRenderProposal: vi.fn(),
   // other hooks not consumed by ProposalPreview
   useTeamMembers: vi.fn(),
   useClientReferences: vi.fn(),
@@ -47,12 +48,14 @@ vi.mock('@/hooks/useProposals', () => ({
   useProposal: vi.fn(),
   useCreateProposal: vi.fn(),
   useUpdateProposal: vi.fn(),
+  useProposalRenders: vi.fn(),
 }))
 
-import { useProposalConfig, useProposalMediaUrl } from '@/hooks/useProposals'
+import { useProposalConfig, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
 
 const mockUseProposalConfig = useProposalConfig as MockedFunction<typeof useProposalConfig>
 const mockUseProposalMediaUrl = useProposalMediaUrl as MockedFunction<typeof useProposalMediaUrl>
+const mockUseRenderProposal = useRenderProposal as MockedFunction<typeof useRenderProposal>
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -290,6 +293,8 @@ const ALL_MEMBERS = [
 // Setup
 // ---------------------------------------------------------------------------
 
+const mockMutate = vi.fn()
+
 function setupDefaultMocks() {
   mockUseProposalConfig.mockReturnValue({
     branches: [mockBranch1, mockBranch2],
@@ -306,6 +311,13 @@ function setupDefaultMocks() {
     data: undefined,
     isLoading: false,
   } as ReturnType<typeof useProposalMediaUrl>)
+  mockUseRenderProposal.mockReturnValue({
+    mutate: mockMutate,
+    isPending: false,
+    isSuccess: false,
+    isError: false,
+    data: undefined,
+  } as ReturnType<typeof useRenderProposal>)
 }
 
 function renderPreview(
@@ -315,6 +327,7 @@ function renderPreview(
     executiveTeamMembers?: TeamMember[]
     clientReferences?: ClientReference[]
     portfolioProperties?: PortfolioProperty[]
+    proposalId?: string | null
   },
 ) {
   const formState = makeFormState(formStateOverrides)
@@ -324,6 +337,7 @@ function renderPreview(
       lead={mockLead}
       estimate={mockEstimate}
       onBack={vi.fn()}
+      proposalId={propsOverrides?.proposalId ?? 'prop-001'}
       allTeamMembers={ALL_MEMBERS}
       teamMembers={propsOverrides?.teamMembers ?? []}
       executiveTeamMembers={propsOverrides?.executiveTeamMembers ?? []}
@@ -334,6 +348,7 @@ function renderPreview(
 }
 
 beforeEach(() => {
+  mockMutate.mockReset()
   useAuthStore.setState({
     user: makeUser({ id: 'user-001', name: 'Test Rep', role: 'inside_sales' }),
   })
@@ -724,5 +739,57 @@ describe('ProposalPreview — variable data', () => {
     )
     const page = screen.getByTestId('page-meet-our-team-executive')
     expect(within(page).getByText('Eve CEO')).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 7. Generate PDF button (Slice 8)
+// ---------------------------------------------------------------------------
+
+describe('ProposalPreview — Generate PDF button', () => {
+  it('renders the Generate PDF button', () => {
+    renderPreview()
+    expect(screen.getByTestId('generate-pdf-btn')).toBeInTheDocument()
+  })
+
+  it('Generate PDF button text is "Generate PDF" by default', () => {
+    renderPreview()
+    expect(screen.getByTestId('generate-pdf-btn')).toHaveTextContent('Generate PDF')
+  })
+
+  it('clicking Generate PDF calls mutate with the proposalId', async () => {
+    const { userEvent } = await import('@testing-library/user-event')
+    const user = userEvent.setup()
+    renderPreview({}, { proposalId: 'prop-test-123' })
+    const btn = screen.getByTestId('generate-pdf-btn')
+    await user.click(btn)
+    expect(mockMutate).toHaveBeenCalledWith('prop-test-123', expect.any(Object))
+  })
+
+  it('Generate PDF button is disabled and shows loading when isPending', () => {
+    mockUseRenderProposal.mockReturnValue({
+      mutate: mockMutate,
+      isPending: true,
+      isSuccess: false,
+      isError: false,
+      data: undefined,
+    } as ReturnType<typeof useRenderProposal>)
+    renderPreview()
+    const btn = screen.getByTestId('generate-pdf-btn')
+    expect(btn).toBeDisabled()
+    expect(btn).toHaveTextContent('Generating…')
+  })
+
+  it('Generate PDF button is disabled when proposalId is null', () => {
+    renderPreview({}, { proposalId: null })
+    expect(screen.getByTestId('generate-pdf-btn')).toBeDisabled()
+  })
+
+  it('Print button is also rendered as a fallback', () => {
+    renderPreview()
+    // The Print button is not the Generate PDF button
+    const buttons = screen.getAllByRole('button')
+    const printBtn = buttons.find((b) => b.textContent?.includes('Print') && !b.textContent?.includes('Generate'))
+    expect(printBtn).toBeDefined()
   })
 })

@@ -26,7 +26,7 @@
 //  StartupPlan306090, JuniperSync, JuniperMapping (2 pages), MeetOurTeamExecutive
 // ---------------------------------------------------------------------------
 
-import { ArrowLeft, Leaf, Phone, Mail, MapPin, Printer } from 'lucide-react'
+import { ArrowLeft, Leaf, Phone, Mail, MapPin, Printer, FileDown, Loader2 } from 'lucide-react'
 import { COMPANY_INFO } from '@/lib/constants'
 import {
   ROOTED_IN_FLORIDA_CONTENT,
@@ -39,7 +39,7 @@ import {
   JUNIPER_MAPPING_CONTENT,
 } from '@/lib/proposal/staticContent'
 import { nearestBranches } from '@/lib/proposal/proximity'
-import { useProposalConfig, useProposalMediaUrl } from '@/hooks/useProposals'
+import { useProposalConfig, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
 import type { ProposalPreviewSlotProps } from './ProposalBuilder'
 import type {
   TeamMember,
@@ -916,6 +916,7 @@ export function ProposalPreview({
   formState,
   lead,
   onBack,
+  proposalId,
   allTeamMembers,
   teamMembers,
   executiveTeamMembers,
@@ -923,6 +924,7 @@ export function ProposalPreview({
   portfolioProperties,
 }: ProposalPreviewProps) {
   const { branches, insurance } = useProposalConfig()
+  const renderMutation = useRenderProposal()
 
   // Proximity footer: 2–3 nearest branches to the lead's lat/lng
   const nearbyBranches = nearestBranches(lead.lat, lead.lng, branches, 3)
@@ -953,14 +955,41 @@ export function ProposalPreview({
           <ArrowLeft className="h-3.5 w-3.5" />
           Back to form
         </button>
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="inline-flex items-center gap-2 rounded-lg bg-[#2E7D52] px-4 py-2 text-xs font-semibold text-white hover:opacity-90"
-        >
-          <Printer className="h-3.5 w-3.5" />
-          Print / Export PDF
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Generate PDF — server-side Chromium render, GCS-persisted */}
+          <button
+            type="button"
+            data-testid="generate-pdf-btn"
+            disabled={renderMutation.isPending || !proposalId}
+            onClick={() => {
+              if (!proposalId) return
+              renderMutation.mutate(proposalId, {
+                onSuccess: (result) => {
+                  if (result.downloadUrl) {
+                    window.open(result.downloadUrl, '_blank')
+                  }
+                },
+              })
+            }}
+            className="inline-flex items-center gap-2 rounded-lg bg-[#2E7D52] px-4 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {renderMutation.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileDown className="h-3.5 w-3.5" />
+            )}
+            {renderMutation.isPending ? 'Generating…' : 'Generate PDF'}
+          </button>
+          {/* Print fallback — browser print dialog */}
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-2 rounded-lg border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium text-[hsl(var(--fg))] hover:bg-[hsl(var(--muted))]"
+          >
+            <Printer className="h-3.5 w-3.5" />
+            Print
+          </button>
+        </div>
       </div>
 
       {/* All proposal pages */}

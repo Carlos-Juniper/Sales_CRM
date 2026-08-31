@@ -331,13 +331,17 @@ function renderPreview(
   },
 ) {
   const formState = makeFormState(formStateOverrides)
+  // Use 'prop-001' as the default only when proposalId was NOT explicitly provided.
+  const proposalId = propsOverrides && 'proposalId' in propsOverrides
+    ? propsOverrides.proposalId
+    : 'prop-001'
   return render(
     <ProposalPreview
       formState={formState}
       lead={mockLead}
       estimate={mockEstimate}
       onBack={vi.fn()}
-      proposalId={propsOverrides?.proposalId ?? 'prop-001'}
+      proposalId={proposalId}
       allTeamMembers={ALL_MEMBERS}
       teamMembers={propsOverrides?.teamMembers ?? []}
       executiveTeamMembers={propsOverrides?.executiveTeamMembers ?? []}

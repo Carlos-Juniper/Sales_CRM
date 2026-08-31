@@ -147,6 +147,11 @@ ON DUPLICATE KEY UPDATE
     address1 = VALUES(address1), city = VALUES(city), state = VALUES(state), zip = VALUES(zip),
     phone = VALUES(phone), manager_contact_id = VALUES(manager_contact_id),
     manager_name = VALUES(manager_name), legal_name = VALUES(legal_name), time_zone = VALUES(time_zone);
+-- ⚠️  AMENDMENT A.2 (migration 014, 2026-08-26): lat, lng, region_id are
+-- deliberately EXCLUDED from the UPDATE list above. These three columns are
+-- manually curated proposal data (seeded in migration 015); they must NOT be
+-- overwritten by an Aspire export reseed. Any future refresh of this INSERT
+-- block MUST keep lat / lng / region_id out of ON DUPLICATE KEY UPDATE.
 
 -- 2b. sales_territories — the "City, ST" units scoping/intake/push operate on -
 CREATE TABLE IF NOT EXISTS sales_territories (

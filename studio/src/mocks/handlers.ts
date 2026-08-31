@@ -496,10 +496,12 @@ const allHandlers = [
     const status = url.searchParams.get('status')
     // Row-level branch scope (BRD I-9.5) — enforced server-side in production.
     const branch = url.searchParams.get('branch')
+    const leadId = url.searchParams.get('leadId')
     let filtered = [...estimates]
     if (estimateType) filtered = filtered.filter((e) => e.estimateType === estimateType)
     if (status) filtered = filtered.filter((e) => e.status === status)
     if (branch) filtered = filtered.filter((e) => e.branch === branch)
+    if (leadId) filtered = filtered.filter((e) => e.leadId === leadId)
     return HttpResponse.json(filtered)
   }),
 

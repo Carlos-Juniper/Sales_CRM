@@ -330,9 +330,11 @@ async def require_auth(session: Optional[str] = Cookie(default=None)) -> dict:
 # Routes live in api/estimating.py; registered here so they share require_auth.
 from api import estimating as _estimating  # noqa: E402
 from api import properties as _properties  # noqa: E402
+from api import proposals as _proposals    # noqa: E402
 
 _estimating.register(app, require_auth)
 _properties.register(app, require_auth)
+_proposals.register(app, require_auth)
 
 
 # ── Leads ────────────────────────────────────────────────────────────────────

@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import { Send } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { useBidByLeadId, useCreateBid, useUpdateBid } from '@/hooks/useBids'
 import { useUpdateLead } from '@/hooks/useLeads'
 import { formatCurrency, formatDate, daysUntil, cn } from '@/lib/utils'
+import { estimatingApi } from '@/api/estimating'
+import { ProposalBuilder } from '@/views/inside-sales/components/estimating/ProposalBuilder'
 import type { Lead } from '@/types'
 
 interface BidTabProps {
@@ -12,11 +15,22 @@ interface BidTabProps {
 
 export function BidTab({ lead }: BidTabProps) {
   const [bidAmountDraft, setBidAmountDraft] = useState<string | null>(null)
+  const [showProposalBuilder, setShowProposalBuilder] = useState(false)
 
   const { data: existingBid } = useBidByLeadId(lead.id)
   const createBid = useCreateBid()
   const updateBid = useUpdateBid()
   const updateLead = useUpdateLead()
+
+  // Fetch the approved estimate linked to this lead — needed to gate the
+  // Generate Proposal button. Only queried when lead.status === 'approved'.
+  const { data: approvedEstimates, isLoading: loadingApprovedEstimate } = useQuery({
+    queryKey: ['estimates', 'approved', lead.id],
+    queryFn: () => estimatingApi.list({ leadId: lead.id, status: 'approved' }),
+    enabled: lead.status === 'approved',
+    staleTime: 30_000,
+  })
+  const approvedEstimate = approvedEstimates?.[0] ?? null
 
   const effectiveBidAmount = bidAmountDraft ?? (existingBid ? existingBid.estimated_value.toString() : '')
 
@@ -136,6 +150,33 @@ export function BidTab({ lead }: BidTabProps) {
           </div>
         )}
       </div>
+
+      {/* Proposal section — only rendered when lead is approved AND an approved
+          estimate exists for this lead. Absent (not disabled) otherwise. */}
+      {lead.status === 'approved' && !loadingApprovedEstimate && approvedEstimate && (
+        <div>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Proposal</p>
+
+          {showProposalBuilder ? (
+            <ProposalBuilder
+              lead={lead}
+              estimate={approvedEstimate}
+              onClose={() => setShowProposalBuilder(false)}
+            />
+          ) : (
+            <div className="flex flex-col items-center py-8 border border-dashed border-gray-200 rounded-lg text-center gap-3">
+              <p className="text-sm text-gray-500">No proposal generated yet for this lead.</p>
+              <Button
+                size="sm"
+                className="bg-[#2E7D52] hover:bg-[#256644] text-white"
+                onClick={() => setShowProposalBuilder(true)}
+              >
+                Generate Proposal
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Bid Tracker */}
       <div>

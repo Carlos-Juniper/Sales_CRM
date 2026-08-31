@@ -1201,6 +1201,13 @@ def register(app, require_auth) -> None:
         estimate_type: Optional[str] = Query(default=None),
         status: Optional[str] = Query(default=None),
         branch: Optional[str] = Query(default=None),
+        # Slice 4 (Handoff 37): filter by the lead that originated the estimate.
+        # Uses estimates.lead_id (added in migration 010). Allows BidTab to fetch
+        # only the approved estimate for this lead without client-side filtering
+        # of the full list (§7). Note: estimates.branch is a territory string
+        # (e.g. "Fort Myers, FL") while leads.branch_id is the same vocabulary —
+        # they are independent of aspire_branch_id (Amendment A.1).
+        lead_id: Optional[str] = Query(default=None, alias="leadId"),
         _user: dict = Depends(require_auth),
     ) -> list:
         # Branch scope is derived from the AUTHENTICATED user (BRD I-9.5)
@@ -1224,6 +1231,10 @@ def register(app, require_auth) -> None:
         elif branch:  # cross-branch role opting into a narrower view
             conditions.append("branch = %s")
             params.append(branch)
+        if lead_id:
+            # Filter to estimates linked to the given lead (migration 010 column).
+            conditions.append("lead_id = %s")
+            params.append(lead_id)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         rows = await query(
             f"SELECT id FROM estimates {where} ORDER BY created_at DESC", params

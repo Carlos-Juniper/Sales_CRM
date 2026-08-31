@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import os
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -312,7 +313,10 @@ class PatchPMContactBody(BaseModel):
 
 # ── Auth dependency ──────────────────────────────────────────────────────────
 
-async def require_auth(session: Optional[str] = Cookie(default=None)) -> dict:
+async def require_auth(
+    request: Request,
+    session: Optional[str] = Cookie(default=None),
+) -> dict:
     if not session:
         raise HTTPException(status_code=401, detail="Not authenticated")
     if not JWT_SECRET:
@@ -323,6 +327,35 @@ async def require_auth(session: Optional[str] = Cookie(default=None)) -> dict:
         raise HTTPException(status_code=401, detail="Session expired")
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Session expired or invalid")
+
+    # ── Render-token scope guard ─────────────────────────────────────────────
+    # Render tokens are short-lived (120 s) JWTs with scope="proposal_render".
+    # They are only valid for:
+    #   • GET requests
+    #   • /api/proposals/config/... (config look-up routes, no proposal-id check)
+    #   • /api/proposals/{their proposal_id} and sub-paths
+    # Any other use → 403.
+    if payload.get("scope") == "proposal_render":
+        if request.method != "GET":
+            raise HTTPException(
+                status_code=403,
+                detail="Render token not valid for this resource",
+            )
+        path = request.url.path
+        # Config routes are always allowed (check first so "config" is not
+        # mistaken for a proposal_id).
+        if path.startswith("/api/proposals/config/"):
+            return payload
+        # Proposal-scoped routes: must match the token's proposal_id exactly.
+        pid = payload.get("proposal_id", "")
+        pattern = rf"^/api/proposals/{re.escape(pid)}(/.*)?$"
+        if pid and re.match(pattern, path):
+            return payload
+        raise HTTPException(
+            status_code=403,
+            detail="Render token not valid for this resource",
+        )
+
     return payload
 
 
@@ -1508,6 +1541,33 @@ def _issue_jwt(user: dict, response: Response) -> dict:
         max_age=SESSION_DURATION,
     )
     return {k: v for k, v in payload.items() if k != "exp"}
+
+
+@app.post("/api/proposals/{proposal_id}/render-token")
+async def issue_render_token(
+    proposal_id: str,
+    user: dict = Depends(require_auth),
+) -> dict:
+    """Mint a short-lived (120 s) render-scoped JWT for a specific proposal.
+
+    The caller must hold a normal session cookie.  The returned token may be
+    used only for GET requests against /api/proposals/<proposal_id>/... and
+    /api/proposals/config/... routes.
+    """
+    if not JWT_SECRET:
+        raise HTTPException(status_code=500, detail="JWT_SECRET not configured")
+    payload = {
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": user["role"],
+        "branch_id": user["branch_id"],
+        "scope": "proposal_render",
+        "proposal_id": proposal_id,
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=120),
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return {"token": token}
 
 
 def _avatar_initials(name: str) -> str:

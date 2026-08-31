@@ -11,6 +11,7 @@ import AccountsPage from '@/views/inside-sales/AccountsPage'
 import ConnectionsPage from '@/views/inside-sales/ConnectionsPage'
 import BranchManagerPage from '@/views/branch-manager'
 import { InsideSalesGuard } from '@/guards'
+import ProposalPrintRoute from '@/views/inside-sales/components/estimating/ProposalPrintRoute'
 
 export const router = createBrowserRouter([
   {
@@ -20,6 +21,10 @@ export const router = createBrowserRouter([
   {
     path: '/auth/callback',
     element: <AuthCallbackPage />,
+  },
+  {
+    path: '/proposals/:id/print',
+    element: <ProposalPrintRoute />,
   },
   {
     path: '/',

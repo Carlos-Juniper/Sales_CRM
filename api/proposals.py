@@ -205,6 +205,23 @@ def _json_col_out(v: Any) -> Any:
     return v
 
 
+def _render_out(row: dict) -> dict:
+    """Map a proposal_renders DB row to camelCase API response."""
+    created_at = row.get("created_at")
+    return {
+        "id": row["id"],
+        "proposalId": row["proposal_id"],
+        "version": row["version"],
+        "objectKey": row["object_key"],
+        "pageCount": row.get("page_count"),
+        "status": row["status"],
+        "errorMessage": row.get("error_message"),
+        "renderedBy": row["rendered_by"],
+        "durationMs": row.get("duration_ms"),
+        "renderedAt": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
+    }
+
+
 def _proposal_request_out(r: dict) -> dict:
     """Map a proposal_requests row to the ProposalRequest API shape (camelCase).
 
@@ -602,3 +619,80 @@ def register(app, require_auth) -> None:
                 "SELECT * FROM proposal_requests ORDER BY created_at DESC",
             )
         return [_proposal_request_out(r) for r in rows]
+
+    # ── POST /api/proposals/:id/render ────────────────────────────────────────
+    # Trigger a server-side headless Chromium PDF render for a proposal.
+    # Returns the render result with download URL on success.
+
+    @app.post("/api/proposals/{proposal_id}/render")
+    async def render_proposal(
+        proposal_id: str,
+        user: dict = Depends(require_auth),
+    ):
+        rows = await query(
+            "SELECT id FROM proposal_requests WHERE id = %s",
+            (proposal_id,),
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+
+        try:
+            from api.proposal_render import render_proposal_pdf
+            result = await render_proposal_pdf(proposal_id, user)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "30"})
+        except Exception as exc:
+            logger.error("Render failed for proposal %s: %s", proposal_id, exc)
+            raise HTTPException(status_code=503, detail="Render failed", headers={"Retry-After": "30"})
+
+        return {
+            "id": result.id,
+            "status": result.status,
+            "objectKey": result.object_key,
+            "downloadUrl": result.download_url,
+            "pageCount": result.page_count,
+            "version": result.version,
+            "renderedAt": result.rendered_at,
+        }
+
+    # ── GET /api/proposals/:id/renders ────────────────────────────────────────
+    # List all PDF renders for a proposal, ordered by version DESC.
+
+    @app.get("/api/proposals/{proposal_id}/renders")
+    async def list_renders(
+        proposal_id: str,
+        user: dict = Depends(require_auth),
+    ):
+        rows = await query(
+            """
+            SELECT id, proposal_id, version, object_key, page_count, status,
+                   error_message, rendered_by, duration_ms, created_at
+            FROM proposal_renders
+            WHERE proposal_id = %s
+            ORDER BY version DESC
+            """,
+            (proposal_id,),
+        )
+        return [_render_out(r) for r in rows]
+
+    # ── GET /api/proposals/:id/renders/:version/download ──────────────────────
+    # Redirect to a short-lived signed GCS URL for the rendered PDF.
+
+    @app.get("/api/proposals/{proposal_id}/renders/{version}/download")
+    async def download_render(
+        proposal_id: str,
+        version: int,
+        user: dict = Depends(require_auth),
+    ):
+        from fastapi.responses import RedirectResponse
+        from api.attachments import signed_get_url as _signed_get_url
+
+        rows = await query(
+            "SELECT object_key FROM proposal_renders WHERE proposal_id = %s AND version = %s",
+            (proposal_id, version),
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Render not found")
+
+        url = _signed_get_url(rows[0]["object_key"], f"proposal-v{version}.pdf")
+        return RedirectResponse(url=url, status_code=302)

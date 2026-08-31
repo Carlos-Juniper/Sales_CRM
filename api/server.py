@@ -60,11 +60,18 @@ async def lifespan(app):
     if os.environ.get("ASPIRE_SYNC_ENABLED", "false").strip().lower() in ("1", "true", "yes"):
         from api.estimating import sweep_loop
         sweep_task = asyncio.create_task(sweep_loop())
+    # Headless Chromium for server-side PDF rendering — only when explicitly enabled.
+    # Tests must NOT set PDF_RENDER_ENABLED so no browser is spawned during pytest.
+    if os.environ.get("PDF_RENDER_ENABLED", "").strip().lower() in ("1", "true", "yes"):
+        from api.proposal_render import start_browser
+        await start_browser()
     try:
         yield
     finally:
         if sweep_task is not None:
             sweep_task.cancel()
+        from api.proposal_render import stop_browser
+        await stop_browser()
         await close_pool()
 
 

@@ -58,19 +58,41 @@ import type { ProposalFormState } from './ProposalBuilder'
 // ---------------------------------------------------------------------------
 
 const PRINT_STYLES = `
+:root {
+  --proposal-font-sans: "Liberation Sans", Arial, Helvetica, sans-serif;
+  --proposal-font-serif: "Liberation Serif", "Times New Roman", Times, serif;
+}
+
 @media print {
-  body * { visibility: hidden !important; }
-  #proposal-preview, #proposal-preview * { visibility: visible !important; }
-  #proposal-preview { position: absolute; top: 0; left: 0; width: 100%; }
+  body:not([data-print-route]) * { visibility: hidden !important; }
+  body:not([data-print-route]) #proposal-preview,
+  body:not([data-print-route]) #proposal-preview * { visibility: visible !important; }
+  body:not([data-print-route]) #proposal-preview { position: absolute; top: 0; left: 0; width: 100%; }
   .no-print { display: none !important; }
+  @page {
+    size: A4;
+    margin: 20mm;
+  }
   .print-page {
+    height: 256mm;
+    box-sizing: border-box;
+    overflow: hidden;
     page-break-after: always;
-    page-break-inside: avoid;
     break-after: page;
+    page-break-inside: avoid;
     break-inside: avoid;
-    min-height: 100vh;
   }
   .print-page:last-child { page-break-after: auto; break-after: auto; }
+  /* Prevent cohesive blocks from splitting across pages */
+  .signer-block,
+  .team-card,
+  .reference-entry,
+  .org-chart-node-group,
+  .day-column,
+  .insurance-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }
 `
 

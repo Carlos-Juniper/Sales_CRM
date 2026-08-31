@@ -81,6 +81,16 @@ def begin_resumable_session(key: str, content_type: str, origin: str) -> str:
     return blob.create_resumable_upload_session(content_type=content_type, origin=origin)
 
 
+def upload_bytes(key: str, data: bytes, content_type: str) -> None:
+    """Upload raw bytes to GCS — used by server-side PDF rendering.
+
+    Unlike begin_resumable_session (which hands a URI to the browser), this
+    uploads directly from the API server. Same bucket, same signing pattern.
+    """
+    blob = _gcs().bucket(GCS_ATTACHMENTS_BUCKET).blob(key)
+    blob.upload_from_string(data, content_type=content_type)
+
+
 def head(key: str) -> storage.Blob:
     """Reload the blob metadata (used by confirm to verify the upload landed)."""
     blob = _gcs().bucket(GCS_ATTACHMENTS_BUCKET).blob(key)

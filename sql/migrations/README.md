@@ -43,6 +43,10 @@ for at least one real deploy cycle.
 - **011** — renames `leads.status = 'handed_off'` → `'estimating'` (data-only; idempotent `UPDATE WHERE`). Run before deploying the renamed frontend/backend code.
 - **012** — adds `estimates.turf_area_acres`, `estimates.curb_miles`, and wires takeoff-scan attachments (Handoff 27).
 - **013** — adds `section_services.discipline` (nullable LS/IR override, Handoff 29).
+- **014** — creates `proposal_config_tables`: `team_members`, `client_references`, `portfolio_properties`, `insurance_certificates` (Handoff 37).
+- **015** — seeds `proposal_config` tables with initial data (Handoff 37).
+- **016** — creates `proposal_requests` table (Handoff 37 Slice 4).
+- **017** — creates `proposal_renders` table for server-side PDF render results (Handoff 39).
 
 ---
 

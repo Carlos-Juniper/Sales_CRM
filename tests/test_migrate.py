@@ -260,17 +260,17 @@ class TestSplitStatements:
 
 
 class TestMigrationFiles:
-    def test_finds_exactly_sixteen_files(self):
-        # Updated: migration 016 (proposal_requests table)
-        # added by Handoff 37 Slice 4 (2026-08-26).
+    def test_finds_exactly_seventeen_files(self):
+        # Updated: migration 017 (proposal_renders table)
+        # added by Handoff 39 Slice 5 (2026-08-31).
         files = M.migration_files()
-        assert len(files) == 16
+        assert len(files) == 17
 
     def test_ordered_numerically(self):
         files = M.migration_files()
         ids = [mid for mid, _ in files]
         assert ids[0].startswith("001_")
-        assert ids[15].startswith("016_")
+        assert ids[16].startswith("017_")
         assert ids == sorted(ids)
 
     def test_ids_match_stem_of_path(self):

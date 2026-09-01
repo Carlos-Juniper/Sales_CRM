@@ -7,6 +7,8 @@ Endpoints under test (all authenticated, all read-only):
   GET /api/proposals/config/branches
       → BranchProfile[] projected from crm.branches; operating-roster filter;
         only rows with lat/lng; ordered by branch_name
+  GET /api/proposals/config/branch-coverage
+      → office names grouped by state; address-deduped; no lat/lng requirement
   GET /api/proposals/config/team-members?aspire_branch_id=&team_type=
       → TeamMember[]; null-branch rows included alongside branch matches (A.6)
   GET /api/proposals/config/client-references?aspire_branch_id=
@@ -211,6 +213,98 @@ class TestBranches:
         with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
             mock_q.return_value = []
             res = client.get("/api/proposals/config/branches")
+        assert res.status_code == 200
+        assert res.json() == []
+
+
+# ── GET /api/proposals/config/branch-coverage ────────────────────────────────
+
+def _coverage_row(**over) -> dict:
+    row = {
+        "branch_name": "Fort Myers Install",
+        "address1": "5880 Staley Road",
+        "city": "Fort Myers",
+        "state": "FL",
+    }
+    row.update(over)
+    return row
+
+
+class TestBranchCoverage:
+    def test_groups_by_state_and_strips_service_line(self, authed):
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = [
+                _coverage_row(branch_name="Fort Myers Install"),
+                _coverage_row(branch_name="Fort Myers Maintenance"),
+                _coverage_row(branch_name="Houston Maintenance", address1="1 Bayou Rd",
+                              city="Houston", state="TX"),
+            ]
+            res = client.get("/api/proposals/config/branch-coverage")
+        assert res.status_code == 200
+        body = res.json()
+        assert [g["state"] for g in body] == ["FL", "TX"]
+        assert body[0]["stateName"] == "Florida"
+        assert body[0]["branches"] == ["Fort Myers"]
+        assert body[1]["branches"] == ["Houston"]
+
+    def test_does_not_require_coordinates(self, authed):
+        """Coverage is a roster, not a proximity calc — most rows are un-geocoded."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            client.get("/api/proposals/config/branch-coverage")
+        sql = mock_q.call_args.args[0]
+        assert "lat IS NOT NULL" not in sql
+        assert "active = 1" in sql
+        assert "*** PICK A BRANCH ***" in sql
+
+    def test_distinct_addresses_are_distinct_offices(self, authed):
+        """Venice Install and Maintenance sit in different towns — one display name."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = [
+                _coverage_row(branch_name="Venice Install",
+                              address1="10620 Peach Lily Path", city="North Port"),
+                _coverage_row(branch_name="Venice Maintenance",
+                              address1="533 Paul Morris Drive", city="Englewood"),
+            ]
+            res = client.get("/api/proposals/config/branch-coverage")
+        assert res.json()[0]["branches"] == ["Venice"]
+
+    def test_division_row_collapses_into_its_host_office(self, authed):
+        """Aquatics/Sports Turf branches are booked at a host yard's address."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = [
+                _coverage_row(branch_name="Davie Maintenance", address1="1 Griffin Rd",
+                              city="Davie"),
+                _coverage_row(branch_name="Riviera Beach Sports Turf",
+                              address1="1 Griffin Rd", city="Davie"),
+            ]
+            res = client.get("/api/proposals/config/branch-coverage")
+        assert res.json()[0]["branches"] == ["Davie"]
+
+    def test_distinct_towns_sharing_a_yard_both_listed(self, authed):
+        """Panama City Beach and Tyndall really do share 511 N Highway 79."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = [
+                _coverage_row(branch_name="Panama City Beach Maintenance",
+                              address1="511 N Highway 79", city="Panama City Beach"),
+                _coverage_row(branch_name="Tyndall Maintenance",
+                              address1="511 N Highway 79", city="Panama City Beach"),
+            ]
+            res = client.get("/api/proposals/config/branch-coverage")
+        assert res.json()[0]["branches"] == ["Panama City Beach", "Tyndall"]
+
+    def test_unknown_state_code_falls_back_to_the_code(self, authed):
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = [_coverage_row(state="GA", address1="1 Peach St",
+                                                 city="Savannah",
+                                                 branch_name="Savannah Install")]
+            res = client.get("/api/proposals/config/branch-coverage")
+        assert res.json()[0]["stateName"] == "GA"
+
+    def test_empty_when_no_offices(self, authed):
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            res = client.get("/api/proposals/config/branch-coverage")
         assert res.status_code == 200
         assert res.json() == []
 

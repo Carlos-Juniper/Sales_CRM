@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -43,16 +44,42 @@ logger = logging.getLogger(__name__)
 
 
 # ── Operating-roster filter (Amendment A.2) ──────────────────────────────────
-# 21 of the 56 crm.branches rows are not real offices (placeholders, training
-# branches, holding entities, explicit "DO NOT USE" rows). Filter them out
-# consistently across every branches query.
+# Not every crm.branches row is a real office. Nine carry "DO NOT USE" in the
+# name; the seven below are placeholders, training branches and holding
+# entities that are still active = 1, so they need naming explicitly.
 
-_BRANCH_ROSTER_FILTER = "active = 1 AND branch_name NOT LIKE '%DO NOT USE%'"
+_NON_OFFICE_BRANCHES = (
+    "*** PICK A BRANCH ***",
+    "General Holding",
+    "Learning & Development",
+    "Contract and Billing",
+    "Training Branch",
+    "Training Branch EC",
+    "Golden Palms on Orange River",
+)
 
-# Full exclusion list for reference (these branch_names also fail the filter):
-#   '*** PICK A BRANCH ***', 'General Holding', 'Learning & Development',
-#   'Contract and Billing', 'Training Branch', 'Training Branch EC',
-#   'Golden Palms on Orange River', and 9 variations of "DO NOT USE" in the name.
+_BRANCH_ROSTER_FILTER = (
+    "active = 1 AND branch_name NOT LIKE '%DO NOT USE%' AND branch_name NOT IN ("
+    + ", ".join("'" + n.replace("'", "''") + "'" for n in _NON_OFFICE_BRANCHES)
+    + ")"
+)
+
+# Clients care about the town, not our internal division split — "Venice
+# Install" and "Venice Maintenance" both read as "Venice".
+_BRANCH_SERVICE_LINE_SUFFIX = re.compile(r"\s+(Install|Maintenance)$")
+
+# Specialty divisions are booked as their own branch but operate out of a host
+# office's yard, so their address is that office's. Where the host is also in
+# the roster the division name is redundant.
+_BRANCH_DIVISION = re.compile(r"\b(Aquatics|Sports Turf)\b")
+
+_STATE_NAMES = {
+    "FL": "Florida",
+    "NC": "North Carolina",
+    "PA": "Pennsylvania",
+    "SC": "South Carolina",
+    "TX": "Texas",
+}
 
 
 # ── Row mappers (DB snake_case → API camelCase) ───────────────────────────────
@@ -289,6 +316,52 @@ def register(app, require_auth) -> None:
             """,
         )
         return [_branch_profile_out(r) for r in rows]
+
+    # ── GET /api/proposals/config/branch-coverage ──────────────────────────
+    # The "where we operate" table on the Local Landscape Experts page.
+    # Unlike /config/branches this does not require lat/lng — coverage is a
+    # roster, not a proximity calculation, and only ~16 of 56 rows are geocoded.
+    # Offices sharing an address are one office; different addresses are
+    # separate offices even under the same town name.
+
+    @app.get("/api/proposals/config/branch-coverage")
+    async def get_proposal_branch_coverage(
+        _user: dict = Depends(require_auth),
+    ) -> list:
+        rows = await query(
+            f"""
+            SELECT b.branch_name, b.address1, b.city, b.state
+            FROM branches b
+            WHERE {_BRANCH_ROSTER_FILTER}
+              AND b.address1 IS NOT NULL AND b.address1 <> ''
+              AND b.state IS NOT NULL AND b.state <> ''
+            ORDER BY b.state, b.branch_name
+            """,
+        )
+
+        by_address: dict[tuple, tuple[str, set[str]]] = {}
+        for r in rows:
+            key = (r["address1"].strip().lower(), (r["city"] or "").strip().lower())
+            state = r["state"].strip().upper()
+            name = _BRANCH_SERVICE_LINE_SUFFIX.sub("", r["branch_name"].strip())
+            by_address.setdefault(key, (state, set()))[1].add(name)
+
+        by_state: dict[str, set[str]] = {}
+        for state, names in by_address.values():
+            # Rows sharing an address are one building, but not necessarily one
+            # name: Panama City Beach and Tyndall share a yard and both belong on
+            # the page. Only the division rows collapse into their host.
+            hosts = {n for n in names if not _BRANCH_DIVISION.search(n)}
+            by_state.setdefault(state, set()).update(hosts or names)
+
+        return [
+            {
+                "state": state,
+                "stateName": _STATE_NAMES.get(state, state),
+                "branches": sorted(by_state[state]),
+            }
+            for state in sorted(by_state, key=lambda s: (-len(by_state[s]), s))
+        ]
 
     # ── GET /api/proposals/config/team-members ─────────────────────────────
     # Returns TeamMember[] with optional aspire_branch_id and team_type filters.

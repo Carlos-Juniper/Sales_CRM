@@ -213,51 +213,25 @@ export const ROOTED_IN_FLORIDA_CONTENT: StaticPageCopy = {
   heading: 'Rooted in Florida',
   subheading: 'About Us',
   body: [
-    "Juniper Landscaping was founded on a simple belief: that Florida's outdoor spaces deserve the same care and expertise that go into the buildings they surround. What began as a single-branch operation has grown into one of the state's most trusted commercial landscape companies — with branches spanning the East Coast, West Coast, and Central Florida regions.",
+    "Juniper Landscaping was founded on a simple belief: that Florida's outdoor spaces deserve the same care and expertise that go into the buildings they surround. What began as a single-branch operation has grown into one of the state's most trusted commercial landscape companies — still headquartered in Florida, and now serving clients from offices across five states.",
     'We are a company of horticulturalists, arborists, irrigation engineers, and project managers who take pride in the craft of landscape management. Our team holds dozens of professional certifications and licenses, and we invest continuously in training, equipment, and technology so that our work reflects the latest standards in sustainable and safe landscape practice.',
     'Through every hurricane season, drought, and freeze event, we have stood beside our clients — adapting, responding, and rebuilding. That resilience is in our DNA, and it is the foundation of every proposal we present.',
   ],
 }
 
-/** Company-scale figures shown beside the About Us copy. */
+/**
+ * Company-scale figures shown beside the About Us copy. The office count is not
+ * here — it is computed from the same branch-coverage endpoint that drives the
+ * table on the next page, so the two can never contradict each other.
+ */
 export const COMPANY_STATS: { num: string; label: string }[] = [
   { num: '3,200+', label: 'Horticulturally trained employees' },
   { num: '750+', label: 'In our vehicle fleet' },
-  { num: '26', label: 'Operating locations throughout Florida' },
 ]
 
 // ---------------------------------------------------------------------------
 // Local Landscape Experts — static page
 // ---------------------------------------------------------------------------
-
-/**
- * Marketing copy, deliberately NOT derived from crm.branches. The table names
- * the offices sales wants to advertise; crm.branches holds all 56 rows
- * including ones that would contradict the "26 operating locations" figure
- * above. The variable, per-proposal element on this page is the nearest-branch
- * footer, which does come from the database.
- */
-export const BRANCH_LOCATIONS: { region: string; branches: string[] }[] = [
-  {
-    region: 'East Coast',
-    branches: [
-      'Davie', 'Daytona', 'Melbourne', 'Jupiter',
-      'Riviera Beach', 'West Palm Beach', 'Vero Beach',
-    ],
-  },
-  {
-    region: 'West Coast',
-    branches: [
-      'Bonita Springs', 'Bradenton', 'Estero', 'Fort Myers — Corporate',
-      'Fort Myers', 'Naples', 'Panama City Beach', 'Tampa East',
-      'Tampa North', 'Tampa South', 'Venice',
-    ],
-  },
-  {
-    region: 'Central',
-    branches: ['Ocala', 'Central Orlando', 'South Orlando', 'West Orlando'],
-  },
-]
 
 export const LOCAL_EXPERTS_CONTENT: StaticPageCopy = {
   heading: 'Your Local Landscape Experts',

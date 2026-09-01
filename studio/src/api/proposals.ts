@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type {
+  BranchCoverageGroup,
   BranchProfile,
   ClientReference,
   PortfolioProperty,
@@ -30,6 +31,13 @@ export const proposalConfigApi = {
    * Only rows with lat/lng populated are returned (proximity footer requires them).
    */
   branches: () => apiClient.get<BranchProfile[]>('/proposals/config/branches'),
+
+  /**
+   * GET /api/proposals/config/branch-coverage
+   * Office names grouped by state for the coverage table. Unlike branches() this
+   * does not require lat/lng, so it covers the whole operating roster.
+   */
+  branchCoverage: () => apiClient.get<BranchCoverageGroup[]>('/proposals/config/branch-coverage'),
 
   /**
    * GET /api/proposals/config/team-members?aspire_branch_id=&team_type=

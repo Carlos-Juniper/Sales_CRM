@@ -26,6 +26,7 @@ import type {
   TeamMember,
   ClientReference,
   PortfolioProperty,
+  BranchCoverageGroup,
   BranchProfile,
   OrgChartInput,
   OrgChartCrewCounts,
@@ -80,6 +81,11 @@ const mockBranch2: BranchProfile = {
   lat: 26.1424,
   lng: -81.7948,
 }
+
+const mockBranchCoverage: BranchCoverageGroup[] = [
+  { state: 'FL', stateName: 'Florida', branches: ['Fort Myers', 'Naples', 'Venice'] },
+  { state: 'TX', stateName: 'Texas', branches: ['Houston'] },
+]
 
 const mockLead: Lead = {
   id: 'lead-001',
@@ -298,6 +304,7 @@ const mockMutate = vi.fn()
 function setupDefaultMocks() {
   mockUseProposalConfig.mockReturnValue({
     branches: [mockBranch1, mockBranch2],
+    branchCoverage: mockBranchCoverage,
     insurance: {
       id: 'ins-001',
       objectKey: 'proposal/insurance/cert-2026.pdf',
@@ -704,6 +711,7 @@ describe('ProposalPreview — proximity footer', () => {
   it('renders no nearby-branches container when no branches are configured', () => {
     mockUseProposalConfig.mockReturnValue({
       branches: [],
+      branchCoverage: mockBranchCoverage,
       insurance: null,
       loaded: true,
     })

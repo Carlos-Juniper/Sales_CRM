@@ -70,6 +70,13 @@ export interface BranchProfile {
   lng: number
 }
 
+/** Coverage table read-model — office names grouped by state, deduped on address. */
+export interface BranchCoverageGroup {
+  state: string
+  stateName: string
+  branches: string[]
+}
+
 export interface ClientReference {
   id: string
   aspireBranchId: number | null   // Amendment A.1: null = usable company-wide

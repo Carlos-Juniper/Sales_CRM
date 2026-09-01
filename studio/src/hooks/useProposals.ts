@@ -16,6 +16,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { proposalConfigApi, proposalsApi } from '@/api/proposals'
 import { useUIStore } from '@/store/uiStore'
 import type {
+  BranchCoverageGroup,
   BranchProfile,
   ClientReference,
   PortfolioProperty,
@@ -38,6 +39,7 @@ export const PROPOSAL_CONFIG_KEY = 'proposals-config'
 
 export interface ProposalStaticConfig {
   branches: BranchProfile[]
+  branchCoverage: BranchCoverageGroup[]
   insurance: {
     id: string
     objectKey: string
@@ -50,22 +52,25 @@ export interface ProposalStaticConfig {
 
 const FALLBACK_PROPOSAL_CONFIG: ProposalStaticConfig = {
   branches: [],
+  branchCoverage: [],
   insurance: null,
   loaded: false,
 }
 
 async function fetchStaticConfig(): Promise<ProposalStaticConfig> {
   // Each endpoint catches independently — one failing call cannot blank the other.
-  const [branches, insurance] = await Promise.all([
+  const [branches, branchCoverage, insurance] = await Promise.all([
     proposalConfigApi.branches().catch(() => null),
+    proposalConfigApi.branchCoverage().catch(() => null),
     proposalConfigApi.insurance().catch(() => null),
   ])
   return {
     branches: branches ?? [],
+    branchCoverage: branchCoverage ?? [],
     // insurance() returns null when no cert has been uploaded yet — treat
     // a fetch error the same way so the UI degrades gracefully.
     insurance: insurance ?? null,
-    loaded: branches !== null || insurance !== null,
+    loaded: branches !== null || branchCoverage !== null || insurance !== null,
   }
 }
 

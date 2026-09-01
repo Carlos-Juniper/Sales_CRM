@@ -13,7 +13,7 @@
 //  0. CoverPage           — property name + city, no page number
 //  1. IntroLetter         — variable signer block
 //  2. RootedInFlorida     — static
-//  3. LocalLandscapeExperts — static map + variable proximity footer
+//  3. LocalLandscapeExperts — live branch coverage + variable proximity footer
 //  4. OrgChartPage        — dynamic tree, conditional nodes
 //  5–15. ServicesPages    — 11 static blurbs
 //  16. StartupCommunication — static
@@ -36,7 +36,6 @@ import { COMPANY_INFO } from '@/lib/constants'
 import {
   ROOTED_IN_FLORIDA_CONTENT,
   COMPANY_STATS,
-  BRANCH_LOCATIONS,
   LOCAL_EXPERTS_CONTENT,
   SERVICES_CONTENT,
   STARTUP_COMMUNICATION_CONTENT,
@@ -53,6 +52,7 @@ import type {
   TeamMember,
   ClientReference,
   PortfolioProperty,
+  BranchCoverageGroup,
   BranchProfile,
   OrgChartInput,
   OrgChartCrewCounts,
@@ -349,9 +349,17 @@ function IntroLetter({
 // Page 2 — Rooted in Florida (static)
 // ---------------------------------------------------------------------------
 
-function RootedInFlorida() {
+function RootedInFlorida({ coverage }: { coverage: BranchCoverageGroup[] }) {
   const content = ROOTED_IN_FLORIDA_CONTENT
   const [lede, ...rest] = content.body
+  const officeCount = coverage.reduce((n, g) => n + g.branches.length, 0)
+  // Same source as the coverage table overleaf, so the two cannot disagree.
+  const stats = officeCount
+    ? [...COMPANY_STATS, {
+        num: String(officeCount),
+        label: `Operating locations across ${coverage.length} states`,
+      }]
+    : COMPANY_STATS
   return (
     <PrintPage data-testid="page-rooted-in-florida">
       <div className="page-head">
@@ -369,7 +377,7 @@ function RootedInFlorida() {
           ))}
         </div>
         <div className="stats">
-          {COMPANY_STATS.map((s) => (
+          {stats.map((s) => (
             <div className="stat" key={s.num}>
               <div className="num">{s.num}</div>
               <div className="lbl">{s.label}</div>
@@ -386,8 +394,10 @@ function RootedInFlorida() {
 // ---------------------------------------------------------------------------
 
 function LocalLandscapeExperts({
+  coverage,
   nearbyBranches,
 }: {
+  coverage: BranchCoverageGroup[]
   nearbyBranches: BranchProfile[]
 }) {
   const content = LOCAL_EXPERTS_CONTENT
@@ -398,12 +408,12 @@ function LocalLandscapeExperts({
       <p className="lede">{content.body[0]}</p>
 
       <div className="cols-2 wide-left branch-cols">
-        <table className="branch-tbl">
+        <table className="branch-tbl" data-testid="branch-coverage">
           <tbody>
-            {BRANCH_LOCATIONS.map((group) => (
-              <Fragment key={group.region}>
+            {coverage.map((group) => (
+              <Fragment key={group.state}>
                 <tr>
-                  <th colSpan={2}>{group.region}</th>
+                  <th colSpan={2}>{group.stateName}</th>
                 </tr>
                 {pairUp(group.branches).map(([left, right]) => (
                   <tr key={left}>
@@ -439,7 +449,7 @@ function LocalLandscapeExperts({
   )
 }
 
-/** Two branch names per table row, so a region reads down two short columns. */
+/** Two branch names per table row, so a state reads down two short columns. */
 function pairUp(items: string[]): [string, string | undefined][] {
   const rows: [string, string | undefined][] = []
   for (let i = 0; i < items.length; i += 2) {
@@ -1002,7 +1012,7 @@ export function ProposalPreview({
   clientReferences,
   portfolioProperties,
 }: ProposalPreviewProps) {
-  const { branches, insurance } = useProposalConfig()
+  const { branches, branchCoverage, insurance } = useProposalConfig()
   const renderMutation = useRenderProposal()
 
   // Proximity footer: 2–3 nearest branches to the lead's lat/lng
@@ -1025,8 +1035,8 @@ export function ProposalPreview({
     // Required and implicit, like the intro letter — never in formState.sections.
     { key: 'cover', node: <CoverPage lead={lead} /> },
     { key: 'intro', node: <IntroLetter lead={lead} signer={signer} /> },
-    { key: 'rooted', node: <RootedInFlorida /> },
-    { key: 'local', node: <LocalLandscapeExperts nearbyBranches={nearbyBranches} /> },
+    { key: 'rooted', node: <RootedInFlorida coverage={branchCoverage} /> },
+    { key: 'local', node: <LocalLandscapeExperts coverage={branchCoverage} nearbyBranches={nearbyBranches} /> },
     ...(formState.orgChart.included
       ? [{
           key: 'org',

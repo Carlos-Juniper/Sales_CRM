@@ -30,6 +30,16 @@ const OPTIONAL_SECTION_KEYS: OptionalSection[] = [
   'meet_our_team_executive',
 ]
 
+// CSS font shorthands for every face the document sets. Each must resolve
+// before capture; see the readiness gate below.
+const BRAND_FACES = [
+  '400 12px "Lato"',
+  '700 12px "Lato"',
+  '400 12px "Open Sans"',
+  '700 12px "Open Sans"',
+  '400 12px "Mrs Saint Delafield"',
+]
+
 export default function ProposalPrintRoute(): JSX.Element {
   const { id } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
@@ -75,7 +85,20 @@ export default function ProposalPrintRoute(): JSX.Element {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
       const root = document.querySelector('#proposal-preview')
       if (!root) return
+
+      // document.fonts.ready only resolves *pending* loads — it says nothing
+      // about whether a face was ever requested. Force each brand face to load,
+      // then assert it resolved. If any is missing we leave the flag false so
+      // the render 503s and the proposal is marked failed, rather than shipping
+      // a client-facing PDF set in Arial.
+      await Promise.all(BRAND_FACES.map((f) => document.fonts.load(f).catch(() => [])))
       await document.fonts.ready
+      const missing = BRAND_FACES.filter((f) => !document.fonts.check(f))
+      if (missing.length > 0) {
+        console.error('[proposal] brand fonts failed to load:', missing)
+        return
+      }
+
       const imgs = Array.from(root.querySelectorAll('img'))
       await Promise.all(
         imgs.map((img) => img.decode().catch(() => undefined)),

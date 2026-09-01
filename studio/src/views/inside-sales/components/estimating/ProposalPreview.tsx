@@ -27,6 +27,7 @@
 // ---------------------------------------------------------------------------
 
 import { ArrowLeft, Leaf, Phone, Mail, MapPin, Printer, FileDown, Loader2 } from 'lucide-react'
+import '@/styles/proposal-print.css'
 import { COMPANY_INFO } from '@/lib/constants'
 import {
   ROOTED_IN_FLORIDA_CONTENT,
@@ -58,11 +59,6 @@ import type { ProposalFormState } from './ProposalBuilder'
 // ---------------------------------------------------------------------------
 
 const PRINT_STYLES = `
-:root {
-  --proposal-font-sans: "Liberation Sans", Arial, Helvetica, sans-serif;
-  --proposal-font-serif: "Liberation Serif", "Times New Roman", Times, serif;
-}
-
 @media print {
   /* Chrome drops every background colour and image when printing unless this is
      set. The server render passes print_background=True, but an in-app Cmd+P
@@ -1031,7 +1027,7 @@ export function ProposalPreview({
       {/* All proposal pages */}
       <div
         id="proposal-preview"
-        className="font-sans text-sm rounded-xl border border-[hsl(var(--border))] overflow-hidden print:border-0 print:rounded-none space-y-0"
+        className="proposal-root text-sm rounded-xl border border-[hsl(var(--border))] overflow-hidden print:border-0 print:rounded-none space-y-0"
         data-testid="proposal-preview"
       >
         {/* ── Required pages, fixed §2 order ────────────────────────────── */}

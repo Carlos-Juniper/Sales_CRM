@@ -1,0 +1,81 @@
+/* ---------------------------------------------------------------------------
+   Proposal print stylesheet — Handoff 40
+
+   Imported by ProposalPreview.tsx so Vite bundles and fingerprints it. Every
+   rule here must resolve same-origin: the headless renderer (api/proposal_render.py)
+   loads the print route with no network egress, so a cross-origin font or image
+   request would hang the readiness gate and 503 the render.
+
+   Tokens live under .proposal-root, NOT in index.css's @theme block. @theme is
+   app-wide — putting --jn-green there would restyle the whole CRM.
+   --------------------------------------------------------------------------- */
+
+/* --- Brand faces -----------------------------------------------------------
+   Lato, Open Sans and Mrs Saint Delafield are the faces embedded in the real
+   Proposify exports (extracted from "business docs/Coral Bay HOA.pdf"). All
+   three are Google Fonts under OFL/Apache, so server-side embedding is clear.
+
+   latin subset only (U+0000-00FF covers the accented characters in client and
+   signer names). Glyphs outside it fall back to fonts-liberation /
+   fonts-dejavu-core, installed in the render image for exactly this reason.
+
+   font-display: block, never swap — a swap-driven FOUT can be captured
+   mid-render and ship a PDF in the fallback face.
+   --------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Lato';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('/fonts/lato-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Lato';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url('/fonts/lato-700.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('/fonts/opensans-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url('/fonts/opensans-700.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Mrs Saint Delafield';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('/fonts/mrs-saint-delafield-400.woff2') format('woff2');
+}
+
+/* --- Typography tokens ---------------------------------------------------- */
+
+.proposal-root {
+  --jn-display: 'Lato', 'Liberation Sans', Arial, sans-serif;
+  --jn-body: 'Open Sans', 'Liberation Sans', Arial, sans-serif;
+  --jn-script: 'Mrs Saint Delafield', cursive;
+
+  font-family: var(--jn-body);
+}
+
+.proposal-root h1,
+.proposal-root h2,
+.proposal-root h3,
+.proposal-root h4 {
+  font-family: var(--jn-display);
+}

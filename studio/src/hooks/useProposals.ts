@@ -19,6 +19,7 @@ import type {
   BranchCoverageGroup,
   BranchProfile,
   ClientReference,
+  LicenseCertificationGroups,
   PortfolioProperty,
   ProposalRender,
   ProposalRequest,
@@ -131,6 +132,20 @@ export function usePortfolio(params?: { regionId?: string }) {
   return useQuery<PortfolioProperty[]>({
     queryKey: ['proposals', 'config', 'portfolio', params?.regionId ?? null],
     queryFn: () => proposalConfigApi.portfolio(params),
+    staleTime: 5 * 60_000,
+  })
+}
+
+/**
+ * Licenses and certifications for a branch, company-wide rows always included.
+ * Expired credentials are omitted — the proposal page shows a prose line rather
+ * than an empty table, so an empty result is a valid render, not an error.
+ * Query key: ['proposals', 'config', 'licenses', aspireBranchId]
+ */
+export function useProposalLicenses(params?: { aspireBranchId?: number }) {
+  return useQuery<LicenseCertificationGroups>({
+    queryKey: ['proposals', 'config', 'licenses', params?.aspireBranchId ?? null],
+    queryFn: () => proposalConfigApi.licenses(params),
     staleTime: 5 * 60_000,
   })
 }

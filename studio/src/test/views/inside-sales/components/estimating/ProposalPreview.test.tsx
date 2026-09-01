@@ -27,6 +27,7 @@ import type {
   ClientReference,
   PortfolioProperty,
   BranchCoverageGroup,
+  LicenseCertification,
   BranchProfile,
   OrgChartInput,
   OrgChartCrewCounts,
@@ -40,6 +41,7 @@ import type { ProposalFormState } from '@/views/inside-sales/components/estimati
 
 vi.mock('@/hooks/useProposals', () => ({
   useProposalConfig: vi.fn(),
+  useProposalLicenses: vi.fn(),
   useProposalMediaUrl: vi.fn(),
   useRenderProposal: vi.fn(),
   // other hooks not consumed by ProposalPreview
@@ -52,9 +54,10 @@ vi.mock('@/hooks/useProposals', () => ({
   useProposalRenders: vi.fn(),
 }))
 
-import { useProposalConfig, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
+import { useProposalConfig, useProposalLicenses, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
 
 const mockUseProposalConfig = useProposalConfig as MockedFunction<typeof useProposalConfig>
+const mockUseProposalLicenses = useProposalLicenses as MockedFunction<typeof useProposalLicenses>
 const mockUseProposalMediaUrl = useProposalMediaUrl as MockedFunction<typeof useProposalMediaUrl>
 const mockUseRenderProposal = useRenderProposal as MockedFunction<typeof useRenderProposal>
 
@@ -86,6 +89,24 @@ const mockBranchCoverage: BranchCoverageGroup[] = [
   { state: 'FL', stateName: 'Florida', branches: ['Fort Myers', 'Naples', 'Venice'] },
   { state: 'TX', stateName: 'Texas', branches: ['Houston'] },
 ]
+
+function makeLicense(over: Partial<LicenseCertification> = {}): LicenseCertification {
+  return {
+    id: 'lc-000',
+    kind: 'license',
+    name: 'Sample Credential',
+    issuingBody: 'Florida Dept. of Agriculture',
+    identifier: 'JB1234',
+    holderName: 'Jane Bell',
+    aspireBranchId: null,
+    issuedDate: '2025-01-15',
+    expiryDate: '2027-01-14',
+    objectKey: null,
+    isExpired: false,
+    active: true,
+    ...over,
+  }
+}
 
 const mockLead: Lead = {
   id: 'lead-001',
@@ -314,6 +335,11 @@ function setupDefaultMocks() {
     },
     loaded: true,
   })
+  // Empty is the live state: every credential on file is currently expired, and
+  // the backend filters those out. Tests that need rows override this.
+  mockUseProposalLicenses.mockReturnValue({
+    data: { licenses: [], certifications: [] },
+  } as ReturnType<typeof useProposalLicenses>)
   mockUseProposalMediaUrl.mockReturnValue({
     data: undefined,
     isLoading: false,
@@ -342,6 +368,9 @@ function renderPreview(
   const proposalId = propsOverrides && 'proposalId' in propsOverrides
     ? propsOverrides.proposalId
     : 'prop-001'
+  // The portfolio page is omitted when no picked property has a photo, so the
+  // default must carry one for the required-page assertions.
+  const portfolioProperties = propsOverrides?.portfolioProperties ?? [mockPortfolioProperty]
   return render(
     <ProposalPreview
       formState={formState}
@@ -353,9 +382,7 @@ function renderPreview(
       teamMembers={propsOverrides?.teamMembers ?? []}
       executiveTeamMembers={propsOverrides?.executiveTeamMembers ?? []}
       clientReferences={propsOverrides?.clientReferences ?? []}
-      {/* The portfolio page is omitted when no picked property has a photo,
-          so the default must carry one for the required-page assertions. */}
-      portfolioProperties={propsOverrides?.portfolioProperties ?? [mockPortfolioProperty]}
+      portfolioProperties={portfolioProperties}
     />,
   )
 }
@@ -431,17 +458,22 @@ describe('ProposalPreview — required pages', () => {
     expect(screen.getByTestId('page-insurance')).toBeInTheDocument()
   })
 
-  it('renders page 21: portfolio', () => {
+  it('renders page 21: licenses and certifications', () => {
+    renderPreview()
+    expect(screen.getByTestId('page-licenses-certifications')).toBeInTheDocument()
+  })
+
+  it('renders page 22: portfolio', () => {
     renderPreview()
     expect(screen.getByTestId('page-portfolio')).toBeInTheDocument()
   })
 
-  it('renders page 22: thank you', () => {
+  it('renders page 23: thank you', () => {
     renderPreview()
     expect(screen.getByTestId('page-thank-you')).toBeInTheDocument()
   })
 
-  it('all 12 required pages are present with no optional sections', () => {
+  it('all 13 required pages are present with no optional sections', () => {
     renderPreview({ sections: [] })
     // Required pages
     expect(screen.getByTestId('page-intro-letter')).toBeInTheDocument()
@@ -452,6 +484,7 @@ describe('ProposalPreview — required pages', () => {
     expect(screen.getByTestId('page-meet-our-team')).toBeInTheDocument()
     expect(screen.getByTestId('page-client-references')).toBeInTheDocument()
     expect(screen.getByTestId('page-insurance')).toBeInTheDocument()
+    expect(screen.getByTestId('page-licenses-certifications')).toBeInTheDocument()
     expect(screen.getByTestId('page-portfolio')).toBeInTheDocument()
     expect(screen.getByTestId('page-thank-you')).toBeInTheDocument()
     // Optional pages should NOT be present
@@ -689,6 +722,39 @@ describe('ProposalPreview — static content from constants', () => {
     const page = screen.getByTestId('page-insurance')
     // Cert expiry date — text contains '2027' regardless of locale format
     expect(within(page).getByText(/2027/)).toBeInTheDocument()
+  })
+
+  it('licenses page renders the prose empty state, not a table, when nothing is current', () => {
+    renderPreview()
+    const page = screen.getByTestId('page-licenses-certifications')
+    expect(within(page).queryByTestId('licenses-table')).not.toBeInTheDocument()
+    expect(within(page).getByText(/available on request/i)).toBeInTheDocument()
+  })
+
+  it('licenses page renders a table once current credentials exist', () => {
+    mockUseProposalLicenses.mockReturnValue({
+      data: {
+        licenses: [makeLicense({ id: 'lc-1', name: 'Certified Pest Control Operator' })],
+        certifications: [
+          makeLicense({ id: 'lc-2', kind: 'certification', name: 'ISA Certified Arborist' }),
+        ],
+      },
+    } as ReturnType<typeof useProposalLicenses>)
+    renderPreview()
+    const page = screen.getByTestId('page-licenses-certifications')
+    expect(within(page).getByTestId('licenses-table')).toBeInTheDocument()
+    expect(within(page).getByText(/Certified Pest Control Operator/)).toBeInTheDocument()
+    expect(within(page).getByText(/ISA Certified Arborist/)).toBeInTheDocument()
+    expect(within(page).queryByText(/available on request/i)).not.toBeInTheDocument()
+  })
+
+  it('the empty licenses page never hints that something is missing', () => {
+    // Expired rows are filtered server-side and simply absent. A client must not
+    // be able to tell the difference between "none current" and "none on file".
+    renderPreview()
+    const page = screen.getByTestId('page-licenses-certifications')
+    expect(within(page).queryByText(/expired/i)).not.toBeInTheDocument()
+    expect(within(page).queryByText(/pending/i)).not.toBeInTheDocument()
   })
 })
 

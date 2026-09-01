@@ -13,6 +13,7 @@ Slice 3 scope (this file, Amendment A):
     GET /api/proposals/config/client-references → ClientReference[]
     GET /api/proposals/config/portfolio      → PortfolioProperty[]
     GET /api/proposals/config/insurance      → InsuranceCert (current cert)
+    GET /api/proposals/config/licenses       → { licenses[], certifications[] }
 
 Slice 4 will extend this same module with the ProposalRequest CRUD routes.
 Router object name: `register` (same as estimating.py).
@@ -207,6 +208,24 @@ def _insurance_cert_out(r: dict) -> dict:
         "expiryDate": _iso(r["expiry_date"]),
         "label": r.get("label"),
         "uploadedAt": _iso(r["uploaded_at"]),
+    }
+
+
+def _license_out(r: dict) -> dict:
+    """Map a licenses_certifications row to the API response shape."""
+    return {
+        "id": r["id"],
+        "kind": r["kind"],
+        "name": r["name"],
+        "issuingBody": r.get("issuing_body"),
+        "identifier": r.get("identifier"),
+        "holderName": r.get("holder_name"),
+        "aspireBranchId": r.get("aspire_branch_id"),
+        "issuedDate": _iso(r.get("issued_date")),
+        "expiryDate": _iso(r.get("expiry_date")),
+        "objectKey": r.get("object_key"),
+        "isExpired": bool(r["is_expired"]),
+        "active": bool(r["active"]),
     }
 
 
@@ -464,6 +483,41 @@ def register(app, require_auth) -> None:
         if not rows:
             return None
         return _insurance_cert_out(rows[0])
+
+    # ── GET /api/proposals/config/licenses ──────────────────────────────────
+    # Company-wide credentials (aspire_branch_id IS NULL) are returned in
+    # addition to the requested branch's, never instead (Amendment A.6).
+    # is_expired is computed in SQL against CURDATE() so a skewed client clock
+    # cannot flip an expired credential back into a client-facing document.
+
+    @app.get("/api/proposals/config/licenses")
+    async def get_proposal_licenses(
+        aspire_branch_id: Optional[int] = Query(None),
+        include_expired: bool = Query(False),
+        _user: dict = Depends(require_auth),
+    ) -> dict:
+        conditions = ["active = 1"]
+        params: list = []
+        if aspire_branch_id is not None:
+            conditions.append("(aspire_branch_id IS NULL OR aspire_branch_id = %s)")
+            params.append(aspire_branch_id)
+        else:
+            conditions.append("aspire_branch_id IS NULL")
+        if not include_expired:
+            conditions.append("(expiry_date IS NULL OR expiry_date >= CURDATE())")
+
+        rows = await query(
+            "SELECT *, (expiry_date IS NOT NULL AND expiry_date < CURDATE()) AS is_expired "
+            "FROM licenses_certifications "
+            f"WHERE {' AND '.join(conditions)} "
+            "ORDER BY sort_order, name",
+            params or None,
+        )
+        out = [_license_out(r) for r in rows]
+        return {
+            "licenses": [r for r in out if r["kind"] == "license"],
+            "certifications": [r for r in out if r["kind"] == "certification"],
+        }
 
     # ── POST /api/proposals ────────────────────────────────────────────────
     # Body: Omit<ProposalRequest, 'id'|'createdAt'|'updatedAt'>

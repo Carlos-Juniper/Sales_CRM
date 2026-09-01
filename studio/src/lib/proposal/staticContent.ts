@@ -328,6 +328,19 @@ export const STARTUP_PLAN_SEED: StartupPlanSeed = {
 // ---------------------------------------------------------------------------
 
 // TODO: real copy from Caitlyn's content inventory
+/**
+ * Surrounding copy for the licenses & certifications page. The table itself comes
+ * from crm.licenses_certifications; `empty` renders in its place while that is bare.
+ */
+export const LICENSES_PAGE_COPY = {
+  heading: 'Licenses & Certifications',
+  intro: [
+    'Juniper Landscaping maintains the state licensing and industry certifications required to perform every service in this proposal, and our teams hold credentials well beyond the statutory minimum.',
+  ],
+  empty:
+    'Current licensing and certification documentation is available on request.',
+}
+
 export const INSURANCE_PAGE_COPY: InsurancePageCopy = {
   heading: 'Insurance',
   intro: [

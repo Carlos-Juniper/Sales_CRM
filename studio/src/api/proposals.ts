@@ -3,6 +3,7 @@ import type {
   BranchCoverageGroup,
   BranchProfile,
   ClientReference,
+  LicenseCertificationGroups,
   PortfolioProperty,
   ProposalRender,
   ProposalRequest,
@@ -84,6 +85,19 @@ export const proposalConfigApi = {
     apiClient.get<{ id: string; objectKey: string; expiryDate: string; label: string | null; uploadedAt: string } | null>(
       '/proposals/config/insurance',
     ),
+
+  /**
+   * GET /api/proposals/config/licenses?aspire_branch_id=&include_expired=
+   * When aspire_branch_id is supplied, company-wide rows are included in addition
+   * to branch matches. Expired credentials are excluded unless include_expired.
+   */
+  licenses: (params?: { aspireBranchId?: number; includeExpired?: boolean }) => {
+    const qs = new URLSearchParams()
+    if (params?.aspireBranchId !== undefined) qs.set('aspire_branch_id', String(params.aspireBranchId))
+    if (params?.includeExpired) qs.set('include_expired', 'true')
+    const q = qs.toString()
+    return apiClient.get<LicenseCertificationGroups>(`/proposals/config/licenses${q ? `?${q}` : ''}`)
+  },
 
   /**
    * GET /api/proposals/config/media-url?key=

@@ -21,8 +21,9 @@
 //  18. MeetOurTeam        — picked branch team members
 //  19. ClientReferences   — picked refs
 //  20. Insurance          — static copy + cert object/expiry
-//  21. Portfolio          — picked properties + photos
-//  22. ThankYou           — variable signer block
+//  21. LicensesCerts      — live credentials, prose fallback while the table is bare
+//  22. Portfolio          — picked properties + photos
+//  23. ThankYou           — variable signer block
 //
 // Optional pages (render only when their key is in formState.sections):
 //  StartupPlan306090, JuniperSync, JuniperMapping (2 pages), MeetOurTeamExecutive
@@ -42,15 +43,17 @@ import {
   CUSTOMER_CARE_CONTENT,
   STARTUP_PLAN_SEED,
   INSURANCE_PAGE_COPY,
+  LICENSES_PAGE_COPY,
   JUNIPER_SYNC_CONTENT,
   JUNIPER_MAPPING_CONTENT,
 } from '@/lib/proposal/staticContent'
 import { nearestBranches } from '@/lib/proposal/proximity'
-import { useProposalConfig, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
+import { useProposalConfig, useProposalLicenses, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
 import type { ProposalPreviewSlotProps } from './ProposalBuilder'
 import type {
   TeamMember,
   ClientReference,
+  LicenseCertification,
   PortfolioProperty,
   BranchCoverageGroup,
   BranchProfile,
@@ -787,6 +790,65 @@ function InsurancePage({
 }
 
 // ---------------------------------------------------------------------------
+// Page 20b — Licenses & certifications (from crm.licenses_certifications)
+// ---------------------------------------------------------------------------
+
+function LicenseRows({ heading, items }: { heading: string; items: LicenseCertification[] }) {
+  return (
+    <>
+      <tr>
+        <th colSpan={2}>{heading}</th>
+      </tr>
+      {items.map((it) => (
+        <tr key={it.id}>
+          <td>
+            {it.name}
+            {it.identifier ? ` — No. ${it.identifier}` : ''}
+          </td>
+          <td>{it.issuingBody ?? it.holderName ?? ''}</td>
+        </tr>
+      ))}
+    </>
+  )
+}
+
+function LicensesCertificationsPage({
+  licenses,
+  certifications,
+}: {
+  licenses: LicenseCertification[]
+  certifications: LicenseCertification[]
+}) {
+  const copy = LICENSES_PAGE_COPY
+  const hasAny = licenses.length > 0 || certifications.length > 0
+  return (
+    <PrintPage data-testid="page-licenses-certifications">
+      <p className="eyebrow">Coverage &amp; Compliance</p>
+      <h1 className="page-title">{copy.heading}</h1>
+      {copy.intro.map((para, i) => (
+        <p key={i} className="lede">{para}</p>
+      ))}
+
+      {/* Expired credentials are filtered out server-side, so an empty table is a
+          real possibility. A client reads a bare table as an oversight — the
+          prose line reads as an offer. */}
+      {hasAny ? (
+        <table className="branch-tbl" data-testid="licenses-table">
+          <tbody>
+            {licenses.length > 0 && <LicenseRows heading="Licenses" items={licenses} />}
+            {certifications.length > 0 && (
+              <LicenseRows heading="Certifications" items={certifications} />
+            )}
+          </tbody>
+        </table>
+      ) : (
+        <p>{copy.empty}</p>
+      )}
+    </PrintPage>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page 21 — Portfolio (variable: picked properties + photos)
 // ---------------------------------------------------------------------------
 
@@ -992,6 +1054,10 @@ export function ProposalPreview({
   portfolioProperties,
 }: ProposalPreviewProps) {
   const { branches, branchCoverage, insurance } = useProposalConfig()
+  // No aspireBranchId is derivable yet (see the §11 ledger gap in ProposalBuilder),
+  // so this returns company-wide credentials only — which is the right default for
+  // a client document: another state's license does not belong in this proposal.
+  const { data: credentials } = useProposalLicenses()
   const renderMutation = useRenderProposal()
 
   // Proximity footer: 2–3 nearest branches to the lead's lat/lng
@@ -1037,6 +1103,15 @@ export function ProposalPreview({
     { key: 'team', node: <MeetOurTeam members={teamMembers} /> },
     { key: 'references', node: <ClientReferencesPage refs={clientReferences} /> },
     { key: 'insurance', node: <InsurancePage cert={insurance} /> },
+    {
+      key: 'licenses',
+      node: (
+        <LicensesCertificationsPage
+          licenses={credentials?.licenses ?? []}
+          certifications={credentials?.certifications ?? []}
+        />
+      ),
+    },
     ...(photographedProperties.length > 0
       ? [{ key: 'portfolio', node: <PortfolioPage properties={photographedProperties} /> }]
       : []),

@@ -77,6 +77,30 @@ export interface BranchCoverageGroup {
   branches: string[]
 }
 
+/**
+ * A license or certification Juniper holds. expiryDate null means non-expiring;
+ * isExpired is computed server-side so a skewed client clock cannot flip it.
+ */
+export interface LicenseCertification {
+  id: string
+  kind: 'license' | 'certification'
+  name: string
+  issuingBody: string | null
+  identifier: string | null
+  holderName: string | null
+  aspireBranchId: number | null   // null = company-wide
+  issuedDate: string | null
+  expiryDate: string | null
+  objectKey: string | null
+  isExpired: boolean
+  active: boolean
+}
+
+export interface LicenseCertificationGroups {
+  licenses: LicenseCertification[]
+  certifications: LicenseCertification[]
+}
+
 export interface ClientReference {
   id: string
   aspireBranchId: number | null   // Amendment A.1: null = usable company-wide

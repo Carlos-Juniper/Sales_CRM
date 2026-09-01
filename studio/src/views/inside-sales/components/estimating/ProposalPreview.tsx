@@ -26,7 +26,8 @@
 //  StartupPlan306090, JuniperSync, JuniperMapping (2 pages), MeetOurTeamExecutive
 // ---------------------------------------------------------------------------
 
-import { ArrowLeft, Phone, Mail, MapPin, Printer, FileDown, Loader2 } from 'lucide-react'
+import { createContext, useContext } from 'react'
+import { ArrowLeft, Printer, FileDown, Loader2 } from 'lucide-react'
 import '@/styles/proposal-print.css'
 import { JuniperLogoFull } from '@/components/brand/JuniperLogo'
 import { COMPANY_INFO } from '@/lib/constants'
@@ -91,20 +92,9 @@ const PRINT_STYLES = `
   body:not([data-print-route]) #proposal-preview * { visibility: visible !important; }
   body:not([data-print-route]) #proposal-preview { position: absolute; top: 0; left: 0; width: 100%; }
   .no-print { display: none !important; }
-  @page {
-    size: A4;
-    margin: 20mm;
-  }
-  .print-page {
-    height: 256mm;
-    box-sizing: border-box;
-    overflow: hidden;
-    page-break-after: always;
-    break-after: page;
-    page-break-inside: avoid;
-    break-inside: avoid;
-  }
-  .print-page:last-child { page-break-after: auto; break-after: auto; }
+  /* Page size, .print-page geometry and the footer bar live in
+     styles/proposal-print.css and apply on screen too — the preview is meant to
+     be the PDF. Only genuinely print-only rules belong in this block. */
   /* Prevent cohesive blocks from splitting across pages */
   .signer-block,
   .team-card,
@@ -119,44 +109,44 @@ const PRINT_STYLES = `
 `
 
 // ---------------------------------------------------------------------------
-// Letterhead — appears at the top of every page (§8: "on every page")
-// ---------------------------------------------------------------------------
-
-function Letterhead() {
-  return (
-    <div className="bg-[#2E7D52] text-white px-8 py-6 print:py-8">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <JuniperLogoFull variant="white" className="h-10 w-auto" title={COMPANY_INFO.name} />
-          <p className="text-xs text-green-200">{COMPANY_INFO.tagline}</p>
-        </div>
-        <div className="text-right text-xs text-green-100 space-y-0.5 hidden sm:block">
-          <div className="flex items-center justify-end gap-1">
-            <Phone className="h-3 w-3" /> {COMPANY_INFO.phone}
-          </div>
-          <div className="flex items-center justify-end gap-1">
-            <Mail className="h-3 w-3" /> {COMPANY_INFO.email}
-          </div>
-          <div className="flex items-center justify-end gap-1">
-            <MapPin className="h-3 w-3" /> {COMPANY_INFO.address}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // PrintPage — wrapper enforcing one browser-page per proposal page
+//
+// The letterhead bar that used to sit at the top of every page is gone: the
+// real proposals carry the brand in a full-bleed footer instead, and repeating
+// a 1in green header on all 23 pages cost more vertical space than any page
+// could spare.
 // ---------------------------------------------------------------------------
 
-function PrintPage({ children, 'data-testid': testId }: { children: React.ReactNode; 'data-testid'?: string }) {
+// Page numbers are rendered by React, not by Chromium. page.pdf()'s
+// <span class="pageNumber"> only works inside the margin box, and @page
+// margin:0 leaves no margin box (see styles/proposal-print.css).
+//
+// Context rather than a prop so the ~20 page components in this file don't each
+// have to forward a number they don't care about. ProposalPreview owns the
+// order and provides the value; PrintPage consumes it. 0 means "not inside a
+// numbered document" and renders no number.
+const PageNumberContext = createContext(0)
+
+function PrintPage({
+  children,
+  'data-testid': testId,
+  hideNumber = false,
+}: {
+  children: React.ReactNode
+  'data-testid'?: string
+  hideNumber?: boolean
+}) {
+  const pageNumber = useContext(PageNumberContext)
   return (
-    <div className="print-page bg-white text-black" data-testid={testId}>
-      <Letterhead />
-      <div className="px-8 py-6">{children}</div>
-      <div className="px-8 pb-4 mt-auto text-[10px] text-gray-400 text-center">
-        {COMPANY_INFO.name} · {COMPANY_INFO.address} · {COMPANY_INFO.phone} · {COMPANY_INFO.email}
+    <div className="print-page" data-testid={testId}>
+      <div className="well">{children}</div>
+      <div className="footer">
+        <JuniperLogoFull variant="white" className="mark" title={COMPANY_INFO.name} />
+        <span className="meta">
+          {[COMPANY_INFO.website, hideNumber || pageNumber < 1 ? '' : String(pageNumber)]
+            .filter(Boolean)
+            .join('  |  ')}
+        </span>
       </div>
     </div>
   )
@@ -852,40 +842,25 @@ function JuniperSyncPage() {
 // Optional page: Juniper Mapping (2 pages, static)
 // ---------------------------------------------------------------------------
 
-function JuniperMappingPages() {
+// One component per sheet rather than a fragment of two: the page array in
+// ProposalPreview numbers by index, so an entry that renders two sheets would
+// silently skip a number.
+function JuniperMappingPage({ half }: { half: 'pageOne' | 'pageTwo' }) {
+  const content = JUNIPER_MAPPING_CONTENT[half]
   return (
-    <>
-      <PrintPage data-testid="page-juniper-mapping-1">
-        <div className="space-y-4 max-w-prose">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-[#2E7D52]">
-              {JUNIPER_MAPPING_CONTENT.pageOne.subheading}
-            </p>
-            <h2 className="text-2xl font-bold text-gray-900 mt-1">
-              {JUNIPER_MAPPING_CONTENT.pageOne.heading}
-            </h2>
-          </div>
-          {JUNIPER_MAPPING_CONTENT.pageOne.body.map((para, i) => (
-            <p key={i} className="text-sm text-gray-700 leading-relaxed">{para}</p>
-          ))}
+    <PrintPage data-testid={`page-juniper-mapping-${half === 'pageOne' ? 1 : 2}`}>
+      <div className="space-y-4 max-w-prose">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-[#2E7D52]">
+            {content.subheading}
+          </p>
+          <h2 className="text-2xl font-bold text-gray-900 mt-1">{content.heading}</h2>
         </div>
-      </PrintPage>
-      <PrintPage data-testid="page-juniper-mapping-2">
-        <div className="space-y-4 max-w-prose">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-[#2E7D52]">
-              {JUNIPER_MAPPING_CONTENT.pageTwo.subheading}
-            </p>
-            <h2 className="text-2xl font-bold text-gray-900 mt-1">
-              {JUNIPER_MAPPING_CONTENT.pageTwo.heading}
-            </h2>
-          </div>
-          {JUNIPER_MAPPING_CONTENT.pageTwo.body.map((para, i) => (
-            <p key={i} className="text-sm text-gray-700 leading-relaxed">{para}</p>
-          ))}
-        </div>
-      </PrintPage>
-    </>
+        {content.body.map((para, i) => (
+          <p key={i} className="text-sm text-gray-700 leading-relaxed">{para}</p>
+        ))}
+      </div>
+    </PrintPage>
   )
 }
 
@@ -958,6 +933,45 @@ export function ProposalPreview({
 
   const sections = new Set(formState.sections)
 
+  // The document, in §2 order. One entry === one sheet of paper.
+  const pages: { key: string; node: React.ReactNode }[] = [
+    { key: 'intro', node: <IntroLetter lead={lead} signer={signer} /> },
+    { key: 'rooted', node: <RootedInFlorida /> },
+    { key: 'local', node: <LocalLandscapeExperts nearbyBranches={nearbyBranches} /> },
+    ...(formState.orgChart.included
+      ? [{
+          key: 'org',
+          node: <OrgChartPage orgChart={formState.orgChart} teamMembers={allTeamMembers} />,
+        }]
+      : []),
+    ...SERVICE_KEYS.map((key) => ({
+      key: `service-${key}`,
+      node: <ServicePage serviceKey={key} />,
+    })),
+    { key: 'startup-comm', node: <StartupCommunication /> },
+    { key: 'customer-care', node: <CustomerCare /> },
+    { key: 'team', node: <MeetOurTeam members={teamMembers} /> },
+    { key: 'references', node: <ClientReferencesPage refs={clientReferences} /> },
+    { key: 'insurance', node: <InsurancePage cert={insurance} /> },
+    { key: 'portfolio', node: <PortfolioPage properties={portfolioProperties} /> },
+    { key: 'thank-you', node: <ThankYouPage signer={signer} /> },
+
+    // Optional pages — present only when their key is in formState.sections.
+    ...(sections.has('startup_plan_30_60_90')
+      ? [{ key: 'startup-plan', node: <StartupPlan306090 startupPlan={formState.startupPlan} /> }]
+      : []),
+    ...(sections.has('juniper_sync') ? [{ key: 'sync', node: <JuniperSyncPage /> }] : []),
+    ...(sections.has('juniper_mapping')
+      ? [
+          { key: 'mapping-1', node: <JuniperMappingPage half="pageOne" /> },
+          { key: 'mapping-2', node: <JuniperMappingPage half="pageTwo" /> },
+        ]
+      : []),
+    ...(sections.has('meet_our_team_executive')
+      ? [{ key: 'team-exec', node: <MeetOurTeamExecutive members={executiveTeamMembers} /> }]
+      : []),
+  ]
+
   return (
     <>
       <style>{PRINT_STYLES}</style>
@@ -1026,65 +1040,14 @@ export function ProposalPreview({
         className="proposal-root text-sm rounded-xl border border-[hsl(var(--border))] overflow-hidden print:border-0 print:rounded-none space-y-0"
         data-testid="proposal-preview"
       >
-        {/* ── Required pages, fixed §2 order ────────────────────────────── */}
-
-        {/* 1. Intro Letter */}
-        <IntroLetter lead={lead} signer={signer} />
-
-        {/* 2. Rooted in Florida */}
-        <RootedInFlorida />
-
-        {/* 3. Your Local Landscape Experts */}
-        <LocalLandscapeExperts nearbyBranches={nearbyBranches} />
-
-        {/* 4. Org Chart — only when included */}
-        {formState.orgChart.included && (
-          <OrgChartPage orgChart={formState.orgChart} teamMembers={allTeamMembers} />
-        )}
-
-        {/* 5–15. Our Services (11 subpages, always rendered) */}
-        {SERVICE_KEYS.map((key) => (
-          <ServicePage key={key} serviceKey={key} />
+        {/* Each entry is exactly one .print-page — one sheet of paper. The array
+            is the page order, and the index is the printed page number, so
+            inserting or dropping a page renumbers the rest for free. */}
+        {pages.map((page, i) => (
+          <PageNumberContext.Provider key={page.key} value={i + 1}>
+            {page.node}
+          </PageNumberContext.Provider>
         ))}
-
-        {/* 16. Start Up Communication */}
-        <StartupCommunication />
-
-        {/* 17. Customer Care */}
-        <CustomerCare />
-
-        {/* 18. Meet Our Team */}
-        <MeetOurTeam members={teamMembers} />
-
-        {/* 19. Client References */}
-        <ClientReferencesPage refs={clientReferences} />
-
-        {/* 20. Insurance */}
-        <InsurancePage cert={insurance} />
-
-        {/* 21. Portfolio */}
-        <PortfolioPage properties={portfolioProperties} />
-
-        {/* 22. Thank You */}
-        <ThankYouPage signer={signer} />
-
-        {/* ── Optional pages ────────────────────────────────────────────── */}
-
-        {/* Start Up Plan (30-60-90) */}
-        {sections.has('startup_plan_30_60_90') && (
-          <StartupPlan306090 startupPlan={formState.startupPlan} />
-        )}
-
-        {/* Juniper Sync */}
-        {sections.has('juniper_sync') && <JuniperSyncPage />}
-
-        {/* Juniper Mapping (2 pages) */}
-        {sections.has('juniper_mapping') && <JuniperMappingPages />}
-
-        {/* Meet Our Team — Executive */}
-        {sections.has('meet_our_team_executive') && (
-          <MeetOurTeamExecutive members={executiveTeamMembers} />
-        )}
       </div>
     </>
   )

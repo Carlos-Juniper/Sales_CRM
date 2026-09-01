@@ -85,20 +85,6 @@ def _mint_render_token(proposal_id: str, user: dict) -> str:
     return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-_HEADER_TEMPLATE = (
-    '<div style="width:100%;font-size:9px;'
-    "font-family:'Liberation Sans',Helvetica,Arial,sans-serif;"
-    'color:#6b7280;padding:0 20mm;-webkit-print-color-adjust:exact;">'
-    'Juniper Landscaping</div>'
-)
-
-_FOOTER_TEMPLATE = (
-    '<div style="width:100%;font-size:9px;'
-    "font-family:'Liberation Sans',Helvetica,Arial,sans-serif;"
-    'color:#6b7280;padding:0 20mm;text-align:right;">'
-    'Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>'
-)
-
 
 async def render_proposal_pdf(proposal_id: str, user: dict) -> RenderResult:
     """The single awaitable. Route awaits it today; a queue worker calls it tomorrow."""
@@ -140,13 +126,21 @@ async def render_proposal_pdf(proposal_id: str, user: dict) -> RenderResult:
                 timeout=PDF_RENDER_TIMEOUT_MS,
             )
 
+            # prefer_css_page_size wins, so `@page { size: letter }` in
+            # studio/src/styles/proposal-print.css is what actually sizes the
+            # sheet; format is only the fallback and must agree with it.
+            #
+            # display_header_footer is off and the templates are gone. That CSS
+            # also sets `@page { margin: 0 }` so the footer bar can bleed to the
+            # paper edge, and Chromium draws header/footer templates *into the
+            # page margin box* — zero margin, zero box, templates clipped to
+            # nothing. Page numbers are rendered in the document body by
+            # ProposalPreview.tsx instead.
             pdf_bytes = await page.pdf(
-                format="A4",
+                format="Letter",
                 print_background=True,
                 prefer_css_page_size=True,
-                display_header_footer=True,
-                header_template=_HEADER_TEMPLATE,
-                footer_template=_FOOTER_TEMPLATE,
+                display_header_footer=False,
             )
         finally:
             await context.close()

@@ -63,14 +63,32 @@
   src: url('/fonts/mrs-saint-delafield-400.woff2') format('woff2');
 }
 
-/* --- Typography tokens ---------------------------------------------------- */
+/* --- Tokens ---------------------------------------------------------------
+   Colours sampled from the live Proposify exports and independently confirmed
+   by the fills in the supplied brand vectors.
+   --------------------------------------------------------------------------- */
 
 .proposal-root {
   --jn-display: 'Lato', 'Liberation Sans', Arial, sans-serif;
   --jn-body: 'Open Sans', 'Liberation Sans', Arial, sans-serif;
   --jn-script: 'Mrs Saint Delafield', cursive;
 
+  --jn-green: #038442;
+  --jn-green-dark: #026634;
+  --jn-orange: #e87825;
+  --jn-ink: #2a2a2a;
+  --jn-ink-soft: #4a4a4a;
+  --jn-band: #f0f0f0;
+  --jn-hairline: #d8d8d8;
+
+  --jn-page-w: 8.5in;
+  --jn-page-h: 11in;
+  --jn-gutter: 0.58in;
+  --jn-top: 0.52in;
+  --jn-footer-h: 0.34in;
+
   font-family: var(--jn-body);
+  color: var(--jn-ink);
 }
 
 .proposal-root h1,
@@ -78,4 +96,88 @@
 .proposal-root h3,
 .proposal-root h4 {
   font-family: var(--jn-display);
+}
+
+/* --- Page geometry ---------------------------------------------------------
+   US Letter, and margin:0 is load-bearing. The real proposals bleed photography
+   and the green footer bar to the paper edge, which a non-zero @page margin
+   makes impossible. The margins become padding on .well instead.
+
+   Consequence, and the reason api/proposal_render.py sets
+   display_header_footer=False: Chromium renders header/footer templates *into
+   the page margin box*. Zero margin means zero box, so those templates clip to
+   nothing. The footer below is in the document body instead — which is also the
+   only way to put a logo and a coloured bar in it.
+
+   Unconditional, not inside @media print: the on-screen preview is supposed to
+   be the PDF. Fixed height plus overflow:hidden means content that would spill
+   in the PDF visibly spills in the preview, rather than surprising a rep after
+   they hit Generate.
+   --------------------------------------------------------------------------- */
+
+@page {
+  size: letter;
+  margin: 0;
+}
+
+.proposal-root .print-page {
+  position: relative;
+  box-sizing: border-box;
+  width: var(--jn-page-w);
+  height: var(--jn-page-h);
+  overflow: hidden;
+  background: #fff;
+  page-break-after: always;
+  break-after: page;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.proposal-root .print-page:last-child {
+  page-break-after: auto;
+  break-after: auto;
+}
+
+/* Content well — everything that is not full-bleed lives in here. Bottom
+   padding clears the footer bar, which is positioned over the page. */
+.proposal-root .well {
+  position: relative;
+  z-index: 2;
+  padding: var(--jn-top) var(--jn-gutter) calc(var(--jn-footer-h) + 0.18in);
+  height: 100%;
+}
+
+/* Escapes the well's horizontal padding to reach the paper edge. */
+.proposal-root .bleed {
+  margin-left: calc(-1 * var(--jn-gutter));
+  margin-right: calc(-1 * var(--jn-gutter));
+}
+
+/* --- Footer bar ----------------------------------------------------------- */
+
+.proposal-root .footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--jn-footer-h);
+  background: var(--jn-green);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--jn-gutter);
+  z-index: 5;
+}
+
+.proposal-root .footer .mark {
+  width: 0.62in;
+  height: 0.2in;
+}
+
+.proposal-root .footer .meta {
+  font-family: var(--jn-display);
+  color: #fff;
+  font-size: 7pt;
+  font-weight: 600;
+  letter-spacing: 0.07em;
 }

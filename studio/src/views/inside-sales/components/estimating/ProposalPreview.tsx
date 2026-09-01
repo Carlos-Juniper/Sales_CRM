@@ -26,8 +26,9 @@
 //  StartupPlan306090, JuniperSync, JuniperMapping (2 pages), MeetOurTeamExecutive
 // ---------------------------------------------------------------------------
 
-import { ArrowLeft, Leaf, Phone, Mail, MapPin, Printer, FileDown, Loader2 } from 'lucide-react'
+import { ArrowLeft, Phone, Mail, MapPin, Printer, FileDown, Loader2 } from 'lucide-react'
 import '@/styles/proposal-print.css'
+import { JuniperLogoFull } from '@/components/brand/JuniperLogo'
 import { COMPANY_INFO } from '@/lib/constants'
 import {
   ROOTED_IN_FLORIDA_CONTENT,
@@ -126,13 +127,8 @@ function Letterhead() {
     <div className="bg-[#2E7D52] text-white px-8 py-6 print:py-8">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center">
-            <Leaf className="h-6 w-6 text-white" />
-          </div>
-          <div>
-            <p className="text-xl font-bold tracking-tight">{COMPANY_INFO.name}</p>
-            <p className="text-xs text-green-200">{COMPANY_INFO.tagline}</p>
-          </div>
+          <JuniperLogoFull variant="white" className="h-10 w-auto" title={COMPANY_INFO.name} />
+          <p className="text-xs text-green-200">{COMPANY_INFO.tagline}</p>
         </div>
         <div className="text-right text-xs text-green-100 space-y-0.5 hidden sm:block">
           <div className="flex items-center justify-end gap-1">

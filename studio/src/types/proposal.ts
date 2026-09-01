@@ -13,6 +13,7 @@
 /** All page keys in the proposal — required pages are always included; optional ones
  *  appear only when present in ProposalRequest.sections. */
 export type ProposalSectionKey =
+  | 'cover'
   | 'intro_letter' | 'rooted_in_florida' | 'local_landscape_experts' | 'org_chart'
   | 'services_design' | 'services_maintenance' | 'services_installation' | 'services_turf'
   | 'services_irrigation' | 'services_arboriculture' | 'services_storm_response'

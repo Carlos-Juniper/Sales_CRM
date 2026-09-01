@@ -8,7 +8,9 @@
 // code, deleted by Slice 9). Nothing here imports ProposalExport — it is safe
 // to delete after this file is committed.
 //
-// §2 page order (fixed):
+// §2 page order (fixed). The cover is unnumbered, so the printed number on the
+// intro letter is 2 and every page below is one higher than its list position:
+//  0. CoverPage           — property name + city, no page number
 //  1. IntroLetter         — variable signer block
 //  2. RootedInFlorida     — static
 //  3. LocalLandscapeExperts — static map + variable proximity footer
@@ -131,14 +133,16 @@ function PrintPage({
   children,
   'data-testid': testId,
   hideNumber = false,
+  noFrond = false,
 }: {
   children: React.ReactNode
   'data-testid'?: string
   hideNumber?: boolean
+  noFrond?: boolean
 }) {
   const pageNumber = useContext(PageNumberContext)
   return (
-    <div className="print-page" data-testid={testId}>
+    <div className={noFrond ? 'print-page no-frond' : 'print-page'} data-testid={testId}>
       <div className="well">{children}</div>
       <div className="footer">
         <JuniperLogoFull variant="white" className="mark" title={COMPANY_INFO.name} />
@@ -233,10 +237,6 @@ function TeamMemberCard({ member }: { member: TeamMember }) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Page 1 — Intro Letter
-// ---------------------------------------------------------------------------
-
 interface SignerInfo {
   name: string
   title: string
@@ -244,6 +244,64 @@ interface SignerInfo {
   email: string
   branchAddress: string
 }
+
+// The signature, then the same name again in the block below it — that
+// repetition is the real proposals' convention, not a bug.
+function SignerBlock({ signer }: { signer: SignerInfo }) {
+  return (
+    <div className="signer-block">
+      <p className="signature">{signer.name}</p>
+      <p className="signer-lines">
+        <strong>{signer.name}</strong>
+        <br />
+        {signer.title}
+        {signer.phone && (
+          <>
+            <br />
+            {signer.phone}
+          </>
+        )}
+        {signer.email && (
+          <>
+            <br />
+            {signer.email}
+          </>
+        )}
+        {signer.branchAddress && (
+          <>
+            <br />
+            {signer.branchAddress}
+          </>
+        )}
+      </p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Cover — page 1, carries no page number (numbering starts on the letter)
+// ---------------------------------------------------------------------------
+
+function CoverPage({ lead }: { lead: { property_name: string; city: string; state: string } }) {
+  return (
+    <PrintPage data-testid="page-cover" hideNumber noFrond>
+      <div className="cover">
+        <JuniperLogoFull variant="color" className="cover-mark" title={COMPANY_INFO.name} />
+        <p className="cover-eyebrow">Proposal for</p>
+        <h1 className="page-title">{lead.property_name}</h1>
+        <h1 className="page-title">
+          {lead.city}
+          {lead.city && lead.state ? ', ' : ''}
+          {lead.state}
+        </h1>
+      </div>
+    </PrintPage>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Page 2 — Intro Letter
+// ---------------------------------------------------------------------------
 
 function IntroLetter({
   lead,
@@ -260,42 +318,25 @@ function IntroLetter({
 
   return (
     <PrintPage data-testid="page-intro-letter">
-      <div className="space-y-6 max-w-prose">
-        <p className="text-sm text-gray-500">{today}</p>
-        <div>
-          <p className="text-lg font-bold text-gray-900">{lead.property_name}</p>
-        </div>
-        <p className="text-sm text-gray-700 leading-relaxed">
+      <div className="letter">
+        <p className="letter-date">{today}</p>
+        <h2 className="sub" style={{ marginTop: 0 }}>
           Dear {lead.property_name} Leadership,
-        </p>
-        <p className="text-sm text-gray-700 leading-relaxed">
+        </h2>
+        <p>
           Thank you for the opportunity to present this proposal for landscape management
           services. At Juniper Landscaping, we are committed to delivering exceptional
           results that protect and enhance the value of your property.
         </p>
-        <p className="text-sm text-gray-700 leading-relaxed">
+        <p>
           The enclosed package outlines our comprehensive approach to landscape maintenance,
           our team, our service capabilities, and our commitment to communication and
           accountability. We are confident that Juniper is the right partner for your
           property.
         </p>
-        <p className="text-sm text-gray-700 leading-relaxed">
-          We look forward to the opportunity to serve you.
-        </p>
-        <div className="mt-8 space-y-1">
-          <p className="text-sm text-gray-700">Sincerely,</p>
-          <p className="font-semibold text-sm text-gray-900 mt-4">{signer.name}</p>
-          <p className="text-xs text-gray-600">{signer.title}</p>
-          {signer.phone && (
-            <p className="text-xs text-gray-500">{signer.phone}</p>
-          )}
-          {signer.email && (
-            <p className="text-xs text-gray-500">{signer.email}</p>
-          )}
-          {signer.branchAddress && (
-            <p className="text-xs text-gray-500">{signer.branchAddress}</p>
-          )}
-        </div>
+        <p>We look forward to the opportunity to serve you.</p>
+        <p className="letter-closing">Thank you,</p>
+        <SignerBlock signer={signer} />
       </div>
     </PrintPage>
   )
@@ -751,26 +792,20 @@ function PortfolioPage({ properties }: { properties: PortfolioProperty[] }) {
 function ThankYouPage({ signer }: { signer: SignerInfo }) {
   return (
     <PrintPage data-testid="page-thank-you">
-      <div className="space-y-6 max-w-prose">
-        <h2 className="text-2xl font-bold text-gray-900">Thank You</h2>
-        <p className="text-sm text-gray-700 leading-relaxed">
+      <div className="letter">
+        <p className="eyebrow">In closing</p>
+        <h1 className="page-title">Thank You</h1>
+        <p>
           We appreciate the time you have taken to review this proposal. Juniper Landscaping
           looks forward to the opportunity to become your long-term landscape partner. Our
           team is ready to answer any questions you may have.
         </p>
-        <p className="text-sm text-gray-700 leading-relaxed">
+        <p>
           Please do not hesitate to reach out directly — we would love to schedule a site
           walk to discuss your property's needs in detail.
         </p>
-        <div className="mt-8 space-y-1">
-          <p className="font-semibold text-sm text-gray-900">{signer.name}</p>
-          <p className="text-xs text-gray-600">{signer.title}</p>
-          {signer.phone && <p className="text-xs text-gray-500">{signer.phone}</p>}
-          {signer.email && <p className="text-xs text-gray-500">{signer.email}</p>}
-          {signer.branchAddress && (
-            <p className="text-xs text-gray-500">{signer.branchAddress}</p>
-          )}
-        </div>
+        <p className="letter-closing">Thank you,</p>
+        <SignerBlock signer={signer} />
       </div>
     </PrintPage>
   )
@@ -935,6 +970,8 @@ export function ProposalPreview({
 
   // The document, in §2 order. One entry === one sheet of paper.
   const pages: { key: string; node: React.ReactNode }[] = [
+    // Required and implicit, like the intro letter — never in formState.sections.
+    { key: 'cover', node: <CoverPage lead={lead} /> },
     { key: 'intro', node: <IntroLetter lead={lead} signer={signer} /> },
     { key: 'rooted', node: <RootedInFlorida /> },
     { key: 'local', node: <LocalLandscapeExperts nearbyBranches={nearbyBranches} /> },

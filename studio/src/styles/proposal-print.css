@@ -599,4 +599,66 @@
   font-size: 26pt;
   line-height: 1;
   color: var(--jn-ink);
+  margin: 0.1in 0 0.02in;
+}
+
+.proposal-root .signer-lines {
+  margin: 0;
+  font-size: 8.4pt;
+  line-height: 1.45;
+}
+
+.proposal-root .signer-lines strong {
+  color: var(--jn-ink);
+}
+
+/* --- Cover ---------------------------------------------------------------- */
+
+.proposal-root .cover {
+  padding-top: 1.5in;
+  text-align: center;
+}
+
+.proposal-root .cover-mark {
+  width: 2.5in;
+  height: 2.2in;
+}
+
+.proposal-root .cover-eyebrow {
+  font-family: var(--jn-display);
+  margin: 0.9in 0 0.1in;
+  font-size: 11pt;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--jn-ink);
+  text-transform: uppercase;
+}
+
+.proposal-root .cover .page-title {
+  font-size: 38pt;
+  margin-bottom: 0.06in;
+}
+
+.proposal-root .cover .page-title:last-child {
+  margin-bottom: 0;
+}
+
+/* --- Letter pages --------------------------------------------------------- */
+
+.proposal-root .letter-date {
+  font-size: 8.4pt;
+  color: var(--jn-ink-soft);
+  margin: 0 0 0.3in;
+}
+
+.proposal-root .letter {
+  max-width: 6.6in;
+}
+
+.proposal-root .letter p {
+  margin: 0 0 0.14in;
+}
+
+.proposal-root .letter-closing {
+  margin-top: 0.2in;
 }

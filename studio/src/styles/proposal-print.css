@@ -266,6 +266,7 @@
 .proposal-root .lede {
   font-size: 9.4pt;
   color: var(--jn-ink);
+  max-width: 6.6in;
 }
 
 /* --- Lists ----------------------------------------------------------------- */
@@ -329,6 +330,31 @@
 
 .proposal-root .cols-2.narrow-left {
   grid-template-columns: 0.85fr 1fr;
+}
+
+.proposal-root .cols-2.wide-left {
+  grid-template-columns: 1.9fr 1.1fr;
+  gap: 0.3in;
+  margin-top: 0.24in;
+}
+
+.proposal-root .cols-2.branch-cols {
+  grid-template-columns: 1.15fr 1fr;
+  align-items: start;
+}
+
+/* Page header with the leaf mark set opposite the title. */
+.proposal-root .page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.proposal-root .head-leaves {
+  width: 1.15in;
+  height: 0.62in;
+  margin-top: 0.05in;
+  flex: none;
 }
 
 /* Edge-to-edge grey section band.
@@ -468,6 +494,23 @@
 .proposal-root .org-bar {
   height: 1.5px;
   background: var(--jn-green);
+  margin: 0 16%;
+}
+
+.proposal-root .org-chart {
+  margin-top: 0.3in;
+}
+
+/* A single node centred under the tier above it. */
+.proposal-root .org-solo {
+  width: 2.6in;
+  margin: 0 auto;
+}
+
+.proposal-root .org-crew .crew-count {
+  font-size: 7.6pt;
+  color: var(--jn-ink-soft);
+  line-height: 1.3;
 }
 
 /* --- Team cards ------------------------------------------------------------ */
@@ -576,6 +619,26 @@
 .proposal-root .local-branches {
   border-top: 1px solid var(--jn-hairline);
   padding-top: 0.12in;
+  margin-top: 0.42in;
+}
+
+.proposal-root .local-branches-title {
+  margin: 0 0 0.1in;
+  font-size: 11pt;
+}
+
+.proposal-root .local-branches-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.3in;
+}
+
+/* Stand-in for the Florida branch map. Artwork is pending from Proposify; a
+   flat tonal block is the treatment that reads as intentional in a document a
+   rep sends to a client. */
+.proposal-root .map-pending {
+  height: 4.35in;
+  background: var(--jn-band);
 }
 
 .proposal-root .local-branches .bname {

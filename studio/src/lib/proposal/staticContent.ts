@@ -219,6 +219,54 @@ export const ROOTED_IN_FLORIDA_CONTENT: StaticPageCopy = {
   ],
 }
 
+/** Company-scale figures shown beside the About Us copy. */
+export const COMPANY_STATS: { num: string; label: string }[] = [
+  { num: '3,200+', label: 'Horticulturally trained employees' },
+  { num: '750+', label: 'In our vehicle fleet' },
+  { num: '26', label: 'Operating locations throughout Florida' },
+]
+
+// ---------------------------------------------------------------------------
+// Local Landscape Experts — static page
+// ---------------------------------------------------------------------------
+
+/**
+ * Marketing copy, deliberately NOT derived from crm.branches. The table names
+ * the offices sales wants to advertise; crm.branches holds all 56 rows
+ * including ones that would contradict the "26 operating locations" figure
+ * above. The variable, per-proposal element on this page is the nearest-branch
+ * footer, which does come from the database.
+ */
+export const BRANCH_LOCATIONS: { region: string; branches: string[] }[] = [
+  {
+    region: 'East Coast',
+    branches: [
+      'Davie', 'Daytona', 'Melbourne', 'Jupiter',
+      'Riviera Beach', 'West Palm Beach', 'Vero Beach',
+    ],
+  },
+  {
+    region: 'West Coast',
+    branches: [
+      'Bonita Springs', 'Bradenton', 'Estero', 'Fort Myers — Corporate',
+      'Fort Myers', 'Naples', 'Panama City Beach', 'Tampa East',
+      'Tampa North', 'Tampa South', 'Venice',
+    ],
+  },
+  {
+    region: 'Central',
+    branches: ['Ocala', 'Central Orlando', 'South Orlando', 'West Orlando'],
+  },
+]
+
+export const LOCAL_EXPERTS_CONTENT: StaticPageCopy = {
+  heading: 'Your Local Landscape Experts',
+  subheading: 'About Us',
+  body: [
+    'Juniper is founded in Florida and our entire leadership team lives in-state. Our Juniper team members are experienced professionals familiar with the local landscape palette.',
+  ],
+}
+
 // ---------------------------------------------------------------------------
 // Juniper Sync — static page (optional)
 // ---------------------------------------------------------------------------

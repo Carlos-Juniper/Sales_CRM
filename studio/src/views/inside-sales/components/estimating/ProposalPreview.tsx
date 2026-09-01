@@ -28,13 +28,16 @@
 //  StartupPlan306090, JuniperSync, JuniperMapping (2 pages), MeetOurTeamExecutive
 // ---------------------------------------------------------------------------
 
-import { createContext, useContext } from 'react'
+import { createContext, useContext, Fragment } from 'react'
 import { ArrowLeft, Printer, FileDown, Loader2 } from 'lucide-react'
 import '@/styles/proposal-print.css'
-import { JuniperLogoFull } from '@/components/brand/JuniperLogo'
+import { JuniperLogoFull, JuniperLeaves } from '@/components/brand/JuniperLogo'
 import { COMPANY_INFO } from '@/lib/constants'
 import {
   ROOTED_IN_FLORIDA_CONTENT,
+  COMPANY_STATS,
+  BRANCH_LOCATIONS,
+  LOCAL_EXPERTS_CONTENT,
   SERVICES_CONTENT,
   STARTUP_COMMUNICATION_CONTENT,
   CUSTOMER_CARE_CONTENT,
@@ -348,20 +351,31 @@ function IntroLetter({
 
 function RootedInFlorida() {
   const content = ROOTED_IN_FLORIDA_CONTENT
+  const [lede, ...rest] = content.body
   return (
     <PrintPage data-testid="page-rooted-in-florida">
-      <div className="space-y-4 max-w-prose">
+      <div className="page-head">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-[#2E7D52]">
-            {content.subheading}
-          </p>
-          <h2 className="text-2xl font-bold text-gray-900 mt-1">{content.heading}</h2>
+          <p className="eyebrow">{content.subheading}</p>
+          <h1 className="page-title">{content.heading}</h1>
         </div>
-        {content.body.map((para, i) => (
-          <p key={i} className="text-sm text-gray-700 leading-relaxed">
-            {para}
-          </p>
-        ))}
+        <JuniperLeaves className="head-leaves" />
+      </div>
+      <p className="lede">{lede}</p>
+      <div className="cols-2 wide-left">
+        <div>
+          {rest.map((para, i) => (
+            <p key={i}>{para}</p>
+          ))}
+        </div>
+        <div className="stats">
+          {COMPANY_STATS.map((s) => (
+            <div className="stat" key={s.num}>
+              <div className="num">{s.num}</div>
+              <div className="lbl">{s.label}</div>
+            </div>
+          ))}
+        </div>
       </div>
     </PrintPage>
   )
@@ -376,47 +390,62 @@ function LocalLandscapeExperts({
 }: {
   nearbyBranches: BranchProfile[]
 }) {
+  const content = LOCAL_EXPERTS_CONTENT
   return (
     <PrintPage data-testid="page-local-landscape-experts">
-      <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-900">Your Local Landscape Experts</h2>
-        <p className="text-sm text-gray-700 leading-relaxed">
-          Juniper Landscaping maintains branch offices across Florida, ensuring that your
-          property is served by a local team with deep knowledge of your region's soils,
-          climate, and plant palette.
-        </p>
-        {/* Placeholder for the Florida map graphic — image asset pending */}
-        <div className="h-48 rounded-xl bg-gray-100 flex items-center justify-center border border-gray-200">
-          <p className="text-xs text-gray-400">Florida branch map</p>
-        </div>
+      <p className="eyebrow">{content.subheading}</p>
+      <h1 className="page-title">{content.heading}</h1>
+      <p className="lede">{content.body[0]}</p>
 
-        {/* Variable footer: 2–3 nearest branch offices */}
-        {nearbyBranches.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-[#2E7D52] mb-3">
-              Your Nearest Juniper Offices
-            </p>
-            <div
-              className="grid gap-3"
-              style={{ gridTemplateColumns: `repeat(${nearbyBranches.length}, 1fr)` }}
-              data-testid="nearby-branches"
-            >
-              {nearbyBranches.map((b) => (
-                <div
-                  key={b.aspireBranchId}
-                  className="rounded-xl border border-gray-100 bg-gray-50 p-3"
-                  data-testid={`nearby-branch-${b.aspireBranchId}`}
-                >
-                  <p className="font-semibold text-xs text-gray-900">{b.branchName}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{b.address}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+      <div className="cols-2 wide-left branch-cols">
+        <table className="branch-tbl">
+          <tbody>
+            {BRANCH_LOCATIONS.map((group) => (
+              <Fragment key={group.region}>
+                <tr>
+                  <th colSpan={2}>{group.region}</th>
+                </tr>
+                {pairUp(group.branches).map(([left, right]) => (
+                  <tr key={left}>
+                    <td>{left}</td>
+                    <td>{right ?? ''}</td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+        {/* The Florida branch map artwork is still pending from Proposify. An
+            unlabelled tonal block reads as design; a grey box captioned "Florida
+            branch map" reads as a missing image in a client-facing document. */}
+        <div className="map-pending" />
       </div>
+
+      {/* Variable footer: 2–3 nearest branch offices */}
+      {nearbyBranches.length > 0 && (
+        <div className="local-branches">
+          <h2 className="sub local-branches-title">Local Branches</h2>
+          <div className="local-branches-grid" data-testid="nearby-branches">
+            {nearbyBranches.map((b) => (
+              <div key={b.aspireBranchId} data-testid={`nearby-branch-${b.aspireBranchId}`}>
+                <div className="bname">{b.branchName}</div>
+                <div className="baddr">{b.address}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </PrintPage>
   )
+}
+
+/** Two branch names per table row, so a region reads down two short columns. */
+function pairUp(items: string[]): [string, string | undefined][] {
+  const rows: [string, string | undefined][] = []
+  for (let i = 0; i < items.length; i += 2) {
+    rows.push([items[i], items[i + 1]])
+  }
+  return rows
 }
 
 // ---------------------------------------------------------------------------
@@ -425,21 +454,18 @@ function LocalLandscapeExperts({
 
 function CrewRow({ label, count }: { label: string; count: string }) {
   return (
-    <div className="flex flex-col items-center gap-1">
-      <div className="h-px w-8 bg-gray-300" />
-      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-center text-xs">
-        <p className="font-medium text-gray-700">{label}</p>
-        <p className="text-gray-500 text-[11px]">{count}</p>
-      </div>
+    <div className="org-node org-crew">
+      <div className="t">{label}</div>
+      <div className="crew-count">{count}</div>
     </div>
   )
 }
 
-function OrgNode({ title, name }: { title: string; name: string }) {
+function OrgNode({ title, name, filled = false }: { title: string; name: string; filled?: boolean }) {
   return (
-    <div className="rounded-xl border border-[#2E7D52]/30 bg-[#2E7D52]/5 px-4 py-3 text-center min-w-[140px]">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-[#2E7D52]">{title}</p>
-      <p className="text-xs text-gray-800 mt-0.5">{name}</p>
+    <div className={filled ? 'org-node filled' : 'org-node'}>
+      <div className="t">{title}</div>
+      <div className="n">{name}</div>
     </div>
   )
 }
@@ -469,85 +495,111 @@ function OrgChartPage({
 
   const { mow, prune, fertIpm, irrigation: irrigCrew } = orgChart.crewCounts
 
+  const specialists = [
+    agronomyManager && { key: 'agronomy', title: 'Agronomy Manager', name: agronomyManager.name },
+    irrigationManager && { key: 'irrigation', title: 'Irrigation Manager', name: irrigationManager.name },
+  ].filter((s): s is { key: string; title: string; name: string } => !!s)
+
+  const crews = [
+    (mow.foremen > 0 || mow.members > 0) && {
+      key: 'mow',
+      label: 'Mow Team',
+      count: `${mow.foremen} foreman · ${mow.members} members`,
+    },
+    (prune.foremen > 0 || prune.members > 0) && {
+      key: 'prune',
+      label: 'Prune Team',
+      count: `${prune.foremen} foreman · ${prune.members} members`,
+    },
+    fertIpm.members > 0 && {
+      key: 'fert',
+      label: 'Fert/IPM Team',
+      count: `${fertIpm.members} members`,
+    },
+    irrigCrew.members > 0 && {
+      key: 'irrig',
+      label: 'Irrigation Team',
+      count: `${irrigCrew.members} members`,
+    },
+  ].filter((c): c is { key: string; label: string; count: string } => !!c)
+
+  // Column counts vary with how many people the rep picked, so the grid track
+  // list is the one thing here that cannot live in the stylesheet.
+  const columns = (n: number) => ({ gridTemplateColumns: `repeat(${n}, 1fr)` })
+
   return (
     <PrintPage data-testid="page-org-chart">
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold text-gray-900">Our Team — Org Chart</h2>
+      <p className="eyebrow">Our Team</p>
+      <h1 className="page-title">Your Service Team</h1>
 
-        <div className="flex flex-col items-center gap-4 py-4">
-          {/* Tier 1: RD */}
-          {rd && (
-            <div className="flex flex-col items-center gap-2">
+      <div className="org-chart">
+        {/* Tier 1: RD */}
+        {rd && (
+          <>
+            <div className="org-solo">
               <OrgNode title="Regional Director" name={rd.name} />
-              <div className="h-6 w-px bg-gray-300" />
             </div>
-          )}
+            <div className="org-stem" />
+          </>
+        )}
 
-          {/* Tier 2: BM */}
-          {bm && (
-            <div className="flex flex-col items-center gap-2">
-              <OrgNode title="Branch Manager" name={bm.name} />
-              <div className="h-6 w-px bg-gray-300" />
+        {/* Tier 2: BM — the filled node; this is the client's day-to-day owner */}
+        {bm && (
+          <>
+            <div className="org-solo">
+              <OrgNode title="Branch Manager" name={bm.name} filled />
             </div>
-          )}
+            <div className="org-stem" />
+          </>
+        )}
 
-          {/* Tier 3: Account Manager(s) */}
-          {accountManagers.length > 0 && (
-            <div className="flex flex-col items-center gap-2">
-              <div className="flex gap-3">
-                {accountManagers.map((am) => (
-                  <OrgNode key={am.id} title="Account Manager" name={am.name} />
-                ))}
-              </div>
-              <div className="h-6 w-px bg-gray-300" />
+        {/* Tier 3: Account Manager(s) */}
+        {accountManagers.length > 0 && (
+          <>
+            {accountManagers.length > 1 && <div className="org-bar" />}
+            <div className="org-row" style={columns(accountManagers.length)}>
+              {accountManagers.map((am) => (
+                <OrgNode key={am.id} title="Account Manager" name={am.name} />
+              ))}
             </div>
-          )}
+            <div className="org-stem" />
+          </>
+        )}
 
-          {/* Tier 4: Optional specialist managers — only rendered when non-null */}
-          {(agronomyManager || irrigationManager) && (
-            <div className="flex flex-col items-center gap-2">
-              <div className="flex gap-6 items-center">
-                {agronomyManager && (
-                  <OrgNode title="Agronomy Manager" name={agronomyManager.name} />
-                )}
-                {irrigationManager && (
-                  <OrgNode title="Irrigation Manager" name={irrigationManager.name} />
-                )}
-              </div>
-              <div className="h-6 w-px bg-gray-300" />
+        {/* Tier 4: Optional specialist managers — only rendered when non-null */}
+        {specialists.length > 0 && (
+          <>
+            {specialists.length > 1 && <div className="org-bar" />}
+            <div className="org-row" style={columns(specialists.length)}>
+              {specialists.map((s) => (
+                <OrgNode key={s.key} title={s.title} name={s.name} />
+              ))}
             </div>
-          )}
+            <div className="org-stem" />
+          </>
+        )}
 
-          {/* Tier 5: Production Manager (deepest named level, per §3) */}
-          {productionManager && (
-            <div className="flex flex-col items-center gap-2">
+        {/* Tier 5: Production Manager (deepest named level, per §3) */}
+        {productionManager && (
+          <>
+            <div className="org-solo">
               <OrgNode title="Production Manager" name={productionManager.name} />
-              <div className="h-6 w-px bg-gray-300" />
             </div>
-          )}
+            <div className="org-stem" />
+          </>
+        )}
 
-          {/* Tier 6: Numeric crew rows — no names (§3) */}
-          <div className="flex gap-4 flex-wrap justify-center">
-            {(mow.foremen > 0 || mow.members > 0) && (
-              <CrewRow
-                label="Mow Team"
-                count={`${mow.foremen} foreman · ${mow.members} members`}
-              />
-            )}
-            {(prune.foremen > 0 || prune.members > 0) && (
-              <CrewRow
-                label="Prune Team"
-                count={`${prune.foremen} foreman · ${prune.members} members`}
-              />
-            )}
-            {fertIpm.members > 0 && (
-              <CrewRow label="Fert/IPM Team" count={`${fertIpm.members} members`} />
-            )}
-            {irrigCrew.members > 0 && (
-              <CrewRow label="Irrigation Team" count={`${irrigCrew.members} members`} />
-            )}
-          </div>
-        </div>
+        {/* Tier 6: Numeric crew rows — no names (§3) */}
+        {crews.length > 0 && (
+          <>
+            {crews.length > 1 && <div className="org-bar" />}
+            <div className="org-row" style={columns(crews.length)}>
+              {crews.map((c) => (
+                <CrewRow key={c.key} label={c.label} count={c.count} />
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </PrintPage>
   )

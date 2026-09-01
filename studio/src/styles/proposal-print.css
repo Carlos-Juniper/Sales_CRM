@@ -180,4 +180,423 @@
   font-size: 7pt;
   font-weight: 600;
   letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* --- Palm-frond watermark --------------------------------------------------
+   A very low-contrast frond texture sits behind most pages in the real
+   proposals. Inline SVG data-URL, not a file: the render captures as soon as
+   __PROPOSAL_READY__ flips and a background-image fetch is not something the
+   readiness gate can await.
+   --------------------------------------------------------------------------- */
+
+.proposal-root .print-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='420' height='420' viewBox='0 0 420 420'><g fill='none' stroke='%23000' stroke-opacity='.035' stroke-width='1.1'><path d='M210 420 C 210 300 210 190 210 40'/><path d='M210 330 C 150 300 110 250 90 190'/><path d='M210 330 C 270 300 310 250 330 190'/><path d='M210 280 C 160 250 130 205 115 155'/><path d='M210 280 C 260 250 290 205 305 155'/><path d='M210 230 C 172 205 148 168 138 128'/><path d='M210 230 C 248 205 272 168 282 128'/><path d='M210 180 C 182 160 165 130 158 100'/><path d='M210 180 C 238 160 255 130 262 100'/><path d='M210 130 C 192 116 182 96 178 76'/><path d='M210 130 C 228 116 238 96 242 76'/></g></svg>");
+  background-size: 420px 420px;
+}
+
+.proposal-root .print-page.no-frond::before {
+  display: none;
+}
+
+/* --- Type scale ------------------------------------------------------------ */
+
+.proposal-root .eyebrow {
+  font-family: var(--jn-display);
+  color: var(--jn-orange);
+  font-size: 7.6pt;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0 0 0.04in;
+}
+
+.proposal-root .eyebrow.green {
+  color: var(--jn-green);
+}
+
+.proposal-root .page-title {
+  font-family: var(--jn-display);
+  color: var(--jn-green);
+  font-size: 30pt;
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.005em;
+  margin: 0 0 0.14in;
+}
+
+.proposal-root .page-title.caps {
+  text-transform: uppercase;
+}
+
+.proposal-root .page-title.sm {
+  font-size: 24pt;
+}
+
+.proposal-root .sub {
+  font-family: var(--jn-display);
+  color: var(--jn-green);
+  font-size: 14pt;
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0.18in 0 0.06in;
+}
+
+.proposal-root .kicker {
+  font-family: var(--jn-display);
+  color: var(--jn-orange);
+  font-size: 9.5pt;
+  font-weight: 700;
+  margin: 0.14in 0 0.05in;
+}
+
+.proposal-root p,
+.proposal-root li {
+  font-size: 8.8pt;
+  line-height: 1.52;
+  color: var(--jn-ink-soft);
+  margin: 0 0 0.08in;
+}
+
+.proposal-root .lede {
+  font-size: 9.4pt;
+  color: var(--jn-ink);
+}
+
+/* --- Lists ----------------------------------------------------------------- */
+
+.proposal-root ul.leaf {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.proposal-root ul.leaf > li {
+  position: relative;
+  padding-left: 0.24in;
+  margin-bottom: 0.055in;
+}
+
+.proposal-root ul.leaf > li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.045in;
+  width: 0.13in;
+  height: 0.13in;
+  background: var(--jn-orange);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M22 3C12 3 4 8 4 16v5h3v-4c0-6 6-10 15-10-5 1-9 4-11 8 6 1 11-3 11-12z'/></svg>")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M22 3C12 3 4 8 4 16v5h3v-4c0-6 6-10 15-10-5 1-9 4-11 8 6 1 11-3 11-12z'/></svg>")
+    center / contain no-repeat;
+}
+
+.proposal-root ul.dot {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.proposal-root ul.dot > li {
+  position: relative;
+  padding-left: 0.2in;
+  margin-bottom: 0.06in;
+}
+
+.proposal-root ul.dot > li::before {
+  content: '';
+  position: absolute;
+  left: 0.04in;
+  top: 0.075in;
+  width: 0.05in;
+  height: 0.05in;
+  border-radius: 50%;
+  background: var(--jn-orange);
+}
+
+/* --- Layout helpers -------------------------------------------------------- */
+
+.proposal-root .cols-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.34in;
+}
+
+.proposal-root .cols-2.narrow-left {
+  grid-template-columns: 0.85fr 1fr;
+}
+
+/* Edge-to-edge grey section band.
+   Combine with .bleed ONLY when the band sits in normal flow inside the well. A
+   band that is absolutely positioned with left:0/right:0 is already edge to
+   edge; adding .bleed on top double-offsets it and pushes content off the left
+   edge of the sheet. */
+.proposal-root .band {
+  background: var(--jn-band);
+  padding: 0.34in var(--jn-gutter) 0.38in;
+}
+
+/* --- Photos ---------------------------------------------------------------- */
+
+.proposal-root .photo {
+  background: repeating-linear-gradient(135deg, #dde5dd 0 10px, #d5ded5 10px 20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a998a;
+  font-size: 7pt;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  overflow: hidden;
+}
+
+.proposal-root .collage {
+  display: grid;
+  gap: 3px;
+}
+
+.proposal-root .capbar {
+  background: var(--jn-green);
+  color: #fff;
+  font-size: 8pt;
+  text-align: center;
+  padding: 0.05in 0;
+}
+
+.proposal-root .capbar.orange {
+  background: var(--jn-orange);
+}
+
+/* --- 30-60-90 schedule cards ----------------------------------------------- */
+
+.proposal-root .sched {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.26in;
+  position: relative;
+}
+
+.proposal-root .sched-head {
+  border: 1.5px solid var(--jn-orange);
+  color: var(--jn-orange);
+  font-family: var(--jn-display);
+  font-size: 8.6pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 0.1in 0.06in;
+  background: #fff;
+  line-height: 1.25;
+}
+
+.proposal-root .sched-body {
+  background: var(--jn-green);
+  color: #fff;
+  text-align: center;
+  padding: 0.17in 0.1in;
+  font-size: 9pt;
+  line-height: 1.45;
+  margin-top: 0.09in;
+}
+
+.proposal-root .sched-rule {
+  position: absolute;
+  top: 0.155in;
+  left: 12%;
+  right: 12%;
+  height: 1.5px;
+  background: var(--jn-orange);
+  z-index: -1;
+}
+
+/* --- Org chart ------------------------------------------------------------- */
+
+.proposal-root .org-node {
+  border: 1.5px solid var(--jn-green);
+  border-radius: 3px;
+  padding: 0.12in 0.1in;
+  text-align: center;
+  background: #fff;
+}
+
+.proposal-root .org-node .t {
+  font-family: var(--jn-display);
+  font-size: 7.4pt;
+  color: var(--jn-orange);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.proposal-root .org-node .n {
+  font-family: var(--jn-display);
+  font-size: 10.5pt;
+  font-weight: 700;
+  color: var(--jn-green);
+}
+
+.proposal-root .org-node.filled {
+  background: var(--jn-green);
+  border-color: var(--jn-green);
+}
+
+.proposal-root .org-node.filled .t {
+  color: #ffd9bc;
+}
+
+.proposal-root .org-node.filled .n {
+  color: #fff;
+}
+
+.proposal-root .org-row {
+  display: grid;
+  gap: 0.12in;
+}
+
+.proposal-root .org-stem {
+  width: 1.5px;
+  height: 0.3in;
+  background: var(--jn-green);
+  margin: 0 auto;
+}
+
+.proposal-root .org-bar {
+  height: 1.5px;
+  background: var(--jn-green);
+}
+
+/* --- Team cards ------------------------------------------------------------ */
+
+.proposal-root .team-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5in 0.38in;
+}
+
+.proposal-root .team-card {
+  display: grid;
+  grid-template-columns: 1.35in 1fr;
+  gap: 0.17in;
+  break-inside: avoid;
+}
+
+.proposal-root .team-photo {
+  width: 1.35in;
+  height: 1.65in;
+  object-fit: cover;
+}
+
+.proposal-root .team-card .nm {
+  font-family: var(--jn-display);
+  font-size: 11.5pt;
+  font-weight: 700;
+  color: var(--jn-green);
+  line-height: 1.15;
+}
+
+.proposal-root .team-card .ti {
+  font-family: var(--jn-display);
+  font-size: 7.6pt;
+  font-weight: 700;
+  color: var(--jn-orange);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.04in;
+}
+
+.proposal-root .team-card .lo {
+  font-size: 7.4pt;
+  color: #7a7a7a;
+  margin-bottom: 0.05in;
+}
+
+.proposal-root .team-card .bi {
+  font-size: 7.8pt;
+  line-height: 1.45;
+  color: var(--jn-ink-soft);
+}
+
+/* --- Stat rows -------------------------------------------------------------- */
+
+.proposal-root .stat {
+  display: flex;
+  align-items: center;
+  gap: 0.14in;
+  margin-bottom: 0.2in;
+}
+
+.proposal-root .stat .num {
+  font-family: var(--jn-display);
+  font-size: 19pt;
+  font-weight: 700;
+  color: var(--jn-green);
+  line-height: 1;
+}
+
+.proposal-root .stat .lbl {
+  font-family: var(--jn-display);
+  font-size: 7.2pt;
+  font-weight: 700;
+  color: var(--jn-orange);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+}
+
+/* --- Branch tables --------------------------------------------------------- */
+
+.proposal-root .branch-tbl {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.proposal-root .branch-tbl th {
+  background: var(--jn-green);
+  color: #fff;
+  font-family: var(--jn-display);
+  font-size: 7.4pt;
+  text-align: left;
+  padding: 0.045in 0.08in;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.proposal-root .branch-tbl td {
+  font-size: 7.6pt;
+  padding: 0.032in 0.08in;
+  border-bottom: 0.5px solid #e6e6e6;
+  color: var(--jn-ink-soft);
+}
+
+.proposal-root .local-branches {
+  border-top: 1px solid var(--jn-hairline);
+  padding-top: 0.12in;
+}
+
+.proposal-root .local-branches .bname {
+  font-family: var(--jn-display);
+  color: var(--jn-orange);
+  font-size: 8pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.proposal-root .local-branches .baddr {
+  font-size: 7.6pt;
+  color: var(--jn-ink-soft);
+  line-height: 1.4;
+}
+
+/* Signature block — the real proposals sign in a script face. */
+.proposal-root .signature {
+  font-family: var(--jn-script);
+  font-size: 26pt;
+  line-height: 1;
+  color: var(--jn-ink);
 }

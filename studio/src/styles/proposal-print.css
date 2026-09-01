@@ -521,6 +521,13 @@
   gap: 0.5in 0.38in;
 }
 
+.proposal-root .team-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3in 0.34in;
+  margin-top: 0.34in;
+}
+
 .proposal-root .team-card {
   display: grid;
   grid-template-columns: 1.35in 1fr;
@@ -532,6 +539,18 @@
   width: 1.35in;
   height: 1.65in;
   object-fit: cover;
+}
+
+.proposal-root .headshot-initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--jn-green) 10%, #fff);
+  color: var(--jn-green);
+  font-family: var(--jn-display);
+  font-size: 22pt;
+  font-weight: 700;
+  letter-spacing: 0.03em;
 }
 
 .proposal-root .team-card .nm {
@@ -562,6 +581,87 @@
   font-size: 7.8pt;
   line-height: 1.45;
   color: var(--jn-ink-soft);
+}
+
+/* --- Client references ------------------------------------------------------ */
+
+.proposal-root .ref-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3in 0.34in;
+  margin-top: 0.34in;
+}
+
+.proposal-root .ref-card {
+  border-left: 2.5px solid var(--jn-orange);
+  padding-left: 0.16in;
+  break-inside: avoid;
+}
+
+.proposal-root .ref-card .nm {
+  font-family: var(--jn-display);
+  font-size: 11pt;
+  font-weight: 700;
+  color: var(--jn-green);
+  line-height: 1.2;
+}
+
+.proposal-root .ref-card .ti {
+  font-size: 8pt;
+  color: var(--jn-ink-soft);
+  margin-top: 0.03in;
+}
+
+.proposal-root .ref-card .since {
+  font-family: var(--jn-display);
+  font-size: 7.4pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--jn-orange);
+  margin-top: 0.05in;
+}
+
+.proposal-root .ref-card .ct {
+  font-size: 7.8pt;
+  line-height: 1.5;
+  color: var(--jn-ink-soft);
+  margin-top: 0.08in;
+}
+
+/* --- Insurance -------------------------------------------------------------- */
+
+.proposal-root .cert-card {
+  background: var(--jn-band);
+  border-left: 2.5px solid var(--jn-green);
+  padding: 0.16in 0.2in;
+  margin: 0.26in 0;
+}
+
+.proposal-root .cert-card .nm {
+  font-family: var(--jn-display);
+  font-size: 10.5pt;
+  font-weight: 700;
+  color: var(--jn-green);
+}
+
+.proposal-root .cert-card .ct {
+  font-size: 8.4pt;
+  color: var(--jn-ink-soft);
+  margin-top: 0.04in;
+}
+
+.proposal-root .footnote {
+  font-size: 8pt;
+  font-style: italic;
+  color: var(--jn-ink-soft);
+}
+
+/* --- Portfolio -------------------------------------------------------------- */
+
+.proposal-root .portfolio-item {
+  margin-top: 0.3in;
+  break-inside: avoid;
 }
 
 /* --- Stat rows -------------------------------------------------------------- */

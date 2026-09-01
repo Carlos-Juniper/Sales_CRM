@@ -353,7 +353,9 @@ function renderPreview(
       teamMembers={propsOverrides?.teamMembers ?? []}
       executiveTeamMembers={propsOverrides?.executiveTeamMembers ?? []}
       clientReferences={propsOverrides?.clientReferences ?? []}
-      portfolioProperties={propsOverrides?.portfolioProperties ?? []}
+      {/* The portfolio page is omitted when no picked property has a photo,
+          so the default must carry one for the required-page assertions. */}
+      portfolioProperties={propsOverrides?.portfolioProperties ?? [mockPortfolioProperty]}
     />,
   )
 }
@@ -741,7 +743,7 @@ describe('ProposalPreview — variable data', () => {
   it('Portfolio renders the passed property name', () => {
     renderPreview({}, { portfolioProperties: [mockPortfolioProperty] })
     const page = screen.getByTestId('page-portfolio')
-    expect(within(page).getByText('Pointe Jupiter Yacht Club')).toBeInTheDocument()
+    expect(within(page).getByText(/Pointe Jupiter Yacht Club/)).toBeInTheDocument()
   })
 
   it('Meet Our Team — Executive renders the executive member name', () => {

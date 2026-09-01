@@ -28,7 +28,7 @@
 //  StartupPlan306090, JuniperSync, JuniperMapping (2 pages), MeetOurTeamExecutive
 // ---------------------------------------------------------------------------
 
-import { createContext, useContext, Fragment } from 'react'
+import { createContext, useContext } from 'react'
 import { ArrowLeft, Printer, FileDown, Loader2 } from 'lucide-react'
 import '@/styles/proposal-print.css'
 import { JuniperLogoFull, JuniperLeaves } from '@/components/brand/JuniperLogo'
@@ -174,26 +174,17 @@ function ProposalHeadshot({
 }) {
   const { data } = useProposalMediaUrl(objectKey)
   if (!objectKey || !data?.url) {
-    // Fallback: initials avatar
+    // Headshots are not uploaded yet. Initials in the photo's own footprint
+    // hold the layout without reading as a broken image.
     const initials = name
       .split(' ')
       .map((w) => w[0])
       .join('')
       .toUpperCase()
       .slice(0, 2)
-    return (
-      <div className={`flex items-center justify-center rounded-full bg-[#2E7D52]/10 text-[#2E7D52] font-bold text-sm ${className}`}>
-        {initials}
-      </div>
-    )
+    return <div className={`headshot-initials ${className}`}>{initials}</div>
   }
-  return (
-    <img
-      src={data.url}
-      alt={name}
-      className={`rounded-full object-cover ${className}`}
-    />
-  )
+  return <img src={data.url} alt={name} className={className} />
 }
 
 // ---------------------------------------------------------------------------
@@ -202,14 +193,8 @@ function ProposalHeadshot({
 
 function PortfolioPhoto({ objectKey, alt }: { objectKey: string; alt: string }) {
   const { data } = useProposalMediaUrl(objectKey)
-  if (!data?.url) return <div className="bg-gray-100 rounded aspect-video animate-pulse" />
-  return (
-    <img
-      src={data.url}
-      alt={alt}
-      className="rounded aspect-video object-cover w-full"
-    />
-  )
+  if (!data?.url) return <div className="photo" />
+  return <img src={data.url} alt={alt} className="photo" />
 }
 
 // ---------------------------------------------------------------------------
@@ -218,23 +203,17 @@ function PortfolioPhoto({ objectKey, alt }: { objectKey: string; alt: string }) 
 
 function TeamMemberCard({ member }: { member: TeamMember }) {
   return (
-    <div className="flex gap-4 p-4 rounded-xl border border-gray-100 bg-gray-50">
+    <div className="team-card">
       <ProposalHeadshot
         objectKey={member.headshotObjectKey}
         name={member.name}
-        className="h-16 w-16 flex-shrink-0"
+        className="team-photo"
       />
-      <div className="flex-1 min-w-0">
-        <p className="font-semibold text-sm text-gray-900">{member.name}</p>
-        <p className="text-xs text-[#2E7D52] capitalize">
-          {member.title.replace(/_/g, ' ')}
-        </p>
-        {member.location && (
-          <p className="text-xs text-gray-500 mt-0.5">{member.location}</p>
-        )}
-        {member.bio && (
-          <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">{member.bio}</p>
-        )}
+      <div>
+        <p className="nm">{member.name}</p>
+        <p className="ti">{member.title.replace(/_/g, ' ')}</p>
+        {member.location && <p className="lo">{member.location}</p>}
+        {member.bio && <p className="bi">{member.bio}</p>}
       </div>
     </div>
   )
@@ -401,6 +380,9 @@ function LocalLandscapeExperts({
   nearbyBranches: BranchProfile[]
 }) {
   const content = LOCAL_EXPERTS_CONTENT
+  // This table is read against the Florida map beside it, so it lists Florida
+  // offices only. The five-state footprint is stated on the About Us page.
+  const floridaOffices = coverage.find((g) => g.state === 'FL')?.branches ?? []
   return (
     <PrintPage data-testid="page-local-landscape-experts">
       <p className="eyebrow">{content.subheading}</p>
@@ -410,18 +392,14 @@ function LocalLandscapeExperts({
       <div className="cols-2 wide-left branch-cols">
         <table className="branch-tbl" data-testid="branch-coverage">
           <tbody>
-            {coverage.map((group) => (
-              <Fragment key={group.state}>
-                <tr>
-                  <th colSpan={2}>{group.stateName}</th>
-                </tr>
-                {pairUp(group.branches).map(([left, right]) => (
-                  <tr key={left}>
-                    <td>{left}</td>
-                    <td>{right ?? ''}</td>
-                  </tr>
-                ))}
-              </Fragment>
+            <tr>
+              <th colSpan={2}>Florida Locations</th>
+            </tr>
+            {pairUp(floridaOffices).map(([left, right]) => (
+              <tr key={left}>
+                <td>{left}</td>
+                <td>{right ?? ''}</td>
+              </tr>
             ))}
           </tbody>
         </table>
@@ -447,6 +425,12 @@ function LocalLandscapeExperts({
       )}
     </PrintPage>
   )
+}
+
+/** Balance body paragraphs across two columns, first column taking the extra. */
+function splitColumns(paras: string[]): [string[], string[]] {
+  const half = Math.ceil(paras.length / 2)
+  return [paras.slice(0, half), paras.slice(half)]
 }
 
 /** Two branch names per table row, so a state reads down two short columns. */
@@ -637,19 +621,24 @@ const SERVICE_KEYS: ServiceKey[] = [
 
 function ServicePage({ serviceKey }: { serviceKey: ServiceKey }) {
   const content = SERVICES_CONTENT[serviceKey]
+  const [lede, ...rest] = content.body
   return (
     <PrintPage data-testid={`page-service-${serviceKey}`}>
-      <div className="space-y-4 max-w-prose">
+      <div className="page-head">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-[#2E7D52]">
-            Our Services
-          </p>
-          <h2 className="text-2xl font-bold text-gray-900 mt-1">{content.title}</h2>
+          <p className="eyebrow">Our Services</p>
+          <h1 className="page-title">{content.title}</h1>
         </div>
-        {content.body.map((para, i) => (
-          <p key={i} className="text-sm text-gray-700 leading-relaxed">
-            {para}
-          </p>
+        <JuniperLeaves className="head-leaves" />
+      </div>
+      <p className="lede">{lede}</p>
+      <div className="cols-2">
+        {splitColumns(rest).map((column, i) => (
+          <div key={i}>
+            {column.map((para, j) => (
+              <p key={j}>{para}</p>
+            ))}
+          </div>
         ))}
       </div>
     </PrintPage>
@@ -662,12 +651,19 @@ function ServicePage({ serviceKey }: { serviceKey: ServiceKey }) {
 
 function StartupCommunication() {
   const content = STARTUP_COMMUNICATION_CONTENT
+  const [lede, ...rest] = content.body
   return (
     <PrintPage data-testid="page-startup-communication">
-      <div className="space-y-4 max-w-prose">
-        <h2 className="text-2xl font-bold text-gray-900">{content.heading}</h2>
-        {content.body.map((para, i) => (
-          <p key={i} className="text-sm text-gray-700 leading-relaxed">{para}</p>
+      <p className="eyebrow">{content.subheading}</p>
+      <h1 className="page-title">{content.heading}</h1>
+      <p className="lede">{lede}</p>
+      <div className="cols-2">
+        {splitColumns(rest).map((column, i) => (
+          <div key={i}>
+            {column.map((para, j) => (
+              <p key={j}>{para}</p>
+            ))}
+          </div>
         ))}
       </div>
     </PrintPage>
@@ -680,12 +676,24 @@ function StartupCommunication() {
 
 function CustomerCare() {
   const content = CUSTOMER_CARE_CONTENT
+  const [lede, ...rest] = content.body
   return (
     <PrintPage data-testid="page-customer-care">
-      <div className="space-y-4 max-w-prose">
-        <h2 className="text-2xl font-bold text-gray-900">{content.heading}</h2>
-        {content.body.map((para, i) => (
-          <p key={i} className="text-sm text-gray-700 leading-relaxed">{para}</p>
+      <div className="page-head">
+        <div>
+          <p className="eyebrow">{content.subheading}</p>
+          <h1 className="page-title">{content.heading}</h1>
+        </div>
+        <JuniperLeaves className="head-leaves" />
+      </div>
+      <p className="lede">{lede}</p>
+      <div className="cols-2">
+        {splitColumns(rest).map((column, i) => (
+          <div key={i}>
+            {column.map((para, j) => (
+              <p key={j}>{para}</p>
+            ))}
+          </div>
         ))}
       </div>
     </PrintPage>
@@ -699,17 +707,12 @@ function CustomerCare() {
 function MeetOurTeam({ members }: { members: TeamMember[] }) {
   return (
     <PrintPage data-testid="page-meet-our-team">
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold text-gray-900">Meet Our Team</h2>
-        {members.length === 0 ? (
-          <p className="text-sm text-gray-500">No team members selected for this proposal.</p>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {members.map((m) => (
-              <TeamMemberCard key={m.id} member={m} />
-            ))}
-          </div>
-        )}
+      <p className="eyebrow">Your Juniper Team</p>
+      <h1 className="page-title">Meet Our Team</h1>
+      <div className="team-grid">
+        {members.map((m) => (
+          <TeamMemberCard key={m.id} member={m} />
+        ))}
       </div>
     </PrintPage>
   )
@@ -722,29 +725,22 @@ function MeetOurTeam({ members }: { members: TeamMember[] }) {
 function ClientReferencesPage({ refs }: { refs: ClientReference[] }) {
   return (
     <PrintPage data-testid="page-client-references">
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold text-gray-900">Client References</h2>
-        {refs.length === 0 ? (
-          <p className="text-sm text-gray-500">No references selected.</p>
-        ) : (
-          <div className="space-y-4">
-            {refs.map((r) => (
-              <div
-                key={r.id}
-                className="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-1"
-              >
-                <p className="font-semibold text-sm text-gray-900">{r.propertyName}</p>
-                <p className="text-xs text-[#2E7D52]">{r.servicesProvided}</p>
-                <p className="text-xs text-gray-600">Client since {r.clientSinceYear}</p>
-                <div className="text-xs text-gray-500 space-y-0.5 pt-1">
-                  <p>{r.contactName}{r.contactTitle ? `, ${r.contactTitle}` : ''}</p>
-                  <p>{r.phone} · {r.email}</p>
-                  <p>{r.address}</p>
-                </div>
-              </div>
-            ))}
+      <p className="eyebrow">Proven Partnerships</p>
+      <h1 className="page-title">Client References</h1>
+      <div className="ref-grid">
+        {refs.map((r) => (
+          <div className="ref-card" key={r.id}>
+            <p className="nm">{r.propertyName}</p>
+            <p className="ti">{r.servicesProvided}</p>
+            <p className="since">Client since {r.clientSinceYear}</p>
+            <p className="ct">
+              {r.contactName}{r.contactTitle ? `, ${r.contactTitle}` : ''}
+              <br />{r.phone}
+              <br />{r.email}
+              <br />{r.address}
+            </p>
           </div>
-        )}
+        ))}
       </div>
     </PrintPage>
   )
@@ -762,34 +758,30 @@ function InsurancePage({
   const copy = INSURANCE_PAGE_COPY
   return (
     <PrintPage data-testid="page-insurance">
-      <div className="space-y-4 max-w-prose">
-        <h2 className="text-2xl font-bold text-gray-900">{copy.heading}</h2>
-        {copy.intro.map((para, i) => (
-          <p key={i} className="text-sm text-gray-700 leading-relaxed">{para}</p>
-        ))}
+      <p className="eyebrow">Coverage &amp; Compliance</p>
+      <h1 className="page-title">{copy.heading}</h1>
+      {copy.intro.map((para, i) => (
+        <p key={i}>{para}</p>
+      ))}
 
-        {cert ? (
-          <div className="rounded-xl border border-[#2E7D52]/30 bg-[#2E7D52]/5 p-4 space-y-1">
-            <p className="text-xs font-semibold text-[#2E7D52]">
-              {cert.label ?? 'Certificate of Insurance'}
-            </p>
-            <p className="text-xs text-gray-600">
-              Expires: {new Date(cert.expiryDate).toLocaleDateString('en-US', {
-                year: 'numeric', month: 'long', day: 'numeric',
-              })}
-            </p>
-            <p className="text-[11px] text-gray-400 break-all">{cert.objectKey}</p>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-            <p className="text-xs text-gray-400">Certificate pending upload.</p>
-          </div>
-        )}
+      {cert ? (
+        // The GCS object key is deliberately not rendered — it is an internal
+        // storage path and this document goes to the client.
+        <div className="cert-card">
+          <p className="nm">{cert.label ?? 'Certificate of Insurance'}</p>
+          <p className="ct">
+            Current through {new Date(cert.expiryDate).toLocaleDateString('en-US', {
+              year: 'numeric', month: 'long', day: 'numeric',
+            })}
+          </p>
+        </div>
+      ) : (
+        <p>Our current certificate of insurance is available on request.</p>
+      )}
 
-        {copy.footer.map((para, i) => (
-          <p key={i} className="text-sm text-gray-600 leading-relaxed italic">{para}</p>
-        ))}
-      </div>
+      {copy.footer.map((para, i) => (
+        <p key={i} className="footnote">{para}</p>
+      ))}
     </PrintPage>
   )
 }
@@ -801,48 +793,38 @@ function InsurancePage({
 function PortfolioPage({ properties }: { properties: PortfolioProperty[] }) {
   return (
     <PrintPage data-testid="page-portfolio">
-      <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-900">Portfolio</h2>
-        {properties.length === 0 ? (
-          <p className="text-sm text-gray-500">No portfolio properties selected.</p>
-        ) : (
-          <div className="space-y-8">
-            {properties.map((p) => (
-              <div key={p.id} className="space-y-2">
-                <p className="font-semibold text-sm text-gray-900">{p.name}</p>
-                <p className="text-xs text-gray-500">{p.cityState}</p>
-                {p.photoObjectKeys.length > 0 && (
-                  <div
-                    className={`grid gap-2 ${p.photoObjectKeys.length === 1 ? '' : 'grid-cols-2'}`}
-                  >
-                    {p.photoObjectKeys.map((key) => (
-                      <PortfolioPhoto key={key} objectKey={key} alt={`${p.name} photo`} />
-                    ))}
-                  </div>
-                )}
-                {p.beforeAfterObjectKeys && (
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div>
-                      <p className="text-[10px] text-gray-400 mb-1">Before</p>
-                      <PortfolioPhoto
-                        objectKey={p.beforeAfterObjectKeys.before}
-                        alt={`${p.name} before`}
-                      />
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-gray-400 mb-1">After</p>
-                      <PortfolioPhoto
-                        objectKey={p.beforeAfterObjectKeys.after}
-                        alt={`${p.name} after`}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
+      <p className="eyebrow">Our Work</p>
+      <h1 className="page-title">Portfolio</h1>
+      {properties.map((p) => (
+        <div className="portfolio-item" key={p.id}>
+          <div
+            className="collage"
+            style={{ gridTemplateColumns: p.photoObjectKeys.length === 1 ? '1fr' : '1fr 1fr' }}
+          >
+            {p.photoObjectKeys.map((key) => (
+              <PortfolioPhoto key={key} objectKey={key} alt={`${p.name} photo`} />
             ))}
           </div>
-        )}
-      </div>
+          <div className="capbar">
+            {p.name} — {p.cityState}
+          </div>
+          {p.beforeAfterObjectKeys && (
+            <>
+              <div className="collage" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <PortfolioPhoto
+                  objectKey={p.beforeAfterObjectKeys.before}
+                  alt={`${p.name} before`}
+                />
+                <PortfolioPhoto
+                  objectKey={p.beforeAfterObjectKeys.after}
+                  alt={`${p.name} after`}
+                />
+              </div>
+              <div className="capbar orange">Before &nbsp;·&nbsp; After</div>
+            </>
+          )}
+        </div>
+      ))}
     </PrintPage>
   )
 }
@@ -879,34 +861,32 @@ function ThankYouPage({ signer }: { signer: SignerInfo }) {
 
 function StartupPlan306090({ startupPlan }: { startupPlan: StartupPlanInput }) {
   const { dayZero, day30 } = STARTUP_PLAN_SEED
-
-  function BulletSection({ title, bullets }: { title: string; bullets: string[] }) {
-    if (bullets.length === 0) return null
-    return (
-      <div className="space-y-1.5">
-        <p className="text-xs font-semibold uppercase tracking-widest text-[#2E7D52]">{title}</p>
-        <ul className="space-y-1">
-          {bullets.map((b, i) => (
-            <li key={i} className="flex gap-2 text-xs text-gray-700">
-              <span className="text-[#2E7D52] mt-0.5">•</span>
-              <span>{b}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    )
-  }
+  const phases: { title: string; bullets: string[] }[] = [
+    { title: 'Day Zero', bullets: dayZero.map((b) => b.text) },
+    { title: 'Day 30', bullets: day30.map((b) => b.text) },
+    { title: 'Day 60', bullets: startupPlan.day60 },
+    { title: 'Day 90', bullets: startupPlan.day90 },
+    { title: 'Day 120+', bullets: startupPlan.day120Plus },
+    { title: 'Ongoing', bullets: startupPlan.ongoing },
+  ].filter((p) => p.bullets.length > 0)
 
   return (
     <PrintPage data-testid="page-startup-plan">
-      <div className="space-y-5">
-        <h2 className="text-2xl font-bold text-gray-900">Start Up Plan (30-60-90 Day)</h2>
-        <BulletSection title="Day Zero" bullets={dayZero.map((b) => b.text)} />
-        <BulletSection title="Day 30" bullets={day30.map((b) => b.text)} />
-        <BulletSection title="Day 60" bullets={startupPlan.day60} />
-        <BulletSection title="Day 90" bullets={startupPlan.day90} />
-        <BulletSection title="Day 120+" bullets={startupPlan.day120Plus} />
-        <BulletSection title="Ongoing" bullets={startupPlan.ongoing} />
+      <p className="eyebrow">Transition</p>
+      <h1 className="page-title">Start Up Plan (30-60-90 Day)</h1>
+      <div className="sched">
+        {phases.map((phase) => (
+          <div key={phase.title}>
+            <div className="sched-head">{phase.title}</div>
+            <div className="sched-body">
+              <ul className="dot">
+                {phase.bullets.map((b, i) => (
+                  <li key={i}>{b}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ))}
       </div>
     </PrintPage>
   )
@@ -918,17 +898,19 @@ function StartupPlan306090({ startupPlan }: { startupPlan: StartupPlanInput }) {
 
 function JuniperSyncPage() {
   const content = JUNIPER_SYNC_CONTENT
+  const [lede, ...rest] = content.body
   return (
     <PrintPage data-testid="page-juniper-sync">
-      <div className="space-y-4 max-w-prose">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-[#2E7D52]">
-            {content.subheading}
-          </p>
-          <h2 className="text-2xl font-bold text-gray-900 mt-1">{content.heading}</h2>
-        </div>
-        {content.body.map((para, i) => (
-          <p key={i} className="text-sm text-gray-700 leading-relaxed">{para}</p>
+      <p className="eyebrow">{content.subheading}</p>
+      <h1 className="page-title">{content.heading}</h1>
+      <p className="lede">{lede}</p>
+      <div className="cols-2">
+        {splitColumns(rest).map((column, i) => (
+          <div key={i}>
+            {column.map((para, j) => (
+              <p key={j}>{para}</p>
+            ))}
+          </div>
         ))}
       </div>
     </PrintPage>
@@ -944,17 +926,19 @@ function JuniperSyncPage() {
 // silently skip a number.
 function JuniperMappingPage({ half }: { half: 'pageOne' | 'pageTwo' }) {
   const content = JUNIPER_MAPPING_CONTENT[half]
+  const [lede, ...rest] = content.body
   return (
     <PrintPage data-testid={`page-juniper-mapping-${half === 'pageOne' ? 1 : 2}`}>
-      <div className="space-y-4 max-w-prose">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-[#2E7D52]">
-            {content.subheading}
-          </p>
-          <h2 className="text-2xl font-bold text-gray-900 mt-1">{content.heading}</h2>
-        </div>
-        {content.body.map((para, i) => (
-          <p key={i} className="text-sm text-gray-700 leading-relaxed">{para}</p>
+      <p className="eyebrow">{content.subheading}</p>
+      <h1 className="page-title">{content.heading}</h1>
+      <p className="lede">{lede}</p>
+      <div className="cols-2">
+        {splitColumns(rest).map((column, i) => (
+          <div key={i}>
+            {column.map((para, j) => (
+              <p key={j}>{para}</p>
+            ))}
+          </div>
         ))}
       </div>
     </PrintPage>
@@ -968,17 +952,12 @@ function JuniperMappingPage({ half }: { half: 'pageOne' | 'pageTwo' }) {
 function MeetOurTeamExecutive({ members }: { members: TeamMember[] }) {
   return (
     <PrintPage data-testid="page-meet-our-team-executive">
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold text-gray-900">Meet Our Team — Executive</h2>
-        {members.length === 0 ? (
-          <p className="text-sm text-gray-500">No executive team members selected.</p>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {members.map((m) => (
-              <TeamMemberCard key={m.id} member={m} />
-            ))}
-          </div>
-        )}
+      <p className="eyebrow">Leadership</p>
+      <h1 className="page-title">Meet Our Team — Executive</h1>
+      <div className="team-grid">
+        {members.map((m) => (
+          <TeamMemberCard key={m.id} member={m} />
+        ))}
       </div>
     </PrintPage>
   )
@@ -1030,6 +1009,12 @@ export function ProposalPreview({
 
   const sections = new Set(formState.sections)
 
+  // Portfolio photos are not uploaded yet. A property with no photo is a name
+  // over an empty box, so it is dropped; if none have photos the page goes too.
+  const photographedProperties = portfolioProperties.filter(
+    (p) => p.photoObjectKeys.length > 0 || p.beforeAfterObjectKeys,
+  )
+
   // The document, in §2 order. One entry === one sheet of paper.
   const pages: { key: string; node: React.ReactNode }[] = [
     // Required and implicit, like the intro letter — never in formState.sections.
@@ -1052,7 +1037,9 @@ export function ProposalPreview({
     { key: 'team', node: <MeetOurTeam members={teamMembers} /> },
     { key: 'references', node: <ClientReferencesPage refs={clientReferences} /> },
     { key: 'insurance', node: <InsurancePage cert={insurance} /> },
-    { key: 'portfolio', node: <PortfolioPage properties={portfolioProperties} /> },
+    ...(photographedProperties.length > 0
+      ? [{ key: 'portfolio', node: <PortfolioPage properties={photographedProperties} /> }]
+      : []),
     { key: 'thank-you', node: <ThankYouPage signer={signer} /> },
 
     // Optional pages — present only when their key is in formState.sections.

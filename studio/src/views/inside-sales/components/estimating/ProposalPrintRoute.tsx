@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import {
   useProposal,
   useTeamMembers,
@@ -32,6 +32,10 @@ const OPTIONAL_SECTION_KEYS: OptionalSection[] = [
 
 export default function ProposalPrintRoute(): JSX.Element {
   const { id } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
+  // ?autoprint=1 is set by the in-app "Print" button. The headless renderer
+  // never sets it — it polls __PROPOSAL_READY__ and calls page.pdf() instead.
+  const autoPrint = searchParams.get('autoprint') === '1'
 
   // Mark <body> so print-specific global CSS can target this route.
   useEffect(() => {
@@ -41,37 +45,56 @@ export default function ProposalPrintRoute(): JSX.Element {
     }
   }, [])
 
-  const { data: proposal, isLoading } = useProposal(id ?? null)
-  const { data: lead } = useLead(proposal?.leadId ?? null)
-  const { data: estimate } = useEstimate(proposal?.estimateId ?? null)
+  const { data: proposal, isLoading: loadingProposal } = useProposal(id ?? null)
+  const { data: lead, isLoading: loadingLead } = useLead(proposal?.leadId ?? null)
+  const { data: estimate, isLoading: loadingEstimate } = useEstimate(proposal?.estimateId ?? null)
 
   // Config data needed by ProposalPreview
-  const { data: allTeamMembers = [] } = useTeamMembers()
-  const { data: executiveTeamMembers = [] } = useTeamMembers({ teamType: 'executive' })
-  const { data: allClientRefs = [] } = useClientReferences()
-  const { data: allPortfolio = [] } = usePortfolio()
+  const { data: allTeamMembers = [], isLoading: loadingTeam } = useTeamMembers()
+  const { data: executiveTeamMembers = [], isLoading: loadingExec } = useTeamMembers({ teamType: 'executive' })
+  const { data: allClientRefs = [], isLoading: loadingRefs } = useClientReferences()
+  const { data: allPortfolio = [], isLoading: loadingPortfolio } = usePortfolio()
 
-  // Readiness gate — fires after proposal + lead + estimate are loaded
+  // Everything ProposalPreview needs before it renders anything but a hidden
+  // placeholder. `proposal` alone is NOT enough: lead and estimate are fetched
+  // from ids *on* the proposal, so they resolve a round-trip later. Gating the
+  // readiness flag on `proposal` alone let Chromium capture — and the autoprint
+  // path print — the hidden placeholder, producing a blank one-page PDF.
+  const dataReady =
+    !!proposal && !!lead && !!estimate &&
+    !loadingProposal && !loadingLead && !loadingEstimate &&
+    !loadingTeam && !loadingExec && !loadingRefs && !loadingPortfolio
+
+  // Readiness gate
   useEffect(() => {
-    if (!proposal || isLoading) return
+    if (!dataReady) return
     let cancelled = false
     const settle = async () => {
+      // The effect runs after commit, but wait one frame so layout has settled
+      // and #proposal-preview's images are attached before we enumerate them.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      const root = document.querySelector('#proposal-preview')
+      if (!root) return
       await document.fonts.ready
-      const imgs = Array.from(document.querySelectorAll('#proposal-preview img'))
+      const imgs = Array.from(root.querySelectorAll('img'))
       await Promise.all(
-        imgs.map((img) =>
-          (img as HTMLImageElement).decode().catch(() => undefined),
-        ),
+        imgs.map((img) => img.decode().catch(() => undefined)),
       )
-      if (!cancelled) (window as unknown as { __PROPOSAL_READY__?: boolean }).__PROPOSAL_READY__ = true
+      if (cancelled) return
+      ;(window as unknown as { __PROPOSAL_READY__?: boolean }).__PROPOSAL_READY__ = true
+      if (autoPrint) {
+        // rAF so the browser has committed a paint before the modal print
+        // dialog freezes rendering.
+        requestAnimationFrame(() => window.print())
+      }
     }
     void settle()
     return () => {
       cancelled = true
     }
-  }, [proposal, isLoading])
+  }, [dataReady, autoPrint])
 
-  if (!proposal || !lead || !estimate) {
+  if (!dataReady || !proposal || !lead || !estimate) {
     return <div style={{ display: 'none' }} />
   }
 

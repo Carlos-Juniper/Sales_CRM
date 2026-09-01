@@ -64,6 +64,31 @@ const PRINT_STYLES = `
 }
 
 @media print {
+  /* Chrome drops every background colour and image when printing unless this is
+     set. The server render passes print_background=True, but an in-app Cmd+P
+     goes through the print dialog and needs the declaration. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* AppShell wraps the whole SPA in h-screen + overflow-hidden (see
+     components/layout/AppShell.tsx). A clipping ancestor chain truncates print
+     output to one viewport, which is why Cmd+P inside the app emits a single
+     page. Unclip the shell so pagination sees the real document height.
+     The /proposals/:id/print route mounts outside AppShell and is unaffected. */
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  body:not([data-print-route]) [data-app-shell],
+  body:not([data-print-route]) [data-app-shell-main] {
+    display: block !important;
+    height: auto !important;
+    width: auto !important;
+    overflow: visible !important;
+  }
+
   body:not([data-print-route]) * { visibility: hidden !important; }
   body:not([data-print-route]) #proposal-preview,
   body:not([data-print-route]) #proposal-preview * { visibility: visible !important; }
@@ -980,10 +1005,21 @@ export function ProposalPreview({
             )}
             {renderMutation.isPending ? 'Generating…' : 'Generate PDF'}
           </button>
-          {/* Print fallback — browser print dialog */}
+          {/* Print fallback — opens the chrome-free print route in a new tab and
+              prints from there. Printing this page directly fights the AppShell
+              layout (fixed-height, clipped) and the visibility lift-out, which
+              takes #proposal-preview out of flow so Chrome paginates from the
+              viewport height instead of the content height. The print route is
+              the exact DOM the server renders, so what you see matches the PDF. */}
           <button
             type="button"
-            onClick={() => window.print()}
+            onClick={() => {
+              if (proposalId) {
+                window.open(`/proposals/${proposalId}/print?autoprint=1`, '_blank')
+                return
+              }
+              window.print()
+            }}
             className="inline-flex items-center gap-2 rounded-lg border border-[hsl(var(--border))] px-3 py-2 text-xs font-medium text-[hsl(var(--fg))] hover:bg-[hsl(var(--muted))]"
           >
             <Printer className="h-3.5 w-3.5" />

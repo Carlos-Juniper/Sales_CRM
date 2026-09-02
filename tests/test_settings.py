@@ -159,3 +159,91 @@ class TestCompanySettingsAuth:
         assert len(audit_sqls) == 1
         flat = " ".join(str(p) for p in audit_sqls[0].args[1])
         assert "10000000" in flat and "25000000" in flat
+
+
+# ── Slice 5: branch settings + scope guard ───────────────────────────────────
+
+
+class TestBranchSettingsScope:
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_manager_out_of_scope_branch_403(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("manager")
+        # resolve_branch_scope reads user_branches via authz.query → only 1403.
+        mock_authz_query.return_value = [{"aspire_branch_id": 1403}]
+        r = client.patch(
+            "/api/settings/branch/3696",
+            json={"crew_rate_cents_per_hour": 20000},
+        )
+        assert r.status_code == 403
+        mock_exec.assert_not_awaited()
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_manager_in_scope_branch_200_and_audits(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("manager")
+        mock_authz_query.return_value = [{"aspire_branch_id": 1403}]
+        # Read the current crew rate (from_value source).
+        mock_query.return_value = [{"crew_rate_cents_per_hour": 18000}]
+        r = client.patch(
+            "/api/settings/branch/1403",
+            json={"crew_rate_cents_per_hour": 20000},
+        )
+        assert r.status_code == 200
+
+        bs_updates = [
+            c for c in mock_exec.await_args_list if "branch_settings" in c.args[0]
+        ]
+        audit_sqls = [
+            c for c in mock_exec.await_args_list if "config_audit" in c.args[0]
+        ]
+        assert len(bs_updates) == 1
+        assert len(audit_sqls) == 1
+        flat = " ".join(str(p) for p in audit_sqls[0].args[1])
+        assert "branch" in flat
+        assert "1403" in flat  # scope_id
+        assert "18000" in flat and "20000" in flat  # from → to
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_body_supplied_branch_cannot_widen_scope(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        # Manager scoped to 1403 hits /branch/3696 — the path/body naming another
+        # branch must not grant access. Scope comes from user_branches only.
+        as_role("manager")
+        mock_authz_query.return_value = [{"aspire_branch_id": 1403}]
+        r = client.patch(
+            "/api/settings/branch/3696",
+            json={"crew_rate_cents_per_hour": 99999, "aspire_branch_id": 1403},
+        )
+        assert r.status_code == 403
+        mock_exec.assert_not_awaited()
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_admin_patches_any_branch_200(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("admin")
+        # admin → resolve_branch_scope returns kind='all' without touching
+        # user_branches; still, keep authz.query benign.
+        mock_authz_query.return_value = []
+        mock_query.return_value = [{"crew_rate_cents_per_hour": 18000}]
+        r = client.patch(
+            "/api/settings/branch/3696",
+            json={"crew_rate_cents_per_hour": 21000},
+        )
+        assert r.status_code == 200
+        bs_updates = [
+            c for c in mock_exec.await_args_list if "branch_settings" in c.args[0]
+        ]
+        assert len(bs_updates) == 1

@@ -22,7 +22,10 @@ PROXY_VERSION=v2.14.2
 PROXY_URL="https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/${PROXY_VERSION}/cloud-sql-proxy.linux.amd64"
 
 echo "==> Installing pymysql"
-pip install --quiet "pymysql==1.1.1"
+# --break-system-packages: this container is disposable per-build (PEP 668
+# blocks system-wide pip installs on the cloud-sdk image's Debian/Python 3.13
+# base) -- safe here since nothing else on the image depends on this env.
+pip install --quiet --break-system-packages "pymysql==1.1.1"
 
 echo "==> Downloading cloud-sql-proxy ${PROXY_VERSION}"
 curl -fsSL -o /usr/local/bin/cloud-sql-proxy "${PROXY_URL}"

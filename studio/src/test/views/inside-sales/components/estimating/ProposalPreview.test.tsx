@@ -15,8 +15,11 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { screen, within } from '@testing-library/react'
 import { render } from '@/test/utils'
+import { JuniperLogoFull } from '@/components/brand/JuniperLogo'
 import { useAuthStore } from '@/store/authStore'
 import { makeUser } from '@/test/utils'
 import { ProposalPreview } from '@/views/inside-sales/components/estimating/ProposalPreview'
@@ -871,5 +874,76 @@ describe('ProposalPreview — Generate PDF button', () => {
     const buttons = screen.getAllByRole('button')
     const printBtn = buttons.find((b) => b.textContent?.includes('Print') && !b.textContent?.includes('Generate'))
     expect(printBtn).toBeDefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 8. Slice 10 — brand/print fidelity locks
+//
+// These lock ALREADY-SHIPPED behaviour so a regression turns them red. The
+// print CSS is loaded by a headless renderer, not jsdom, so a couple of these
+// assert against the stylesheet SOURCE rather than computed layout (see the
+// per-test comments explaining the jsdom limitation).
+// ---------------------------------------------------------------------------
+
+// Read once — every geometry/token assertion reads the same source of truth the
+// renderer bundles (studio/src/styles/proposal-print.css).
+const PROPOSAL_PRINT_CSS = readFileSync(
+  path.resolve(process.cwd(), 'src/styles/proposal-print.css'),
+  'utf8',
+)
+
+describe('ProposalPreview — Slice 10 brand & print fidelity', () => {
+  it('last page footer number equals the .print-page count and the cover shows none', () => {
+    // Structural page-counting via .print-page is legitimate; the ASSERTION is
+    // behavioural — the footer's rendered NUMBER text, and the cover's absence
+    // of one.
+    const { container } = renderPreview()
+    const pages = container.querySelectorAll('.print-page')
+    const pageCount = pages.length
+
+    // The cover (page-cover) renders no footer number.
+    const cover = screen.getByTestId('page-cover')
+    const coverFooter = cover.querySelector('.footer .meta')
+    expect(coverFooter?.textContent ?? '').not.toMatch(/\d/)
+
+    // The last page's footer renders the total page count as its number.
+    const lastPage = pages[pages.length - 1]
+    const lastMeta = lastPage.querySelector('.footer .meta')
+    // The footer meta is "juniper.com  |  <n>"; the number is the last token.
+    const lastNumber = (lastMeta?.textContent ?? '').trim().split('|').pop()?.trim()
+    expect(lastNumber).toBe(String(pageCount))
+  })
+
+  it('print page geometry is declared as US Letter (8.5in x 11in) in the stylesheet', () => {
+    // jsdom does NOT apply stylesheet CSS to layout and does NOT resolve CSS
+    // custom properties via getComputedStyle, so `.print-page` never computes to
+    // 8.5in/11in here (that would be vacuous). Assert the SOURCE the print
+    // renderer actually bundles instead: the page-size tokens and @page rule.
+    expect(PROPOSAL_PRINT_CSS).toMatch(/--jn-page-w:\s*8\.5in/)
+    expect(PROPOSAL_PRINT_CSS).toMatch(/--jn-page-h:\s*11in/)
+    // @page declares the US Letter size, matching the 8.5x11 tokens above.
+    expect(PROPOSAL_PRINT_CSS).toMatch(/@page\s*\{[^}]*size:\s*letter/)
+  })
+
+  it('JuniperLogoFull renders a genuine vector (viewBox, no <image>, no <text>)', () => {
+    const { container } = render(<JuniperLogoFull variant="color" />)
+    const svg = container.querySelector('svg')
+    expect(svg).not.toBeNull()
+    expect(svg!.hasAttribute('viewBox')).toBe(true)
+    expect(svg!.querySelectorAll('image').length).toBe(0)
+    expect(svg!.querySelectorAll('text').length).toBe(0)
+  })
+
+  it('--jn-green is the single source of truth (#038442) referenced via var(), not hardcoded', () => {
+    // Empirically, getComputedStyle(...).getPropertyValue('--jn-green') returns
+    // '' under jsdom (external/style-block custom properties are not resolved),
+    // so asserting the computed value would be vacuous. Assert the SOURCE: the
+    // token is defined once, and consumers reference var(--jn-green) rather than
+    // repeating the hex.
+    expect(PROPOSAL_PRINT_CSS).toMatch(/--jn-green:\s*#038442/)
+    // The footer bar — the brand's most visible surface — pulls the token, not a
+    // literal hex.
+    expect(PROPOSAL_PRINT_CSS).toMatch(/\.footer\s*\{[^}]*background:\s*var\(--jn-green\)/)
   })
 })

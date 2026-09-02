@@ -267,6 +267,93 @@ export const settingsApi = {
    */
   deletePortfolioProperty: (propertyId: string) =>
     apiClient.delete<void>(`/settings/portfolio/${propertyId}`),
+
+  // ── Slice 15b: licenses/certifications CRUD (settings write path) ───────────
+
+  /**
+   * GET /api/settings/licenses?aspire_branch_id=&include_expired=
+   * Returns licenses_certifications rows visible to the caller. Admin sees all;
+   * BM/RD sees only their branch scope. include_expired=true returns inactive rows.
+   * NOTE: this endpoint does NOT return isExpired — use /proposals/config/licenses
+   * for the server-computed isExpired flag (used by the expiry banner).
+   */
+  listLicenses: (params?: { aspireBranchId?: number; includeExpired?: boolean }) => {
+    const qs = new URLSearchParams()
+    if (params?.aspireBranchId !== undefined) qs.set('aspire_branch_id', String(params.aspireBranchId))
+    if (params?.includeExpired) qs.set('include_expired', 'true')
+    const q = qs.toString()
+    return apiClient.get<LicenseSettingsRow[]>(`/settings/licenses${q ? `?${q}` : ''}`)
+  },
+
+  /** POST /api/settings/licenses — creates a new license/certification row. */
+  createLicense: (body: LicenseCreateBody) =>
+    apiClient.post<LicenseSettingsRow>('/settings/licenses', body),
+
+  /** PATCH /api/settings/licenses/:id — partial update. */
+  updateLicense: (licenseId: string, body: LicensePatchBody) =>
+    apiClient.patch<LicenseSettingsRow>(`/settings/licenses/${licenseId}`, body),
+
+  /**
+   * DELETE /api/settings/licenses/:id — soft-delete (active=0).
+   * An expired or deactivated license is a historical record; it is never hard-deleted.
+   */
+  deactivateLicense: (licenseId: string) =>
+    apiClient.delete<{ id: string; active: boolean }>(`/settings/licenses/${licenseId}`),
+
+  /**
+   * POST /api/settings/licenses/:id/scan — upload a scan PDF/image.
+   * Sends a multipart/form-data request. The GCS object key is returned so the
+   * caller can store it and build a view link via the media-url signer.
+   */
+  uploadLicenseScan: (licenseId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.postForm<{ id: string; objectKey: string }>(
+      `/settings/licenses/${licenseId}/scan`,
+      form,
+    )
+  },
+
+  // ── Slice 15b: insurance_certificates CRUD (admin-only, company-scoped) ─────
+
+  /**
+   * GET /api/settings/insurance — list insurance certificates, newest first.
+   * Admin-only server-side. The expiry banner checks expiryDate on these rows.
+   */
+  listInsurance: () =>
+    apiClient.get<InsuranceCert[]>('/settings/insurance'),
+
+  /** POST /api/settings/insurance — create a cert row given an existing objectKey. */
+  createInsurance: (body: InsuranceCreateBody) =>
+    apiClient.post<InsuranceCert>('/settings/insurance', body),
+
+  /** PATCH /api/settings/insurance/:id — partial update. */
+  updateInsurance: (certId: string, body: InsurancePatchBody) =>
+    apiClient.patch<InsuranceCert>(`/settings/insurance/${certId}`, body),
+
+  /**
+   * DELETE /api/settings/insurance/:id — hard delete (no active column).
+   * NOTE: insurance_certificates has no active column (migration 014).
+   */
+  deleteInsurance: (certId: string) =>
+    apiClient.delete<void>(`/settings/insurance/${certId}`),
+
+  /**
+   * POST /api/settings/insurance/upload — upload a cert PDF + create the DB row
+   * in one request. This is the preferred flow for the Settings UI (avoids a
+   * separate POST after the upload). Returns the created InsuranceCert row.
+   */
+  uploadInsuranceCert: (params: {
+    file: File
+    expiryDate: string
+    label?: string | null
+  }) => {
+    const form = new FormData()
+    form.append('file', params.file)
+    form.append('expiry_date', params.expiryDate)
+    if (params.label) form.append('label', params.label)
+    return apiClient.postForm<InsuranceCert>('/settings/insurance/upload', form)
+  },
 }
 
 // ── H37 request/response shapes ──────────────────────────────────────────────
@@ -317,3 +404,57 @@ export interface PortfolioPropertyCreateBody {
 }
 
 export type PortfolioPropertyPatchBody = Partial<PortfolioPropertyCreateBody>
+
+// ── Slice 15b: licenses/certifications request/response shapes ────────────────
+// These mirror LicenseCreate / LicensePatch / InsuranceCreate / InsurancePatch
+// in api/settings.py. The read path from /settings/licenses returns this shape
+// (NOTE: isExpired is absent — only /proposals/config/licenses computes it).
+
+export interface LicenseSettingsRow {
+  id: string
+  kind: 'license' | 'certification'
+  name: string
+  issuingBody: string | null
+  identifier: string | null
+  holderName: string | null
+  /** null = company-wide (admin-only create; BM sees read-only). */
+  aspireBranchId: number | null
+  issuedDate: string | null
+  expiryDate: string | null
+  objectKey: string | null
+  active: boolean
+  sortOrder: number
+  updatedAt: string | null
+}
+
+export interface LicenseCreateBody {
+  kind: 'license' | 'certification'
+  name: string
+  issuingBody?: string | null
+  identifier?: string | null
+  holderName?: string | null
+  aspireBranchId?: number | null
+  issuedDate?: string | null
+  expiryDate?: string | null
+  objectKey?: string | null
+  sortOrder?: number
+}
+
+export type LicensePatchBody = Partial<Omit<LicenseCreateBody, 'aspireBranchId'>>
+
+/** Insurance certificate — admin-only, company-scoped. */
+export interface InsuranceCert {
+  id: string
+  objectKey: string
+  expiryDate: string | null
+  label: string | null
+  uploadedAt: string | null
+}
+
+export interface InsuranceCreateBody {
+  objectKey: string
+  expiryDate: string
+  label?: string | null
+}
+
+export type InsurancePatchBody = Partial<InsuranceCreateBody>

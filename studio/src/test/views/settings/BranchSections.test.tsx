@@ -264,12 +264,19 @@ describe('ProductionRatesForm', () => {
   })
 })
 
-// ── Bug 5: BranchSection placeholder for unmapped slugs ──────────────────────
+// ── Slice 15b: BranchSection dispatches branch-credentials to CredentialsSection
 
-describe('BranchSection unmapped slug', () => {
-  it('renders a SectionPlaceholder for branch-credentials instead of blank', () => {
-    // branch-credentials is in sections.ts but has no form in BRANCH_FORMS —
-    // BranchSection must render a placeholder (with the stable testid), not null.
+describe('BranchSection branch-credentials slug', () => {
+  it('renders the CredentialsSection for branch-credentials (not blank)', async () => {
+    // branch-credentials now renders CredentialsSection (Slice 15b).
+    // Stub the three queries CredentialsSection fires so it does not hang.
+    server.use(
+      http.get('*/api/settings/licenses', () => HttpResponse.json([])),
+      http.get('*/api/settings/insurance', () => HttpResponse.json([])),
+      http.get('*/api/proposals/config/licenses', () =>
+        HttpResponse.json({ licenses: [], certifications: [] }),
+      ),
+    )
     renderComp(
       <BranchSection
         slug="branch-credentials"
@@ -277,13 +284,26 @@ describe('BranchSection unmapped slug', () => {
         sectionLabel="Credentials (branch)"
       />,
     )
+    // The CredentialsSection uses the 'credentials' slug for its testid.
+    expect(
+      await screen.findByTestId('settings-section-credentials'),
+    ).toBeInTheDocument()
+  })
+
+  it('renders a "select a branch" prompt when no aspireBranchId is available', () => {
+    renderComp(
+      <BranchSection
+        slug="branch-credentials"
+        aspireBranchId={undefined}
+        sectionLabel="Credentials (branch)"
+      />,
+    )
     expect(
       screen.getByTestId('settings-section-branch-credentials'),
     ).toBeInTheDocument()
-    // Placeholder text must not be empty.
     expect(
-      screen.getByTestId('settings-section-branch-credentials').textContent?.trim(),
-    ).not.toBe('')
+      screen.getByTestId('settings-section-branch-credentials').textContent,
+    ).toMatch(/select a branch/i)
   })
 })
 

@@ -1505,6 +1505,12 @@ async def list_users(
     if role:
         conditions.append("role = %s")
         params.append(role)
+        # A role filter drives the assignee pickers (e.g. ?role=sales for the
+        # lead-assignee picker, §2.8), so it must exclude DEACTIVATED users:
+        # Slice 6 deactivates instead of deleting, and a deactivated rep must
+        # not be assignable. A plain listing (no role) keeps returning inactive
+        # rows so historical name lookups still resolve.
+        conditions.append("active = 1")
     if branch_id:
         conditions.append("branch_id = %s")
         params.append(branch_id)

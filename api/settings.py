@@ -36,6 +36,18 @@ from pydantic import BaseModel
 
 from db import execute, query
 from api import authz
+from api import aspire_sync
+from api import graph
+
+
+# Exact §2.8 copy shown when a sales user has no resolvable Aspire ContactID.
+# The UI keys off this string verbatim; do NOT reword it.
+SALES_ASPIRE_BLOCK_COPY = (
+    "No Aspire contact matches this email. Create an Aspire user with the same "
+    "email address, then click Link Aspire Rep. Until then, estimates from this "
+    "rep push to Aspire without a sales rep — and opportunities already pushed "
+    "must be corrected in Aspire by hand."
+)
 
 
 # ── Audit helper (shared by both slices) ─────────────────────────────────────
@@ -173,6 +185,33 @@ class BranchSettingsPatch(BaseModel):
     # {material_key: {factor_name: value, ...}} — factor columns only, never
     # unit_cost/unit_sell.
     material_factors: Optional[dict[str, dict]] = None
+
+
+class AuthorizeUserBody(BaseModel):
+    """Authorize a person PICKED from the M365 directory (§2.8).
+
+    name/email come straight from the directory pick — the admin never types the
+    email, so the lowercased-email match Entra SSO relies on is typo-proof. role
+    is validated against CANONICAL_ROLES; branches are an optional replace-set of
+    aspire_branch_id.
+    """
+    name: str
+    email: str
+    role: str
+    branches: Optional[list[int]] = None
+
+
+class UserAdminPatch(BaseModel):
+    """Partial update of one users row (role / branches / active).
+
+    Every field optional — the PATCH applies only the keys present. Setting role
+    to 'sales' re-runs the aspire_rep_id hard-block; `active` toggles the
+    deactivate flag (never a DELETE); `branches` is a replace-set on
+    user_branches.
+    """
+    role: Optional[str] = None
+    branches: Optional[list[int]] = None
+    active: Optional[bool] = None
 
 
 # Company setting column map (camel-free: bodies already use snake_case columns).
@@ -445,6 +484,188 @@ def register(app, require_auth) -> None:
 
         return await get_branch_settings_payload(aspire_branch_id)
 
+    # ── Slice 6: user administration (§2.8) — admin-only writes ──────────────
+
+    @app.get("/api/settings/users/directory")
+    async def search_user_directory(
+        q: str = "", user: dict = Depends(require_auth)
+    ) -> list[dict]:
+        """Proxy the M365 directory search so an admin PICKS a person (§2.8).
+
+        Returns {name, email} candidates. Admin-only (live re-read) because the
+        pick feeds the authorize path; a blank/short query returns [] without
+        touching Graph.
+        """
+        await _require_admin(user)
+        return await graph.search_directory(q)
+
+    @app.post("/api/settings/users", status_code=201)
+    async def authorize_user(
+        body: AuthorizeUserBody, user: dict = Depends(require_auth)
+    ) -> dict:
+        """Authorize a directory-picked person into `users` (§2.8) — admin-only.
+
+        Not "create from scratch": name/email come from the M365 pick, so the
+        stored email is exact. Email is lowercased (Entra SSO matches lowercased
+        email). role='sales' triggers the aspire_rep_id hard-block; other roles
+        save with no Aspire link and no warning. The authorize and any branch
+        set are audited.
+        """
+        await _require_admin(user)
+
+        role = body.role.strip()
+        if role not in authz.CANONICAL_ROLES:
+            raise HTTPException(status_code=422, detail=f"Unknown role {role!r}")
+
+        email = body.email.strip().lower()
+
+        # Hard-block sales without a resolvable Aspire contact BEFORE any write.
+        aspire_rep_id: Optional[int] = None
+        if role == "sales":
+            aspire_rep_id = await _require_resolved_sales_rep(email, None)
+
+        user_id = str(uuid.uuid4())
+        await execute(
+            """INSERT INTO users (id, email, name, role, active, aspire_rep_id)
+                 VALUES (%s, %s, %s, %s, 1, %s)""",
+            [user_id, email, body.name, role, aspire_rep_id],
+        )
+
+        actor = _actor(user)
+        await _audit(
+            scope_type="company",
+            scope_id=None,
+            setting_key=f"user.{user_id}.authorize",
+            from_value=None,
+            to_value=email,
+            actor=actor,
+        )
+        if body.branches is not None:
+            await _replace_user_branches(user_id, body.branches, actor)
+
+        return {
+            "id": user_id,
+            "email": email,
+            "name": body.name,
+            "role": role,
+            "active": 1,
+            "aspire_rep_id": aspire_rep_id,
+        }
+
+    @app.patch("/api/settings/users/{user_id}")
+    async def patch_user(
+        user_id: str, body: UserAdminPatch, user: dict = Depends(require_auth)
+    ) -> dict:
+        """Edit a user's role / branches / active flag (§2.8) — admin-only.
+
+        Deactivate, never delete: `active=false` sets users.active=0 (no DELETE),
+        so historical references survive and the user drops from ?role= pickers
+        (which filter active=1). Setting role='sales' re-runs the aspire_rep_id
+        hard-block against the row's stored rep or a live resolution. Branches
+        are a replace-set. Every change is audited.
+        """
+        await _require_admin(user)
+
+        rows = await query(
+            "SELECT id, email, role, active, aspire_rep_id FROM users WHERE id = %s",
+            [user_id],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="User not found")
+        current = rows[0]
+        actor = _actor(user)
+
+        # ── role ─────────────────────────────────────────────────────────────
+        if body.role is not None:
+            new_role = body.role.strip()
+            if new_role not in authz.CANONICAL_ROLES:
+                raise HTTPException(status_code=422, detail=f"Unknown role {new_role!r}")
+
+            new_rep_id = current.get("aspire_rep_id")
+            if new_role == "sales":
+                # Block a sales role that cannot resolve an Aspire contact BEFORE
+                # writing anything (prevent-don't-repair).
+                new_rep_id = await _require_resolved_sales_rep(
+                    current.get("email") or "", current.get("aspire_rep_id")
+                )
+
+            await execute(
+                "UPDATE users SET role = %s, aspire_rep_id = %s WHERE id = %s",
+                [new_role, new_rep_id, user_id],
+            )
+            await _audit(
+                scope_type="company",
+                scope_id=None,
+                setting_key=f"user.{user_id}.role",
+                from_value=current.get("role"),
+                to_value=new_role,
+                actor=actor,
+            )
+
+        # ── active (deactivate/reactivate) ───────────────────────────────────
+        if body.active is not None:
+            new_active = 1 if body.active else 0
+            await execute(
+                "UPDATE users SET active = %s WHERE id = %s",
+                [new_active, user_id],
+            )
+            await _audit(
+                scope_type="company",
+                scope_id=None,
+                setting_key=f"user.{user_id}.active",
+                from_value=current.get("active"),
+                to_value=new_active,
+                actor=actor,
+            )
+
+        # ── branches (replace-set) ───────────────────────────────────────────
+        if body.branches is not None:
+            await _replace_user_branches(user_id, body.branches, actor)
+
+        refreshed = await query(
+            "SELECT id, email, name, role, active, aspire_rep_id FROM users WHERE id = %s",
+            [user_id],
+        )
+        return dict(refreshed[0]) if refreshed else {"id": user_id}
+
+    @app.post("/api/settings/users/{user_id}/link-aspire-rep")
+    async def link_aspire_rep(
+        user_id: str, user: dict = Depends(require_auth)
+    ) -> dict:
+        """Resolve + persist a user's Aspire ContactID from their email (§2.8).
+
+        The "Link Aspire Rep" path referenced by the sales-block copy. Resolves
+        the row's email against Aspire; on a hit, sets aspire_rep_id and audits.
+        On a miss, returns 422 with the same §2.8 copy so the admin knows the
+        Aspire contact still doesn't exist.
+        """
+        await _require_admin(user)
+
+        rows = await query(
+            "SELECT id, email, aspire_rep_id FROM users WHERE id = %s", [user_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="User not found")
+        email = (rows[0].get("email") or "").strip().lower()
+
+        resolved = await aspire_sync.resolve_aspire_rep_id(email)
+        if resolved is None:
+            raise HTTPException(status_code=422, detail=SALES_ASPIRE_BLOCK_COPY)
+
+        await execute(
+            "UPDATE users SET aspire_rep_id = %s WHERE id = %s",
+            [resolved, user_id],
+        )
+        await _audit(
+            scope_type="company",
+            scope_id=None,
+            setting_key=f"user.{user_id}.aspire_rep_id",
+            from_value=rows[0].get("aspire_rep_id"),
+            to_value=resolved,
+            actor=_actor(user),
+        )
+        return {"id": user_id, "aspire_rep_id": resolved}
+
     async def get_branch_settings_payload(aspire_branch_id: int) -> dict:
         rows = await query(
             "SELECT * FROM branch_settings WHERE aspire_branch_id = %s",
@@ -455,6 +676,49 @@ def register(app, require_auth) -> None:
             "aspireBranchId": aspire_branch_id,
             "crewRateCentsPerHour": None if crew_rate is None else int(crew_rate),
         }
+
+
+async def _replace_user_branches(
+    user_id: str, branches: list[int], actor: str
+) -> None:
+    """Replace a user's user_branches rows with `branches` (replace-set) + audit.
+
+    The whole set is rewritten in one shot: delete every existing row, then
+    insert the new ids. A replace-set (not an incremental add/remove) keeps the
+    endpoint idempotent — re-sending the same branches is a no-op. One audit row
+    captures the new set; scope is company for user-admin writes (scope_id NULL).
+    """
+    await execute("DELETE FROM user_branches WHERE user_id = %s", [user_id])
+    for aspire_branch_id in branches:
+        await execute(
+            "INSERT INTO user_branches (user_id, aspire_branch_id) VALUES (%s, %s)",
+            [user_id, aspire_branch_id],
+        )
+    await _audit(
+        scope_type="company",
+        scope_id=None,
+        setting_key=f"user.{user_id}.branches",
+        from_value=None,
+        to_value=branches,
+        actor=actor,
+    )
+
+
+async def _require_resolved_sales_rep(email: str, current_rep_id: Any) -> int:
+    """Return a resolved Aspire ContactID for a sales rep, or 422 with §2.8 copy.
+
+    The hard-block (§2.8, prevent-don't-repair): a user with role='sales' must
+    map to an Aspire contact so opportunity pushes stamp SalesRepID. If the row
+    already carries an aspire_rep_id it is trusted; otherwise the email is
+    resolved live against Aspire. An unresolved rep raises 422 with the EXACT
+    §2.8 copy — no partial save.
+    """
+    if current_rep_id is not None:
+        return int(current_rep_id)
+    resolved = await aspire_sync.resolve_aspire_rep_id(email)
+    if resolved is None:
+        raise HTTPException(status_code=422, detail=SALES_ASPIRE_BLOCK_COPY)
+    return resolved
 
 
 async def _write_material_factors(

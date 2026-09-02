@@ -161,5 +161,11 @@ class TestLegalEdgesStillSucceed:
             extra={"priority": "high"},
         )
         assert resp.status_code == 200
-        update_sql = mock_exec.call_args.args[0]
-        assert "status = %s" in update_sql and "priority = %s" in update_sql
+        # The ride-along fields land in the _apply_updates UPDATE. That is no
+        # longer guaranteed to be the LAST execute — entering in_progress also
+        # fires the crew-rate clear (§2.6) after it — so scan all writes.
+        field_updates = [
+            c.args[0] for c in mock_exec.await_args_list
+            if "status = %s" in c.args[0] and "priority = %s" in c.args[0]
+        ]
+        assert field_updates, "estimates UPDATE carrying status + priority not found"

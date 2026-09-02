@@ -76,6 +76,69 @@ async def _write_back_lead_status(lead_id: Optional[str], status: str) -> None:
     await execute("UPDATE leads SET status = %s WHERE id = %s", [status, lead_id])
 
 
+# ── Crew-rate snapshot on transitions (Handoff 38 §2.6 — LOCKED) ─────────────
+#
+# estimates.crew_rate_cents_per_hour is the branch crew rate *frozen* at the
+# moment an estimate enters review/approval, so the displayed margin stops
+# moving once it is under review. It is:
+#   FREEZE    on entry to review / pending_approval / approved
+#   CLEAR     on entry to in_progress (the hand-back to the estimating queue)
+#   PRESERVE  everywhere else (approved → handed_back → won | lost keep it)
+#
+# All three freeze targets are handled because in_progress→pending_approval and
+# review→approved are both legal edges that skip the middle state. Freeze is
+# expressed as "snapshot only if not already frozen": that snapshots the live
+# rate once, on the FIRST entry to a frozen state, and preserves it across the
+# later frozen edges — so a mid-review branch-rate change never restates the
+# margin (§2.6). A branch with no branch_settings row is left NULL, never
+# invented (the §2.3 loud-failure path); it must not raise.
+_FREEZE_STATES = frozenset({"review", "pending_approval", "approved"})
+
+
+async def _snapshot_crew_rate_on_transition(
+    estimate_id: str, target_status: str, current: dict
+) -> None:
+    """Manage estimates.crew_rate_cents_per_hour across a status transition.
+
+    Freezes (snapshots) the branch rate on first entry to a frozen state, clears
+    it on the hand-back to in_progress, and does nothing otherwise. No-op when the
+    status is not actually changing.
+    """
+    if target_status == current.get("status"):
+        return  # same-status PATCH — not a transition
+
+    if target_status == "in_progress":
+        # Hand-back to the estimating queue: the margin is live again.
+        await execute(
+            "UPDATE estimates SET crew_rate_cents_per_hour = NULL WHERE id = %s",
+            [estimate_id],
+        )
+        return
+
+    if target_status not in _FREEZE_STATES:
+        return  # PRESERVE — handed_back / won / lost never touch the column
+
+    # FREEZE. Snapshot once: if it is already frozen (a later review→approved
+    # style edge), keep the existing value rather than re-reading a rate that may
+    # have changed mid-review.
+    if current.get("crew_rate_cents_per_hour") is not None:
+        return
+
+    branch_id = current.get("aspire_branch_id")
+    if branch_id is None:
+        return  # no branch ⇒ no rate to snapshot; leave NULL (loud-failure path)
+    rate_rows = await query(
+        "SELECT crew_rate_cents_per_hour FROM branch_settings WHERE aspire_branch_id = %s",
+        [branch_id],
+    )
+    if not rate_rows or rate_rows[0].get("crew_rate_cents_per_hour") is None:
+        return  # branch has no configured crew rate — do NOT invent one
+    await execute(
+        "UPDATE estimates SET crew_rate_cents_per_hour = %s WHERE id = %s",
+        [int(rate_rows[0]["crew_rate_cents_per_hour"]), estimate_id],
+    )
+
+
 class IllegalTransitionError(Exception):
     def __init__(self, frm: str, to: str) -> None:
         super().__init__(f"Illegal estimate status transition: {frm} → {to}")
@@ -430,7 +493,26 @@ async def sweep_loop() -> None:
 # opportunity_qty is a LOCALLY-set, manually-editable value — it is never read
 # from Aspire (locked decision).
 
+# §5.4 — this constant was "defined twice" (here AND studio/.../config.ts). The
+# backend source of truth is now company_settings.discrepancy_threshold_pct
+# (read via _discrepancy_threshold); this value survives ONLY as the last-resort
+# fallback for when that singleton row is somehow missing. The seed equals this
+# value, so moving the source changes no behaviour.
 DISCREPANCY_DEFAULT_THRESHOLD = 0.10
+
+
+async def _discrepancy_threshold() -> float:
+    """Read the discrepancy flag threshold from company_settings (§5.4).
+
+    Falls back to DISCREPANCY_DEFAULT_THRESHOLD only when the singleton row is
+    absent — never invents a different number.
+    """
+    rows = await query(
+        "SELECT discrepancy_threshold_pct FROM company_settings WHERE id = %s", [1]
+    )
+    if not rows or rows[0].get("discrepancy_threshold_pct") is None:
+        return DISCREPANCY_DEFAULT_THRESHOLD
+    return float(rows[0]["discrepancy_threshold_pct"])
 
 _TAKEOFF_COLS = {
     "description": "description",
@@ -457,7 +539,7 @@ def _takeoff_flagged(
     return abs(measured_qty - plan_qty) / plan_qty > threshold
 
 
-def _takeoff_line_out(r: dict) -> dict:
+def _takeoff_line_out(r: dict, threshold: float = DISCREPANCY_DEFAULT_THRESHOLD) -> dict:
     plan = float(_num(r["plan_qty"]) or 0)
     add = float(_num(r["add_pct"]) or 0)
     measured = float(_num(r["measured_qty"]) or 0)
@@ -472,10 +554,10 @@ def _takeoff_line_out(r: dict) -> dict:
         "measuredQty": measured,
         "opportunityQty": opp,
         "catalogItemId": r.get("catalog_item_id"),
-        # Derived server-side at the default config threshold — the UI's live
-        # slider re-derives client-side; these are never stored.
+        # Derived server-side at the config threshold (company_settings, §5.4) —
+        # the UI's live slider re-derives client-side; these are never stored.
         "bidQty": _bid_qty(plan, add),
-        "flagged": _takeoff_flagged(measured, plan),
+        "flagged": _takeoff_flagged(measured, plan, threshold),
         "deltaVsOpp": measured - opp,
     }
 
@@ -1455,7 +1537,8 @@ def register(app, require_auth) -> None:
         # the adjustments POST.)
         await _require_estimate_patch_ownership(body, _user)
         rows = await query(
-            "SELECT estimate_type, status, aspire_opportunity_id, lead_id FROM estimates WHERE id = %s",
+            "SELECT estimate_type, status, aspire_opportunity_id, lead_id, "
+            "aspire_branch_id, crew_rate_cents_per_hour FROM estimates WHERE id = %s",
             [estimate_id],
         )
         if not rows:
@@ -1493,6 +1576,13 @@ def register(app, require_auth) -> None:
                 body.setdefault(camel, val)
 
         await _apply_updates("estimates", _UPDATABLE, body, estimate_id, touch_updated_at=True)
+
+        # Crew-rate snapshot (§2.6): freeze on entry to review/pending_approval/
+        # approved, clear on the hand-back to in_progress, preserve otherwise.
+        # Runs only when status is actually moving (the helper no-ops on a
+        # same-status PATCH). target_status is None when the body omits status.
+        if target_status is not None:
+            await _snapshot_crew_rate_on_transition(estimate_id, target_status, current)
 
         # Terminal-only Aspire write-back (won/lost), best-effort in the background.
         # Guarded by the transition machine so an illegal PATCH jump (e.g.
@@ -2023,7 +2113,8 @@ def register(app, require_auth) -> None:
             "SELECT * FROM takeoff_lines WHERE estimate_id = %s ORDER BY created_at, id",
             [estimate_id],
         )
-        return [_takeoff_line_out(r) for r in rows]
+        threshold = await _discrepancy_threshold()
+        return [_takeoff_line_out(r, threshold) for r in rows]
 
     @app.post(
         "/api/estimating/estimates/{estimate_id}/takeoff-lines", status_code=201
@@ -2055,7 +2146,8 @@ def register(app, require_auth) -> None:
         await execute(
             "UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id]
         )
-        return _takeoff_line_out(await _get_takeoff_line(estimate_id, line_id))
+        threshold = await _discrepancy_threshold()
+        return _takeoff_line_out(await _get_takeoff_line(estimate_id, line_id), threshold)
 
     @app.patch("/api/estimating/estimates/{estimate_id}/takeoff-lines/{line_id}")
     async def update_takeoff_line(
@@ -2067,7 +2159,8 @@ def register(app, require_auth) -> None:
         await execute(
             "UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id]
         )
-        return _takeoff_line_out(await _get_takeoff_line(estimate_id, line_id))
+        threshold = await _discrepancy_threshold()
+        return _takeoff_line_out(await _get_takeoff_line(estimate_id, line_id), threshold)
 
     @app.delete(
         "/api/estimating/estimates/{estimate_id}/takeoff-lines/{line_id}",

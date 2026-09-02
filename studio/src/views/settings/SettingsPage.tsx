@@ -9,6 +9,8 @@ import {
   type SettingsSection,
 } from './sections'
 import { SectionPlaceholder } from './SectionPlaceholder'
+import { CompanySection } from './company/CompanySection'
+import { companySectionOwnsSlug } from './company/companySlugs'
 
 /**
  * Settings shell (Slice 9): a left-hand section nav grouped by permission, plus
@@ -109,9 +111,16 @@ export function SettingsPage() {
           </div>
         )}
 
-        {activeSection && (
-          <SectionPlaceholder slug={activeSection.slug} name={activeSection.label} />
-        )}
+        {activeSection &&
+          (activeGroup?.id === 'company' &&
+          companySectionOwnsSlug(activeSection.slug) ? (
+            <CompanySection slug={activeSection.slug} label={activeSection.label} />
+          ) : (
+            <SectionPlaceholder
+              slug={activeSection.slug}
+              name={activeSection.label}
+            />
+          ))}
       </div>
     </div>
   )

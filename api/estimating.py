@@ -319,7 +319,7 @@ async def _build_opportunity_input(est_row: dict, service_line: Optional[str] = 
     rep_contact_id: Optional[int] = None
     if est_row.get("crm_rep"):
         urows = await query(
-            "SELECT aspire_rep_id FROM crm_users WHERE id = %s", [est_row["crm_rep"]]
+            "SELECT aspire_rep_id FROM users WHERE id = %s", [est_row["crm_rep"]]
         )
         if urows:
             rep_contact_id = urows[0].get("aspire_rep_id")
@@ -1520,7 +1520,10 @@ def register(app, require_auth) -> None:
 
     @app.post("/api/estimating/estimates/{estimate_id}/retry-aspire-sync", status_code=202)
     async def retry_aspire_sync(
-        estimate_id: str, background: BackgroundTasks, _user: dict = Depends(require_auth)
+        estimate_id: str,
+        background: BackgroundTasks,
+        response: Response,
+        _user: dict = Depends(require_auth),
     ) -> dict:
         rows = await query(
             "SELECT id, status, aspire_opportunity_id FROM estimates WHERE id = %s",
@@ -1533,6 +1536,11 @@ def register(app, require_auth) -> None:
             background.add_task(_sync_new_opportunity_bg, estimate_id)
         elif r.get("status") in ("won", "lost"):
             background.add_task(_sync_status_bg, estimate_id, r["status"])
+        else:
+            # §5.3: already synced and not terminal ⇒ nothing to push. Don't lie
+            # with 202 "queued"; override the route default to 200 not_needed.
+            response.status_code = 200
+            return {"status": "not_needed"}
         return {"status": "queued"}
 
     @app.post("/api/estimating/estimates/{estimate_id}/approve-handback")

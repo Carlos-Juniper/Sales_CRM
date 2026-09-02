@@ -68,8 +68,19 @@ class RenderResult:
     rendered_at: Optional[str]
 
 
-def _mint_render_token(proposal_id: str, user: dict) -> str:
-    """Mint a short-lived render-scoped JWT for internal Chromium use."""
+def _mint_render_token(
+    proposal_id: str,
+    user: dict,
+    lead_id: Optional[str] = None,
+    estimate_id: Optional[str] = None,
+) -> str:
+    """Mint a short-lived render-scoped JWT for internal Chromium use.
+
+    lead_id and estimate_id are carried as claims because the print route fetches
+    /api/leads/{lead_id} and /api/estimating/estimates/{estimate_id} in addition to
+    the proposal itself, and the scope guard in server.py admits only the exact ids
+    named here — the token still cannot read any other lead or estimate.
+    """
     import jwt as pyjwt
     from api.server import JWT_SECRET, JWT_ALGORITHM
     payload = {
@@ -80,6 +91,8 @@ def _mint_render_token(proposal_id: str, user: dict) -> str:
         "branch_id": user["branch_id"],
         "scope": "proposal_render",
         "proposal_id": proposal_id,
+        "lead_id": lead_id,
+        "estimate_id": estimate_id,
         "exp": datetime.now(timezone.utc) + timedelta(seconds=120),
     }
     return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -102,7 +115,18 @@ async def render_proposal_pdf(proposal_id: str, user: dict) -> RenderResult:
     object_key = f"proposal/generated/{proposal_id}/v{next_version}.pdf"
     render_id = f"pr-{uuid.uuid4().hex[:12]}"
 
-    token = _mint_render_token(proposal_id, user)
+    # The print route blocks on lead and estimate as well as the proposal, so the
+    # token has to name them or the page never reaches __PROPOSAL_READY__.
+    prop_rows = await query(
+        "SELECT lead_id, estimate_id FROM proposal_requests WHERE id = %s",
+        (proposal_id,),
+    )
+    if not prop_rows:
+        raise RuntimeError(f"Proposal {proposal_id} not found")
+
+    token = _mint_render_token(
+        proposal_id, user, prop_rows[0]["lead_id"], prop_rows[0]["estimate_id"],
+    )
     start_ms = int(time.time() * 1000)
 
     async with _semaphore:

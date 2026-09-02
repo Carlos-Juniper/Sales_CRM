@@ -341,6 +341,11 @@ async def require_auth(
     #   • GET requests
     #   • /api/proposals/config/... (config look-up routes, no proposal-id check)
     #   • /api/proposals/{their proposal_id} and sub-paths
+    #   • /api/leads/{their lead_id} and /api/estimating/estimates/{their
+    #     estimate_id} — exact paths, no sub-paths. The print route blocks on
+    #     both before it sets __PROPOSAL_READY__, so denying them means every
+    #     render times out. Pinned to the ids named in the token: a render token
+    #     still cannot read any other lead or estimate.
     # Any other use → 403.
     if payload.get("scope") == "proposal_render":
         if request.method != "GET":
@@ -357,6 +362,13 @@ async def require_auth(
         pid = payload.get("proposal_id", "")
         pattern = rf"^/api/proposals/{re.escape(pid)}(/.*)?$"
         if pid and re.match(pattern, path):
+            return payload
+        # The proposal's own lead and estimate — exact paths only.
+        lead_id = payload.get("lead_id") or ""
+        estimate_id = payload.get("estimate_id") or ""
+        if lead_id and path == f"/api/leads/{lead_id}":
+            return payload
+        if estimate_id and path == f"/api/estimating/estimates/{estimate_id}":
             return payload
         raise HTTPException(
             status_code=403,

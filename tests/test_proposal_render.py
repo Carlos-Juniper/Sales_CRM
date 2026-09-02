@@ -28,6 +28,10 @@ from api.server import app, require_auth, JWT_SECRET, JWT_ALGORITHM  # noqa: E40
 
 _PROPOSAL_ID = "prop-abc123def456"
 _OTHER_PROPOSAL_ID = "prop-zzzzzzzzzzzz"
+_LEAD_ID = "lead-abc123"
+_OTHER_LEAD_ID = "lead-zzzzzz"
+_ESTIMATE_ID = "est-abc123"
+_OTHER_ESTIMATE_ID = "est-zzzzzz"
 
 _USER = {
     "id": "u1",
@@ -50,7 +54,12 @@ def _mint_normal_token() -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-def _mint_render_token(proposal_id: str = _PROPOSAL_ID, ttl: int = 120) -> str:
+def _mint_render_token(
+    proposal_id: str = _PROPOSAL_ID,
+    ttl: int = 120,
+    lead_id: str = _LEAD_ID,
+    estimate_id: str = _ESTIMATE_ID,
+) -> str:
     """Mint a render-scoped JWT for the given proposal_id."""
     payload = {
         "id": _USER["id"],
@@ -60,6 +69,8 @@ def _mint_render_token(proposal_id: str = _PROPOSAL_ID, ttl: int = 120) -> str:
         "branch_id": _USER["branch_id"],
         "scope": "proposal_render",
         "proposal_id": proposal_id,
+        "lead_id": lead_id,
+        "estimate_id": estimate_id,
         "exp": datetime.now(timezone.utc) + timedelta(seconds=ttl),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -139,6 +150,38 @@ class TestRenderTokenScopeGuardNegative:
             f"Expected 403, got {res.status_code}: {res.text}"
         )
 
+    def test_render_token_rejected_on_other_lead(self, client, render_token_cookie):
+        """Admitting the token's own lead must not admit anyone else's."""
+        res = client.get(f"/api/leads/{_OTHER_LEAD_ID}", cookies=render_token_cookie)
+        assert res.status_code == 403, (
+            f"Expected 403, got {res.status_code}: {res.text}"
+        )
+
+    def test_render_token_rejected_on_other_estimate(self, client, render_token_cookie):
+        res = client.get(
+            f"/api/estimating/estimates/{_OTHER_ESTIMATE_ID}", cookies=render_token_cookie,
+        )
+        assert res.status_code == 403, (
+            f"Expected 403, got {res.status_code}: {res.text}"
+        )
+
+    def test_render_token_rejected_on_lead_subpath(self, client, render_token_cookie):
+        """The lead allowance is an exact path — sub-resources stay closed."""
+        res = client.get(
+            f"/api/leads/{_LEAD_ID}/activity", cookies=render_token_cookie,
+        )
+        assert res.status_code == 403, (
+            f"Expected 403, got {res.status_code}: {res.text}"
+        )
+
+    def test_render_token_without_lead_claim_rejects_all_leads(self, client):
+        """An older token carrying no lead_id must not fall through to allow-all."""
+        token = _mint_render_token(lead_id="", estimate_id="")
+        res = client.get(f"/api/leads/{_LEAD_ID}", cookies={"session": token})
+        assert res.status_code == 403, (
+            f"Expected 403, got {res.status_code}: {res.text}"
+        )
+
     def test_render_token_rejected_on_prefix_injection(self, client, render_token_cookie):
         """A path that starts with the proposal_id prefix but isn't a sub-path → 403.
 
@@ -200,6 +243,22 @@ class TestRenderTokenScopeGuardPositive:
         )
         assert res.status_code != 403, (
             f"Guard should pass for config route; got {res.status_code}: {res.text}"
+        )
+
+    def test_render_token_accepted_on_own_lead(self, client, render_token_cookie):
+        """The print route blocks on the lead, so the guard must admit it."""
+        res = client.get(f"/api/leads/{_LEAD_ID}", cookies=render_token_cookie)
+        assert res.status_code not in (401, 403), (
+            f"Guard should pass for the token's own lead; got {res.status_code}: {res.text}"
+        )
+
+    def test_render_token_accepted_on_own_estimate(self, client, render_token_cookie):
+        """The print route blocks on the estimate too."""
+        res = client.get(
+            f"/api/estimating/estimates/{_ESTIMATE_ID}", cookies=render_token_cookie,
+        )
+        assert res.status_code not in (401, 403), (
+            f"Guard should pass for the token's own estimate; got {res.status_code}: {res.text}"
         )
 
     def test_normal_token_unaffected(self, client, normal_auth_cookie):
@@ -337,6 +396,23 @@ class TestMintRenderToken:
         assert decoded["scope"] == "proposal_render"
         assert decoded["proposal_id"] == "prop-abc123"
         assert decoded["id"] == "u1"
+
+    def test_mint_carries_lead_and_estimate_claims(self):
+        """The guard pins the lead/estimate allowance to these two claims."""
+        import api.proposal_render as render_mod
+        from api.server import JWT_SECRET, JWT_ALGORITHM
+        import jwt as pyjwt
+
+        user = {
+            "id": "u1", "name": "Alice", "email": "a@x.com",
+            "role": "sales", "branch_id": "Fort Myers, FL",
+        }
+        token = render_mod._mint_render_token(
+            "prop-abc123", user, "lead-xyz", "est-xyz",
+        )
+        decoded = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        assert decoded["lead_id"] == "lead-xyz"
+        assert decoded["estimate_id"] == "est-xyz"
 
     def test_mint_token_expires_within_120_seconds(self):
         """Token exp is ≤120 s in the future."""

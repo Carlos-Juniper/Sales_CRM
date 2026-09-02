@@ -167,6 +167,16 @@ export interface EstimateBase {
    * legacy `estimates.branch` column until Slice 14 drops it.
    */
   branchCity: string | null
+  /**
+   * Frozen loaded-crew-rate snapshot, integer cents/hr, captured at submission
+   * (Slice 7). Present (non-null) once an estimate reaches review/pending_approval/
+   * approved; NULL for in_progress / handed-back / pre-migration rows. The Margin
+   * Analysis panel prices maintenance margin off THIS when present, so a later
+   * branch-rate change never moves a frozen estimate's displayed margin (§2.6).
+   * Null ⇒ fall through to the live branch rate, then to a loud no-rate state —
+   * NEVER an invented default (§2.3, no-fallback).
+   */
+  crewRateCentsPerHour?: number | null
   acreage: number | null
   /** Derived roll-up, persisted for queue/reporting. Integer cents. */
   contractValueCents: number

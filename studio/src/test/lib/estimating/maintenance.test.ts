@@ -22,13 +22,13 @@ import {
   assertCanEdit,
   estimatingRolesForUser,
   canUserEditField,
+  MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
   formatCents,
   lineCentsPerSqft,
   maintenanceCatalogFromItems,
   sellRateCentsPer1000Sf,
   unresolvedProductionRateLabels,
 } from '@/lib/estimating/maintenance'
-import { MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR } from '@/lib/estimating/margins'
 import type { CatalogItem } from '@/types/estimating'
 import { buildMaintenanceEstimate } from '@/mocks/estimatingData'
 

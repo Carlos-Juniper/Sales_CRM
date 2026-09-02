@@ -24,15 +24,6 @@ import {
   maintServiceLine,
 } from './calc'
 
-// ----- Cost-basis config (provisional) ---------------------------------------
-
-/**
- * Loaded crew-hour rate (labor + equipment burden) used to cost maintenance
- * hours, integer cents/hr. PROVISIONAL demo config — TODO(carlos): replace
- * with real branch crew rates (kit production-rate migration) before ship.
- */
-export const MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR = 18_000
-
 // ----- Benchmark config (provisional, BRD III-6) ------------------------------
 
 export interface BenchmarkBand {
@@ -148,12 +139,17 @@ export function maintenanceLineHours(
  * assumed the line was priced exactly at target, so over/under-pricing could
  * never flag). An unresolvable line (blocked from saving by the guard) costs
  * 0 rather than inventing a number.
+ *
+ * Slice 11b: `crewRateCents` is REQUIRED — there is deliberately NO default.
+ * A silent 18_000 fallback here would feed the Margin Analysis panel a
+ * plausible-but-WRONG margin an approver then approves. Callers resolve the
+ * rate (snapshot→live→null) and skip cost entirely when null (§2.3).
  */
 export function maintenanceLineCost(
   section: EstimateSection,
   svc: SectionService,
-  catalogItems: CatalogItem[] = [],
-  crewRateCents: number = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
+  catalogItems: CatalogItem[],
+  crewRateCents: number,
 ): number {
   const occurrenceHours = resolveOccurrenceHours(section, svc, catalogItems) ?? 0
   return Math.round(maintenanceLineHours(svc, occurrenceHours) * crewRateCents)
@@ -217,9 +213,15 @@ export interface ServiceGroupMargin {
  * Re-aggregate the section-organized estimate BY
  * SERVICE across all sections, on a cost basis. Reads the same live model the
  * editors mutate — editing a line flows straight into these numbers.
+ *
+ * Slice 11b: `crewRateCents` is REQUIRED for a maintenance estimate — the
+ * caller resolves it (snapshot→live) and must NOT call this at all when the
+ * rate is null (the panel refuses a number instead, §2.3). Install estimates
+ * ignore it (their cost is materials-inclusive), so it may be 0 there.
  */
 export function serviceGroupMargins(
   estimate: Estimate,
+  crewRateCents: number,
   catalogItems: CatalogItem[] = [],
 ): ServiceGroupMargin[] {
   const contract = contractTotal(estimate)
@@ -250,7 +252,7 @@ export function serviceGroupMargins(
           svc.qty,
           svc.complexityPct,
         )
-        g.costCents += maintenanceLineCost(section, svc, catalogItems)
+        g.costCents += maintenanceLineCost(section, svc, catalogItems, crewRateCents)
         g.hoursPerYear += maintenanceLineHours(
           svc,
           resolveOccurrenceHours(section, svc, catalogItems) ?? 0,
@@ -299,7 +301,9 @@ export function mowingPerOccurrenceCents(
   estimate: Estimate,
   catalogItems: CatalogItem[] = [],
 ): number | null {
-  const mowing = serviceGroupMargins(estimate, catalogItems).find((g) => /mow/i.test(g.label))
+  // Price-basis read only (occurrence price ÷ max qty) — the crew rate never
+  // enters here, so 0 is safe: it touches cost, which this ignores.
+  const mowing = serviceGroupMargins(estimate, 0, catalogItems).find((g) => /mow/i.test(g.label))
   if (!mowing || mowing.maxQty === 0) return null
   return mowing.priceCents / mowing.maxQty
 }

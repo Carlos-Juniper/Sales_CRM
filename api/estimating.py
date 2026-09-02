@@ -252,6 +252,12 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         # `branch` city string is display-only until Slice 14 drops it.
         "aspireBranchId": r.get("aspire_branch_id"),
         "branchCity": r["branch"],
+        # Frozen crew-rate snapshot (cents/hr) captured at submission (Slice 7);
+        # NULL for in_progress / pre-migration rows. Slice 11b: the Margin
+        # Analysis panel prices maintenance margin off THIS when present, so a
+        # later branch-rate change never moves a frozen estimate's margin. Never
+        # substitutes an invented number — null flows straight through (§2.3).
+        "crewRateCentsPerHour": r.get("crew_rate_cents_per_hour"),
         "customerType": r["customer_type"],
         "acreage": _num(r["acreage"]),
         "contractValueCents": int(r["contract_value_cents"]),

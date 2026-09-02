@@ -22,7 +22,19 @@ import type {
 import type { LegacyUserRole, UserRole } from '@/types'
 import { normalizeRole } from '@/hooks/useRole'
 import { per1000SfRead } from './calc'
-import { MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR } from './margins'
+
+/**
+ * Loaded crew-hour rate (labor + equipment burden) used to derive a kit's
+ * SELL rate from its production rate when the catalog row carries no explicit
+ * unit sell, integer cents/hr. PROVISIONAL demo config — TODO(carlos): replace
+ * with real branch crew rates (kit production-rate migration) before ship.
+ *
+ * Slice 11b NOTE: this is a PRICING helper default, NOT a margin source. The
+ * Margin Analysis panel must NEVER silently fall back to this value — it
+ * resolves the crew rate snapshot→live→null and refuses a number when null
+ * (§2.3). Do not reintroduce this as a default in margins.ts.
+ */
+export const MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR = 18_000
 
 // ----- Complexity (I-9.7) ----------------------------------------------------
 

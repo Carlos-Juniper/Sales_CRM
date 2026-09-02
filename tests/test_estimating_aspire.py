@@ -243,6 +243,27 @@ class TestCreateBranchIdentityContract:
         assert out["aspireBranchId"] == 3668
         assert out["branchCity"] == "Orlando, FL"
 
+    def test_estimate_out_exposes_frozen_crew_rate_snapshot(self):
+        # Slice 11b: the frozen crew-rate snapshot (estimates.crew_rate_cents_per_hour)
+        # must reach the client so the Margin Analysis panel prices maintenance
+        # margin off the value frozen at submission — never a live re-read.
+        base = {**_est_row(aspire_branch_id=3668, branch="Orlando, FL"),
+                "aspire_number": None, "client_name": "HOA", "acreage": None,
+                "contract_value_cents": 0, "target_margin": 0.22, "lifecycle": "bidding",
+                "aspire_owner": "estimating", "priority": "medium", "win_probability": 0.2,
+                "site_walk_date": None, "due_back_date": None, "anticipated_close_date": None,
+                "service_start_date": None, "assigned_ls_estimator": None,
+                "assigned_irr_estimator": None, "crm_rep": None, "notify_bm_rd_on_return": None,
+                "created_at": None, "updated_at": None}
+        frozen = est._estimate_out({**base, "crew_rate_cents_per_hour": 19500}, sections=[])
+        assert frozen["crewRateCentsPerHour"] == 19500
+        # An estimate with no snapshot (in_progress / pre-migration) hands back null,
+        # never an invented number (the §2.3 no-fallback contract).
+        cleared = est._estimate_out({**base, "crew_rate_cents_per_hour": None}, sections=[])
+        assert cleared["crewRateCentsPerHour"] is None
+        missing = est._estimate_out(base, sections=[])
+        assert missing["crewRateCentsPerHour"] is None
+
 
 # ── HTTP: create is THE property-sync trigger ────────────────────────────────
 

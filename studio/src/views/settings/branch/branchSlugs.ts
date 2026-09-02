@@ -1,13 +1,16 @@
 /**
- * The branch slugs Slice 11a owns a real form for. The remaining branch slugs
- * (team-roster, client-references, branch-credentials) stay as placeholders
- * until their later slices.
+ * The branch slugs with real form implementations.
+ * Slice 11a owns crew-rate/material-factors/production-rates/branch-profile.
+ * Slice 13b adds team-roster and client-references.
+ * branch-credentials stays as a placeholder until Slice 15.
  */
 export const BRANCH_FORM_SLUGS = [
   'crew-rate',
   'material-factors',
   'production-rates',
   'branch-profile',
+  'team-roster',
+  'client-references',
 ] as const
 
 export type BranchSectionSlug = (typeof BRANCH_FORM_SLUGS)[number]

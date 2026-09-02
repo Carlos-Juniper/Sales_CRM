@@ -14,6 +14,15 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { proposalConfigApi, proposalsApi } from '@/api/proposals'
+import { settingsApi } from '@/api/settings'
+import type {
+  TeamMemberCreateBody,
+  TeamMemberPatchBody,
+  ClientReferenceCreateBody,
+  ClientReferencePatchBody,
+  PortfolioPropertyCreateBody,
+  PortfolioPropertyPatchBody,
+} from '@/api/settings'
 import { useUIStore } from '@/store/uiStore'
 import type {
   BranchCoverageGroup,
@@ -274,6 +283,118 @@ export function useProposalRenders(id: string | null) {
         return 5_000
       }
       return false
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Slice 13b: H37 config mutations (settings write path)
+//
+// All mutations invalidate their matching list query key so the section
+// re-fetches after a successful create/edit/deactivate.
+// ---------------------------------------------------------------------------
+
+// ── Team Members ─────────────────────────────────────────────────────────────
+
+/**
+ * Creates a team member. aspireBranchId is accepted so callers can scope the
+ * mutation to a branch (used for cache invalidation via the query key prefix).
+ */
+export function useCreateTeamMember(_aspireBranchId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: TeamMemberCreateBody) => settingsApi.createTeamMember(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'team-members'] })
+    },
+  })
+}
+
+export function useUpdateTeamMember(_aspireBranchId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ memberId, body }: { memberId: string; body: TeamMemberPatchBody }) =>
+      settingsApi.updateTeamMember(memberId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'team-members'] })
+    },
+  })
+}
+
+export function useDeactivateTeamMember(_aspireBranchId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (memberId: string) => settingsApi.deactivateTeamMember(memberId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'team-members'] })
+    },
+  })
+}
+
+// ── Client References ─────────────────────────────────────────────────────────
+
+export function useCreateClientReference(_aspireBranchId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ClientReferenceCreateBody) =>
+      settingsApi.createClientReference(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'client-references'] })
+    },
+  })
+}
+
+export function useUpdateClientReference(_aspireBranchId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ refId, body }: { refId: string; body: ClientReferencePatchBody }) =>
+      settingsApi.updateClientReference(refId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'client-references'] })
+    },
+  })
+}
+
+export function useDeactivateClientReference(_aspireBranchId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (refId: string) => settingsApi.deactivateClientReference(refId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'client-references'] })
+    },
+  })
+}
+
+// ── Portfolio Properties ──────────────────────────────────────────────────────
+
+export function useCreatePortfolioProperty() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: PortfolioPropertyCreateBody) =>
+      settingsApi.createPortfolioProperty(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'portfolio'] })
+    },
+  })
+}
+
+export function useUpdatePortfolioProperty() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ propertyId, body }: { propertyId: string; body: PortfolioPropertyPatchBody }) =>
+      settingsApi.updatePortfolioProperty(propertyId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'portfolio'] })
+    },
+  })
+}
+
+export function useDeletePortfolioProperty() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (propertyId: string) => settingsApi.deletePortfolioProperty(propertyId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'portfolio'] })
     },
   })
 }

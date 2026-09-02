@@ -12,6 +12,7 @@ export const COMPANY_SECTION_SLUGS = [
   'intake-defaults',
   'regions',
   'static-content',
+  'portfolio',
 ] as const
 
 export type CompanySectionSlug = (typeof COMPANY_SECTION_SLUGS)[number]

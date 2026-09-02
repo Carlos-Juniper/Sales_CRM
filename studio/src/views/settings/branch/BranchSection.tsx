@@ -3,6 +3,8 @@ import { CrewRateForm } from './CrewRateForm'
 import { MaterialFactorsForm } from './MaterialFactorsForm'
 import { ProductionRatesForm } from './ProductionRatesForm'
 import { BranchProfileSection } from './BranchProfileSection'
+import { TeamRosterSection } from './TeamRosterSection'
+import { ClientReferencesSection } from './ClientReferencesSection'
 
 /** Each branch form takes the currently-selected branch id. */
 type BranchForm = (props: { aspireBranchId: number }) => React.ReactElement
@@ -12,6 +14,8 @@ const BRANCH_FORMS: Record<BranchSectionSlug, BranchForm> = {
   'material-factors': MaterialFactorsForm,
   'production-rates': ProductionRatesForm,
   'branch-profile': BranchProfileSection,
+  'team-roster': TeamRosterSection,
+  'client-references': ClientReferencesSection,
 }
 
 /**

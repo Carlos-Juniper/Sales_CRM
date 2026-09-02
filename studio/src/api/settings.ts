@@ -224,4 +224,96 @@ export const settingsApi = {
       `/settings/users/${userId}/link-aspire-rep`,
       {},
     ),
+
+  // ── Slice 13b: H37 config table write paths ─────────────────────────────────
+  // Read paths live in proposalConfigApi (proposals.ts) under /proposals/config/*.
+  // Write paths live here under /settings/* (server-side scoped by role).
+
+  /** POST /api/settings/team-members — branch rows require BM/RD scope */
+  createTeamMember: (body: TeamMemberCreateBody) =>
+    apiClient.post<TeamMemberRow>('/settings/team-members', body),
+
+  /** PATCH /api/settings/team-members/:id — scope from existing row */
+  updateTeamMember: (memberId: string, body: TeamMemberPatchBody) =>
+    apiClient.patch<TeamMemberRow>(`/settings/team-members/${memberId}`, body),
+
+  /** DELETE /api/settings/team-members/:id — soft-delete (active=0) */
+  deactivateTeamMember: (memberId: string) =>
+    apiClient.delete<void>(`/settings/team-members/${memberId}`),
+
+  /** POST /api/settings/client-references — branch rows require BM/RD scope */
+  createClientReference: (body: ClientReferenceCreateBody) =>
+    apiClient.post<ClientReferenceRow>('/settings/client-references', body),
+
+  /** PATCH /api/settings/client-references/:id */
+  updateClientReference: (refId: string, body: ClientReferencePatchBody) =>
+    apiClient.patch<ClientReferenceRow>(`/settings/client-references/${refId}`, body),
+
+  /** DELETE /api/settings/client-references/:id — soft-delete */
+  deactivateClientReference: (refId: string) =>
+    apiClient.delete<void>(`/settings/client-references/${refId}`),
+
+  /** POST /api/settings/portfolio — admin-only */
+  createPortfolioProperty: (body: PortfolioPropertyCreateBody) =>
+    apiClient.post<PortfolioPropertyRow>('/settings/portfolio', body),
+
+  /** PATCH /api/settings/portfolio/:id — admin-only */
+  updatePortfolioProperty: (propertyId: string, body: PortfolioPropertyPatchBody) =>
+    apiClient.patch<PortfolioPropertyRow>(`/settings/portfolio/${propertyId}`, body),
+
+  /**
+   * DELETE /api/settings/portfolio/:id — hard delete until migration adds active column
+   * (backend follow-up #18: add portfolio_properties.active + convert to soft-delete).
+   */
+  deletePortfolioProperty: (propertyId: string) =>
+    apiClient.delete<void>(`/settings/portfolio/${propertyId}`),
 }
+
+// ── H37 request/response shapes ──────────────────────────────────────────────
+// These mirror the Pydantic models in api/settings.py (Slice 13a).
+// Read-path response types live in types/proposal.ts; the write endpoints return
+// the same camelCase shape so we re-export them under the settings names.
+
+import type { TeamMember, ClientReference, PortfolioProperty } from '@/types/proposal'
+export type TeamMemberRow = TeamMember
+export type ClientReferenceRow = ClientReference
+export type PortfolioPropertyRow = PortfolioProperty
+
+export interface TeamMemberCreateBody {
+  name: string
+  title: string
+  teamType: string
+  aspireBranchId: number | null
+  userId?: string | null
+  location?: string | null
+  bio?: string
+  headshotObjectKey?: string | null
+  sortOrder?: number
+}
+
+export type TeamMemberPatchBody = Partial<Omit<TeamMemberCreateBody, 'aspireBranchId'>>
+
+export interface ClientReferenceCreateBody {
+  propertyName: string
+  servicesProvided: string
+  contactName: string
+  contactTitle?: string | null
+  phone: string
+  email: string
+  address: string
+  clientSinceYear: number
+  aspireBranchId: number | null
+}
+
+export type ClientReferencePatchBody = Partial<Omit<ClientReferenceCreateBody, 'aspireBranchId'>>
+
+export interface PortfolioPropertyCreateBody {
+  name: string
+  cityState: string
+  regionId: string
+  photoObjectKeys?: string[]
+  beforeAfterObjectKeys?: { before: string; after: string } | null
+  sortOrder?: number
+}
+
+export type PortfolioPropertyPatchBody = Partial<PortfolioPropertyCreateBody>

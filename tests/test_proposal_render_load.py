@@ -80,14 +80,17 @@ def _total_rss_mb() -> float:
 @pytest.mark.asyncio
 async def test_render_load_rss_stable_under_5_concurrent_20_sequential(monkeypatch):
     import api.proposal_render as render_mod
+    import api.attachments as attachments_mod
     import db as db_mod
 
     # ── Monkeypatch ONLY the post-render write seams (browser stays real) ──
+    # render module does `from api.attachments import upload_bytes, signed_get_url`
+    # inside the function (call-time local import), so patch the source attribute.
     monkeypatch.setattr(
-        render_mod, "upload_bytes", lambda *a, **k: None, raising=True
+        attachments_mod, "upload_bytes", lambda *a, **k: None, raising=True
     )
     monkeypatch.setattr(
-        render_mod,
+        attachments_mod,
         "signed_get_url",
         lambda *a, **k: "https://example.test/dummy-download-url",
         raising=True,

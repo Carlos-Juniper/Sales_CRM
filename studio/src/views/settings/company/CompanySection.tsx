@@ -5,8 +5,6 @@ import { MarginBandsForm } from './MarginBandsForm'
 import { SlaForm } from './SlaForm'
 import { DiscrepancyThresholdForm } from './DiscrepancyThresholdForm'
 import { IntakeDefaultsForm } from './IntakeDefaultsForm'
-import { RegionsSection } from './RegionsSection'
-import { StaticContentSection } from './StaticContentSection'
 import { PortfolioSection } from './PortfolioSection'
 
 /** Company slugs this slice owns a real body for (users/credentials are elsewhere). */
@@ -16,10 +14,6 @@ const COMPANY_FORMS: Record<CompanySectionSlug, () => React.ReactElement> = {
   sla: SlaForm,
   'discrepancy-threshold': DiscrepancyThresholdForm,
   'intake-defaults': IntakeDefaultsForm,
-  // Read-only sections (no backing write endpoint): regions defers to Handoff 40;
-  // static content is code-managed in lib/proposal/staticContent.ts.
-  regions: RegionsSection,
-  'static-content': StaticContentSection,
   // Slice 13b: portfolio property management (admin-only, company-scoped).
   portfolio: PortfolioSection,
 }

@@ -26,6 +26,7 @@ import { server } from '@/mocks/server'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { makeUser } from '@/test/utils'
 import { useAuthStore } from '@/store/authStore'
+import { BranchSection } from '@/views/settings/branch/BranchSection'
 import { CrewRateForm } from '@/views/settings/branch/CrewRateForm'
 import { MaterialFactorsForm } from '@/views/settings/branch/MaterialFactorsForm'
 import { ProductionRatesForm } from '@/views/settings/branch/ProductionRatesForm'
@@ -260,6 +261,29 @@ describe('ProductionRatesForm', () => {
     fireEvent.click(screen.getByRole('button', { name: /save/i }))
     await waitFor(() => expect(body).not.toBeNull())
     expect(body).toEqual({ production_rates: { 'ci-mow': 13000 } })
+  })
+})
+
+// ── Bug 5: BranchSection placeholder for unmapped slugs ──────────────────────
+
+describe('BranchSection unmapped slug', () => {
+  it('renders a SectionPlaceholder for branch-credentials instead of blank', () => {
+    // branch-credentials is in sections.ts but has no form in BRANCH_FORMS —
+    // BranchSection must render a placeholder (with the stable testid), not null.
+    renderComp(
+      <BranchSection
+        slug="branch-credentials"
+        aspireBranchId={42}
+        sectionLabel="Credentials (branch)"
+      />,
+    )
+    expect(
+      screen.getByTestId('settings-section-branch-credentials'),
+    ).toBeInTheDocument()
+    // Placeholder text must not be empty.
+    expect(
+      screen.getByTestId('settings-section-branch-credentials').textContent?.trim(),
+    ).not.toBe('')
   })
 })
 

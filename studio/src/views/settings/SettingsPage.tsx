@@ -13,7 +13,6 @@ import { CompanySection } from './company/CompanySection'
 import { companySectionOwnsSlug } from './company/companySlugs'
 import { UsersSection } from './company/users/UsersSection'
 import { BranchSection } from './branch/BranchSection'
-import { branchSectionOwnsSlug } from './branch/branchSlugs'
 import { MineSection } from './mine/MineSection'
 
 /**
@@ -138,9 +137,16 @@ function renderSectionBody(
   if (groupId === 'company' && companySectionOwnsSlug(section.slug)) {
     return <CompanySection slug={section.slug} label={section.label} />
   }
-  if (groupId === 'branch' && branchSectionOwnsSlug(section.slug)) {
+  if (groupId === 'branch') {
+    // BranchSection renders the form for owned slugs, a SectionPlaceholder for
+    // unmapped slugs (e.g. 'branch-credentials'), and a "select a branch" prompt
+    // when aspireBranchId is undefined — all three cases handled internally.
     return (
-      <BranchSection slug={section.slug} aspireBranchId={selectedBranchId} />
+      <BranchSection
+        slug={section.slug}
+        aspireBranchId={selectedBranchId}
+        sectionLabel={section.label}
+      />
     )
   }
   if (groupId === 'mine') {

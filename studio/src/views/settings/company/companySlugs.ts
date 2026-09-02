@@ -10,8 +10,6 @@ export const COMPANY_SECTION_SLUGS = [
   'sla',
   'discrepancy-threshold',
   'intake-defaults',
-  'regions',
-  'static-content',
   'portfolio',
 ] as const
 

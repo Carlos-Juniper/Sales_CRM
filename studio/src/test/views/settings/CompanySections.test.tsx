@@ -61,6 +61,18 @@ const TIERS = [
   },
 ]
 
+// 8-row fixture (2 per role: maintenance + install) for the dedupe test.
+const TIERS_8 = [
+  { id: 'tier-bm-m',  roleKey: 'manager',           label: 'Branch Manager',     minValueCents: 0,          maxValueCents: 5_000_000, order: 1, estimateType: 'maintenance' },
+  { id: 'tier-bm-i',  roleKey: 'manager',           label: 'Branch Manager',     minValueCents: 0,          maxValueCents: 5_000_000, order: 1, estimateType: 'install' },
+  { id: 'tier-rd-m',  roleKey: 'regional_director', label: 'Regional Director',  minValueCents: 5_000_000,  maxValueCents: 10_000_000, order: 2, estimateType: 'maintenance' },
+  { id: 'tier-rd-i',  roleKey: 'regional_director', label: 'Regional Director',  minValueCents: 5_000_000,  maxValueCents: 10_000_000, order: 2, estimateType: 'install' },
+  { id: 'tier-vp-m',  roleKey: 'vice_president',    label: 'Vice President',     minValueCents: 10_000_000, maxValueCents: 25_000_000, order: 3, estimateType: 'maintenance' },
+  { id: 'tier-vp-i',  roleKey: 'vice_president',    label: 'Vice President',     minValueCents: 10_000_000, maxValueCents: 25_000_000, order: 3, estimateType: 'install' },
+  { id: 'tier-ceo-m', roleKey: 'ceo',               label: 'CEO',                minValueCents: 25_000_000, maxValueCents: null,       order: 4, estimateType: 'maintenance' },
+  { id: 'tier-ceo-i', roleKey: 'ceo',               label: 'CEO',                minValueCents: 25_000_000, maxValueCents: null,       order: 4, estimateType: 'install' },
+]
+
 const BANDS = [{ id: 'mb-default', name: 'default', goodMin: 0.2, okMin: 0.12 }]
 
 function mockCompany(row = COMPANY) {
@@ -267,6 +279,58 @@ describe('ApprovalTiersForm', () => {
     expect(url).toContain('/settings/company/approval-tiers/tier-bm')
     // 75000 dollars → 7_500_000 cents.
     expect(body).toEqual({ max_value_cents: 7_500_000 })
+  })
+
+  // Bug 2 dedupe: 8 rows (2 per role) must render exactly 4 cards.
+  it('renders exactly 4 cards when the API returns 8 rows (2 per role)', async () => {
+    server.use(
+      http.get('*/api/estimating/config/approval-tiers', () =>
+        HttpResponse.json(TIERS_8),
+      ),
+    )
+    renderComp(<ApprovalTiersForm />)
+
+    // Wait for the data to load.
+    await screen.findByText('Branch Manager')
+
+    // All 4 role labels must appear exactly once each.
+    expect(screen.getAllByText('Branch Manager')).toHaveLength(1)
+    expect(screen.getAllByText('Regional Director')).toHaveLength(1)
+    expect(screen.getAllByText('Vice President')).toHaveLength(1)
+    expect(screen.getAllByText('CEO')).toHaveLength(1)
+
+    // Exactly 4 save buttons (one per role card).
+    expect(screen.getAllByRole('button', { name: /save/i })).toHaveLength(4)
+  })
+
+  // Bug 2 dedupe: saving Manager must PATCH BOTH tier ids (maintenance + install).
+  it('PATCHes BOTH manager tier ids (maintenance + install) on save', async () => {
+    server.use(
+      http.get('*/api/estimating/config/approval-tiers', () =>
+        HttpResponse.json(TIERS_8),
+      ),
+    )
+    const patchedIds: string[] = []
+    server.use(
+      http.patch(
+        '*/api/settings/company/approval-tiers/:id',
+        async ({ params }) => {
+          patchedIds.push(params.id as string)
+          return HttpResponse.json({ id: params.id })
+        },
+      ),
+    )
+    renderComp(<ApprovalTiersForm />)
+    const ceiling = (await screen.findByLabelText(
+      /branch manager ceiling/i,
+    )) as HTMLInputElement
+    fireEvent.change(ceiling, { target: { value: '60000' } })
+    fireEvent.click(screen.getByRole('button', { name: /save branch manager/i }))
+
+    // Both the maintenance and install tier ids must be patched.
+    await waitFor(() => expect(patchedIds).toHaveLength(2))
+    expect(patchedIds).toContain('tier-bm-m')
+    expect(patchedIds).toContain('tier-bm-i')
   })
 })
 

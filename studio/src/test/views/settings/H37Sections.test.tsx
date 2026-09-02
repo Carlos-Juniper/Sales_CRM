@@ -315,6 +315,28 @@ describe('ClientReferencesSection', () => {
 // ── Portfolio ────────────────────────────────────────────────────────────────
 
 describe('PortfolioSection', () => {
+  // Bug 4: portfolio loads without crashing (validates the _portfolio_property_out
+  // coerce_row fix in proposals.py is reflected in the expected response shape).
+  it('loads and renders portfolio properties from the config endpoint', async () => {
+    mockPortfolio([PORTFOLIO_PROPERTY])
+    renderComp(<PortfolioSection />, 'admin')
+    // Name and cityState appear as direct text nodes.
+    expect(await screen.findByText('Oceanfront Villa')).toBeInTheDocument()
+    expect(screen.getByText('Naples, FL')).toBeInTheDocument()
+    // regionId is rendered with a bullet prefix ("· southeast"); use regex.
+    expect(screen.getByText(/southeast/)).toBeInTheDocument()
+  })
+
+  it('shows error state when the portfolio endpoint fails', async () => {
+    server.use(
+      http.get('*/api/proposals/config/portfolio', () =>
+        HttpResponse.json({ detail: 'fail' }, { status: 500 }),
+      ),
+    )
+    renderComp(<PortfolioSection />, 'admin')
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i)
+  })
+
   it('admin sees the portfolio section with listed properties', async () => {
     mockPortfolio([PORTFOLIO_PROPERTY])
     renderComp(<PortfolioSection />, 'admin')

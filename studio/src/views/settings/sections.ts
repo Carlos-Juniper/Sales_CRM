@@ -47,13 +47,11 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     branchScoped: false,
     sections: [
       { slug: 'users', label: 'Users' },
-      { slug: 'regions', label: 'Regions' },
       { slug: 'approval-tiers', label: 'Approval tiers' },
       { slug: 'margin-bands', label: 'Margin bands' },
       { slug: 'sla', label: 'SLA' },
       { slug: 'discrepancy-threshold', label: 'Discrepancy threshold' },
       { slug: 'intake-defaults', label: 'Intake defaults' },
-      { slug: 'static-content', label: 'Static content' },
       { slug: 'portfolio', label: 'Portfolio' },
       { slug: 'credentials', label: 'Credentials' },
     ],

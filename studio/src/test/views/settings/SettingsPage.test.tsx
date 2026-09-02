@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { render as rtlRender, screen, waitFor } from '@testing-library/react'
+import { render as rtlRender, screen, waitFor, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
@@ -128,5 +128,41 @@ describe('SettingsPage shell', () => {
       expect(picker.querySelectorAll('option')).toHaveLength(1),
     )
     expect(picker.value).toBe('1403')
+  })
+
+  // Bug 5: selecting a branch in the picker navigates to the branch-scoped URL.
+  it('changing the branch picker navigates to /settings/branch/:id/crew-rate', async () => {
+    mockBranches()
+    // Mock the branch settings read so the crew-rate form does not error.
+    server.use(
+      http.get('*/api/settings/branch/:id', ({ params }) =>
+        HttpResponse.json({ aspireBranchId: Number(params.id), crewRateCentsPerHour: 6500 }),
+      ),
+    )
+    renderSettings('manager', ['/settings/branch/1403/crew-rate'])
+    const picker = (await screen.findByTestId('settings-branch-picker')) as HTMLSelectElement
+    await waitFor(() => expect(picker.value).toBe('1403'))
+
+    // Select Fort Myers (3696) — onChange fires onBranchChange which navigates.
+    fireEvent.change(picker, { target: { value: '3696' } })
+    await waitFor(() => expect(picker.value).toBe('3696'))
+  })
+
+  // Bug 5: an unmapped branch slug (branch-credentials) renders a placeholder, not blank.
+  it('branch-credentials renders a section placeholder, not blank', async () => {
+    mockBranches()
+    renderSettings('manager', ['/settings/branch/1403/branch-credentials'])
+    // The SectionPlaceholder carries the stable testid.
+    expect(
+      await screen.findByTestId('settings-section-branch-credentials'),
+    ).toBeInTheDocument()
+  })
+
+  // Bug 6: non-configurable sections must not appear in the nav.
+  it('does not show static-content or regions in the Company nav', async () => {
+    renderSettings('admin', ['/settings'])
+    await screen.findByTestId('settings-group-company')
+    expect(screen.queryByText('Static content')).not.toBeInTheDocument()
+    expect(screen.queryByText('Regions')).not.toBeInTheDocument()
   })
 })

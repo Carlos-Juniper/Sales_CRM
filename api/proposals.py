@@ -40,6 +40,7 @@ from typing import Any, Optional
 from fastapi import Depends, HTTPException, Query
 
 from db import execute, query
+from api._serialize import coerce_row
 
 logger = logging.getLogger(__name__)
 
@@ -173,18 +174,33 @@ def _client_reference_out(r: dict) -> dict:
 
 
 def _portfolio_property_out(r: dict) -> dict:
-    """Map a portfolio_properties row to PortfolioProperty API shape."""
-    photo_keys = r.get("photo_object_keys") or "[]"
-    if isinstance(photo_keys, str):
+    """Map a portfolio_properties row to PortfolioProperty API shape.
+
+    Calls coerce_row first so that any Decimal/datetime/bytes values returned
+    by aiomysql are normalised before field access — the same pattern applied
+    to the company endpoint (commit 5c17026).  This is the root cause of the
+    Bug 4 500: aiomysql can return TEXT columns as bytes under certain charset
+    configurations; coerce_row converts bytes → str so json.loads succeeds.
+    """
+    r = coerce_row(r)
+
+    # photo_object_keys is TEXT NOT NULL storing a JSON array (e.g. '[]').
+    # After coerce_row, it is always str or None; guard the empty/null case.
+    photo_keys_raw = r.get("photo_object_keys") or "[]"
+    if isinstance(photo_keys_raw, str):
         try:
-            photo_keys = json.loads(photo_keys)
+            photo_keys = json.loads(photo_keys_raw)
         except (json.JSONDecodeError, TypeError):
             photo_keys = []
+    else:
+        photo_keys = []
 
-    before_after = r.get("before_after_object_keys")
-    if isinstance(before_after, str):
+    # before_after_object_keys is TEXT NULL; NULL rows return as None after coerce_row.
+    before_after_raw = r.get("before_after_object_keys")
+    before_after = None
+    if isinstance(before_after_raw, str):
         try:
-            before_after = json.loads(before_after)
+            before_after = json.loads(before_after_raw)
         except (json.JSONDecodeError, TypeError):
             before_after = None
 

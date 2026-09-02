@@ -351,3 +351,76 @@ export const INSURANCE_PAGE_COPY: InsurancePageCopy = {
     'If your property management company or HOA board requires additional insured status or a specific certificate holder language, please provide those details to your Account Manager at contract signing.',
   ],
 }
+
+// ---------------------------------------------------------------------------
+// Dev-only placeholder tripwire
+//
+// While the copy above is placeholder text pending Caitlyn's content inventory,
+// it is easy to ship a literal "TODO" inside a *rendered string value* by
+// accident. `findTodoStrings` walks any content structure and returns every
+// string value matching /TODO/i so we can catch those before they reach a
+// client-facing page. It is pure and fully unit-testable; the `console.warn`
+// side effect below is gated on `import.meta.env.DEV` so it never runs in a
+// production build and never emits a visible/client-facing marker.
+// ---------------------------------------------------------------------------
+
+const TODO_PATTERN = /TODO/i
+
+/**
+ * Recursively walk an object / array / string structure and return every
+ * string leaf whose value contains "TODO" (case-insensitive). Non-string
+ * leaves (numbers, booleans, null, undefined) are ignored.
+ */
+export function findTodoStrings(content: unknown): string[] {
+  if (typeof content === 'string') {
+    return TODO_PATTERN.test(content) ? [content] : []
+  }
+
+  if (Array.isArray(content)) {
+    return content.flatMap((item) => findTodoStrings(item))
+  }
+
+  if (content !== null && typeof content === 'object') {
+    return Object.values(content as Record<string, unknown>).flatMap((value) =>
+      findTodoStrings(value),
+    )
+  }
+
+  return []
+}
+
+/**
+ * Emit one `console.warn` per offending TODO string found in `content`, with
+ * enough of the string to locate it. Pure aside from the warn call — callers
+ * decide when to invoke it (the module-level invocation below is dev-gated).
+ */
+export function warnOnTodoStrings(content: unknown, label = 'staticContent'): void {
+  for (const hit of findTodoStrings(content)) {
+    console.warn(
+      `[${label}] placeholder TODO found in rendered string value: "${hit}"`,
+    )
+  }
+}
+
+// Dev-only tripwire: scan this module's own exported content. Never runs in a
+// production build (`import.meta.env.DEV` is statically false there), so it is
+// tree-shaken out and can never emit a client-facing marker.
+if (import.meta.env.DEV) {
+  warnOnTodoStrings(
+    {
+      SERVICES_CONTENT,
+      STARTUP_COMMUNICATION_CONTENT,
+      CUSTOMER_CARE_CONTENT,
+      ROOTED_IN_FLORIDA_CONTENT,
+      COMPANY_STATS,
+      LOCAL_EXPERTS_CONTENT,
+      JUNIPER_SYNC_CONTENT,
+      JUNIPER_MAPPING_CONTENT,
+      JUNIPER_CARES_PAGE_CONTENT,
+      STARTUP_PLAN_SEED,
+      LICENSES_PAGE_COPY,
+      INSURANCE_PAGE_COPY,
+    },
+    'proposal/staticContent',
+  )
+}

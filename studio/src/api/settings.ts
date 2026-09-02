@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type { ApprovalTier, MarginBandRow } from '@/types/estimating'
+import type { UserRole } from '@/types'
 
 /**
  * A branch the current user may MANAGE (the Settings branch-picker source).
@@ -62,6 +63,52 @@ export type MarginBandPatch = Partial<{
   ok_min: number
 }>
 
+/**
+ * A user as the Users admin section (§2.8) consumes it.
+ *
+ * Sourced from `GET /api/users`. NOTE (Slice 6 shape gap): that endpoint returns
+ * `id/name/email/role` plus the legacy `branch_id`/`avatar_initials`; it does NOT
+ * yet return `active`, an `aspire_rep_id`, or a `branches[]` array. Those three
+ * are typed OPTIONAL so the UI can consume the richer shape the mutations return
+ * (and a future list endpoint) without lying about today's payload — a user with
+ * no `active` field is treated as active, matching the "deactivate, never delete"
+ * server contract (a missing flag can only mean an authorized/active row).
+ */
+export interface AdminUser {
+  id: string
+  name: string
+  email: string
+  role: string
+  /** 1/true = active; 0/false = deactivated (still listed, historical). */
+  active?: boolean | number
+  /** Resolved Aspire ContactID; null/absent for a non-sales or unlinked user. */
+  aspire_rep_id?: number | null
+  /** aspire_branch_id replace-set. Absent until a list endpoint returns it. */
+  branches?: number[]
+}
+
+/** A M365 directory candidate the admin PICKS (name+email autofill, §2.8). */
+export interface DirectoryCandidate {
+  name: string
+  email: string
+}
+
+/** Authorize a directory-picked person (§2.8): email comes from the pick. */
+export interface AuthorizeUserBody {
+  name: string
+  email: string
+  role: UserRole
+  /** Optional aspire_branch_id replace-set. */
+  branches?: number[]
+}
+
+/** Partial user edit: role / branches (replace-set) / active toggle. */
+export interface UserAdminPatch {
+  role?: UserRole
+  branches?: number[]
+  active?: boolean
+}
+
 export const settingsApi = {
   /** Operating branches the caller may manage, sorted by branch name. */
   branches: () => apiClient.get<ManageableBranch[]>('/settings/branches'),
@@ -86,4 +133,39 @@ export const settingsApi = {
     apiClient.get<MarginBandRow[]>('/estimating/config/margin-bands'),
   updateMarginBand: (bandId: string, body: MarginBandPatch) =>
     apiClient.patch<unknown>(`/settings/company/margin-bands/${bandId}`, body),
+
+  // ── Slice 6: user administration (§2.8) ────────────────────────────────────
+
+  /** Current users (name/email/role/active). Plain listing keeps inactive rows. */
+  listUsers: () => apiClient.get<AdminUser[]>('/users'),
+
+  /**
+   * M365 directory typeahead — the admin PICKS a person so the email is exact
+   * (typo-proof). A blank/short query returns [] server-side.
+   */
+  searchDirectory: (q: string) =>
+    apiClient.get<DirectoryCandidate[]>(
+      `/settings/users/directory?q=${encodeURIComponent(q)}`,
+    ),
+
+  /**
+   * Authorize a picked person into `users`. 422 (with the exact §2.8 copy) when
+   * role='sales' has no resolvable aspire_rep_id — surfaced verbatim by the UI.
+   */
+  authorizeUser: (body: AuthorizeUserBody) =>
+    apiClient.post<AdminUser>('/settings/users', body),
+
+  /** Patch role / branches (replace-set) / active toggle. */
+  updateUser: (userId: string, body: UserAdminPatch) =>
+    apiClient.patch<AdminUser>(`/settings/users/${userId}`, body),
+
+  /**
+   * Resolve + persist a user's Aspire ContactID from their email. 422 (same
+   * §2.8 copy) when Aspire still has no matching contact.
+   */
+  linkAspireRep: (userId: string) =>
+    apiClient.post<{ id: string; aspire_rep_id: number }>(
+      `/settings/users/${userId}/link-aspire-rep`,
+      {},
+    ),
 }

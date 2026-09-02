@@ -214,7 +214,131 @@ class UserAdminPatch(BaseModel):
     active: Optional[bool] = None
 
 
-# Company setting column map (camel-free: bodies already use snake_case columns).
+# ── Slice 13a: H37 config table bodies ───────────────────────────────────────
+
+class TeamMemberCreate(BaseModel):
+    """Create body for a team_members row (branch-scoped or company-wide).
+
+    aspireBranchId=None means company-wide / executive roster — only admin may
+    write those rows. A BM/RD may create rows for a branch in their scope only.
+    bio is NOT NULL in the DB but TEXT cannot carry a DEFAULT in MySQL, so callers
+    must supply it (or pass an empty string).
+    """
+    name: str
+    title: str
+    teamType: str
+    aspireBranchId: Optional[int] = None
+    userId: Optional[str] = None
+    location: Optional[str] = None
+    bio: str = ""
+    headshotObjectKey: Optional[str] = None
+    sortOrder: int = 0
+
+
+class TeamMemberPatch(BaseModel):
+    """Partial update for team_members. Every field optional."""
+    name: Optional[str] = None
+    title: Optional[str] = None
+    teamType: Optional[str] = None
+    userId: Optional[str] = None
+    location: Optional[str] = None
+    bio: Optional[str] = None
+    headshotObjectKey: Optional[str] = None
+    sortOrder: Optional[int] = None
+
+
+# Updatable columns for team_members PATCH (camelCase body key -> DB column).
+_TM_UPDATABLE: dict[str, str] = {
+    "name": "name",
+    "title": "title",
+    "teamType": "team_type",
+    "userId": "user_id",
+    "location": "location",
+    "bio": "bio",
+    "headshotObjectKey": "headshot_object_key",
+    "sortOrder": "sort_order",
+}
+
+
+class ClientReferenceCreate(BaseModel):
+    """Create body for a client_references row.
+
+    aspireBranchId=None = company-wide; only admin may create those.
+    """
+    propertyName: str
+    servicesProvided: str
+    contactName: str
+    contactTitle: Optional[str] = None
+    phone: str
+    email: str
+    address: str
+    clientSinceYear: int
+    aspireBranchId: Optional[int] = None
+
+
+class ClientReferencePatch(BaseModel):
+    """Partial update for client_references."""
+    propertyName: Optional[str] = None
+    servicesProvided: Optional[str] = None
+    contactName: Optional[str] = None
+    contactTitle: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    clientSinceYear: Optional[int] = None
+
+
+# Updatable columns for client_references PATCH.
+_CR_UPDATABLE: dict[str, str] = {
+    "propertyName": "property_name",
+    "servicesProvided": "services_provided",
+    "contactName": "contact_name",
+    "contactTitle": "contact_title",
+    "phone": "phone",
+    "email": "email",
+    "address": "address",
+    "clientSinceYear": "client_since_year",
+}
+
+
+class PortfolioPropertyCreate(BaseModel):
+    """Create body for portfolio_properties — admin-only, company-scoped.
+
+    photo_object_keys is a JSON array of GCS keys; the DB column is TEXT so we
+    serialise before writing. beforeAfterObjectKeys is a JSON object or None.
+    """
+    name: str
+    cityState: str
+    regionId: str
+    photoObjectKeys: list[str] = []
+    beforeAfterObjectKeys: Optional[dict] = None
+    sortOrder: int = 0
+
+
+class PortfolioPropertyPatch(BaseModel):
+    """Partial update for portfolio_properties."""
+    name: Optional[str] = None
+    cityState: Optional[str] = None
+    regionId: Optional[str] = None
+    photoObjectKeys: Optional[list[str]] = None
+    beforeAfterObjectKeys: Optional[dict] = None
+    sortOrder: Optional[int] = None
+
+
+# Updatable columns for portfolio_properties PATCH (camelCase -> DB).
+_PP_UPDATABLE: dict[str, str] = {
+    "name": "name",
+    "cityState": "city_state",
+    "regionId": "region_id",
+    "photoObjectKeys": "photo_object_keys",
+    "beforeAfterObjectKeys": "before_after_object_keys",
+    "sortOrder": "sort_order",
+}
+# portfolio_properties columns that hold JSON and must be serialised before write.
+_PP_JSON_COLS: frozenset[str] = frozenset({"photoObjectKeys", "beforeAfterObjectKeys"})
+
+
+# ── Company setting column map (camel-free: bodies already use snake_case columns).
 _COMPANY_COLS: tuple[str, ...] = (
     "sla_return_window_days",
     "sla_at_risk_threshold_days",
@@ -718,6 +842,518 @@ def register(app, require_auth) -> None:
             "aspireBranchId": aspire_branch_id,
             "crewRateCentsPerHour": None if crew_rate is None else int(crew_rate),
         }
+
+    # ── Slice 13a: team_members CRUD ─────────────────────────────────────────
+    # Branch-scoped: BM/RD may write rows for branches in their user_branches;
+    # company-wide (aspire_branch_id IS NULL) rows are admin-only.
+    # Soft-delete only (active=0), never a hard DELETE.
+
+    @app.post("/api/settings/team-members", status_code=201)
+    async def create_team_member(
+        body: TeamMemberCreate,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Create a team_members row with branch-scope or company-wide guard.
+
+        Company-wide rows (aspireBranchId=None) require admin. Branch rows
+        require either admin or a BM/RD whose user_branches includes that branch.
+        """
+        actor = _actor(user)
+
+        if body.aspireBranchId is None:
+            # Company-wide: admin only.
+            await _require_admin(user)
+            scope_type = "company"
+            scope_id = None
+        else:
+            # Branch row: caller must have scope over this branch.
+            await _require_branch_write_scope(user, body.aspireBranchId)
+            scope_type = "branch"
+            scope_id = str(body.aspireBranchId)
+
+        row_id = str(uuid.uuid4())
+        await execute(
+            """INSERT INTO team_members
+                 (id, name, title, team_type, aspire_branch_id, user_id,
+                  location, bio, headshot_object_key, active, sort_order)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s)""",
+            [
+                row_id,
+                body.name,
+                body.title,
+                body.teamType,
+                body.aspireBranchId,
+                body.userId,
+                body.location,
+                body.bio,
+                body.headshotObjectKey,
+                body.sortOrder,
+            ],
+        )
+        await _audit(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            setting_key=f"team_member.{row_id}.create",
+            from_value=None,
+            to_value=body.name,
+            actor=actor,
+        )
+        return {
+            "id": row_id,
+            "name": body.name,
+            "title": body.title,
+            "teamType": body.teamType,
+            "aspireBranchId": body.aspireBranchId,
+            "userId": body.userId,
+            "location": body.location,
+            "bio": body.bio,
+            "headshotObjectKey": body.headshotObjectKey,
+            "active": True,
+            "sortOrder": body.sortOrder,
+        }
+
+    @app.patch("/api/settings/team-members/{member_id}")
+    async def patch_team_member(
+        member_id: str,
+        body: TeamMemberPatch,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Partial update of one team_members row.
+
+        Scope is read from the EXISTING row's aspire_branch_id — the caller
+        cannot change which branch a member belongs to via this endpoint, and
+        a body-supplied branch id cannot widen scope. Company-wide rows (NULL)
+        are admin-only; branch rows require BM/RD scope over that branch.
+        """
+        rows = await query(
+            "SELECT * FROM team_members WHERE id = %s", [member_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Team member not found")
+        current = rows[0]
+
+        row_branch = current.get("aspire_branch_id")
+        if row_branch is None:
+            await _require_admin(user)
+            scope_type = "company"
+            scope_id = None
+        else:
+            await _require_branch_write_scope(user, int(row_branch))
+            scope_type = "branch"
+            scope_id = str(row_branch)
+
+        updates = {
+            camel: col
+            for camel, col in _TM_UPDATABLE.items()
+            if getattr(body, camel) is not None
+        }
+        if not updates:
+            raise HTTPException(status_code=400, detail="No team member fields to update")
+
+        set_clause = ", ".join(f"{col} = %s" for col in updates.values())
+        params: list[Any] = [getattr(body, camel) for camel in updates] + [member_id]
+        await execute(
+            f"UPDATE team_members SET {set_clause} WHERE id = %s", params
+        )
+
+        actor = _actor(user)
+        for camel, col in updates.items():
+            await _audit(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                setting_key=f"team_member.{member_id}.{col}",
+                from_value=current.get(col),
+                to_value=getattr(body, camel),
+                actor=actor,
+            )
+
+        refreshed = await query("SELECT * FROM team_members WHERE id = %s", [member_id])
+        r = refreshed[0] if refreshed else {**dict(current), **{col: getattr(body, camel) for camel, col in updates.items()}}
+        return {
+            "id": r["id"],
+            "name": r["name"],
+            "title": r["title"],
+            "teamType": r["team_type"],
+            "aspireBranchId": r.get("aspire_branch_id"),
+            "userId": r.get("user_id"),
+            "location": r.get("location"),
+            "bio": r.get("bio") or "",
+            "headshotObjectKey": r.get("headshot_object_key"),
+            "active": bool(r["active"]),
+            "sortOrder": r["sort_order"],
+        }
+
+    @app.delete("/api/settings/team-members/{member_id}")
+    async def deactivate_team_member(
+        member_id: str,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Soft-delete a team_members row by setting active=0.
+
+        Never issues a hard DELETE — historical references in proposal_requests
+        (teamMemberIds) must remain resolvable. Scope guard mirrors the update
+        path: company-wide rows (aspire_branch_id IS NULL) are admin-only.
+        """
+        rows = await query(
+            "SELECT * FROM team_members WHERE id = %s", [member_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Team member not found")
+        current = rows[0]
+
+        row_branch = current.get("aspire_branch_id")
+        if row_branch is None:
+            await _require_admin(user)
+            scope_type = "company"
+            scope_id = None
+        else:
+            await _require_branch_write_scope(user, int(row_branch))
+            scope_type = "branch"
+            scope_id = str(row_branch)
+
+        await execute(
+            "UPDATE team_members SET active = %s WHERE id = %s", [0, member_id]
+        )
+        await _audit(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            setting_key=f"team_member.{member_id}.active",
+            from_value=current.get("active"),
+            to_value=0,
+            actor=_actor(user),
+        )
+        return {"id": member_id, "active": False}
+
+    # ── Slice 13a: client_references CRUD ─────────────────────────────────────
+    # Branch-scoped (same rules as team_members): aspire_branch_id NULL = company-wide.
+    # Soft-delete only (active=0).
+
+    @app.post("/api/settings/client-references", status_code=201)
+    async def create_client_reference(
+        body: ClientReferenceCreate,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Create a client_references row, enforcing branch scope.
+
+        aspireBranchId=None means company-wide (admin only). A BM/RD may only
+        create rows for branches in their user_branches scope.
+        """
+        actor = _actor(user)
+
+        if body.aspireBranchId is None:
+            await _require_admin(user)
+            scope_type = "company"
+            scope_id = None
+        else:
+            await _require_branch_write_scope(user, body.aspireBranchId)
+            scope_type = "branch"
+            scope_id = str(body.aspireBranchId)
+
+        row_id = str(uuid.uuid4())
+        await execute(
+            """INSERT INTO client_references
+                 (id, aspire_branch_id, property_name, services_provided,
+                  contact_name, contact_title, phone, email, address,
+                  client_since_year, active)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)""",
+            [
+                row_id,
+                body.aspireBranchId,
+                body.propertyName,
+                body.servicesProvided,
+                body.contactName,
+                body.contactTitle,
+                body.phone,
+                body.email,
+                body.address,
+                body.clientSinceYear,
+            ],
+        )
+        await _audit(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            setting_key=f"client_reference.{row_id}.create",
+            from_value=None,
+            to_value=body.propertyName,
+            actor=actor,
+        )
+        return {
+            "id": row_id,
+            "aspireBranchId": body.aspireBranchId,
+            "propertyName": body.propertyName,
+            "servicesProvided": body.servicesProvided,
+            "contactName": body.contactName,
+            "contactTitle": body.contactTitle,
+            "phone": body.phone,
+            "email": body.email,
+            "address": body.address,
+            "clientSinceYear": body.clientSinceYear,
+            "active": True,
+        }
+
+    @app.patch("/api/settings/client-references/{ref_id}")
+    async def patch_client_reference(
+        ref_id: str,
+        body: ClientReferencePatch,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Partial update of a client_references row.
+
+        Scope is derived from the EXISTING row — a body-supplied aspireBranchId
+        is ignored for authorization (scope comes from user_branches only).
+        """
+        rows = await query(
+            "SELECT * FROM client_references WHERE id = %s", [ref_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Client reference not found")
+        current = rows[0]
+
+        row_branch = current.get("aspire_branch_id")
+        if row_branch is None:
+            await _require_admin(user)
+            scope_type = "company"
+            scope_id = None
+        else:
+            await _require_branch_write_scope(user, int(row_branch))
+            scope_type = "branch"
+            scope_id = str(row_branch)
+
+        updates = {
+            camel: col
+            for camel, col in _CR_UPDATABLE.items()
+            if getattr(body, camel) is not None
+        }
+        if not updates:
+            raise HTTPException(status_code=400, detail="No client reference fields to update")
+
+        set_clause = ", ".join(f"{col} = %s" for col in updates.values())
+        params: list[Any] = [getattr(body, camel) for camel in updates] + [ref_id]
+        await execute(
+            f"UPDATE client_references SET {set_clause} WHERE id = %s", params
+        )
+
+        actor = _actor(user)
+        for camel, col in updates.items():
+            await _audit(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                setting_key=f"client_reference.{ref_id}.{col}",
+                from_value=current.get(col),
+                to_value=getattr(body, camel),
+                actor=actor,
+            )
+
+        refreshed = await query("SELECT * FROM client_references WHERE id = %s", [ref_id])
+        r = refreshed[0] if refreshed else current
+        return {
+            "id": r["id"],
+            "aspireBranchId": r.get("aspire_branch_id"),
+            "propertyName": r["property_name"],
+            "servicesProvided": r["services_provided"],
+            "contactName": r["contact_name"],
+            "contactTitle": r.get("contact_title"),
+            "phone": r["phone"],
+            "email": r["email"],
+            "address": r["address"],
+            "clientSinceYear": r["client_since_year"],
+            "active": bool(r["active"]),
+        }
+
+    @app.delete("/api/settings/client-references/{ref_id}")
+    async def deactivate_client_reference(
+        ref_id: str,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Soft-delete a client_references row (active=0). Never a hard DELETE."""
+        rows = await query(
+            "SELECT * FROM client_references WHERE id = %s", [ref_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Client reference not found")
+        current = rows[0]
+
+        row_branch = current.get("aspire_branch_id")
+        if row_branch is None:
+            await _require_admin(user)
+            scope_type = "company"
+            scope_id = None
+        else:
+            await _require_branch_write_scope(user, int(row_branch))
+            scope_type = "branch"
+            scope_id = str(row_branch)
+
+        await execute(
+            "UPDATE client_references SET active = %s WHERE id = %s", [0, ref_id]
+        )
+        await _audit(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            setting_key=f"client_reference.{ref_id}.active",
+            from_value=current.get("active"),
+            to_value=0,
+            actor=_actor(user),
+        )
+        return {"id": ref_id, "active": False}
+
+    # ── Slice 13a: portfolio_properties CRUD ──────────────────────────────────
+    # Company-wide, admin-only.
+    #
+    # SCHEMA NOTE: portfolio_properties has NO `active` column (see migration 014).
+    # Deactivate therefore performs a hard DELETE. A follow-up migration should add
+    #   ALTER TABLE portfolio_properties ADD COLUMN `active` TINYINT(1) NOT NULL DEFAULT 1;
+    # to enable soft-delete consistent with the other config tables.
+
+    @app.post("/api/settings/portfolio", status_code=201)
+    async def create_portfolio_property(
+        body: PortfolioPropertyCreate,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Create a portfolio_properties row — admin-only, company-scoped."""
+        await _require_admin(user)
+        actor = _actor(user)
+
+        row_id = str(uuid.uuid4())
+        await execute(
+            """INSERT INTO portfolio_properties
+                 (id, name, city_state, region_id, photo_object_keys,
+                  before_after_object_keys, sort_order)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            [
+                row_id,
+                body.name,
+                body.cityState,
+                body.regionId,
+                json.dumps(body.photoObjectKeys),
+                json.dumps(body.beforeAfterObjectKeys) if body.beforeAfterObjectKeys is not None else None,
+                body.sortOrder,
+            ],
+        )
+        await _audit(
+            scope_type="company",
+            scope_id=None,
+            setting_key=f"portfolio_property.{row_id}.create",
+            from_value=None,
+            to_value=body.name,
+            actor=actor,
+        )
+        return {
+            "id": row_id,
+            "name": body.name,
+            "cityState": body.cityState,
+            "regionId": body.regionId,
+            "photoObjectKeys": body.photoObjectKeys,
+            "beforeAfterObjectKeys": body.beforeAfterObjectKeys,
+            "sortOrder": body.sortOrder,
+        }
+
+    @app.patch("/api/settings/portfolio/{property_id}")
+    async def patch_portfolio_property(
+        property_id: str,
+        body: PortfolioPropertyPatch,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Partial update of a portfolio_properties row — admin-only."""
+        await _require_admin(user)
+
+        rows = await query(
+            "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Portfolio property not found")
+        current = rows[0]
+
+        updates = {
+            camel: col
+            for camel, col in _PP_UPDATABLE.items()
+            if getattr(body, camel) is not None
+        }
+        if not updates:
+            raise HTTPException(status_code=400, detail="No portfolio fields to update")
+
+        set_clause = ", ".join(f"{col} = %s" for col in updates.values())
+        # Serialise JSON columns before writing.
+        params: list[Any] = [
+            json.dumps(getattr(body, camel)) if camel in _PP_JSON_COLS else getattr(body, camel)
+            for camel in updates
+        ] + [property_id]
+        await execute(
+            f"UPDATE portfolio_properties SET {set_clause} WHERE id = %s", params
+        )
+
+        actor = _actor(user)
+        for camel, col in updates.items():
+            await _audit(
+                scope_type="company",
+                scope_id=None,
+                setting_key=f"portfolio_property.{property_id}.{col}",
+                from_value=current.get(col),
+                to_value=getattr(body, camel),
+                actor=actor,
+            )
+
+        refreshed = await query(
+            "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
+        )
+        r = refreshed[0] if refreshed else current
+
+        import json as _json  # local alias to avoid shadowing the module-level import
+        photo_keys = r.get("photo_object_keys") or "[]"
+        if isinstance(photo_keys, str):
+            try:
+                photo_keys = _json.loads(photo_keys)
+            except (ValueError, TypeError):
+                photo_keys = []
+        ba_keys = r.get("before_after_object_keys")
+        if isinstance(ba_keys, str):
+            try:
+                ba_keys = _json.loads(ba_keys)
+            except (ValueError, TypeError):
+                ba_keys = None
+
+        return {
+            "id": r["id"],
+            "name": r["name"],
+            "cityState": r["city_state"],
+            "regionId": r["region_id"],
+            "photoObjectKeys": photo_keys if isinstance(photo_keys, list) else [],
+            "beforeAfterObjectKeys": ba_keys,
+            "sortOrder": r["sort_order"],
+        }
+
+    @app.delete("/api/settings/portfolio/{property_id}")
+    async def delete_portfolio_property(
+        property_id: str,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Hard-delete a portfolio_properties row — admin-only.
+
+        portfolio_properties has no `active` column (see migration 014), so there
+        is no soft-delete path. A follow-up migration should add an `active`
+        TINYINT(1) NOT NULL DEFAULT 1 column so this can be converted to a
+        soft-delete consistent with team_members and client_references.
+        """
+        await _require_admin(user)
+
+        rows = await query(
+            "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Portfolio property not found")
+        current = rows[0]
+
+        await execute(
+            "DELETE FROM portfolio_properties WHERE id = %s", [property_id]
+        )
+        await _audit(
+            scope_type="company",
+            scope_id=None,
+            setting_key=f"portfolio_property.{property_id}.delete",
+            from_value=current.get("name"),
+            to_value=None,
+            actor=_actor(user),
+        )
+        return {"id": property_id, "deleted": True}
 
 
 async def _replace_user_branches(

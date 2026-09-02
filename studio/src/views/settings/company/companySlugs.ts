@@ -10,6 +10,8 @@ export const COMPANY_SECTION_SLUGS = [
   'sla',
   'discrepancy-threshold',
   'intake-defaults',
+  'regions',
+  'static-content',
 ] as const
 
 export type CompanySectionSlug = (typeof COMPANY_SECTION_SLUGS)[number]

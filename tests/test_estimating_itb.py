@@ -252,13 +252,17 @@ class TestListItbProjects:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_branch_scoped_for_branch_roles(self, mock_query, mock_authz_query, authed):
-        mock_authz_query.return_value = []  # branches lookup falls back to raw value
+        # Amendment B.1: scope comes from user_branches (aspire_branch_id ints),
+        # filtered on the linked estimate's aspire_branch_id.
+        mock_authz_query.return_value = [
+            {"aspire_branch_id": 1403}, {"aspire_branch_id": 3696}
+        ]
         mock_query.side_effect = [[], []]
         resp = client.get("/api/estimating/itb/projects")
         assert resp.status_code == 200
         sql, params = mock_query.call_args_list[0].args
-        assert "branch = %s" in sql
-        assert "Orlando, FL" in params
+        assert "e.aspire_branch_id IN (%s, %s)" in sql
+        assert 1403 in params and 3696 in params
 
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_cross_branch_role_sees_all(self, mock_query, authed_admin):
@@ -271,6 +275,8 @@ class TestListItbProjects:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_no_branch_assignment_sees_no_rows(self, mock_query, mock_authz_query):
+        # Zero user_branches rows → kind='none' → empty, no estimates query.
+        mock_authz_query.return_value = []
         app.dependency_overrides[require_auth] = lambda: {**_ESTIMATOR, "branch_id": None}
         try:
             resp = client.get("/api/estimating/itb/projects")

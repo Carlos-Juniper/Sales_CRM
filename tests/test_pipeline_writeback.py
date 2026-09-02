@@ -47,6 +47,16 @@ def as_approver():
     app.dependency_overrides.clear()
 
 
+def _approver_authz_reads():
+    """The two authz.query reads the approve path now does (B.2 + §5.1): the
+    live users row (role + active) then the approval_tiers ceiling. RD's $250k
+    ceiling covers every value under test here."""
+    return [
+        [{"role": "regional_director", "active": 1}],
+        [{"max_value_cents": 25_000_000}],
+    ]
+
+
 # ── create_estimate: Qualifying -> Estimating ────────────────────────────────
 
 class TestCreateWritesBackEstimating:
@@ -183,12 +193,14 @@ class TestPatchWritesBackOpReview:
 # ── approve_handback: OP Review -> Approved ──────────────────────────────────
 
 class TestApproveHandbackWritesBackApproved:
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_approve_from_in_progress_writes_back_approved(
-        self, mock_query, mock_exec, mock_load, as_approver
+        self, mock_query, mock_exec, mock_load, mock_authz_query, as_approver
     ):
+        mock_authz_query.side_effect = _approver_authz_reads()
         mock_query.return_value = [{"id": "est-1", "status": "in_progress",
                                      "contract_value_cents": 5000, "lead_id": "lead-3"}]
         mock_load.return_value = {"id": "est-1"}
@@ -204,12 +216,14 @@ class TestApproveHandbackWritesBackApproved:
         sql, params = writeback_calls[0].args
         assert params == ["approved", "lead-3"]
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_approve_without_lead_id_is_a_noop(
-        self, mock_query, mock_exec, mock_load, as_approver
+        self, mock_query, mock_exec, mock_load, mock_authz_query, as_approver
     ):
+        mock_authz_query.side_effect = _approver_authz_reads()
         mock_query.return_value = [{"id": "est-1", "status": "in_progress",
                                      "contract_value_cents": 5000, "lead_id": None}]
         mock_load.return_value = {"id": "est-1"}
@@ -223,16 +237,18 @@ class TestApproveHandbackWritesBackApproved:
         ]
         assert writeback_calls == []
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_approve_already_approved_chains_to_handed_back_only_and_still_writes_back(
-        self, mock_query, mock_exec, mock_load, as_approver
+        self, mock_query, mock_exec, mock_load, mock_authz_query, as_approver
     ):
         # status == 'approved' -> steps = ['handed_back'] only; 'approved' is
         # still in the transition records list is NOT true here, so the
         # write-back only fires when the chain actually LANDS on 'approved'
         # in this call (i.e. starting from a pre-approval status).
+        mock_authz_query.side_effect = _approver_authz_reads()
         mock_query.return_value = [{"id": "est-1", "status": "approved",
                                      "contract_value_cents": 5000, "lead_id": "lead-4"}]
         mock_load.return_value = {"id": "est-1"}

@@ -1139,14 +1139,16 @@ _ESTIMATOR_OR_APPROVER_FIELDS = frozenset({"contractValueCents"})
 _ANY_ROLE_FIELDS = frozenset({"status"})
 
 
-def _require_estimate_patch_ownership(body: dict, user: dict) -> None:
+async def _require_estimate_patch_ownership(body: dict, user: dict) -> None:
     """Classify the PATCH body's fields and apply the strictest required check
     per ownership group. A body mixing groups requires every group's check
     (e.g. targetMargin + name → approver AND estimator, effectively admin),
-    which matches field ownership."""
+    which matches field ownership.
+
+    Async because require_approver now re-reads the live users row (B.2)."""
     keys = set(body)
     if keys & _APPROVER_ONLY_FIELDS:
-        authz.require_approver(user)
+        await authz.require_approver(user)
     if keys & _ESTIMATOR_OR_APPROVER_FIELDS:
         role = user.get("role")
         if not (authz.is_estimator(role) or authz.is_approver(role)):
@@ -1226,9 +1228,14 @@ def register(app, require_auth) -> None:
             conditions.append("status = %s")
             params.append(status)
         if scope.kind == "branch":
-            conditions.append("branch = %s")
-            params.append(scope.branch)
+            # Scope to the user's aspire_branch_id list (Amendment B.1). One
+            # parameterized placeholder per id — the ids are NEVER interpolated.
+            placeholders = ", ".join(["%s"] * len(scope.ids))
+            conditions.append(f"aspire_branch_id IN ({placeholders})")
+            params.extend(scope.ids)
         elif branch:  # cross-branch role opting into a narrower view
+            # This convenience param is still the legacy territory string; the
+            # authoritative scoped path above filters on aspire_branch_id.
             conditions.append("branch = %s")
             params.append(branch)
         if lead_id:
@@ -1446,7 +1453,7 @@ def register(app, require_auth) -> None:
         # (contractValueCents is now estimator-or-approver since it mirrors
         # the line-item rollup; approver value-adjustments remain audited via
         # the adjustments POST.)
-        _require_estimate_patch_ownership(body, _user)
+        await _require_estimate_patch_ownership(body, _user)
         rows = await query(
             "SELECT estimate_type, status, aspire_opportunity_id, lead_id FROM estimates WHERE id = %s",
             [estimate_id],
@@ -1550,14 +1557,18 @@ def register(app, require_auth) -> None:
         # Approve is approver-owned, and only within the caller's tier — a
         # manager cannot approve a >$100k estimate. Identity
         # comes from the JWT, never from the client body.
-        authz.require_approver(_user)
+        # require_approver gates approver+active BEFORE the 404 lookup and
+        # returns the live role so the authority check reuses that users re-read.
+        live_role = await authz.require_approver(_user)
         rows = await query(
             "SELECT id, status, contract_value_cents, lead_id FROM estimates WHERE id = %s",
             [estimate_id],
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
-        authz.require_approval_authority(_user, int(rows[0].get("contract_value_cents") or 0))
+        await authz.require_approval_authority(
+            _user, int(rows[0].get("contract_value_cents") or 0), live_role=live_role
+        )
         actor = _user.get("name") or _user.get("email") or _user.get("id") or "unknown"
         at = _now_utc().isoformat()
         try:
@@ -1630,7 +1641,7 @@ def register(app, require_auth) -> None:
         estimate_id: str, body: AdjustmentBody, _user: dict = Depends(require_auth)
     ) -> dict:
         # Adjustments are approver-owned — estimators 403.
-        authz.require_approver(_user)
+        await authz.require_approver(_user)
         if body.field not in ("complexity", "margin"):
             raise HTTPException(
                 status_code=400,
@@ -2336,8 +2347,12 @@ def register(app, require_auth) -> None:
         conditions = ["e.status NOT IN ('won', 'lost')"]
         params: list[Any] = []
         if scope.kind == "branch":
-            conditions.append("p.branch = %s")
-            params.append(scope.branch)
+            # Filter on the linked estimate's aspire_branch_id (Amendment B.1);
+            # the JOIN already brings `estimates e` into scope. Parameterized
+            # placeholders only — ids are never string-interpolated.
+            placeholders = ", ".join(["%s"] * len(scope.ids))
+            conditions.append(f"e.aspire_branch_id IN ({placeholders})")
+            params.extend(scope.ids)
         rows = await query(
             f"""SELECT p.* FROM itb_projects p
                  JOIN estimates e ON e.id = p.estimate_id

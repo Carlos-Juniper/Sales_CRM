@@ -187,6 +187,11 @@ def extract_aspire_number(record: dict) -> Optional[str]:
 # ── Payload builders (Aspire vocabulary) ─────────────────────────────────────
 
 def build_opportunity_payload(inp: OpportunityInput) -> dict:
+    # TODO(slice8-bonus): the estimate now persists aspire_branch_id directly
+    # (Slice 8), so BranchID could come straight from it instead of round-
+    # tripping branch_city through ASPIRE_BRANCH_MAP. Deferred: it means adding
+    # the id to OpportunityInput and re-baselining the aspire push tests, which
+    # is outside the Slice 8 create-estimate contract.
     payload: dict = {
         "OpportunityName": inp.name,
         "PropertyID": inp.aspire_property_id,

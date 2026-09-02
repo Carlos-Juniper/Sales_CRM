@@ -110,7 +110,7 @@ class TestAutoGeneration:
         mock_load.return_value = {"id": "est-1", "estimateType": est_type}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": est_type, "name": "Greenfield", "clientName": "LLC",
-            "branch": "Orlando, FL", "contractValueCents": 4500000,
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL", "contractValueCents": 4500000,
             "dueBackDate": "2026-09-30",
         })
         assert resp.status_code == 201
@@ -131,7 +131,7 @@ class TestAutoGeneration:
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield Estate",
             "aspireNumber": "ASP-9", "clientName": "Greenfield LLC",
-            "branch": "Orlando, FL", "contractValueCents": 12000000,
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL", "contractValueCents": 12000000,
             "crmRep": "Amanda Torres", "assignedLsEstimator": "Carlos H",
             "assignedIrrEstimator": "Maria R", "dueBackDate": "2026-11-15",
         })
@@ -163,7 +163,7 @@ class TestAutoGeneration:
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "HOA", "clientName": "HOA LLC",
-            "branch": "Orlando",
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL",
         })
         assert resp.status_code == 201
         status_inserts = [c for c in mock_exec.call_args_list
@@ -189,7 +189,7 @@ class TestAutoGeneration:
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "X", "clientName": "Y",
-            "branch": "Orlando",
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL",
         })
         status_inserts = [c for c in mock_exec.call_args_list
                           if "INSERT INTO itb_scope_status" in c.args[0]]

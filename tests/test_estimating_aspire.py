@@ -152,13 +152,96 @@ class TestCreateSchedulesSync:
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
-            "branch": "Orlando, FL", "propertyId": "prop-1"})
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL", "propertyId": "prop-1"})
         assert resp.status_code == 201
         # background task ran (TestClient executes background tasks)
         mock_bg.assert_awaited_once()
         # property link persisted in the INSERT
         insert_params = mock_exec.call_args_list[0].args[1]
         assert "prop-1" in insert_params
+
+
+# ── Slice 8: intake submits aspire_branch_id; estimate carries it ────────────
+
+class TestCreateBranchIdentityContract:
+    """Branch identity rides on the Aspire BranchID (int). The legacy `branch`
+    city column stays NOT NULL, so create resolves a display city from the id
+    (or accepts branchCity) and persists both."""
+
+    @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
+    @patch("api.estimating._load_estimate", new_callable=AsyncMock)
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_persists_aspire_branch_id_and_non_null_branch(
+        self, mock_query, mock_exec, mock_load, mock_bg, authed
+    ):
+        mock_query.return_value = []  # itb_scopes read (auto-gen)
+        mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
+        resp = client.post("/api/estimating/estimates", json={
+            "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL"})
+        assert resp.status_code == 201, resp.text
+        # The estimates INSERT is the first execute() call.
+        insert_sql, insert_params = mock_exec.call_args_list[0].args
+        assert "aspire_branch_id" in insert_sql
+        # aspire_branch_id (int identity) is persisted …
+        assert 3668 in insert_params
+        # … and the legacy branch city column is populated, never NULL/empty.
+        assert "Orlando, FL" in insert_params
+
+    @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
+    @patch("api.estimating._load_estimate", new_callable=AsyncMock)
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_resolves_branch_city_from_id_when_client_omits_it(
+        self, mock_query, mock_exec, mock_load, mock_bg, authed
+    ):
+        mock_query.return_value = []
+        mock_load.return_value = {"id": "est-1", "estimateType": "install"}
+        # Client sends only the id — the backend reverse-resolves the city so
+        # the NOT NULL branch column is still populated. Install Bradenton = 1374.
+        resp = client.post("/api/estimating/estimates", json={
+            "estimateType": "install", "name": "GF", "clientName": "LLC",
+            "aspireBranchId": 1374})
+        assert resp.status_code == 201, resp.text
+        insert_params = mock_exec.call_args_list[0].args[1]
+        assert 1374 in insert_params
+        assert "Bradenton, FL" in insert_params
+
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_rejects_missing_aspire_branch_id(self, mock_query, mock_exec, authed):
+        resp = client.post("/api/estimating/estimates", json={
+            "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA"})
+        assert resp.status_code == 400
+        assert "aspireBranchId" in resp.json()["detail"]
+        # Reject persists nothing.
+        mock_exec.assert_not_awaited()
+
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_rejects_unresolvable_aspire_branch_id(self, mock_query, mock_exec, authed):
+        # A syntactically valid int that maps to no branch and carries no city.
+        resp = client.post("/api/estimating/estimates", json={
+            "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
+            "aspireBranchId": 999999})
+        assert resp.status_code == 400
+        mock_exec.assert_not_awaited()
+
+    def test_estimate_out_exposes_aspire_branch_id_and_branch_city(self):
+        out = est._estimate_out(
+            {**_est_row(aspire_branch_id=3668, branch="Orlando, FL"),
+             "aspire_number": None, "client_name": "HOA", "acreage": None,
+             "contract_value_cents": 0, "target_margin": 0.22, "lifecycle": "bidding",
+             "aspire_owner": "estimating", "priority": "medium", "win_probability": 0.2,
+             "site_walk_date": None, "due_back_date": None, "anticipated_close_date": None,
+             "service_start_date": None, "assigned_ls_estimator": None,
+             "assigned_irr_estimator": None, "crm_rep": None, "notify_bm_rd_on_return": None,
+             "created_at": None, "updated_at": None},
+            sections=[],
+        )
+        assert out["aspireBranchId"] == 3668
+        assert out["branchCity"] == "Orlando, FL"
 
 
 # ── HTTP: create is THE property-sync trigger ────────────────────────────────
@@ -192,7 +275,7 @@ class TestCreateTriggersPropertySync:
 
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
-            "branch": "Orlando, FL", "propertyId": "prop-1"})
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL", "propertyId": "prop-1"})
         assert resp.status_code == 201
 
         # exactly one push, and the row was flipped to pending at trigger time
@@ -220,7 +303,7 @@ class TestCreateTriggersPropertySync:
 
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
-            "branch": "Orlando, FL", "propertyId": "prop-1"})
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL", "propertyId": "prop-1"})
         assert resp.status_code == 201
         mock_push.assert_not_awaited()
 
@@ -236,7 +319,7 @@ class TestCreateTriggersPropertySync:
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
-            "branch": "Orlando, FL"})
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL"})
         assert resp.status_code == 201
         mock_needed.assert_not_awaited()
 

@@ -248,7 +248,10 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         "name": r["name"],
         "aspireNumber": r["aspire_number"],
         "clientName": r["client_name"],
-        "branch": r["branch"],
+        # Branch identity rides on the Aspire BranchID (int); the legacy
+        # `branch` city string is display-only until Slice 14 drops it.
+        "aspireBranchId": r.get("aspire_branch_id"),
+        "branchCity": r["branch"],
         "customerType": r["customer_type"],
         "acreage": _num(r["acreage"]),
         "contractValueCents": int(r["contract_value_cents"]),
@@ -1013,7 +1016,9 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
             estimate_id,
             body.get("name", ""),
             body.get("aspireNumber"),
-            body.get("branch", ""),
+            # ITB project carries the display branch city (Slice 8: intake sends
+            # branchCity; legacy `branch` kept as a fallback for older callers).
+            body.get("branchCity") or body.get("branch", ""),
             body.get("crmRep"),
             body.get("assignedLsEstimator"),
             body.get("assignedIrrEstimator"),
@@ -1337,10 +1342,30 @@ def register(app, require_auth) -> None:
         est_type = body.get("estimateType")
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
-        if not body.get("branch", "").strip():
+        # Slice 8 cutover: branch identity rides on the Aspire BranchID (int),
+        # captured at intake from the selected branch. The legacy `branch` city
+        # column stays NOT NULL until Slice 14, so we resolve a display city from
+        # the id (mirroring GET /config/branches) and persist both.
+        aspire_branch_id = body.get("aspireBranchId")
+        if not isinstance(aspire_branch_id, int) or isinstance(aspire_branch_id, bool):
             raise HTTPException(
                 status_code=400,
-                detail="branch is required — select a branch from the intake form",
+                detail="aspireBranchId is required — select a branch from the intake form",
+            )
+        # Prefer the client-supplied display city (resolved from the same option
+        # list the backend serves); fall back to a reverse lookup of the map so
+        # the NOT NULL `branch` column is never left empty.
+        branch_city = (body.get("branchCity") or "").strip()
+        if not branch_city:
+            branch_city = next(
+                (city for (city, _install), bid in ASPIRE_BRANCH_MAP.items()
+                 if bid == aspire_branch_id),
+                "",
+            )
+        if not branch_city:
+            raise HTTPException(
+                status_code=400,
+                detail="aspireBranchId does not resolve to a known branch",
             )
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
@@ -1352,19 +1377,21 @@ def register(app, require_auth) -> None:
         estimate_id = _new_id("est")
         await execute(
             """INSERT INTO estimates
-                 (id, estimate_type, name, aspire_number, client_name, branch, customer_type,
+                 (id, estimate_type, name, aspire_number, client_name, branch, aspire_branch_id,
+                  customer_type,
                   acreage, contract_value_cents, target_margin, status, lifecycle, aspire_owner,
                   priority, win_probability, site_walk_date, due_back_date, anticipated_close_date,
                   service_start_date, assigned_ls_estimator, assigned_irr_estimator, crm_rep,
                   notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 estimate_id,
                 est_type,
                 body.get("name", ""),
                 body.get("aspireNumber"),
                 body.get("clientName", ""),
-                body.get("branch", ""),
+                branch_city,
+                aspire_branch_id,
                 body.get("customerType", ""),
                 body.get("acreage"),
                 body.get("contractValueCents", 0),

@@ -71,7 +71,7 @@ class TestCreateWritesBackEstimating:
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
-            "branch": "Orlando, FL", "leadId": "lead-1"})
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL", "leadId": "lead-1"})
         assert resp.status_code == 201
         writeback_calls = [
             c for c in mock_exec.call_args_list
@@ -92,7 +92,7 @@ class TestCreateWritesBackEstimating:
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
-            "branch": "Orlando, FL"})
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL"})
         assert resp.status_code == 201
         writeback_calls = [
             c for c in mock_exec.call_args_list

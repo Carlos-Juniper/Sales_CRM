@@ -513,7 +513,7 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
             </span>
           </div>
           <p className="mt-1 text-xs text-[hsl(var(--muted-fg))]">
-            {draft.clientName} · {draft.branch} ·{' '}
+            {draft.clientName} · {draft.branchCity} ·{' '}
             <span className="font-medium text-[hsl(var(--fg))]">{formatCents(contractCents)}</span>{' '}
             · {totalHours.toFixed(2)} hrs planned
           </p>

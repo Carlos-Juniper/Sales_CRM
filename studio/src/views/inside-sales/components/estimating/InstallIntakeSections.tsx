@@ -211,7 +211,7 @@ export function RequestorSection({ form, setStr, setBool, branchOptions }: Reque
           >
             <option value="">— select branch —</option>
             {branchOptions.map((b) => (
-              <option key={b.city} value={b.city}>{b.city}</option>
+              <option key={b.aspire_branch_id} value={String(b.aspire_branch_id)}>{b.city}</option>
             ))}
           </select>
         </div>

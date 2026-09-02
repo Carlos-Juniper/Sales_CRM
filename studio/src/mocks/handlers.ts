@@ -153,7 +153,7 @@ function itbProjectForEstimate(e: Estimate): MockItbProject {
     estimateId: e.id,
     name: e.name,
     aspireNumber: e.aspireNumber ?? null,
-    branch: e.branch,
+    branch: e.branchCity ?? '',
     salesRep: e.crmRep ?? null,
     lsEstimator: e.assignedLsEstimator ?? null,
     irrEstimator: e.assignedIrrEstimator ?? null,
@@ -500,7 +500,7 @@ const allHandlers = [
     let filtered = [...estimates]
     if (estimateType) filtered = filtered.filter((e) => e.estimateType === estimateType)
     if (status) filtered = filtered.filter((e) => e.status === status)
-    if (branch) filtered = filtered.filter((e) => e.branch === branch)
+    if (branch) filtered = filtered.filter((e) => e.branchCity === branch)
     if (leadId) filtered = filtered.filter((e) => e.leadId === leadId)
     return HttpResponse.json(filtered)
   }),

@@ -154,8 +154,19 @@ export interface EstimateBase {
    */
   leadId?: string | null
   clientName: string
-  /** Region/branch scope: Phoenix-Desert, Raleigh, Florida, Pennsylvania. */
-  branch: string
+  /**
+   * Aspire BranchID (identity) — the service-line-encoded branch row the crew
+   * rates vary at (e.g. Fort Myers Install=1403 vs Maintenance=3696). Set at
+   * intake from the selected {@link BranchOption}; null only for legacy rows
+   * created before the id was carried. Use THIS for branch identity/scoping.
+   */
+  aspireBranchId: number | null
+  /**
+   * Human-readable branch city label (e.g. "Fort Myers, FL"). Display only —
+   * never an identity key (the map is not uniquely reversible). Mirrors the
+   * legacy `estimates.branch` column until Slice 14 drops it.
+   */
+  branchCity: string | null
   acreage: number | null
   /** Derived roll-up, persisted for queue/reporting. Integer cents. */
   contractValueCents: number

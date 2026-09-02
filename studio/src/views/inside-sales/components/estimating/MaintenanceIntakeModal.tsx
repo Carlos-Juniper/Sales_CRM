@@ -77,7 +77,9 @@ interface FormState {
   company: string
   phone: string
   email: string
-  // Branch (required, populated from Aspire config)
+  // Branch (required, populated from Aspire config). Holds the Aspire
+  // BranchID (identity) as a string; the display city is resolved from
+  // branchOptions on submit. Empty string ⇒ nothing selected.
   branch: string
   // Property
   propertyAddress: string
@@ -247,6 +249,11 @@ export function MaintenanceIntakeModal({
 
       const winProbability = Math.min(1.0, Math.max(0.2, Number(form.winProbabilityPct) / 100))
 
+      // Branch identity rides on the Aspire BranchID (int); the city label is
+      // resolved from the loaded options for the display column.
+      const aspireBranchId = Number(form.branch)
+      const branchCity = branchOptions.find((b) => b.aspire_branch_id === aspireBranchId)?.city ?? null
+
       // Build intake payload persisted verbatim (I-6.1; parsing uploads is
       // explicitly future scope — files stored for estimator to open).
       const intakePayload: Record<string, unknown> = {
@@ -289,7 +296,8 @@ export function MaintenanceIntakeModal({
         leadId: leadCtx?.leadNumber || null,
         serviceLine,
         clientName: form.company || form.contactName,
-        branch: form.branch,
+        aspireBranchId,
+        branchCity,
         customerType: form.customerType,
         acreage: null,
         contractValueCents: 0,
@@ -436,7 +444,7 @@ export function MaintenanceIntakeModal({
                 >
                   <option value="">— select branch —</option>
                   {branchOptions.map((b) => (
-                    <option key={b.city} value={b.city}>{b.city}</option>
+                    <option key={b.aspire_branch_id} value={String(b.aspire_branch_id)}>{b.city}</option>
                   ))}
                 </select>
               </div>

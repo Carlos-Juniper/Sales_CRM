@@ -261,11 +261,13 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
     e.target.value = ''
   }
 
-  function buildIntakePayload() {
+  function buildIntakePayload(branchCity: string | null) {
     return {
       leadId: form.leadId || null,
       requestedBy: form.requestedBy,
-      installBranch: form.installBranch,
+      // Persist the human-readable city (identity travels on the estimate's
+      // aspireBranchId); form.installBranch now holds the raw Aspire id string.
+      installBranch: branchCity ?? form.installBranch,
       phone: form.phone,
       email: form.email,
       requestDate: form.requestDate,
@@ -364,7 +366,12 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
 
       const winProbability = Math.min(1.0, Math.max(0.2, Number(form.winProbabilityPct) / 100))
 
-      const intakePayload = buildIntakePayload()
+      // Branch identity rides on the Aspire BranchID (int); the city label is
+      // resolved from the loaded options for the display column.
+      const aspireBranchId = Number(form.installBranch)
+      const branchCity = branchOptions.find((b) => b.aspire_branch_id === aspireBranchId)?.city ?? null
+
+      const intakePayload = buildIntakePayload(branchCity)
       const created = await estimatingApi.create({
         estimateType: 'install',
         name: form.opportunityName || form.propertyName || 'Install Intake',
@@ -375,7 +382,8 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
         leadId: form.leadId || null,
         serviceLine,
         clientName: form.company || form.contactPerson,
-        branch: form.installBranch,
+        aspireBranchId,
+        branchCity,
         customerType: form.industry as InstallCustomerType,
         acreage: form.acreage ? parseFloat(form.acreage) : null,
         contractValueCents: form.estimatedValue ? Math.round(parseFloat(form.estimatedValue) * 100) : 0,

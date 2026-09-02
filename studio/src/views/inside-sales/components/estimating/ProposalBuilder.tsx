@@ -8,14 +8,9 @@
 // Step 2 (Preview): Slice 8 drops its page sub-components into <PreviewSlot />.
 //                   Until Slice 8 ships, a placeholder is rendered.
 //
-// Branch-scoping decision: Lead.branch_id is a territory string ("Fort Myers,
-// FL"), NOT an aspireBranchId. Estimate does not yet carry aspire_branch_id
-// (Amendment A.1 notes it, but no column exists on Estimate today per Slice 1
-// ledger). The team pickers therefore scope by estimate.branch (city string)
-// only when an aspireBranchId can be derived; otherwise they show all active
-// branch members. If Estimate.aspire_branch_id is added in a future migration,
-// replace the `aspireBranchId` derivation below and the team picks will narrow
-// automatically. See §11 Slice 7 ledger entry for the documented gap.
+// Branch-scoping: the Estimate carries aspireBranchId (Slice 8), captured at
+// intake from the selected branch. The team/client-reference pickers scope by
+// that id; legacy rows with a null id fall back to all active branch members.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from 'react'
@@ -376,13 +371,11 @@ function ProposalFormStep({
   isEditing: boolean
 }) {
   // ---------------------------------------------------------------------------
-  // Branch scoping: Lead.branch_id is a territory string, not an aspireBranchId.
-  // Estimate does not yet carry aspire_branch_id (Amendment A.1 gap — see file header).
-  // We pass no aspireBranchId to useTeamMembers/useClientReferences, which returns
-  // all active members. When Estimate.aspire_branch_id is available, replace
-  // `aspireBranchId` below with `estimate.aspire_branch_id` (number).
+  // Branch scoping: the estimate now carries aspireBranchId (Slice 8), captured
+  // at intake from the selected branch. Scope the team/client-reference pickers
+  // to that branch; legacy rows with a null id fall back to all active members.
   // ---------------------------------------------------------------------------
-  const aspireBranchId: number | undefined = undefined // gap documented in §11 ledger
+  const aspireBranchId: number | undefined = estimate.aspireBranchId ?? undefined
 
   const { data: branchTeamMembers = [] } = useTeamMembers(
     aspireBranchId !== undefined ? { aspireBranchId } : undefined,

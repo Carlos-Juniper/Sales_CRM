@@ -68,7 +68,10 @@ export type UpdateEstimatePayload = Partial<{
   name: string
   aspireNumber: string | null
   clientName: string
-  branch: string
+  /** Aspire BranchID (identity). */
+  aspireBranchId: number | null
+  /** Display city label mirroring the legacy `estimates.branch` column. */
+  branchCity: string | null
   customerType: Estimate['customerType']
   acreage: number | null
   contractValueCents: number

@@ -12,6 +12,8 @@ import { SectionPlaceholder } from './SectionPlaceholder'
 import { CompanySection } from './company/CompanySection'
 import { companySectionOwnsSlug } from './company/companySlugs'
 import { UsersSection } from './company/users/UsersSection'
+import { BranchSection } from './branch/BranchSection'
+import { branchSectionOwnsSlug } from './branch/branchSlugs'
 
 /**
  * Settings shell (Slice 9): a left-hand section nav grouped by permission, plus
@@ -112,7 +114,8 @@ export function SettingsPage() {
           </div>
         )}
 
-        {activeSection && renderSectionBody(activeSection, activeGroup?.id)}
+        {activeSection &&
+          renderSectionBody(activeSection, activeGroup?.id, selectedBranchId)}
       </div>
     </div>
   )
@@ -126,12 +129,18 @@ export function SettingsPage() {
 function renderSectionBody(
   section: SettingsSection,
   groupId?: SettingsGroup['id'],
+  selectedBranchId?: number,
 ) {
   if (groupId === 'company' && section.slug === 'users') {
     return <UsersSection slug={section.slug} label={section.label} />
   }
   if (groupId === 'company' && companySectionOwnsSlug(section.slug)) {
     return <CompanySection slug={section.slug} label={section.label} />
+  }
+  if (groupId === 'branch' && branchSectionOwnsSlug(section.slug)) {
+    return (
+      <BranchSection slug={section.slug} aspireBranchId={selectedBranchId} />
+    )
   }
   return <SectionPlaceholder slug={section.slug} name={section.label} />
 }

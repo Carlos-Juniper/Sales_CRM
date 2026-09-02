@@ -17,6 +17,36 @@ export interface ManageableBranch {
 }
 
 /**
+ * A branch's settings as returned by GET /api/settings/branch/{aspire_branch_id}
+ * (Slice 5). NOTE (shape gap): this endpoint returns ONLY the crew rate — a
+ * branch with no configured rate hands back `crewRateCentsPerHour: null` (the
+ * §2.3 no-fallback contract: never an invented number). Material factors and
+ * production rates are NOT on this payload; they are read from the estimating
+ * config endpoints (material-calcs / catalog-items) and written back through
+ * this endpoint's PATCH.
+ */
+export interface BranchSettings {
+  aspireBranchId: number
+  /** Dollars-per-hour stored as cents; null ⇒ not configured (no fallback). */
+  crewRateCentsPerHour: number | null
+}
+
+/**
+ * Partial branch-settings update → PATCH /api/settings/branch/{aspire_branch_id}.
+ * Scope is enforced server-side from `user_branches` (a BM patching a branch
+ * outside its scope gets a 403); the `aspireBranchId` in the URL is authoritative.
+ * Only the keys present are written.
+ */
+export interface BranchSettingsPatch {
+  /** Crew rate in cents-per-hour (dollars converted client-side). */
+  crewRateCentsPerHour?: number
+  /** {catalogItemId: productionRate} — one row per changed kit. */
+  productionRates?: Record<string, number>
+  /** {materialKey: {factorName: value}} — FACTOR columns only, never unit_cost/sell. */
+  materialFactors?: Record<string, Record<string, number | Record<string, number>>>
+}
+
+/**
  * The company_settings singleton (row id=1) as returned by
  * GET/PATCH /api/settings/company. Snake_case because the endpoint hands back
  * the raw DB row (migration 020 typed columns) — no camel-casing layer. Every
@@ -112,6 +142,32 @@ export interface UserAdminPatch {
 export const settingsApi = {
   /** Operating branches the caller may manage, sorted by branch name. */
   branches: () => apiClient.get<ManageableBranch[]>('/settings/branches'),
+
+  /**
+   * Read one branch's settings (crew rate only — see BranchSettings). Scoped
+   * server-side; an out-of-scope branch 403s.
+   */
+  branchSettings: (aspireBranchId: number) =>
+    apiClient.get<BranchSettings>(`/settings/branch/${aspireBranchId}`),
+
+  /**
+   * Patch a branch's crew rate / production rates / material factors. The
+   * BranchSettingsPatch (Slice 5) model expects snake_case keys, so the camel
+   * body is mapped to the wire shape here — the UI/hooks stay camelCase.
+   */
+  updateBranchSettings: (aspireBranchId: number, body: BranchSettingsPatch) => {
+    const wire: Record<string, unknown> = {}
+    if (body.crewRateCentsPerHour !== undefined)
+      wire.crew_rate_cents_per_hour = body.crewRateCentsPerHour
+    if (body.productionRates !== undefined)
+      wire.production_rates = body.productionRates
+    if (body.materialFactors !== undefined)
+      wire.material_factors = body.materialFactors
+    return apiClient.patch<BranchSettings>(
+      `/settings/branch/${aspireBranchId}`,
+      wire,
+    )
+  },
 
   /** Read the company_settings singleton (any authed role). */
   company: () => apiClient.get<CompanySettings>('/settings/company'),

@@ -57,13 +57,29 @@ def as_role():
 BODY = {"field": "margin", "fromValue": 0.22, "toValue": 0.30}
 
 
+def _live_user(role: str, active: int = 1):
+    """The users-table re-read (role + active) that require_approver now does.
+
+    Mirrors test_rbac.py's `_live_user` helper (Amendment B.2): the POST
+    /adjustments handler calls `authz.require_approver`, whose live-role
+    re-read hits `api.authz.query`. Each approver-path test must mock that
+    read to return the acting user's role so the guard's decision comes from
+    the mocked role (not an unmocked-DB error).
+    """
+    return [{"role": role, "active": active}]
+
+
 # ── POST /adjustments ────────────────────────────────────────────────────────
 
 class TestCreateAdjustment:
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_persists_row_with_jwt_actor(self, mock_query, mock_exec, as_role):
+    def test_persists_row_with_jwt_actor(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
         as_role("manager")
+        mock_authz_query.return_value = _live_user("manager")  # live re-read (B.2)
         mock_query.return_value = [{"id": "est-1"}]
         resp = client.post(
             "/api/estimating/estimates/est-1/adjustments",
@@ -89,10 +105,14 @@ class TestCreateAdjustment:
         assert "Spoofed Actor" not in params
         assert "margin" in params
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_complexity_field_accepted(self, mock_query, mock_exec, as_role):
+    def test_complexity_field_accepted(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
         as_role("regional_director")
+        mock_authz_query.return_value = _live_user("regional_director")
         mock_query.return_value = [{"id": "est-1"}]
         resp = client.post(
             "/api/estimating/estimates/est-1/adjustments",
@@ -101,32 +121,47 @@ class TestCreateAdjustment:
         assert resp.status_code == 201
         assert resp.json()["field"] == "complexity"
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_estimator_role_403(self, mock_query, mock_exec, as_role):
+    def test_estimator_role_403(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
         for role in ("maintenance_estimating", "install_estimating", "sales"):
             as_role(role)
+            # Live re-read confirms the JWT role (still a non-approver here), so
+            # the 403 comes from the role check, not an unmocked-DB error (B.2).
+            mock_authz_query.return_value = _live_user(role)
             resp = client.post(
                 "/api/estimating/estimates/est-1/adjustments", json=BODY
             )
             assert resp.status_code == 403, role
         mock_exec.assert_not_awaited()
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_every_approver_role_allowed(self, mock_query, mock_exec, as_role):
+    def test_every_approver_role_allowed(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
         mock_query.return_value = [{"id": "est-1"}]
         for role in ("manager", "regional_director", "vice_president", "ceo", "admin"):
             as_role(role)
+            # Live re-read returns the same approver role so the guard passes.
+            mock_authz_query.return_value = _live_user(role)
             resp = client.post(
                 "/api/estimating/estimates/est-1/adjustments", json=BODY
             )
             assert resp.status_code == 201, role
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_rejects_bogus_field(self, mock_query, mock_exec, as_role):
+    def test_rejects_bogus_field(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
         as_role("manager")
+        mock_authz_query.return_value = _live_user("manager")
         mock_query.return_value = [{"id": "est-1"}]
         resp = client.post(
             "/api/estimating/estimates/est-1/adjustments",
@@ -135,22 +170,30 @@ class TestCreateAdjustment:
         assert resp.status_code == 400
         mock_exec.assert_not_awaited()
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_404_when_estimate_missing(self, mock_query, mock_exec, as_role):
+    def test_404_when_estimate_missing(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
         as_role("manager")
+        mock_authz_query.return_value = _live_user("manager")
         mock_query.return_value = []
         resp = client.post(
             "/api/estimating/estimates/est-nope/adjustments", json=BODY
         )
         assert resp.status_code == 404
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_never_mutates_the_estimate_row(self, mock_query, mock_exec, as_role):
+    def test_never_mutates_the_estimate_row(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
         """The audit write must not suppress/replace the status-transition or
         PATCH path — it only ever inserts into estimate_adjustments."""
         as_role("manager")
+        mock_authz_query.return_value = _live_user("manager")
         mock_query.return_value = [{"id": "est-1"}]
         client.post("/api/estimating/estimates/est-1/adjustments", json=BODY)
         for c in mock_exec.await_args_list:

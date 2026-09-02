@@ -485,3 +485,49 @@ class TestRenderEndpoints:
         assert res.status_code in (302, 404, 500), (
             f"Unexpected status: {res.status_code}: {res.text}"
         )
+
+
+# ── Regression: PDF page-setup contract (locks in already-shipped behaviour) ──
+#
+# These assert against the module source rather than capturing a mocked
+# page.pdf(...) call: the existing render_proposal_pdf harness never mocks the
+# Playwright page/context (it only exercises the "browser not started" path),
+# so there is no live kwargs-capture seam to reuse. Building a full fake page
+# would fabricate a parallel to the real call; asserting the real source of the
+# actual `await page.pdf(` call is the faithful check.
+
+class TestRenderPdfPageSetupContract:
+
+    def _pdf_call_source(self) -> str:
+        """The source of render_proposal_pdf, where the real page.pdf() call lives."""
+        import inspect
+        import api.proposal_render as render_mod
+        return inspect.getsource(render_mod.render_proposal_pdf)
+
+    def test_pdf_rendered_at_letter_format(self):
+        """The PDF is rendered at format="Letter"."""
+        src = self._pdf_call_source()
+        assert 'format="Letter"' in src, (
+            "render_proposal_pdf must call page.pdf(format=\"Letter\", ...)"
+        )
+
+    def test_display_header_footer_is_false(self):
+        """display_header_footer is False on the page.pdf() call.
+
+        The header/footer templates were removed; page numbers are drawn in the
+        document body instead, so the footer/header must stay disabled.
+        """
+        src = self._pdf_call_source()
+        assert "display_header_footer=False" in src, (
+            "page.pdf(...) must pass display_header_footer=False"
+        )
+        assert "display_header_footer=True" not in src, (
+            "display_header_footer must not be re-enabled"
+        )
+
+    def test_header_template_constant_removed(self):
+        """_HEADER_TEMPLATE no longer exists on the render module."""
+        import api.proposal_render as m
+        assert not hasattr(m, "_HEADER_TEMPLATE"), (
+            "_HEADER_TEMPLATE was removed; it must not reappear at module level"
+        )

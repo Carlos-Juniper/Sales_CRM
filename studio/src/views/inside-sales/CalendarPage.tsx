@@ -197,7 +197,7 @@ function CalendarNotConnectedState() {
           Link your Microsoft 365 account to see your calendar and schedule meetings.
         </p>
         <Link
-          to="/inside-sales/settings/connections"
+          to="/settings/connections"
           className="inline-flex items-center gap-1.5 text-xs font-medium text-[#2E7D52] hover:text-[#256644] underline underline-offset-2"
         >
           Connect account

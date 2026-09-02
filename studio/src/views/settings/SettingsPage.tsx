@@ -14,6 +14,7 @@ import { companySectionOwnsSlug } from './company/companySlugs'
 import { UsersSection } from './company/users/UsersSection'
 import { BranchSection } from './branch/BranchSection'
 import { branchSectionOwnsSlug } from './branch/branchSlugs'
+import { MineSection } from './mine/MineSection'
 
 /**
  * Settings shell (Slice 9): a left-hand section nav grouped by permission, plus
@@ -141,6 +142,11 @@ function renderSectionBody(
     return (
       <BranchSection slug={section.slug} aspireBranchId={selectedBranchId} />
     )
+  }
+  if (groupId === 'mine') {
+    const mineBody = <MineSection slug={section.slug} />
+    // MineSection returns null for slugs it doesn't own yet; fall through to placeholder.
+    if (mineBody !== null) return mineBody
   }
   return <SectionPlaceholder slug={section.slug} name={section.label} />
 }

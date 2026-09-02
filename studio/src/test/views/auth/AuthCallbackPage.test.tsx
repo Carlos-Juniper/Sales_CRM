@@ -160,7 +160,7 @@ describe('AuthCallbackPage — Entra token exchange', () => {
     })
   })
 
-  it('navigates manager users to /branch-manager', async () => {
+  it('navigates manager users to /settings (BranchManagerPage removed in Slice 12)', async () => {
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })
     mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
     mockEntraCallback.mockResolvedValue(makeUser({ role: 'manager' }))
@@ -169,7 +169,7 @@ describe('AuthCallbackPage — Entra token exchange', () => {
     render(<AuthCallbackPage />)
 
     await vi.waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/branch-manager', { replace: true })
+      expect(mockNavigate).toHaveBeenCalledWith('/settings', { replace: true })
     })
   })
 

@@ -375,6 +375,17 @@ const allHandlers = [
     return HttpResponse.json(mockConnections)
   }),
 
+  // GET /api/settings/branches — the Settings branch-picker source (Slice 9).
+  // Scope + roster filtering is server-side; this mock returns two operating
+  // branches sorted by name. Tests override with server.use() as needed.
+  http.get(`${API}/settings/branches`, async () => {
+    await delay(50)
+    return HttpResponse.json([
+      { aspireBranchId: 1403, branchName: 'Bonita Springs', city: 'Bonita Springs' },
+      { aspireBranchId: 3696, branchName: 'Fort Myers', city: 'Fort Myers' },
+    ])
+  }),
+
   // ---------------------------------------------------------------------
   // Estimating config read APIs — read-only; the seeded config
   // tables mirrored here. Tests override with server.use() to simulate DB

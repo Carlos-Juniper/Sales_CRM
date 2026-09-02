@@ -247,3 +247,75 @@ class TestBranchSettingsScope:
             c for c in mock_exec.await_args_list if "branch_settings" in c.args[0]
         ]
         assert len(bs_updates) == 1
+
+
+# ── Slice 9: manageable-branches list (GET /api/settings/branches) ────────────
+
+
+class TestManageableBranchesList:
+    """The section-nav branch picker's data source.
+
+    Returns the operating branches the caller may MANAGE:
+      * admin (scope kind='all') → every operating branch,
+      * BM/RD (scope kind='branch') → only their user_branches operating
+        branches,
+      * a user with zero branches (kind='none') → [].
+    The operating-roster filter (active=1 AND branch_name NOT LIKE '%DO NOT
+    USE%') lives in the SQL so the 21-of-56 non-office rows never reach the UI.
+    """
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_admin_gets_all_operating_branches_filtered_in_sql(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        as_role("admin")
+        mock_authz_query.return_value = []  # admin → kind='all', not consulted
+        mock_query.return_value = [
+            {"aspire_branch_id": 1403, "branch_name": "Bonita Springs", "city": "Bonita Springs"},
+            {"aspire_branch_id": 3696, "branch_name": "Fort Myers", "city": "Fort Myers"},
+        ]
+        r = client.get("/api/settings/branches")
+        assert r.status_code == 200
+        body = r.json()
+        assert [b["aspireBranchId"] for b in body] == [1403, 3696]
+        assert body[0]["branchName"] == "Bonita Springs"
+
+        # The operating-roster filter is in the WHERE clause (server-side).
+        sql = mock_query.await_args_list[0].args[0]
+        assert "active = 1" in sql
+        assert "NOT LIKE" in sql and "DO NOT USE" in sql
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_manager_gets_only_their_user_branches(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        as_role("manager")
+        # resolve_branch_scope reads user_branches (via authz.query) → [1403].
+        mock_authz_query.return_value = [{"aspire_branch_id": 1403}]
+        mock_query.return_value = [
+            {"aspire_branch_id": 1403, "branch_name": "Bonita Springs", "city": "Bonita Springs"},
+        ]
+        r = client.get("/api/settings/branches")
+        assert r.status_code == 200
+        assert [b["aspireBranchId"] for b in r.json()] == [1403]
+
+        # The scoped branch id is a parameterized filter, not interpolated.
+        call = mock_query.await_args_list[0]
+        sql, params = call.args[0], call.args[1]
+        assert "aspire_branch_id IN" in sql
+        assert 1403 in params
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_user_with_no_branches_gets_empty_list(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        as_role("manager")
+        mock_authz_query.return_value = []  # zero user_branches → kind='none'
+        r = client.get("/api/settings/branches")
+        assert r.status_code == 200
+        assert r.json() == []
+        # Short-circuits before hitting the branches table.
+        mock_query.assert_not_awaited()

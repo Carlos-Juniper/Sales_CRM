@@ -375,6 +375,48 @@ def register(app, require_auth) -> None:
         refreshed = await query("SELECT * FROM margin_bands WHERE id = %s", [band_id])
         return dict(refreshed[0]) if refreshed else {**dict(current), **updates}
 
+    # ── Slice 9: manageable-branches list (section-nav branch picker) ─────────
+
+    @app.get("/api/settings/branches")
+    async def list_manageable_branches(user: dict = Depends(require_auth)) -> list[dict]:
+        """Operating branches the caller may MANAGE (the branch-picker source).
+
+        Scope comes from resolve_branch_scope (Amendment B.1), never the request:
+        admin (kind='all') gets every operating branch; a BM/RD (kind='branch')
+        gets only its user_branches; a user with zero branches (kind='none')
+        gets []. The operating-roster filter (active=1 AND branch_name NOT LIKE
+        '%DO NOT USE%') lives in the WHERE clause so the 21-of-56 non-office rows
+        never reach the UI. Returns [{aspireBranchId, branchName, city}] sorted
+        by branch_name.
+        """
+        scope = await authz.resolve_branch_scope(user)
+        if scope.kind == "none":
+            return []
+
+        where = ["active = 1", "branch_name NOT LIKE '%DO NOT USE%'"]
+        params: list[Any] = []
+        if scope.kind == "branch":
+            # Parameterized placeholders only — ids are never interpolated.
+            placeholders = ", ".join(["%s"] * len(scope.ids))
+            where.append(f"aspire_branch_id IN ({placeholders})")
+            params.extend(scope.ids)
+
+        rows = await query(
+            f"""SELECT aspire_branch_id, branch_name, city
+                  FROM branches
+                 WHERE {' AND '.join(where)}
+                 ORDER BY branch_name""",
+            params,
+        )
+        return [
+            {
+                "aspireBranchId": int(r["aspire_branch_id"]),
+                "branchName": r["branch_name"],
+                "city": r.get("city"),
+            }
+            for r in rows
+        ]
+
     # ── Slice 5: branch settings + scope guard ───────────────────────────────
 
     @app.get("/api/settings/branch/{aspire_branch_id}")

@@ -9,7 +9,7 @@ import {
 } from '@/views/inside-sales'
 import AccountsPage from '@/views/inside-sales/AccountsPage'
 import ConnectionsPage from '@/views/inside-sales/ConnectionsPage'
-import BranchManagerPage from '@/views/branch-manager'
+import { SettingsPage } from '@/views/settings/SettingsPage'
 import { InsideSalesGuard } from '@/guards'
 import ProposalPrintRoute from '@/views/inside-sales/components/estimating/ProposalPrintRoute'
 
@@ -85,10 +85,21 @@ export const router = createBrowserRouter([
         path: 'branch-manager',
         element: <Navigate to="/inside-sales" replace />,
       },
-      // Settings
+      // Settings — new shell (Slice 9): section nav, permission filtering,
+      // branch picker. Deep-linkable per section and per branch. Section CONTENT
+      // is filled by Slices 10–12; BranchManagerPage + the standalone
+      // connections route are removed in Slice 12 (not deleted here).
       {
         path: 'settings',
-        element: <RequireAuth><BranchManagerPage /></RequireAuth>,
+        element: <RequireAuth><SettingsPage /></RequireAuth>,
+      },
+      {
+        path: 'settings/:section',
+        element: <RequireAuth><SettingsPage /></RequireAuth>,
+      },
+      {
+        path: 'settings/branch/:aspireBranchId/:section',
+        element: <RequireAuth><SettingsPage /></RequireAuth>,
       },
       {
         path: 'inside-sales/settings/connections',

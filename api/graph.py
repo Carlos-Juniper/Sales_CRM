@@ -278,10 +278,22 @@ async def get_app_token() -> str:
     use application permissions (``User.Read.All``) rather than a stored user
     delegated token. Requires ``ENTRA_CLIENT_SECRET`` alongside the client/tenant
     ids the SSO app registration already carries.
+
+    Raises ``HTTPException(503)`` with an actionable message if
+    ``ENTRA_CLIENT_SECRET`` is absent from the environment, rather than letting
+    a ``KeyError`` bubble up as a generic 500.
     """
     client_id = os.environ["ENTRA_CLIENT_ID"]
     tenant_id = os.environ["ENTRA_TENANT_ID"]
-    client_secret = os.environ["ENTRA_CLIENT_SECRET"]
+    client_secret = os.environ.get("ENTRA_CLIENT_SECRET")
+    if not client_secret:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Directory search is not configured — "
+                "ENTRA_CLIENT_SECRET is not set on the server."
+            ),
+        )
     authority = f"https://login.microsoftonline.com/{tenant_id}"
 
     app = msal.ConfidentialClientApplication(

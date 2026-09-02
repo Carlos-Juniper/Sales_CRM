@@ -38,6 +38,7 @@ from db import execute, query
 from api import authz
 from api import aspire_sync
 from api import graph
+from api._serialize import coerce_row
 
 
 # Exact §2.8 copy shown when a sales user has no resolvable Aspire ContactID.
@@ -370,7 +371,7 @@ def register(app, require_auth) -> None:
         rows = await query("SELECT * FROM company_settings WHERE id = 1", [])
         if not rows:
             raise HTTPException(status_code=404, detail="Company settings not initialized")
-        return dict(rows[0])
+        return coerce_row(dict(rows[0]))
 
     @app.patch("/api/settings/company")
     async def patch_company_settings(
@@ -414,7 +415,7 @@ def register(app, require_auth) -> None:
             )
 
         refreshed = await query("SELECT * FROM company_settings WHERE id = 1", [])
-        return dict(refreshed[0]) if refreshed else {**dict(current), **updates}
+        return coerce_row(dict(refreshed[0])) if refreshed else coerce_row({**dict(current), **updates})
 
     @app.patch("/api/settings/company/approval-tiers/{tier_id}")
     async def patch_approval_tier(
@@ -458,7 +459,7 @@ def register(app, require_auth) -> None:
             )
 
         refreshed = await query("SELECT * FROM approval_tiers WHERE id = %s", [tier_id])
-        return dict(refreshed[0]) if refreshed else {**dict(current), **updates}
+        return coerce_row(dict(refreshed[0])) if refreshed else coerce_row({**dict(current), **updates})
 
     @app.patch("/api/settings/company/margin-bands/{band_id}")
     async def patch_margin_band(
@@ -497,7 +498,7 @@ def register(app, require_auth) -> None:
             )
 
         refreshed = await query("SELECT * FROM margin_bands WHERE id = %s", [band_id])
-        return dict(refreshed[0]) if refreshed else {**dict(current), **updates}
+        return coerce_row(dict(refreshed[0])) if refreshed else coerce_row({**dict(current), **updates})
 
     # ── Slice 9: manageable-branches list (section-nav branch picker) ─────────
 

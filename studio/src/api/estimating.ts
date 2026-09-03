@@ -68,7 +68,10 @@ export type UpdateEstimatePayload = Partial<{
   name: string
   aspireNumber: string | null
   clientName: string
-  branch: string
+  /** Aspire BranchID (identity). */
+  aspireBranchId: number | null
+  /** Display city label mirroring the legacy `estimates.branch` column. */
+  branchCity: string | null
   customerType: Estimate['customerType']
   acreage: number | null
   contractValueCents: number
@@ -184,6 +187,12 @@ export interface ListEstimatesParams {
    * as an optional narrowing filter for cross-branch (admin/VP/CEO) roles.
    */
   branch?: string
+  /**
+   * Filter to estimates belonging to a specific lead (Handoff 37 §7).
+   * Added to avoid client-side filtering of the full list when BidTab needs
+   * only the approved estimate for a given lead.
+   */
+  leadId?: string
 }
 
 /** Runtime guard backing the compile-time omission of `estimateType`. */
@@ -199,6 +208,8 @@ export const estimatingApi = {
     if (params?.estimateType) qs.set('estimate_type', params.estimateType)
     if (params?.status) qs.set('status', params.status)
     if (params?.branch) qs.set('branch', params.branch)
+    // Handoff 37 §7: backend added leadId filter in Slice 4 (api/estimating.py list_estimates)
+    if (params?.leadId) qs.set('leadId', params.leadId)
     const q = qs.toString()
     return apiClient.get<Estimate[]>(`/estimating/estimates${q ? `?${q}` : ''}`)
   },
@@ -464,4 +475,76 @@ export const propertiesApi = {
       `/properties/${propertyId}/promote`,
       {},
     ),
+}
+
+// ── Beam / Attentive AI takeoff ─────────────────────────────────────────────
+
+export interface BeamOutput {
+  id: string
+  featureName: string
+  measurementName: string
+  value: number | null
+  unit: string | null
+  geometryType: number | null
+  isCustom: boolean
+  appliedToSectionId: string | null
+  appliedValue: number | null
+  appliedUnit: string | null
+  outputUpdatedAt: string | null
+}
+
+/** A measurement Beam returned that has no mapping — surfaced, never dropped. */
+export interface BeamUnmapped {
+  featureName: string
+  unit: string | null
+}
+
+export interface BeamRequest {
+  id: string
+  propertyId: string
+  estimateId: string | null
+  attentiveRequestId: string | null
+  /** Deep link into Attentive's editor; null until the draft exists there. */
+  editorUrl: string | null
+  status:
+    | 'unordered'
+    | 'draft'
+    | 'in_progress'
+    | 'completed'
+    | 'failed'
+    | 'queued'
+    | 'investigating'
+    | 'resubmitted'
+  /** What Attentive will charge. Shown BEFORE generate — generate is billable. */
+  costCents: number | null
+  etaSeconds: number | null
+  parcelAreaSqft: number | null
+  address: string | null
+  submittedAt: string | null
+  completedAt: string | null
+  syncStatus: string | null
+  syncError: string | null
+  unmapped: BeamUnmapped[]
+  outputs?: BeamOutput[]
+}
+
+/**
+ * Beam takeoff ordering and review.
+ *
+ * `createDraft` is free; `generate` is the ONLY call in the app that spends
+ * money, which is why cost is fetched and displayed first and why the server
+ * gates it on the estimator role and makes it idempotent.
+ */
+export const beamApi = {
+  /** The estimate's most recent takeoff request, or null if none has been created. */
+  forEstimate: (estimateId: string) =>
+    apiClient.get<BeamRequest | null>(`/estimating/estimates/${estimateId}/beam`),
+  createDraft: (estimateId: string, address: string) =>
+    apiClient.post<BeamRequest>(`/estimating/estimates/${estimateId}/beam/draft`, { address }),
+  get: (beamRequestId: string) =>
+    apiClient.get<BeamRequest>(`/estimating/beam/requests/${beamRequestId}`),
+  generate: (beamRequestId: string) =>
+    apiClient.post<BeamRequest>(`/estimating/beam/requests/${beamRequestId}/generate`, {}),
+  acceptChanges: (beamRequestId: string) =>
+    apiClient.post<BeamRequest>(`/estimating/beam/requests/${beamRequestId}/accept`, {}),
 }

@@ -146,7 +146,8 @@ describe('CalendarPage — 400 (Graph not connected) empty state', () => {
       expect(screen.getByText(/connect your microsoft account/i)).toBeInTheDocument()
     })
     const link = screen.getByRole('link', { name: /connect/i })
-    expect(link).toHaveAttribute('href', '/inside-sales/settings/connections')
+    // Slice 12: link moved to /settings/connections (Mine section)
+    expect(link).toHaveAttribute('href', '/settings/connections')
   })
 })
 

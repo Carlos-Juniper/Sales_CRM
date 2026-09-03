@@ -154,8 +154,38 @@ export interface EstimateBase {
    */
   leadId?: string | null
   clientName: string
-  /** Region/branch scope: Phoenix-Desert, Raleigh, Florida, Pennsylvania. */
-  branch: string
+  /**
+   * Aspire BranchID (identity) — the service-line-encoded branch row the crew
+   * rates vary at (e.g. Fort Myers Install=1403 vs Maintenance=3696). Set at
+   * intake from the selected {@link BranchOption}; null only for legacy rows
+   * created before the id was carried. Use THIS for branch identity/scoping.
+   */
+  aspireBranchId: number | null
+  /**
+   * Human-readable branch city label (e.g. "Fort Myers, FL"). Display only —
+   * never an identity key (the map is not uniquely reversible). Mirrors the
+   * legacy `estimates.branch` column until Slice 14 drops it.
+   */
+  branchCity: string | null
+  /**
+   * Frozen loaded-crew-rate snapshot, integer cents/hr, captured at submission
+   * (Slice 7). Present (non-null) once an estimate reaches review/pending_approval/
+   * approved; NULL for in_progress / handed-back / pre-migration rows. The Margin
+   * Analysis panel prices maintenance margin off THIS when present, so a later
+   * branch-rate change never moves a frozen estimate's displayed margin (§2.6).
+   * Null ⇒ fall through to the live branch rate, then to a loud no-rate state —
+   * NEVER an invented default (§2.3, no-fallback).
+   */
+  crewRateCentsPerHour?: number | null
+  /**
+   * Submitted-at crew rate preserved when clearing on hand-back to in_progress
+   * (§2.6, migration 024). Non-null when an estimate was handed back after a
+   * freeze and the branch rate has since changed. The Margin Analysis panel
+   * shows "Crew rate changed $X.XX → $Y.YY since this was submitted" when this
+   * differs from the current live branch rate. Null for fresh in_progress
+   * estimates and pre-migration rows.
+   */
+  priorCrewRateCentsPerHour?: number | null
   acreage: number | null
   /** Derived roll-up, persisted for queue/reporting. Integer cents. */
   contractValueCents: number
@@ -189,13 +219,18 @@ export interface EstimateBase {
    */
   rfiStatus?: string | null
   /**
-   * Manual takeoff metadata (Takeoff Insert stat grid). Manual
-   * estimator entry today, persisted on the estimate. Beam AI automated
-   * takeoff (paused) is the eventual source and will write
-   * these same fields. Acreage & sqft stay DERIVED from sections.
+   * Takeoff metadata (Takeoff Insert stat grid). Written either by estimator
+   * entry or by Beam ingest, which converts Attentive's sq ft / ft into the
+   * acres and miles these fields hold. Acreage & sqft stay DERIVED from sections.
    */
   turfAreaAcres?: number | null
   curbMiles?: number | null
+  /**
+   * Set when Beam redelivered measurements after this estimate was priced.
+   * Non-null means the displayed price may be stale and the estimator has a
+   * diff to accept — Beam never silently overwrites a priced estimate.
+   */
+  takeoffChangedAt?: string | null
   sections: EstimateSection[]
   createdAt: string
   updatedAt: string

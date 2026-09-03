@@ -5,7 +5,6 @@ import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES } from '@/lib/roles
 // ── Canonical role model (mirrors api/authz.py) ─────────────────
 
 const LEGACY_ROLE_MAP: Record<LegacyUserRole, UserRole> = {
-  inside_sales: 'sales',
   outside_sales: 'sales',
 }
 

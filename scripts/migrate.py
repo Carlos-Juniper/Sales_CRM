@@ -66,15 +66,25 @@ def connect() -> pymysql.Connection:
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
+def _run(cur, sql: str, params) -> None:
+    # pymysql %-interpolates whenever args is not None, so an empty tuple still turns
+    # a literal `LIKE '%DO NOT USE%'` into a bad format string. Pass no args at all
+    # when there are none.
+    if params:
+        cur.execute(sql, params)
+    else:
+        cur.execute(sql)
+
+
 def _fetch_one(conn, sql: str, params=()) -> Optional[dict]:
     with conn.cursor() as cur:
-        cur.execute(sql, params)
+        _run(cur, sql, params)
         return cur.fetchone()
 
 
 def _execute(conn, sql: str, params=()) -> None:
     with conn.cursor() as cur:
-        cur.execute(sql, params)
+        _run(cur, sql, params)
 
 
 # ── Tracking table ────────────────────────────────────────────────────────────
@@ -263,8 +273,14 @@ def check_003_gate(conn) -> int:
     Returns 0 (safe to proceed) if leads.property_id doesn't exist yet —
     migration 002 hasn't run, so there can be no orphans, and 002 will run
     before 003 in sequence.
+
+    Also returns 0 once leads.hoa_property_id is gone: 003 has already run, so
+    there is nothing left to gate. Without this the gate raises "Unknown column
+    'hoa_property_id'" on every DB that is already past 003.
     """
     if not column_exists(conn, "leads", "property_id"):
+        return 0
+    if not column_exists(conn, "leads", "hoa_property_id"):
         return 0
     row = _fetch_one(
         conn,
@@ -369,6 +385,87 @@ def detect_013(conn) -> bool:
     return column_exists(conn, "section_services", "discipline")
 
 
+def detect_025(conn) -> bool:
+    """
+    025 applied ↔ estimates.takeoff_changed_at exists.
+
+    Keyed on the ALTER rather than the two CREATE TABLEs because the ALTER is
+    the file's last statement and its only non-idempotent one.
+
+    Originally numbered 014 on feat/estimating-tab-redesign; renumbered to 025
+    to avoid collision with worktree-proposify's 014_proposal_config_tables.sql
+    which was already applied to the CRM database.
+    """
+    return column_exists(conn, "estimates", "takeoff_changed_at")
+
+
+def detect_019(conn) -> bool:
+    """019 applied ↔ estimates.aspire_branch_id column exists.
+
+    Keys on the estimates column rather than user_branches: that one is a
+    CREATE TABLE IF NOT EXISTS and so cannot distinguish a partial run, while the
+    ALTER that adds this column is non-idempotent against an existing table.
+    """
+    return column_exists(conn, "estimates", "aspire_branch_id")
+
+
+def detect_020(conn) -> bool:
+    """020 applied ↔ estimates.crew_rate_cents_per_hour column exists.
+
+    Keyed on the file's last statement. Everything before it is either
+    CREATE TABLE IF NOT EXISTS or an idempotent INSERT, so a partial run leaves
+    detection FALSE and the file safely re-runnable.
+    """
+    return column_exists(conn, "estimates", "crew_rate_cents_per_hour")
+
+
+def detect_026(conn) -> bool:
+    """026 applied ↔ leads.created_by column exists.
+
+    Originally numbered 015 on feat/estimating-tab-redesign; renumbered to 026
+    to avoid collision with worktree-proposify's 015_seed_proposal_config.sql.
+    """
+    return column_exists(conn, "leads", "created_by")
+
+
+def detect_022(conn) -> bool:
+    """022 applied ↔ estimates.branch column is absent.
+
+    Keying on estimates.branch (the first DROP in the file) rather than
+    catalog_items.branch: if a partial run dropped estimates.branch only,
+    re-running will skip the already-applied DROP and execute the remaining
+    catalog_items DROP — but MySQL ALTER TABLE DROP COLUMN on a missing column
+    raises an error. In practice, both ALTERs are atomic statements and the
+    runner stops on any failure, so a partial apply is unlikely. The estimates
+    column is chosen because it is the primary motivation for the migration.
+
+    Note: detect_022 deliberately does NOT key on users.branch_id — that column
+    is deferred to a separate later migration (Handoff 38 Amendment B.3).
+    """
+    return not column_exists(conn, "estimates", "branch")
+
+
+def detect_023(conn) -> bool:
+    """023 applied ↔ portfolio_properties.active column exists.
+
+    Keying on the first column added by the migration (portfolio_properties.active).
+    Both ALTER TABLE statements use idempotent PREPARE guards so a partial run is
+    safe to re-run; the tracking row is the primary idempotency gate.
+    """
+    return column_exists(conn, "portfolio_properties", "active")
+
+
+def detect_024(conn) -> bool:
+    """024 applied ↔ estimates.prior_crew_rate_cents_per_hour column exists.
+
+    The migration adds a single nullable BIGINT column. Keyed on that column —
+    the only statement in the file is the ALTER TABLE, which is non-idempotent
+    against an existing column (MySQL raises "Duplicate column name"), so the
+    tracking row is the primary idempotency gate once detection returns True.
+    """
+    return column_exists(conn, "estimates", "prior_crew_rate_cents_per_hour")
+
+
 # ── Migration 004 conditional execution ──────────────────────────────────────
 
 def _is_create_table_users(stmt: str) -> bool:
@@ -447,6 +544,13 @@ _DETECT: dict = {
     "011_leads_status_estimating_rename":        detect_011,
     "012_takeoff_scan_and_manual_metadata":      detect_012,
     "013_section_services_discipline":           detect_013,
+    "019_branch_model":                          detect_019,
+    "020_settings_storage":                      detect_020,
+    "022_contract_drop_branch_columns":          detect_022,
+    "023_config_soft_delete":                    detect_023,
+    "024_estimate_prior_crew_rate":              detect_024,
+    "025_beam_takeoff":                          detect_025,
+    "026_leads_created_by":                      detect_026,
 }
 
 

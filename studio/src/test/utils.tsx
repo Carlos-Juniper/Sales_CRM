@@ -61,7 +61,7 @@ export function makeUser(overrides?: Partial<AuthUser>): AuthUser {
     id: 'u1',
     email: 'test@example.com',
     name: 'Test User',
-    role: 'inside_sales',
+    role: 'sales',
     branch_id: 'b1',
     avatar_initials: 'TU',
     token: 'test-jwt-token',

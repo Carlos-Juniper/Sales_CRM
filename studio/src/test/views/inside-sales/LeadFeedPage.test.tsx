@@ -5,6 +5,7 @@ import { http, HttpResponse, delay } from 'msw'
 import { server } from '@/mocks/server'
 import { render } from '@/test/utils'
 import LeadFeedPage from '@/views/inside-sales/LeadFeedPage'
+import MyLeadsPage from '@/views/inside-sales/MyLeadsPage'
 import { useAuthStore } from '@/store/authStore'
 import { useLeadsStore } from '@/store/leadsStore'
 import { useUIStore } from '@/store/uiStore'
@@ -312,12 +313,12 @@ describe('LeadFeedPage — empty state', () => {
       ),
     )
     render(<LeadFeedPage />)
-    expect(await screen.findByText(/no leads match your filters/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no public leads match your filters/i)).toBeInTheDocument()
     expect(screen.queryByTestId('lead-card-skeleton')).not.toBeInTheDocument()
   })
 })
 
-describe('LeadFeedPage — Add Lead', () => {
+describe('LeadFeedPage — gov-only scope', () => {
   beforeEach(() => {
     server.use(
       http.get('/api/leads', () =>
@@ -326,9 +327,52 @@ describe('LeadFeedPage — Add Lead', () => {
     )
   })
 
+  it('narrows the request to the scraper sources', async () => {
+    let requested: string | null = null
+    server.use(
+      http.get('/api/leads', ({ request }) => {
+        requested = new URL(request.url).searchParams.get('sources')
+        return HttpResponse.json({ data: tenLeads, total: 10, page: 1, page_size: 25 })
+      }),
+    )
+    render(<LeadFeedPage />)
+    await waitFor(() => screen.getByText('Property l1'))
+    expect(requested).toBe('higher_gov,sam_gov')
+  })
+
+  it('offers no Add lead button — manual leads belong on the Leads tab', async () => {
+    render(<LeadFeedPage />)
+    await waitFor(() => screen.getByText('Property l1'))
+    expect(screen.queryByRole('button', { name: /add lead/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('MyLeadsPage — user-scoped Leads tab', () => {
+  beforeEach(() => {
+    server.use(
+      http.get('/api/leads', () =>
+        HttpResponse.json({ data: tenLeads, total: 10, page: 1, page_size: 25 }),
+      ),
+    )
+  })
+
+  it('requests only the caller\'s own leads', async () => {
+    let requested: string | null = null
+    server.use(
+      http.get('/api/leads', ({ request }) => {
+        const params = new URL(request.url).searchParams
+        requested = params.get('mine')
+        return HttpResponse.json({ data: tenLeads, total: 10, page: 1, page_size: 25 })
+      }),
+    )
+    render(<MyLeadsPage />)
+    await waitFor(() => screen.getByText('Property l1'))
+    expect(requested).toBe('true')
+  })
+
   it('clicking Add Lead button opens the AddLeadModal', async () => {
     const user = userEvent.setup()
-    render(<LeadFeedPage />)
+    render(<MyLeadsPage />)
     await waitFor(() => screen.getByText('Property l1'))
     await user.click(screen.getByRole('button', { name: /add lead/i }))
     expect(screen.getByTestId('add-lead-modal')).toBeInTheDocument()

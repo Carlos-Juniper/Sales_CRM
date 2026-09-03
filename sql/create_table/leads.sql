@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS crm.leads (
     contact_email            VARCHAR(255)   DEFAULT NULL,
     status                   VARCHAR(30)    NOT NULL DEFAULT 'new',
     assigned_to              VARCHAR(255)   DEFAULT NULL,
+    -- users.id who manually created this lead (logical ref, no FK). NULL for
+    -- every scraped lead — the gov-bids pipeline ingests with no acting user.
+    created_by               VARCHAR(36)    DEFAULT NULL,
     priority                 TINYINT        DEFAULT 0,
     notes                    TEXT           DEFAULT NULL,
     branch_id                VARCHAR(100)   DEFAULT NULL,
@@ -39,5 +42,8 @@ CREATE TABLE IF NOT EXISTS crm.leads (
     INDEX `idx_bid_deadline` (`bid_deadline`),
     INDEX `idx_branch_id`    (`branch_id`),
     INDEX `idx_score`        (`score`),
-    INDEX `idx_property_id`  (`property_id`)
+    INDEX `idx_property_id`  (`property_id`),
+    INDEX `idx_leads_created_by`  (`created_by`),
+    INDEX `idx_leads_assigned_to` (`assigned_to`),
+    INDEX `idx_leads_source`      (`source`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

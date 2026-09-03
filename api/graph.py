@@ -200,6 +200,120 @@ async def store_tokens(
 
 
 
+# ── Directory (people picker) ────────────────────────────────────────────────
+
+# Cap the directory search page so the picker stays snappy and never pulls the
+# whole tenant. Graph's own default is 100; 25 candidates is plenty for a
+# name/email autocomplete.
+_DIRECTORY_SEARCH_TOP = 25
+
+
+async def search_directory(q: str) -> list[dict]:
+    """Search the M365 directory by name or email, returning ``{name, email}``.
+
+    Backs the Settings > Users "authorize a person" picker (§2.8): an admin
+    PICKS a real directory person instead of typing a raw email, which makes the
+    lowercased-email match Entra SSO relies on typo-proof. Wraps Graph
+    ``GET /users`` with ``$search`` on displayName/mail (the documented people
+    search); ``ConsistencyLevel: eventual`` is required by Graph for ``$search``.
+
+    An app-level token is used (``get_app_token``) rather than a user delegated
+    token: reading the directory is an admin/tenant operation, not the signed-in
+    admin's own mailbox. A blank/short query returns [] without calling Graph.
+    """
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+
+    token = await get_app_token()
+    # $search wants the term quoted; escape embedded quotes so a stray '"' in the
+    # query can't break out of the search expression.
+    safe = q.replace('"', '\\"')
+    search_expr = f'"displayName:{safe}" OR "mail:{safe}"'
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{_GRAPH_BASE}/users",
+                params={
+                    "$search": search_expr,
+                    "$select": "displayName,mail,userPrincipalName",
+                    "$top": str(_DIRECTORY_SEARCH_TOP),
+                },
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    # Required by Graph for $search on the directory.
+                    "ConsistencyLevel": "eventual",
+                },
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        logger.error("Graph directory search failed: %s", exc.response.status_code)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Microsoft Graph directory search failed: {exc.response.status_code}",
+        )
+    except httpx.RequestError as exc:
+        logger.error("Graph directory search network error: %s", exc)
+        raise HTTPException(status_code=502, detail="Microsoft Graph unreachable")
+
+    people: list[dict] = []
+    for row in data.get("value", []):
+        # Prefer `mail`; fall back to userPrincipalName (some accounts have no
+        # mail attribute but the UPN is their sign-in address). Skip rows with
+        # neither — an entry with no email is unusable for SSO matching.
+        email = row.get("mail") or row.get("userPrincipalName")
+        if not email:
+            continue
+        people.append({"name": row.get("displayName") or email, "email": email})
+    return people
+
+
+async def get_app_token() -> str:
+    """Acquire an app-only Graph token via MSAL client-credentials.
+
+    Directory reads are a tenant operation, not a per-user mailbox call, so they
+    use application permissions (``User.Read.All``) rather than a stored user
+    delegated token. Requires ``ENTRA_CLIENT_SECRET`` alongside the client/tenant
+    ids the SSO app registration already carries.
+
+    Raises ``HTTPException(503)`` with an actionable message if
+    ``ENTRA_CLIENT_SECRET`` is absent from the environment, rather than letting
+    a ``KeyError`` bubble up as a generic 500.
+    """
+    client_id = os.environ["ENTRA_CLIENT_ID"]
+    tenant_id = os.environ["ENTRA_TENANT_ID"]
+    client_secret = os.environ.get("ENTRA_CLIENT_SECRET")
+    if not client_secret:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Directory search is not configured — "
+                "ENTRA_CLIENT_SECRET is not set on the server."
+            ),
+        )
+    authority = f"https://login.microsoftonline.com/{tenant_id}"
+
+    app = msal.ConfidentialClientApplication(
+        client_id=client_id, authority=authority, client_credential=client_secret
+    )
+    result = app.acquire_token_for_client(
+        scopes=["https://graph.microsoft.com/.default"]
+    )
+    if "access_token" not in result:
+        logger.error(
+            "MSAL app-token failed: %s — %s",
+            result.get("error"),
+            result.get("error_description"),
+        )
+        raise HTTPException(
+            status_code=502, detail="Microsoft Graph directory auth failed"
+        )
+    return result["access_token"]
+
+
 # ── Calendar ─────────────────────────────────────────────────────────────────
 
 async def list_events(user_id: str, start_iso: str, end_iso: str) -> list[dict]:

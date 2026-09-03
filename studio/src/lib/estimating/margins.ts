@@ -24,15 +24,6 @@ import {
   maintServiceLine,
 } from './calc'
 
-// ----- Cost-basis config (provisional) ---------------------------------------
-
-/**
- * Loaded crew-hour rate (labor + equipment burden) used to cost maintenance
- * hours, integer cents/hr. PROVISIONAL demo config — TODO(carlos): replace
- * with real branch crew rates (kit production-rate migration) before ship.
- */
-export const MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR = 18_000
-
 // ----- Benchmark config (provisional, BRD III-6) ------------------------------
 
 export interface BenchmarkBand {
@@ -65,6 +56,50 @@ export interface MarginBenchmarkConfig {
   treeWorkSaleCents: number[]
 }
 
+// TODO(margin-benchmarks): these values are FABRICATED and must not ship as-is.
+//
+// Every number below is invented demo data, and `region: 'Desert'` is not even one of
+// Juniper's regions — the real ones come from the `regions` config table (Handoff 37
+// Amendment A.3). A wrong benchmark tells an approver a correctly-priced bid is
+// out of band, or that an underpriced one is fine.
+//
+// These are explicitly OUT of the Settings page's scope, and deliberately so: the fix is
+// NOT to make them admin-editable. BRD III-6 specifies a benchmark auto-calculator
+// compiled from historical WON-BID data. A settings form would just be a hardcode with a
+// nicer input box, and would ask someone to type numbers the database can derive.
+//
+// Implementation plan (own handoff, depends on the Settings-page branch migration):
+//
+//  1. SOURCE. Won bids are `estimates WHERE lifecycle = 'won'` — already persisted, with
+//     `contract_value_cents`, `acreage`, `estimate_type`, `customer_type`, and (post-
+//     migration) `aspire_branch_id`. `sections.square_feet` + `section_services` give the
+//     per-service detail the mowing band needs. No new capture is required.
+//
+//  2. COHORT. A benchmark is only meaningful against comparables, which is what the fake
+//     `note` fields ("120-ac govt parks · Desert region") were gesturing at. Define a
+//     cohort as (region, estimate_type, customer_type, acreage bucket). Acreage buckets
+//     want to come from the data, not be guessed — start with quartiles over won bids.
+//
+//  3. COMPUTE. Per cohort: p25/median/p75 of contract $/acre, of annual contract value,
+//     and of mowing $/occurrence (derived from the mowing `section_services` line). Band
+//     = p25..p75; median reported separately, as `mowingPerOccurrence.medianCents`
+//     already expects. `treeWorkSaleCents` becomes the last N won tree-work line sale
+//     prices for the cohort, not a literal array.
+//
+//  4. MINIMUM SAMPLE. Below a floor (start at n = 5) a cohort has no band. Render
+//     "Not enough comparable won bids (n=2)" — never widen the cohort silently to
+//     manufacture one, and never fall back to a company-wide number, which would
+//     reintroduce exactly the confidently-wrong display this TODO exists to remove.
+//
+//  5. REFRESH. Nightly materialized rollup keyed on cohort, not a per-render query —
+//     the panel reads one row. Recompute on `lifecycle -> 'won'` is optional.
+//
+//  6. PROVENANCE. Keep the `provisional` flag's spirit: the panel must always state the
+//     cohort and sample size it is comparing against ("vs 14 won bids · 100-150ac ·
+//     HOA · West Coast"), so an approver can weigh the comparison instead of trusting a
+//     bare band. Until step 3 lands, the panel should show no bands at all rather than
+//     these literals.
+//
 export const MARGIN_BENCHMARKS: MarginBenchmarkConfig = {
   provisional: true,
   region: 'Desert',
@@ -148,12 +183,17 @@ export function maintenanceLineHours(
  * assumed the line was priced exactly at target, so over/under-pricing could
  * never flag). An unresolvable line (blocked from saving by the guard) costs
  * 0 rather than inventing a number.
+ *
+ * Slice 11b: `crewRateCents` is REQUIRED — there is deliberately NO default.
+ * A silent 18_000 fallback here would feed the Margin Analysis panel a
+ * plausible-but-WRONG margin an approver then approves. Callers resolve the
+ * rate (snapshot→live→null) and skip cost entirely when null (§2.3).
  */
 export function maintenanceLineCost(
   section: EstimateSection,
   svc: SectionService,
-  catalogItems: CatalogItem[] = [],
-  crewRateCents: number = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
+  catalogItems: CatalogItem[],
+  crewRateCents: number,
 ): number {
   const occurrenceHours = resolveOccurrenceHours(section, svc, catalogItems) ?? 0
   return Math.round(maintenanceLineHours(svc, occurrenceHours) * crewRateCents)
@@ -217,9 +257,15 @@ export interface ServiceGroupMargin {
  * Re-aggregate the section-organized estimate BY
  * SERVICE across all sections, on a cost basis. Reads the same live model the
  * editors mutate — editing a line flows straight into these numbers.
+ *
+ * Slice 11b: `crewRateCents` is REQUIRED for a maintenance estimate — the
+ * caller resolves it (snapshot→live) and must NOT call this at all when the
+ * rate is null (the panel refuses a number instead, §2.3). Install estimates
+ * ignore it (their cost is materials-inclusive), so it may be 0 there.
  */
 export function serviceGroupMargins(
   estimate: Estimate,
+  crewRateCents: number,
   catalogItems: CatalogItem[] = [],
 ): ServiceGroupMargin[] {
   const contract = contractTotal(estimate)
@@ -250,7 +296,7 @@ export function serviceGroupMargins(
           svc.qty,
           svc.complexityPct,
         )
-        g.costCents += maintenanceLineCost(section, svc, catalogItems)
+        g.costCents += maintenanceLineCost(section, svc, catalogItems, crewRateCents)
         g.hoursPerYear += maintenanceLineHours(
           svc,
           resolveOccurrenceHours(section, svc, catalogItems) ?? 0,
@@ -299,7 +345,9 @@ export function mowingPerOccurrenceCents(
   estimate: Estimate,
   catalogItems: CatalogItem[] = [],
 ): number | null {
-  const mowing = serviceGroupMargins(estimate, catalogItems).find((g) => /mow/i.test(g.label))
+  // Price-basis read only (occurrence price ÷ max qty) — the crew rate never
+  // enters here, so 0 is safe: it touches cost, which this ignores.
+  const mowing = serviceGroupMargins(estimate, 0, catalogItems).find((g) => /mow/i.test(g.label))
   if (!mowing || mowing.maxQty === 0) return null
   return mowing.priceCents / mowing.maxQty
 }

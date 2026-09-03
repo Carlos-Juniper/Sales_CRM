@@ -8,18 +8,20 @@
 // the customer-facing proposal in the CRM from this insert plus the
 // approved estimate (Maintenance Review edit; BRD I-6.8; E2E Phase E).
 //
-// Boundary interpretation stays manual by design: "A LOT OF HUMAN
-// INTERPRETATION IS NEEDED" — hence the permanent "Manual takeoff — human
-// interpreted" badge. Full boundary automation is explicitly not wanted.
+// Beam (Attentive AI) measures the property automatically, but the estimator's
+// QA pass is still mandatory — "A LOT OF HUMAN INTERPRETATION IS NEEDED".
+// Attentive systematically misses lake banks, mulch beds with no turf border,
+// and hard edging against black asphalt, so the badge reads "Estimator QA'd"
+// rather than claiming the numbers are machine-final.
 //
 // The tab is durable:
 //   * The uploaded scan persists through the real GCS attachment flow
 //     (presign → PUT → confirm) as an estimate-scoped `takeoff_scan`
 //     attachment; on mount the stored scan is reloaded via the signed
 //     download-url endpoint, so it survives reload.
-//   * Turf area & curb miles are manual, editable (blue-cell convention)
-//     fields persisted on the estimate. Acreage & sqft stay DERIVED from
-//     sections — never stored.
+//   * Turf area & curb miles are editable (blue-cell convention) fields
+//     persisted on the estimate, written either by hand or by Beam ingest.
+//     Acreage & sqft stay DERIVED from sections — never stored.
 // ---------------------------------------------------------------------------
 
 import { useEffect, useState } from 'react'
@@ -28,6 +30,7 @@ import { estimatingApi } from '@/api/estimating'
 import { acresFromSqft } from '@/lib/estimating/calc'
 import { useAttachmentUpload } from '@/lib/estimating/useAttachmentUpload'
 import type { MaintenanceEstimate } from '@/types/estimating'
+import { BeamTakeoffPanel } from './BeamTakeoffPanel'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
 
@@ -83,13 +86,11 @@ function TakeoffInsertBody({
   const [handingOff, setHandingOff] = useState(false)
   const { upload, state: uploadState } = useAttachmentUpload()
 
-  // ── Manual takeoff metadata ──────────────────────────────────────────────
+  // ── Takeoff metadata ─────────────────────────────────────────────────────
   //
-  // ⚙️  BEAM SLOT — Beam AI automated takeoff (PAUSED) is the
-  //     eventual source of turf area & curb miles. When the integration lands
-  //     it should PATCH these same estimate fields (turfAreaAcres, curbMiles);
-  //     the manual blue-cell inputs below then become estimator overrides.
-  //     Do not build any Beam client here until the pause is lifted.
+  // Beam ingest writes these same two estimate fields after converting sq ft to
+  // acres and ft to miles, so the blue-cell inputs below are the estimator's
+  // override of whatever Beam delivered.
   const [turfDraft, setTurfDraft] = useState(estimate.turfAreaAcres?.toString() ?? '')
   const [curbDraft, setCurbDraft] = useState(estimate.curbMiles?.toString() ?? '')
 
@@ -184,7 +185,7 @@ function TakeoffInsertBody({
       `Square footage: ${totalSqft.toLocaleString()}`,
       `Turf area: ${turfAreaAcres !== null ? formatAcres(turfAreaAcres) : '—'}`,
       `Curb miles: ${curbMiles !== null ? `${curbMiles.toLocaleString()} mi` : '—'}`,
-      'Manual takeoff — human interpreted. Manually drawn & QA\'d by estimator.',
+      'Estimator QA\'d — human interpreted.',
     ]
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -293,7 +294,7 @@ function TakeoffInsertBody({
           )}
           <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-[rgba(17,24,39,0.82)] px-2.5 py-1 text-[11px] text-white">
             <PenTool className="h-3 w-3" />
-            Manual takeoff — human interpreted
+            Estimator QA'd — human interpreted
           </span>
         </div>
 
@@ -326,10 +327,9 @@ function TakeoffInsertBody({
           />
         </div>
 
-        {/* Stat grid — acreage/sqft DERIVED from sections; turf/curb MANUAL
-            blue-cell entry persisted on the estimate.
-            BEAM SLOT: Beam AI automated takeoff (paused) will populate
-            turfAreaAcres/curbMiles later — same fields, no UI change needed. */}
+        {/* Stat grid — acreage/sqft DERIVED from sections; turf/curb are
+            blue-cell entry persisted on the estimate, and the same fields Beam
+            ingest writes after unit conversion. */}
         <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">
           {derivedStats.map((stat) => (
             <div key={stat.label}>
@@ -367,6 +367,8 @@ function TakeoffInsertBody({
           </div>
         </div>
       </div>
+
+      <BeamTakeoffPanel estimate={estimate} />
 
       {/* Hard business rule — the maintenance tab never generates a proposal */}
       <div className="flex items-start gap-2.5 rounded-[10px] bg-[hsl(var(--muted))] px-3.5 py-3">

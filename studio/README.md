@@ -88,7 +88,7 @@ All use password: **`demo`**
 
 | File | Description |
 |------|-------------|
-| `useLeads.ts` | TanStack Query hooks for leads: `useLeads` (list, reads filter/sort/page from `leadsStore`), `useLead` (single), `useAllLeads` (up to 100 for map), `useOutreachHistory`, `useCreateLead`, `useUpdateLead`, `useSendOutreach`, `useHandoffLead`. All mutations emit toasts on success/error. |
+| `useLeads.ts` | TanStack Query hooks for leads: `useLeads` (list, reads filter/sort/page from `leadsStore`), `useLead` (single), `useAllLeads` (up to 100 for map), `useOutreachHistory`, `useCreateLead`, `useUpdateLead`, `useSendOutreach`, `useAssignLeadToCrm`. `useLeads` takes an optional scope (`sources`, `mine`) that is part of the query key. All mutations emit toasts on success/error. |
 | `useBids.ts` | TanStack Query hooks for bids and supporting data: `useBids`, `useBidByLeadId`, `useCreateBid`, `useUpdateBid`, `useUsers`, `useInsideSalesDashboard` (auto-refetches every 60 s). |
 | `useAnalytics.ts` | `useRevenueAnalytics` — fetches monthly revenue data, stale after 60 s. |
 | `useRole.ts` | Reads the authenticated role from `authStore` and returns boolean flags (`isInsideSales`, `isOutsideSales`, etc.) plus a `canAccess(roles)` helper. Branch managers pass all role checks. |
@@ -176,7 +176,8 @@ Thin wrappers around Radix UI primitives with Tailwind styling applied via CVA (
 | `components/HistoryTab.tsx` | Lead detail tab showing a timeline of status changes, outreach events, and handoffs. |
 | `components/BidTab.tsx` | Lead detail tab for RFP bid details — status, deadline, estimated value, and link to the submission. |
 | `components/LeadFilters.tsx` | Filter panel: text search, lead type checkboxes, state multi-select, min-score slider, assigned/unassigned toggles, and reset button. Writes to `leadsStore`. |
-| `components/HandoffModal.tsx` | Dialog to hand a lead off to an outside sales rep. Selects rep from `useUsers`, pre-populates AI notes, attaches last outreach, and requires SLA confirmation before submitting. |
+| `components/AssignCrmModal.tsx` | Dialog to assign a qualified lead to the CRM who will own the relationship. Selects a `sales` user from `useUsers`, takes handoff notes, and PATCHes the lead to `qualified`. |
+| `components/LeadListView.tsx` | Shared lead feed — filters, sort bar, card grid, pagination and detail panel. Backs both `LeadFeedPage` (gov sources) and `MyLeadsPage` (`mine=true`). |
 | `components/AddLeadModal.tsx` | Dialog to manually create a new lead. Form fields: property name, address, city, state, lead type, and contact info. Posts to `/api/leads`. |
 | `components/analytics/BidDeadlineTrackerCard.tsx` | Card showing upcoming RFP bid deadlines sorted by urgency. |
 | `components/analytics/PipelineAnalyticsCard.tsx` | Bar/funnel chart of leads by pipeline stage with conversion rate stats. |

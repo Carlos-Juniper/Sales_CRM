@@ -1,6 +1,6 @@
 """Canonical role model + server-side authorization.
 
-One role vocabulary for the whole app (nine business roles), the
+One role vocabulary for the whole app (ten business roles), the
 estimator/approver ownership split enforced server-side, the approval-tier
 authority ladder, and branch scoping derived from the authenticated user —
 never from a client-supplied query param (BRD I-9.5).
@@ -11,7 +11,7 @@ decoded JWT payload, and `resolve_branch_scope(user)` to build row-level scope.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from fastapi import HTTPException
@@ -23,6 +23,7 @@ from db import query
 CANONICAL_ROLES = frozenset({
     "procurement",
     "sales",
+    "inside_sales",
     "admin",
     "manager",
     "regional_director",
@@ -32,9 +33,10 @@ CANONICAL_ROLES = frozenset({
     "ceo",
 })
 
-# Legacy auth roles collapse into `sales` (inside/outside distinction retired).
+# `inside_sales` qualifies raw public/government leads and assigns them on to a
+# `sales` CRM, so the two are distinct personas and only inside sales reaches the
+# public lead feed. `outside_sales` remains retired and collapses into `sales`.
 LEGACY_ROLE_MAP = {
-    "inside_sales": "sales",
     "outside_sales": "sales",
 }
 
@@ -54,19 +56,6 @@ LINE_ITEM_EDIT_ROLES = ESTIMATOR_ROLES | APPROVER_ROLES
 # own branch until Carlos confirms the cross-branch matrix (§7 open item).
 CROSS_BRANCH_ROLES = frozenset({"admin", "vice_president", "ceo"})
 
-# Approval-authority ceilings in integer cents (mirrors the approval-tier
-# ladder: manager <$100k · RD ≤$250k · VP ≤$1M · CEO/admin unlimited). A role
-# may approve any estimate at or under its ceiling; over-ceiling requests 403
-# (the auto-route to the higher tier is added separately). None = unlimited.
-APPROVAL_CEILING_CENTS: dict[str, Optional[int]] = {
-    "manager": 10_000_000,
-    "regional_director": 25_000_000,
-    "vice_president": 100_000_000,
-    "ceo": None,
-    "admin": None,
-}
-
-
 def normalize_role(role: Optional[str]) -> str:
     """Map a stored/JWT role onto the canonical vocabulary (legacy → sales)."""
     role = (role or "").strip()
@@ -85,13 +74,30 @@ def sees_all_branches(role: Optional[str]) -> bool:
     return normalize_role(role) in CROSS_BRANCH_ROLES
 
 
-def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
+async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
     """Max estimate value (cents) the role may approve; None = unlimited.
 
-    Raises 403 semantics via require_approval_authority — non-approver roles
-    have no ceiling entry and should never reach the value check.
+    Reads the ceiling from the config-driven `approval_tiers` table (never a
+    hardcoded constant — defect §5.1), so an admin editing a tier moves the
+    ACTUAL 403 boundary, not just the displayed ladder. A role's ceiling is
+    the top of its highest band: the MAX of `max_value_cents` across its rows,
+    where a NULL `max_value_cents` (the top, unbounded tier) means unlimited.
+
+    The maintenance and install ladders carry the same $ bands per role, so
+    keying on role_key alone is unambiguous. A role with no tier rows (any
+    non-approver) yields 0 — it can approve nothing; require_approver gates
+    these before the value check is ever reached.
     """
-    return APPROVAL_CEILING_CENTS.get(normalize_role(role))
+    rows = await query(
+        "SELECT max_value_cents FROM approval_tiers WHERE role_key = %s",
+        [normalize_role(role)],
+    )
+    if not rows:
+        return 0
+    # A NULL max on any band = unbounded ceiling for the role.
+    if any(r.get("max_value_cents") is None for r in rows):
+        return None
+    return max(int(r["max_value_cents"]) for r in rows)
 
 
 # ── Request guards (layered on require_auth) ─────────────────────────────────
@@ -109,19 +115,67 @@ def require_estimator(user: dict) -> None:
         )
 
 
-def require_approver(user: dict) -> None:
-    """403 unless the JWT role owns approver scope (adjustments/approve)."""
-    if not is_approver(user.get("role")):
+async def _live_role(user: dict) -> str:
+    """Re-read the CURRENT role from the users table, keyed on the JWT user id.
+
+    Immediate revocation on approver paths (Amendment B.2): a role change or a
+    deactivation must revoke approval authority NOW, not when the token expires.
+    Raises 403 if the user id is missing, the row is gone, or `active` is 0.
+    Returns the canonical live role for the caller's authority checks.
+
+    Scope is deliberately narrow: ONLY the approver guards re-read; every other
+    route keeps trusting the token claim. The accepted tradeoff is that a
+    deactivated user can still READ until the token expires — only approval
+    authority is revoked immediately.
+    """
+    user_id = user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=403, detail="Approver identity missing.")
+    rows = await query("SELECT role, active FROM users WHERE id = %s", [user_id])
+    if not rows or not rows[0].get("active"):
+        raise HTTPException(
+            status_code=403,
+            detail="Account is inactive — approval authority revoked.",
+        )
+    return normalize_role(rows[0].get("role"))
+
+
+async def require_approver(user: dict) -> str:
+    """403 unless the LIVE role owns approver scope (adjustments/approve).
+
+    Re-reads role AND active from the users table (B.2) so a demotion or
+    deactivation takes effect on the very next approver call, regardless of
+    the stale JWT claim. Returns the validated live role so a caller that
+    immediately follows with require_approval_authority can pass it through
+    and skip a redundant users re-read.
+    """
+    live_role = await _live_role(user)
+    if live_role not in APPROVER_ROLES:
         raise HTTPException(
             status_code=403,
             detail="Approver role required: adjustments and approvals are approver-owned.",
         )
+    return live_role
 
 
-def require_approval_authority(user: dict, value_cents: int) -> None:
-    """403 unless the approver's tier ceiling covers the estimate value."""
-    require_approver(user)
-    ceiling = approval_ceiling_cents(user.get("role"))
+async def require_approval_authority(
+    user: dict, value_cents: int, live_role: Optional[str] = None
+) -> None:
+    """403 unless the approver's tier ceiling covers the estimate value.
+
+    The ceiling comes from the live `approval_tiers` table (§5.1) and the role
+    from the live users row (B.2) — neither from the JWT. Pass `live_role` (the
+    value returned by a preceding require_approver call) to reuse that users
+    re-read; omit it and this guard re-reads on its own (standalone-safe).
+    """
+    if live_role is None:
+        live_role = await _live_role(user)
+    if live_role not in APPROVER_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Approver role required: adjustments and approvals are approver-owned.",
+        )
+    ceiling = await approval_ceiling_cents(live_role)
     if ceiling is not None and value_cents > ceiling:
         raise HTTPException(
             status_code=403,
@@ -136,37 +190,34 @@ def require_approval_authority(user: dict, value_cents: int) -> None:
 
 @dataclass(frozen=True)
 class BranchScope:
-    """Row-level scope for estimate reads.
+    """Row-level scope for estimate reads (Amendment B.1).
 
     kind = 'all'    → no branch restriction (cross-branch role)
-           'branch' → restrict to `branch` (resolved name, matches estimates.branch)
-           'none'   → user has no branch assignment; sees no rows
+           'branch' → restrict to `ids`, a list of aspire_branch_id ints drawn
+                      from the user's `user_branches` rows (1 for a maintenance
+                      estimator, ~8 for a regional director)
+           'none'   → user has zero user_branches rows; sees no rows
     """
     kind: str
-    branch: Optional[str] = None
-
-
-async def resolve_branch_name(branch_id: Optional[str]) -> Optional[str]:
-    """Resolve a user's branch_id to the territory name stored on estimates.
-
-    users.branch_id holds a sales_territories.id ("Orlando, FL"), which is also
-    the value estimates.branch carries. Looks it up in the `sales_territories`
-    table (sql/migrations/004); falls back to the raw value when branch_id
-    already holds the territory name (or no row matches).
-    """
-    if not branch_id:
-        return None
-    rows = await query("SELECT name FROM sales_territories WHERE id = %s", [branch_id])
-    if rows and rows[0].get("name"):
-        return rows[0]["name"]
-    return branch_id
+    ids: list[int] = field(default_factory=list)
 
 
 async def resolve_branch_scope(user: dict) -> BranchScope:
-    """Derive the estimate-read scope from the authenticated user (BRD I-9.5)."""
+    """Derive the estimate-read scope from the authenticated user (BRD I-9.5).
+
+    Cross-branch roles (admin/VP/CEO) see everything. Every other role —
+    including regional_director, whose reach comes from holding many
+    `user_branches` rows rather than the role set (B.1) — is scoped to the
+    aspire_branch_id list on its `user_branches` assignments. Zero rows → the
+    user sees nothing until Settings > Users assigns a branch.
+    """
     if sees_all_branches(user.get("role")):
         return BranchScope(kind="all")
-    branch = await resolve_branch_name(user.get("branch_id"))
-    if branch is None:
+    rows = await query(
+        "SELECT aspire_branch_id FROM user_branches WHERE user_id = %s",
+        [user.get("id")],
+    )
+    ids = [int(r["aspire_branch_id"]) for r in rows]
+    if not ids:
         return BranchScope(kind="none")
-    return BranchScope(kind="branch", branch=branch)
+    return BranchScope(kind="branch", ids=ids)

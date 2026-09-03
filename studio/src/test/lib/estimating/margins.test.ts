@@ -16,7 +16,6 @@ import { describe, it, expect } from 'vitest'
 import { buildInstallEstimate, buildMaintenanceEstimate } from '@/mocks/estimatingData'
 import { contractTotal, groupMargin } from '@/lib/estimating/calc'
 import {
-  MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
   MARGIN_BENCHMARKS,
   barWidthPct,
   benchmarkStatus,
@@ -30,7 +29,15 @@ import {
   resolveOccurrenceHours,
   serviceGroupMargins,
 } from '@/lib/estimating/margins'
+// Slice 11b: the crew-rate constant now lives in the pricing module
+// (maintenance.ts), NOT margins.ts — margins.ts no longer owns a silent
+// margin default. Callers must pass an explicit resolved rate.
+import { MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR } from '@/lib/estimating/maintenance'
 import type { CatalogItem } from '@/types/estimating'
+
+// The rate the panel resolves and threads in; these lib tests pass it
+// explicitly (there is no default anymore).
+const RATE = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR
 
 const maint = buildMaintenanceEstimate()
 const install = buildInstallEstimate()
@@ -55,7 +62,7 @@ describe('maintenance cost basis (hours-driven)', () => {
     const s1 = maint.sections[0]
     const mowing = s1.services[0] // 1.6 h, 42/yr, +10%
     const expectedHours = 1.6 * 42 * 1.1 // 73.92 h/yr
-    expect(maintenanceLineCost(s1, mowing)).toBe(
+    expect(maintenanceLineCost(s1, mowing, [], RATE)).toBe(
       Math.round(expectedHours * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
     )
   })
@@ -65,7 +72,7 @@ describe('maintenance cost basis (hours-driven)', () => {
     const noHours = { ...s1.services[0], hours: null, catalogItemId: MOWING_KIT.id }
     // hours/occurrence = 120,000 / 60,000 = 2 h → 2 × 42 × 1.1 = 92.4 h/yr
     expect(resolveOccurrenceHours(s1, noHours, [MOWING_KIT])).toBeCloseTo(2, 10)
-    expect(maintenanceLineCost(s1, noHours, [MOWING_KIT])).toBe(
+    expect(maintenanceLineCost(s1, noHours, [MOWING_KIT], RATE)).toBe(
       Math.round(2 * 42 * 1.1 * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
     )
   })
@@ -76,15 +83,15 @@ describe('maintenance cost basis (hours-driven)', () => {
     expect(resolveOccurrenceHours(s1, noHours)).toBeNull()
     // The old fallback would have returned round(2,494,800 × 0.78) — a number
     // that could never flag mispricing because it assumed target margin.
-    expect(maintenanceLineCost(s1, noHours)).toBe(0)
-    expect(maintenanceLineCost(s1, noHours)).not.toBe(Math.round(2_494_800 * 0.78))
+    expect(maintenanceLineCost(s1, noHours, [], RATE)).toBe(0)
+    expect(maintenanceLineCost(s1, noHours, [], RATE)).not.toBe(Math.round(2_494_800 * 0.78))
   })
 
   it('a mispriced line now flags: cost from production rate diverges from price-at-target', () => {
     const s1 = maint.sections[0]
     // Same price either way; real cost = 92.4 h × $180/h = $16,632.
     const line = { ...s1.services[0], hours: null, catalogItemId: MOWING_KIT.id }
-    const realCost = maintenanceLineCost(s1, line, [MOWING_KIT])
+    const realCost = maintenanceLineCost(s1, line, [MOWING_KIT], RATE)
     const circular = Math.round(2_494_800 * 0.78)
     expect(realCost).not.toBe(circular) // over/under-pricing is now visible
   })
@@ -118,7 +125,7 @@ describe('install cost basis (materials-inclusive)', () => {
 
 describe('serviceGroupMargins — pivot by service across sections', () => {
   it('merges same-label services from every section into one group', () => {
-    const groups = serviceGroupMargins(maint)
+    const groups = serviceGroupMargins(maint, RATE)
     // Mowing appears in both sections; the other three labels once each.
     expect(groups.map((g) => g.label)).toEqual([
       'Mowing',
@@ -138,7 +145,7 @@ describe('serviceGroupMargins — pivot by service across sections', () => {
   })
 
   it('computes each group share of contract from the same contract total the editor uses', () => {
-    const groups = serviceGroupMargins(maint)
+    const groups = serviceGroupMargins(maint, RATE)
     const contract = contractTotal(maint)
     const shareSum = groups.reduce((s, g) => s + g.shareOfContract, 0)
     expect(shareSum).toBeCloseTo(1, 10)
@@ -146,7 +153,7 @@ describe('serviceGroupMargins — pivot by service across sections', () => {
   })
 
   it('aggregates the install estimate materials-inclusively', () => {
-    const groups = serviceGroupMargins(install)
+    const groups = serviceGroupMargins(install, 0)
     expect(groups).toHaveLength(3)
     const trees = groups.find((g) => g.label.startsWith('Mahogany'))!
     expect(trees.priceCents).toBe(24 * 125_000)
@@ -181,7 +188,7 @@ describe('benchmarks (config-driven, provisional)', () => {
   })
 
   it('computes mowing $/occurrence from the mowing group price ÷ occurrences', () => {
-    const groups = serviceGroupMargins(maint)
+    const groups = serviceGroupMargins(maint, RATE)
     const mowing = groups.find((g) => g.label === 'Mowing')!
     // Both mowing lines are 42/yr — an occurrence is one site visit.
     expect(mowingPerOccurrenceCents(maint)).toBeCloseTo(mowing.priceCents / 42, 6)

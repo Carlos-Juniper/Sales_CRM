@@ -13,9 +13,12 @@ export function AppShell() {
   return (
     <TooltipProvider delayDuration={400}>
       <ToastProvider swipeDirection="right">
-        <div className="flex h-screen w-screen overflow-hidden bg-[hsl(var(--bg))]">
+        {/* data-app-shell / data-app-shell-main are print hooks: the fixed
+            h-screen + overflow-hidden chain clips print output to one page, so
+            ProposalPreview's print CSS unclips these two nodes. */}
+        <div data-app-shell className="flex h-screen w-screen overflow-hidden bg-[hsl(var(--bg))]">
           <Sidebar />
-          <main className="flex-1 flex flex-col overflow-hidden">
+          <main data-app-shell-main className="flex-1 flex flex-col overflow-hidden">
             <Outlet />
           </main>
         </div>

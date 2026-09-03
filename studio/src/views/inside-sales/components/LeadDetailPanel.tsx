@@ -7,7 +7,7 @@ import {
 import { LeadTypeBadge } from '@/components/shared/LeadTypeBadge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { HandoffModal } from './HandoffModal'
+import { AssignCrmModal } from './AssignCrmModal'
 import { EditLeadModal } from './EditLeadModal'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { StageTracker } from './StageTracker'
@@ -32,7 +32,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
   const { data: lead, isLoading } = useLead(leadId)
   const updateLead = useUpdateLead()
   const deleteLead = useDeleteLead()
-  const [handoffOpen, setHandoffOpen] = useState(false)
+  const [assignOpen, setAssignOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -223,10 +223,10 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                 <Button
                   size="sm"
                   className="flex items-center gap-1.5 bg-[#2E7D52] hover:bg-[#256644] text-white"
-                  onClick={() => setHandoffOpen(true)}
-                  disabled={lead.status === 'estimating'}
+                  onClick={() => setAssignOpen(true)}
+                  disabled={!!lead.assigned_to}
                 >
-                  {lead.status === 'estimating' ? 'Handed Off' : 'Hand off to Estimating Team'}
+                  {lead.assigned_to ? 'Assigned' : 'Assign to CRM'}
                   <ArrowRight className="h-3.5 w-3.5" />
                 </Button>
                 <Button
@@ -246,7 +246,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
         </div>
       </div>
 
-      <HandoffModal lead={lead ?? null} isOpen={handoffOpen} onClose={() => setHandoffOpen(false)} />
+      <AssignCrmModal lead={lead ?? null} isOpen={assignOpen} onClose={() => setAssignOpen(false)} />
       {lead && <EditLeadModal lead={lead} open={editOpen} onClose={() => setEditOpen(false)} />}
 
       <DeleteLeadDialog

@@ -4,13 +4,13 @@ import { RequireAuth } from '@/views/auth/RoleGate'
 import LoginPage from '@/views/auth/LoginPage'
 import AuthCallbackPage from '@/views/auth/AuthCallbackPage'
 import {
-  DashboardPage, LeadFeedPage, BidTrackerPage,
+  DashboardPage, LeadFeedPage, MyLeadsPage, BidTrackerPage,
   PipelinePage, MapPage, EstimatingPage, CalendarPage,
 } from '@/views/inside-sales'
 import AccountsPage from '@/views/inside-sales/AccountsPage'
-import ConnectionsPage from '@/views/inside-sales/ConnectionsPage'
-import BranchManagerPage from '@/views/branch-manager'
+import { SettingsPage } from '@/views/settings/SettingsPage'
 import { InsideSalesGuard } from '@/guards'
+import ProposalPrintRoute from '@/views/inside-sales/components/estimating/ProposalPrintRoute'
 
 export const router = createBrowserRouter([
   {
@@ -20,6 +20,10 @@ export const router = createBrowserRouter([
   {
     path: '/auth/callback',
     element: <AuthCallbackPage />,
+  },
+  {
+    path: '/proposals/:id/print',
+    element: <ProposalPrintRoute />,
   },
   {
     path: '/',
@@ -37,6 +41,10 @@ export const router = createBrowserRouter([
       {
         path: 'inside-sales/leads',
         element: <InsideSalesGuard><LeadFeedPage /></InsideSalesGuard>,
+      },
+      {
+        path: 'inside-sales/my-leads',
+        element: <InsideSalesGuard><MyLeadsPage /></InsideSalesGuard>,
       },
       {
         path: 'inside-sales/bids',
@@ -82,19 +90,32 @@ export const router = createBrowserRouter([
         path: 'inside-sales/calendar',
         element: <InsideSalesGuard><CalendarPage /></InsideSalesGuard>,
       },
-      // Branch Manager (redirected — analytics now lives on dashboard)
+      // Branch Manager (Slice 12: BranchManagerPage deleted; old bookmarks redirect to settings)
       {
         path: 'branch-manager',
-        element: <Navigate to="/inside-sales" replace />,
+        element: <Navigate to="/settings" replace />,
       },
-      // Settings
+      // Settings — new shell (Slice 9): section nav, permission filtering,
+      // branch picker. Deep-linkable per section and per branch. Section CONTENT
+      // is filled by Slices 10–12; BranchManagerPage + the standalone
+      // connections route are removed in Slice 12 (not deleted here).
       {
         path: 'settings',
-        element: <RequireAuth><BranchManagerPage /></RequireAuth>,
+        element: <RequireAuth><SettingsPage /></RequireAuth>,
       },
       {
+        path: 'settings/:section',
+        element: <RequireAuth><SettingsPage /></RequireAuth>,
+      },
+      {
+        path: 'settings/branch/:aspireBranchId/:section',
+        element: <RequireAuth><SettingsPage /></RequireAuth>,
+      },
+      // Slice 12: standalone /inside-sales/settings/connections route removed;
+      // the connections UI now lives at /settings/connections (Mine section).
+      {
         path: 'inside-sales/settings/connections',
-        element: <InsideSalesGuard><ConnectionsPage /></InsideSalesGuard>,
+        element: <Navigate to="/settings/connections" replace />,
       },
       // Catch-all
       {

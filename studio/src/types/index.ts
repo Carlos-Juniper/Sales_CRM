@@ -33,11 +33,12 @@ export type LeadStatus =
   | 'op_review'
   | 'approved'
 
-// The nine canonical business roles — one role vocabulary,
+// The ten canonical business roles — one role vocabulary,
 // mirrored by backend validation in api/authz.py.
 export type UserRole =
   | 'procurement'
   | 'sales'
+  | 'inside_sales'
   | 'admin'
   | 'manager'
   | 'regional_director'
@@ -49,6 +50,7 @@ export type UserRole =
 export const CANONICAL_ROLES: readonly UserRole[] = [
   'procurement',
   'sales',
+  'inside_sales',
   'admin',
   'manager',
   'regional_director',
@@ -58,9 +60,9 @@ export const CANONICAL_ROLES: readonly UserRole[] = [
   'ceo',
 ] as const
 
-// Legacy auth roles still present in older JWTs / un-migrated rows; they
-// normalize to `sales` (see useRole/normalizeRole and sql/migrations/004).
-export type LegacyUserRole = 'inside_sales' | 'outside_sales'
+// Legacy auth role still present in older JWTs / un-migrated rows; it
+// normalizes to `sales` (see useRole/normalizeRole and sql/migrations/004).
+export type LegacyUserRole = 'outside_sales'
 
 export type BidStatus =
   | 'pending'
@@ -102,6 +104,8 @@ export interface Lead {
   bid_deadline: string | null
   status: LeadStatus
   assigned_to: string | null
+  /** users.id of the manual creator; null for every scraped lead. */
+  created_by?: string | null
   notes: string | null
   handoff_notes: string | null
   ai_linkedin_draft: string | null
@@ -166,11 +170,10 @@ export interface KanbanColumn {
   leads: Lead[]
 }
 
-export interface HandoffPayload {
+export interface AssignCrmPayload {
   lead_id: string
   assigned_to: string
   handoff_notes: string
-  division_id?: number | null
 }
 
 export interface AuthUser {

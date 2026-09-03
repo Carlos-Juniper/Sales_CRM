@@ -342,6 +342,29 @@ describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
     expect(created[0].status).toBe('new_from_sales')
   })
 
+  it('submits the selected branch as aspireBranchId (int), not a city string (Slice 8)', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'test-est-branch', status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json({ ...fakeEstimate, ...body, id: 'test-est-branch' }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user) // selects "Bradenton, FL" → maintenance aspire_branch_id 3684
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    // Identity now rides on the int id, not the display city string.
+    expect(created[0].aspireBranchId).toBe(3684)
+    expect((created[0] as unknown as { branch?: unknown }).branch).toBeUndefined()
+  })
+
   it('sends the default service line and a null property link when untouched', async () => {
     const user = userEvent.setup()
     const created: CreateEstimatePayload[] = []
@@ -551,8 +574,8 @@ describe('MaintenanceIntakeModal — EstimatingPage integration', () => {
     // We verify this at the prop-passing level: render the modal standalone, call
     // onCreated, and confirm the queue GET is issued a second time.
     const getCalls: string[] = []
-    const existingEstimate = buildMaintenanceEstimate({ name: 'Pre-existing HOA', branch: 'Phoenix-Desert' })
-    const newEstimate = buildMaintenanceEstimate({ id: 'new-1', name: 'New Intake HOA', status: 'new_from_sales', branch: 'Phoenix-Desert' })
+    const existingEstimate = buildMaintenanceEstimate({ name: 'Pre-existing HOA', branchCity: 'Phoenix-Desert' })
+    const newEstimate = buildMaintenanceEstimate({ id: 'new-1', name: 'New Intake HOA', status: 'new_from_sales', branchCity: 'Phoenix-Desert' })
 
     server.use(
       http.get('/api/estimating/estimates', ({ request }) => {

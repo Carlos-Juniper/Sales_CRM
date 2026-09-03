@@ -8,6 +8,7 @@ import type { UserRole } from '@/types'
 // `admin` passes every gate via useRole's canAccess super-role.
 const INSIDE_SALES_ROLES: UserRole[] = [
   'sales',
+  'inside_sales',
   'manager',
   'maintenance_estimating',
   'install_estimating',

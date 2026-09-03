@@ -150,6 +150,42 @@ def test_list_leads_filters_by_property_id(authed):
     assert "prop-1" in data_params
 
 
+def test_list_leads_filters_by_sources(authed):
+    """Public Leads narrows to the scraper sources so manual leads stay out."""
+    with patch("api.server.query", new_callable=AsyncMock) as mock_query:
+        mock_query.side_effect = [[{"cnt": 1}], [_LEAD_ROW]]
+        resp = client.get("/api/leads?sources=higher_gov,sam_gov")
+
+    assert resp.status_code == 200
+    count_sql, count_params = mock_query.call_args_list[0].args
+    assert "source IN (%s, %s)" in count_sql
+    assert "higher_gov" in count_params
+    assert "sam_gov" in count_params
+
+
+def test_list_leads_mine_scopes_to_the_authenticated_user(authed):
+    """`mine` is a boolean switch — the id comes from the JWT, not the query."""
+    with patch("api.server.query", new_callable=AsyncMock) as mock_query:
+        mock_query.side_effect = [[{"cnt": 1}], [_LEAD_ROW]]
+        resp = client.get("/api/leads?mine=true")
+
+    assert resp.status_code == 200
+    count_sql, count_params = mock_query.call_args_list[0].args
+    assert "(assigned_to = %s OR created_by = %s)" in count_sql
+    assert count_params.count(_AUTHED_USER["id"]) == 2
+
+
+def test_list_leads_mine_ignores_a_client_supplied_id(authed):
+    """A caller cannot widen their scope by passing someone else's id."""
+    with patch("api.server.query", new_callable=AsyncMock) as mock_query:
+        mock_query.side_effect = [[{"cnt": 0}], []]
+        resp = client.get("/api/leads?mine=true&created_by=u-other&assigned_to=u-other")
+
+    assert resp.status_code == 200
+    _, count_params = mock_query.call_args_list[0].args
+    assert "u-other" not in count_params
+
+
 def test_list_leads_score_factors_parsed_from_json_string(authed):
     with patch("api.server.query", new_callable=AsyncMock) as mock_query:
         mock_query.side_effect = [[{"cnt": 1}], [_LEAD_ROW]]
@@ -221,6 +257,25 @@ def test_create_lead_returns_201_with_new_lead(authed):
 
     assert resp.status_code == 201
     assert resp.json()["property_name"] == "Silverleaf HOA"  # from mock _LEAD_ROW
+
+
+def test_create_lead_stamps_created_by_from_the_session(authed):
+    """Manual leads are attributed so they surface on the creator's Leads tab."""
+    with patch("api.server.execute", new_callable=AsyncMock, return_value=1) as mock_execute, \
+         patch("api.server.query", new_callable=AsyncMock, return_value=[_LEAD_ROW]):
+        client.post(
+            "/api/leads",
+            json={
+                "property_name": "Test HOA",
+                "city": "Tempe",
+                "state": "AZ",
+                "lead_type": "HOA",
+            },
+        )
+
+    sql, params = mock_execute.await_args[0]
+    assert "created_by" in sql
+    assert params[-1] == _AUTHED_USER["id"]
 
 
 def test_create_lead_requires_property_name_city_state_lead_type(authed):

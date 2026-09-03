@@ -110,7 +110,7 @@ class TestAutoGeneration:
         mock_load.return_value = {"id": "est-1", "estimateType": est_type}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": est_type, "name": "Greenfield", "clientName": "LLC",
-            "branch": "Orlando, FL", "contractValueCents": 4500000,
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL", "contractValueCents": 4500000,
             "dueBackDate": "2026-09-30",
         })
         assert resp.status_code == 201
@@ -131,7 +131,7 @@ class TestAutoGeneration:
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield Estate",
             "aspireNumber": "ASP-9", "clientName": "Greenfield LLC",
-            "branch": "Orlando, FL", "contractValueCents": 12000000,
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL", "contractValueCents": 12000000,
             "crmRep": "Amanda Torres", "assignedLsEstimator": "Carlos H",
             "assignedIrrEstimator": "Maria R", "dueBackDate": "2026-11-15",
         })
@@ -163,7 +163,7 @@ class TestAutoGeneration:
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "HOA", "clientName": "HOA LLC",
-            "branch": "Orlando",
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL",
         })
         assert resp.status_code == 201
         status_inserts = [c for c in mock_exec.call_args_list
@@ -189,7 +189,7 @@ class TestAutoGeneration:
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "X", "clientName": "Y",
-            "branch": "Orlando",
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL",
         })
         status_inserts = [c for c in mock_exec.call_args_list
                           if "INSERT INTO itb_scope_status" in c.args[0]]
@@ -252,13 +252,17 @@ class TestListItbProjects:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_branch_scoped_for_branch_roles(self, mock_query, mock_authz_query, authed):
-        mock_authz_query.return_value = []  # branches lookup falls back to raw value
+        # Amendment B.1: scope comes from user_branches (aspire_branch_id ints),
+        # filtered on the linked estimate's aspire_branch_id.
+        mock_authz_query.return_value = [
+            {"aspire_branch_id": 1403}, {"aspire_branch_id": 3696}
+        ]
         mock_query.side_effect = [[], []]
         resp = client.get("/api/estimating/itb/projects")
         assert resp.status_code == 200
         sql, params = mock_query.call_args_list[0].args
-        assert "branch = %s" in sql
-        assert "Orlando, FL" in params
+        assert "e.aspire_branch_id IN (%s, %s)" in sql
+        assert 1403 in params and 3696 in params
 
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_cross_branch_role_sees_all(self, mock_query, authed_admin):
@@ -271,6 +275,8 @@ class TestListItbProjects:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_no_branch_assignment_sees_no_rows(self, mock_query, mock_authz_query):
+        # Zero user_branches rows → kind='none' → empty, no estimates query.
+        mock_authz_query.return_value = []
         app.dependency_overrides[require_auth] = lambda: {**_ESTIMATOR, "branch_id": None}
         try:
             resp = client.get("/api/estimating/itb/projects")

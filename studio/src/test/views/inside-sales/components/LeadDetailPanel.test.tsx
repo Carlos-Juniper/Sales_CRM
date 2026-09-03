@@ -191,26 +191,33 @@ describe('LeadDetailPanel — stage progression', () => {
   })
 })
 
-describe('LeadDetailPanel — handoff', () => {
-  it('Hand off button is visible', async () => {
+describe('LeadDetailPanel — assign to CRM', () => {
+  it('Assign to CRM button is visible on an unassigned lead', async () => {
     setupHandlers(makeLead({ status: 'new' }))
     render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
     await screen.findByText('Silverleaf HOA')
     expect(
-      screen.getByRole('button', { name: /hand off to estimating team/i }),
+      screen.getByRole('button', { name: /assign to crm/i }),
     ).toBeInTheDocument()
   })
 
-  it('clicking Hand off opens HandoffModal', async () => {
+  it('an already-assigned lead shows a disabled Assigned button', async () => {
+    setupHandlers(makeLead({ status: 'qualified', assigned_to: 'u-42' }))
+    render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
+    await screen.findByText('Silverleaf HOA')
+    expect(screen.getByRole('button', { name: /assigned/i })).toBeDisabled()
+  })
+
+  it('clicking Assign to CRM opens AssignCrmModal', async () => {
     setupHandlers(makeLead({ status: 'new' }))
     const user = userEvent.setup()
     render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
     await screen.findByText('Silverleaf HOA')
-    await user.click(screen.getByRole('button', { name: /hand off to estimating team/i }))
-    expect(await screen.findByRole('dialog', { name: /hand off to estimating team/i })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /assign to crm/i }))
+    expect(await screen.findByRole('dialog', { name: /assign to crm/i })).toBeInTheDocument()
   })
 
-  it('HandoffModal Cancel closes without firing PATCH', async () => {
+  it('AssignCrmModal Cancel closes without firing PATCH', async () => {
     setupHandlers(makeLead({ status: 'new' }))
     let patched = false
     server.use(
@@ -222,11 +229,11 @@ describe('LeadDetailPanel — handoff', () => {
     const user = userEvent.setup()
     render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
     await screen.findByText('Silverleaf HOA')
-    await user.click(screen.getByRole('button', { name: /hand off to estimating team/i }))
-    const modal = await screen.findByRole('dialog', { name: /hand off to estimating team/i })
+    await user.click(screen.getByRole('button', { name: /assign to crm/i }))
+    const modal = await screen.findByRole('dialog', { name: /assign to crm/i })
     await user.click(within(modal).getByRole('button', { name: /cancel/i }))
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: /hand off to estimating team/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /assign to crm/i })).not.toBeInTheDocument()
     })
     expect(patched).toBe(false)
   })

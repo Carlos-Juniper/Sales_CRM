@@ -19,12 +19,21 @@ function normalizeLeads(response: import('@/api/leads').LeadsResponse) {
   }
 }
 
-export function useLeads() {
+/** Scope applied on top of the shared filter/sort/page store — see LeadListView. */
+export interface LeadScope {
+  /** Comma-separated `leads.source` values (GOV_LEAD_SOURCES for Public Leads). */
+  sources?: string
+  /** Leads assigned to or created by the caller; the id is resolved server-side. */
+  mine?: boolean
+}
+
+export function useLeads(scope: LeadScope = {}) {
   const { filters, sortBy, sortDir, page } = useLeadsStore()
 
   return useQuery({
-    queryKey: [LEADS_KEY, filters, sortBy, sortDir, page],
+    queryKey: [LEADS_KEY, scope, filters, sortBy, sortDir, page],
     queryFn: () => leadsApi.list({
+      ...scope,
       search: filters.search || undefined,
       states: filters.states.length > 0 ? filters.states.join(',') : undefined,
       lead_types: filters.leadTypes.length > 0 ? filters.leadTypes.join(',') : undefined,
@@ -103,18 +112,18 @@ export function useDeleteLead() {
   })
 }
 
-export function useHandoffLead() {
+export function useAssignLeadToCrm() {
   const qc = useQueryClient()
   const toast = useUIStore((s) => s.toast)
 
   return useMutation({
-    mutationFn: leadsApi.handoff,
+    mutationFn: leadsApi.assignToCrm,
     onSuccess: (updated) => {
       qc.setQueryData([LEAD_KEY, updated.id], updated)
       qc.invalidateQueries({ queryKey: [LEADS_KEY] })
-      toast('Lead handed off', { variant: 'success' })
+      toast('Lead assigned', { variant: 'success' })
     },
-    onError: () => toast('Handoff failed', { variant: 'error' }),
+    onError: () => toast('Assignment failed', { variant: 'error' }),
   })
 }
 

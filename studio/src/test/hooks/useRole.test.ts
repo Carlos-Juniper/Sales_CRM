@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Canonical 9-role model on the frontend.
+// Canonical 10-role model on the frontend.
 //
-//   * UserRole covers the nine business roles; legacy inside_sales /
-//     outside_sales normalize to `sales`.
+//   * UserRole covers the ten business roles, including `inside_sales`; only
+//     the retired `outside_sales` normalizes to `sales`.
 //   * `admin` is the frontend super-role (canAccess always true); `manager`
 //     narrows to its approval-tier role.
 //   * Estimator/approver mapping mirrors api/authz.py.
@@ -46,12 +46,13 @@ describe('roles.ts — canonical role constants (mirrors api/authz.py)', () => {
 })
 
 describe('canonical role set', () => {
-  it('has exactly the nine business roles', () => {
+  it('has exactly the ten business roles', () => {
     expect([...CANONICAL_ROLES].sort()).toEqual(
       [
         'admin',
         'ceo',
         'install_estimating',
+        'inside_sales',
         'maintenance_estimating',
         'manager',
         'procurement',
@@ -62,17 +63,17 @@ describe('canonical role set', () => {
     )
   })
 
-  it('normalizes legacy sales roles to sales', () => {
-    expect(normalizeRole('inside_sales')).toBe('sales')
+  it('normalizes outside_sales to sales but leaves inside_sales canonical', () => {
     expect(normalizeRole('outside_sales')).toBe('sales')
+    expect(normalizeRole('inside_sales')).toBe('inside_sales')
     expect(normalizeRole('manager')).toBe('manager')
   })
 })
 
 describe('useRole', () => {
   it('exposes the normalized role for legacy users', () => {
-    expect(withRole('inside_sales').role).toBe('sales')
     expect(withRole('outside_sales').role).toBe('sales')
+    expect(withRole('inside_sales').role).toBe('inside_sales')
     expect(withRole('ceo').role).toBe('ceo')
   })
 
@@ -88,10 +89,16 @@ describe('useRole', () => {
     expect(canAccess('manager')).toBe(true)
   })
 
-  it('legacy inside_sales users pass sales gates', () => {
-    const { canAccess } = withRole('inside_sales')
+  it('legacy outside_sales users pass sales gates', () => {
+    const { canAccess } = withRole('outside_sales')
     expect(canAccess('sales')).toBe(true)
     expect(canAccess('manager')).toBe(false)
+  })
+
+  it('inside_sales is its own gate — it does not pass a plain sales gate', () => {
+    const { canAccess } = withRole('inside_sales')
+    expect(canAccess('inside_sales')).toBe(true)
+    expect(canAccess('sales')).toBe(false)
   })
 
   it('maps estimating roles: line-item edit set vs approvers (mirrors api/authz.py)', () => {

@@ -76,6 +76,80 @@ async def _write_back_lead_status(lead_id: Optional[str], status: str) -> None:
     await execute("UPDATE leads SET status = %s WHERE id = %s", [status, lead_id])
 
 
+# ── Crew-rate snapshot on transitions (Handoff 38 §2.6 — LOCKED) ─────────────
+#
+# estimates.crew_rate_cents_per_hour is the branch crew rate *frozen* at the
+# moment an estimate enters review/approval, so the displayed margin stops
+# moving once it is under review. It is:
+#   FREEZE    on entry to review / pending_approval / approved
+#   CLEAR     on entry to in_progress (the hand-back to the estimating queue)
+#   PRESERVE  everywhere else (approved → handed_back → won | lost keep it)
+#
+# All three freeze targets are handled because in_progress→pending_approval and
+# review→approved are both legal edges that skip the middle state. Freeze is
+# expressed as "snapshot only if not already frozen": that snapshots the live
+# rate once, on the FIRST entry to a frozen state, and preserves it across the
+# later frozen edges — so a mid-review branch-rate change never restates the
+# margin (§2.6). A branch with no branch_settings row is left NULL, never
+# invented (the §2.3 loud-failure path); it must not raise.
+_FREEZE_STATES = frozenset({"review", "pending_approval", "approved"})
+
+
+async def _snapshot_crew_rate_on_transition(
+    estimate_id: str, target_status: str, current: dict
+) -> None:
+    """Manage estimates.crew_rate_cents_per_hour across a status transition.
+
+    Freezes (snapshots) the branch rate on first entry to a frozen state, clears
+    it on the hand-back to in_progress, and does nothing otherwise. No-op when the
+    status is not actually changing.
+
+    CLEAR path (§2.6): when entering in_progress, the frozen snapshot is
+    preserved into prior_crew_rate_cents_per_hour in ONE atomic UPDATE so the
+    estimator's notice ("Crew rate changed $X → $Y since this was submitted")
+    can compare the submitted-at rate against the current live branch rate.
+    """
+    if target_status == current.get("status"):
+        return  # same-status PATCH — not a transition
+
+    if target_status == "in_progress":
+        # Hand-back to the estimating queue: copy the frozen snapshot into
+        # prior_crew_rate_cents_per_hour BEFORE nulling it — single atomic write
+        # so the submitted-at rate is never lost. prior=NULL when the estimate
+        # had no snapshot (e.g. handed back before any freeze occurred).
+        await execute(
+            "UPDATE estimates "
+            "SET prior_crew_rate_cents_per_hour = crew_rate_cents_per_hour, "
+            "    crew_rate_cents_per_hour = NULL "
+            "WHERE id = %s",
+            [estimate_id],
+        )
+        return
+
+    if target_status not in _FREEZE_STATES:
+        return  # PRESERVE — handed_back / won / lost never touch the column
+
+    # FREEZE. Snapshot once: if it is already frozen (a later review→approved
+    # style edge), keep the existing value rather than re-reading a rate that may
+    # have changed mid-review.
+    if current.get("crew_rate_cents_per_hour") is not None:
+        return
+
+    branch_id = current.get("aspire_branch_id")
+    if branch_id is None:
+        return  # no branch ⇒ no rate to snapshot; leave NULL (loud-failure path)
+    rate_rows = await query(
+        "SELECT crew_rate_cents_per_hour FROM branch_settings WHERE aspire_branch_id = %s",
+        [branch_id],
+    )
+    if not rate_rows or rate_rows[0].get("crew_rate_cents_per_hour") is None:
+        return  # branch has no configured crew rate — do NOT invent one
+    await execute(
+        "UPDATE estimates SET crew_rate_cents_per_hour = %s WHERE id = %s",
+        [int(rate_rows[0]["crew_rate_cents_per_hour"]), estimate_id],
+    )
+
+
 class IllegalTransitionError(Exception):
     def __init__(self, frm: str, to: str) -> None:
         super().__init__(f"Illegal estimate status transition: {frm} → {to}")
@@ -185,7 +259,23 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         "name": r["name"],
         "aspireNumber": r["aspire_number"],
         "clientName": r["client_name"],
-        "branch": r["branch"],
+        # Branch identity rides on the Aspire BranchID (int).
+        # Slice 14: branchCity now comes from the LEFT JOIN to branches on
+        # aspire_branch_id (aliased as branch_city in _load_estimate's SELECT).
+        # NULL when aspire_branch_id is not set or matches no branches row.
+        "aspireBranchId": r.get("aspire_branch_id"),
+        "branchCity": r.get("branch_city"),
+        # Frozen crew-rate snapshot (cents/hr) captured at submission (Slice 7);
+        # NULL for in_progress / pre-migration rows. Slice 11b: the Margin
+        # Analysis panel prices maintenance margin off THIS when present, so a
+        # later branch-rate change never moves a frozen estimate's margin. Never
+        # substitutes an invented number — null flows straight through (§2.3).
+        "crewRateCentsPerHour": r.get("crew_rate_cents_per_hour"),
+        # Submitted-at crew rate preserved when clearing on hand-back (§2.6).
+        # Non-null when an estimate was handed back after a freeze; null for fresh
+        # in_progress estimates and pre-migration rows. The frontend uses this to
+        # show "Crew rate changed $X → $Y since this was submitted".
+        "priorCrewRateCentsPerHour": r.get("prior_crew_rate_cents_per_hour"),
         "customerType": r["customer_type"],
         "acreage": _num(r["acreage"]),
         "contractValueCents": int(r["contract_value_cents"]),
@@ -217,11 +307,14 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         # display only: nothing gates approval on it. (.get keeps pre-migration
         # rows working.)
         "rfiStatus": r.get("rfi_status"),
-        # Manual takeoff metadata (turf/curb). Manual entry today;
-        # Beam AI automated takeoff will populate these later. (.get keeps
-        # pre-migration rows working.)
+        # Takeoff metadata (turf/curb). Estimator-entered, and also written by
+        # Beam ingest after unit conversion — Beam returns sq ft and ft, these
+        # columns are acres and miles. (.get keeps pre-migration rows working.)
         "turfAreaAcres": _num(r.get("turf_area_acres")),
         "curbMiles": _num(r.get("curb_miles")),
+        # Set when Attentive redelivered measurements after this estimate was
+        # priced. Non-null means the price on screen may be stale.
+        "takeoffChangedAt": _iso(r["takeoff_changed_at"]) if r.get("takeoff_changed_at") else None,
         "sections": sections,
         "createdAt": _iso(r["created_at"]),
         "updatedAt": _iso(r["updated_at"]),
@@ -229,8 +322,20 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
 
 
 async def _load_estimate(estimate_id: str) -> Optional[dict]:
-    """Assemble the full estimate → sections → services → components tree."""
-    rows = await query("SELECT * FROM estimates WHERE id = %s", [estimate_id])
+    """Assemble the full estimate → sections → services → components tree.
+
+    Slice 14: LEFT JOIN to branches on aspire_branch_id so that branchCity is
+    sourced from the canonical branches table rather than the legacy estimates.branch
+    city string. The alias `branch_city` is consumed by _estimate_out. NULL when
+    aspire_branch_id is unset or no matching branches row exists (§2.3 no-fallback).
+    """
+    rows = await query(
+        "SELECT e.*, b.city AS branch_city "
+        "FROM estimates e "
+        "LEFT JOIN branches b ON b.aspire_branch_id = e.aspire_branch_id "
+        "WHERE e.id = %s",
+        [estimate_id],
+    )
     if not rows:
         return None
     est = rows[0]
@@ -319,7 +424,7 @@ async def _build_opportunity_input(est_row: dict, service_line: Optional[str] = 
     rep_contact_id: Optional[int] = None
     if est_row.get("crm_rep"):
         urows = await query(
-            "SELECT aspire_rep_id FROM crm_users WHERE id = %s", [est_row["crm_rep"]]
+            "SELECT aspire_rep_id FROM users WHERE id = %s", [est_row["crm_rep"]]
         )
         if urows:
             rep_contact_id = urows[0].get("aspire_rep_id")
@@ -430,7 +535,26 @@ async def sweep_loop() -> None:
 # opportunity_qty is a LOCALLY-set, manually-editable value — it is never read
 # from Aspire (locked decision).
 
+# §5.4 — this constant was "defined twice" (here AND studio/.../config.ts). The
+# backend source of truth is now company_settings.discrepancy_threshold_pct
+# (read via _discrepancy_threshold); this value survives ONLY as the last-resort
+# fallback for when that singleton row is somehow missing. The seed equals this
+# value, so moving the source changes no behaviour.
 DISCREPANCY_DEFAULT_THRESHOLD = 0.10
+
+
+async def _discrepancy_threshold() -> float:
+    """Read the discrepancy flag threshold from company_settings (§5.4).
+
+    Falls back to DISCREPANCY_DEFAULT_THRESHOLD only when the singleton row is
+    absent — never invents a different number.
+    """
+    rows = await query(
+        "SELECT discrepancy_threshold_pct FROM company_settings WHERE id = %s", [1]
+    )
+    if not rows or rows[0].get("discrepancy_threshold_pct") is None:
+        return DISCREPANCY_DEFAULT_THRESHOLD
+    return float(rows[0]["discrepancy_threshold_pct"])
 
 _TAKEOFF_COLS = {
     "description": "description",
@@ -457,7 +581,7 @@ def _takeoff_flagged(
     return abs(measured_qty - plan_qty) / plan_qty > threshold
 
 
-def _takeoff_line_out(r: dict) -> dict:
+def _takeoff_line_out(r: dict, threshold: float = DISCREPANCY_DEFAULT_THRESHOLD) -> dict:
     plan = float(_num(r["plan_qty"]) or 0)
     add = float(_num(r["add_pct"]) or 0)
     measured = float(_num(r["measured_qty"]) or 0)
@@ -472,10 +596,10 @@ def _takeoff_line_out(r: dict) -> dict:
         "measuredQty": measured,
         "opportunityQty": opp,
         "catalogItemId": r.get("catalog_item_id"),
-        # Derived server-side at the default config threshold — the UI's live
-        # slider re-derives client-side; these are never stored.
+        # Derived server-side at the config threshold (company_settings, §5.4) —
+        # the UI's live slider re-derives client-side; these are never stored.
         "bidQty": _bid_qty(plan, add),
-        "flagged": _takeoff_flagged(measured, plan),
+        "flagged": _takeoff_flagged(measured, plan, threshold),
         "deltaVsOpp": measured - opp,
     }
 
@@ -931,7 +1055,10 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
             estimate_id,
             body.get("name", ""),
             body.get("aspireNumber"),
-            body.get("branch", ""),
+            # ITB project carries the display branch city.
+            # TODO(slice14-contract): after migration 022 is applied to live and
+            #   itb_projects.branch is also dropped (or nullable), remove this write.
+            body.get("branchCity") or body.get("branch", ""),
             body.get("crmRep"),
             body.get("assignedLsEstimator"),
             body.get("assignedIrrEstimator"),
@@ -959,6 +1086,9 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
 
 
 def _catalog_item_out(r: dict) -> dict:
+    # Slice 14: `branch` city string removed; identity carried by aspire_branch_id
+    # (NULL = company-wide per §2.3 convention). The legacy `branch` key is NOT
+    # passed through — once 022 is applied the column will not exist in the row.
     return {
         "id": r["id"],
         "description": r["description"],
@@ -968,7 +1098,7 @@ def _catalog_item_out(r: dict) -> dict:
         "targetGm": _num(r["target_gm"]),
         "kitType": r["kit_type"],
         "productionRate": _num(r["production_rate"]),
-        "branch": r["branch"],
+        "aspireBranchId": r.get("aspire_branch_id"),
         "active": bool(r["active"]),
         "serviceType": r["service_type"],
     }
@@ -1091,7 +1221,9 @@ _UPDATABLE = {
     "name": "name",
     "aspireNumber": "aspire_number",
     "clientName": "client_name",
-    "branch": "branch",
+    # Slice 14: "branch" (legacy city string) removed from PATCH surface.
+    # No caller should send it; if they do it is silently ignored (the key
+    # simply won't appear in _UPDATABLE so no SET clause is generated for it).
     "customerType": "customer_type",
     "acreage": "acreage",
     "contractValueCents": "contract_value_cents",
@@ -1139,14 +1271,16 @@ _ESTIMATOR_OR_APPROVER_FIELDS = frozenset({"contractValueCents"})
 _ANY_ROLE_FIELDS = frozenset({"status"})
 
 
-def _require_estimate_patch_ownership(body: dict, user: dict) -> None:
+async def _require_estimate_patch_ownership(body: dict, user: dict) -> None:
     """Classify the PATCH body's fields and apply the strictest required check
     per ownership group. A body mixing groups requires every group's check
     (e.g. targetMargin + name → approver AND estimator, effectively admin),
-    which matches field ownership."""
+    which matches field ownership.
+
+    Async because require_approver now re-reads the live users row (B.2)."""
     keys = set(body)
     if keys & _APPROVER_ONLY_FIELDS:
-        authz.require_approver(user)
+        await authz.require_approver(user)
     if keys & _ESTIMATOR_OR_APPROVER_FIELDS:
         role = user.get("role")
         if not (authz.is_estimator(role) or authz.is_approver(role)):
@@ -1200,13 +1334,17 @@ def register(app, require_auth) -> None:
     async def list_estimates(
         estimate_type: Optional[str] = Query(default=None),
         status: Optional[str] = Query(default=None),
-        branch: Optional[str] = Query(default=None),
+        # Slice 14: the `branch` city-string convenience filter is removed.
+        # Cross-branch roles should pass aspireBranchId for narrower views once
+        # that query param is added (pending follow-up). Branch-scoped users are
+        # already filtered via aspire_branch_id from their user_branches rows.
+        # Slice 4 (Handoff 37): filter by the lead that originated the estimate.
+        # Uses estimates.lead_id (added in migration 010). Allows BidTab to fetch
+        # only the approved estimate for this lead without client-side filtering.
+        lead_id: Optional[str] = Query(default=None, alias="leadId"),
         _user: dict = Depends(require_auth),
     ) -> list:
-        # Branch scope is derived from the AUTHENTICATED user (BRD I-9.5)
-        # — the client `branch` param is never the authority. It
-        # survives only as an optional convenience filter for cross-branch
-        # (exec/admin) roles.
+        # Branch scope is derived from the AUTHENTICATED user (BRD I-9.5).
         scope = await authz.resolve_branch_scope(_user)
         if scope.kind == "none":
             return []
@@ -1219,11 +1357,15 @@ def register(app, require_auth) -> None:
             conditions.append("status = %s")
             params.append(status)
         if scope.kind == "branch":
-            conditions.append("branch = %s")
-            params.append(scope.branch)
-        elif branch:  # cross-branch role opting into a narrower view
-            conditions.append("branch = %s")
-            params.append(branch)
+            # Scope to the user's aspire_branch_id list (Amendment B.1). One
+            # parameterized placeholder per id — the ids are NEVER interpolated.
+            placeholders = ", ".join(["%s"] * len(scope.ids))
+            conditions.append(f"aspire_branch_id IN ({placeholders})")
+            params.extend(scope.ids)
+        if lead_id:
+            # Filter to estimates linked to the given lead (migration 010 column).
+            conditions.append("lead_id = %s")
+            params.append(lead_id)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         rows = await query(
             f"SELECT id FROM estimates {where} ORDER BY created_at DESC", params
@@ -1237,10 +1379,29 @@ def register(app, require_auth) -> None:
         est_type = body.get("estimateType")
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
-        if not body.get("branch", "").strip():
+        # Branch identity rides on the Aspire BranchID (int), captured at intake.
+        # TODO(slice14-contract): once Carlos applies migration 022 to live, the
+        #   estimates.branch NOT NULL constraint is gone. Remove the branch_city
+        #   write from the INSERT below and drop this city-resolution block.
+        aspire_branch_id = body.get("aspireBranchId")
+        if not isinstance(aspire_branch_id, int) or isinstance(aspire_branch_id, bool):
             raise HTTPException(
                 status_code=400,
-                detail="branch is required — select a branch from the intake form",
+                detail="aspireBranchId is required — select a branch from the intake form",
+            )
+        # Resolve a display city from the id so the still-NOT-NULL estimates.branch
+        # column is never left empty (live DB has NOT NULL until 022 is applied).
+        branch_city = (body.get("branchCity") or "").strip()
+        if not branch_city:
+            branch_city = next(
+                (city for (city, _install), bid in ASPIRE_BRANCH_MAP.items()
+                 if bid == aspire_branch_id),
+                "",
+            )
+        if not branch_city:
+            raise HTTPException(
+                status_code=400,
+                detail="aspireBranchId does not resolve to a known branch",
             )
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
@@ -1252,19 +1413,21 @@ def register(app, require_auth) -> None:
         estimate_id = _new_id("est")
         await execute(
             """INSERT INTO estimates
-                 (id, estimate_type, name, aspire_number, client_name, branch, customer_type,
+                 (id, estimate_type, name, aspire_number, client_name, branch, aspire_branch_id,
+                  customer_type,
                   acreage, contract_value_cents, target_margin, status, lifecycle, aspire_owner,
                   priority, win_probability, site_walk_date, due_back_date, anticipated_close_date,
                   service_start_date, assigned_ls_estimator, assigned_irr_estimator, crm_rep,
                   notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 estimate_id,
                 est_type,
                 body.get("name", ""),
                 body.get("aspireNumber"),
                 body.get("clientName", ""),
-                body.get("branch", ""),
+                branch_city,
+                aspire_branch_id,
                 body.get("customerType", ""),
                 body.get("acreage"),
                 body.get("contractValueCents", 0),
@@ -1435,9 +1598,10 @@ def register(app, require_auth) -> None:
         # (contractValueCents is now estimator-or-approver since it mirrors
         # the line-item rollup; approver value-adjustments remain audited via
         # the adjustments POST.)
-        _require_estimate_patch_ownership(body, _user)
+        await _require_estimate_patch_ownership(body, _user)
         rows = await query(
-            "SELECT estimate_type, status, aspire_opportunity_id, lead_id FROM estimates WHERE id = %s",
+            "SELECT estimate_type, status, aspire_opportunity_id, lead_id, "
+            "aspire_branch_id, crew_rate_cents_per_hour FROM estimates WHERE id = %s",
             [estimate_id],
         )
         if not rows:
@@ -1476,6 +1640,13 @@ def register(app, require_auth) -> None:
 
         await _apply_updates("estimates", _UPDATABLE, body, estimate_id, touch_updated_at=True)
 
+        # Crew-rate snapshot (§2.6): freeze on entry to review/pending_approval/
+        # approved, clear on the hand-back to in_progress, preserve otherwise.
+        # Runs only when status is actually moving (the helper no-ops on a
+        # same-status PATCH). target_status is None when the body omits status.
+        if target_status is not None:
+            await _snapshot_crew_rate_on_transition(estimate_id, target_status, current)
+
         # Terminal-only Aspire write-back (won/lost), best-effort in the background.
         # Guarded by the transition machine so an illegal PATCH jump (e.g.
         # in_progress → won) never fires a bogus write-back to Aspire.
@@ -1509,7 +1680,10 @@ def register(app, require_auth) -> None:
 
     @app.post("/api/estimating/estimates/{estimate_id}/retry-aspire-sync", status_code=202)
     async def retry_aspire_sync(
-        estimate_id: str, background: BackgroundTasks, _user: dict = Depends(require_auth)
+        estimate_id: str,
+        background: BackgroundTasks,
+        response: Response,
+        _user: dict = Depends(require_auth),
     ) -> dict:
         rows = await query(
             "SELECT id, status, aspire_opportunity_id FROM estimates WHERE id = %s",
@@ -1522,6 +1696,11 @@ def register(app, require_auth) -> None:
             background.add_task(_sync_new_opportunity_bg, estimate_id)
         elif r.get("status") in ("won", "lost"):
             background.add_task(_sync_status_bg, estimate_id, r["status"])
+        else:
+            # §5.3: already synced and not terminal ⇒ nothing to push. Don't lie
+            # with 202 "queued"; override the route default to 200 not_needed.
+            response.status_code = 200
+            return {"status": "not_needed"}
         return {"status": "queued"}
 
     @app.post("/api/estimating/estimates/{estimate_id}/approve-handback")
@@ -1531,14 +1710,18 @@ def register(app, require_auth) -> None:
         # Approve is approver-owned, and only within the caller's tier — a
         # manager cannot approve a >$100k estimate. Identity
         # comes from the JWT, never from the client body.
-        authz.require_approver(_user)
+        # require_approver gates approver+active BEFORE the 404 lookup and
+        # returns the live role so the authority check reuses that users re-read.
+        live_role = await authz.require_approver(_user)
         rows = await query(
             "SELECT id, status, contract_value_cents, lead_id FROM estimates WHERE id = %s",
             [estimate_id],
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
-        authz.require_approval_authority(_user, int(rows[0].get("contract_value_cents") or 0))
+        await authz.require_approval_authority(
+            _user, int(rows[0].get("contract_value_cents") or 0), live_role=live_role
+        )
         actor = _user.get("name") or _user.get("email") or _user.get("id") or "unknown"
         at = _now_utc().isoformat()
         try:
@@ -1611,7 +1794,7 @@ def register(app, require_auth) -> None:
         estimate_id: str, body: AdjustmentBody, _user: dict = Depends(require_auth)
     ) -> dict:
         # Adjustments are approver-owned — estimators 403.
-        authz.require_approver(_user)
+        await authz.require_approver(_user)
         if body.field not in ("complexity", "margin"):
             raise HTTPException(
                 status_code=400,
@@ -1993,7 +2176,8 @@ def register(app, require_auth) -> None:
             "SELECT * FROM takeoff_lines WHERE estimate_id = %s ORDER BY created_at, id",
             [estimate_id],
         )
-        return [_takeoff_line_out(r) for r in rows]
+        threshold = await _discrepancy_threshold()
+        return [_takeoff_line_out(r, threshold) for r in rows]
 
     @app.post(
         "/api/estimating/estimates/{estimate_id}/takeoff-lines", status_code=201
@@ -2025,7 +2209,8 @@ def register(app, require_auth) -> None:
         await execute(
             "UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id]
         )
-        return _takeoff_line_out(await _get_takeoff_line(estimate_id, line_id))
+        threshold = await _discrepancy_threshold()
+        return _takeoff_line_out(await _get_takeoff_line(estimate_id, line_id), threshold)
 
     @app.patch("/api/estimating/estimates/{estimate_id}/takeoff-lines/{line_id}")
     async def update_takeoff_line(
@@ -2037,7 +2222,8 @@ def register(app, require_auth) -> None:
         await execute(
             "UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id]
         )
-        return _takeoff_line_out(await _get_takeoff_line(estimate_id, line_id))
+        threshold = await _discrepancy_threshold()
+        return _takeoff_line_out(await _get_takeoff_line(estimate_id, line_id), threshold)
 
     @app.delete(
         "/api/estimating/estimates/{estimate_id}/takeoff-lines/{line_id}",
@@ -2317,8 +2503,12 @@ def register(app, require_auth) -> None:
         conditions = ["e.status NOT IN ('won', 'lost')"]
         params: list[Any] = []
         if scope.kind == "branch":
-            conditions.append("p.branch = %s")
-            params.append(scope.branch)
+            # Filter on the linked estimate's aspire_branch_id (Amendment B.1);
+            # the JOIN already brings `estimates e` into scope. Parameterized
+            # placeholders only — ids are never string-interpolated.
+            placeholders = ", ".join(["%s"] * len(scope.ids))
+            conditions.append(f"e.aspire_branch_id IN ({placeholders})")
+            params.extend(scope.ids)
         rows = await query(
             f"""SELECT p.* FROM itb_projects p
                  JOIN estimates e ON e.id = p.estimate_id
@@ -2369,7 +2559,8 @@ def register(app, require_auth) -> None:
 
     @app.get("/api/estimating/catalog-items")
     async def list_catalog_items(
-        branch: Optional[str] = Query(default=None),
+        # Slice 14: the `branch` city-string filter is removed; callers should
+        # filter by aspireBranchId (int) once that param is wired (follow-up).
         kit_type: Optional[str] = Query(default=None),
         active: Optional[str] = Query(default=None),
         _user: dict = Depends(require_auth),
@@ -2381,9 +2572,6 @@ def register(app, require_auth) -> None:
             )
         conditions: list[str] = []
         params: list[Any] = []
-        if branch:
-            conditions.append("branch = %s")
-            params.append(branch)
         if kit_type:
             conditions.append("kit_type = %s")
             params.append(kit_type)

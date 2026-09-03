@@ -7,7 +7,8 @@ import { useAuthStore } from '@/store/authStore'
 
 function roleDefaultRoute(role: string) {
   if (role === 'outside_sales') return '/outside-sales'
-  if (role === 'manager') return '/branch-manager'
+  // BranchManagerPage removed in Slice 12; managers land on settings.
+  if (role === 'manager') return '/settings'
   return '/inside-sales'
 }
 

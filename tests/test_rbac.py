@@ -59,15 +59,16 @@ def as_role():
 # ── Canonical role model ─────────────────────────────────────────────────────
 
 class TestRoleModel:
-    def test_nine_canonical_roles(self):
+    def test_ten_canonical_roles(self):
         assert authz.CANONICAL_ROLES == frozenset({
-            "procurement", "sales", "admin", "manager", "regional_director",
-            "maintenance_estimating", "install_estimating", "vice_president", "ceo",
+            "procurement", "sales", "inside_sales", "admin", "manager",
+            "regional_director", "maintenance_estimating", "install_estimating",
+            "vice_president", "ceo",
         })
 
-    def test_legacy_roles_normalize_to_sales(self):
-        assert authz.normalize_role("inside_sales") == "sales"
+    def test_only_outside_sales_normalizes_to_sales(self):
         assert authz.normalize_role("outside_sales") == "sales"
+        assert authz.normalize_role("inside_sales") == "inside_sales"
         assert authz.normalize_role("manager") == "manager"
 
     def test_estimator_roles(self):
@@ -82,9 +83,12 @@ class TestRoleModel:
         for r in ("maintenance_estimating", "install_estimating", "sales", "procurement"):
             assert not authz.is_approver(r), r
 
-    def test_require_approver_403s_estimator(self):
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_require_approver_403s_estimator(self, mock_authz_query):
+        # Live re-read confirms the JWT role (still an estimator here).
+        mock_authz_query.return_value = [{"role": "maintenance_estimating", "active": 1}]
         with pytest.raises(HTTPException) as exc:
-            authz.require_approver(_user("maintenance_estimating"))
+            await authz.require_approver(_user("maintenance_estimating"))
         assert exc.value.status_code == 403
 
     def test_require_estimator_allows_approver_roles(self):
@@ -102,13 +106,29 @@ class TestRoleModel:
             authz.require_estimator(_user("procurement"))
         assert exc.value.status_code == 403
 
-    def test_approval_ceilings_match_tier_ladder(self):
-        # manager <$100k · RD $250k · VP $1M · CEO unlimited (cents).
-        assert authz.approval_ceiling_cents("manager") == 10_000_000
-        assert authz.approval_ceiling_cents("regional_director") == 25_000_000
-        assert authz.approval_ceiling_cents("vice_president") == 100_000_000
-        assert authz.approval_ceiling_cents("ceo") is None
-        assert authz.approval_ceiling_cents("admin") is None
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_approval_ceiling_reads_from_table(self, mock_authz_query):
+        # The ceiling is whatever the approval_tiers row says, not a constant.
+        mock_authz_query.return_value = [{"max_value_cents": 10_000_000}]
+        assert await authz.approval_ceiling_cents("manager") == 10_000_000
+        # The emitted SQL reads approval_tiers keyed on the role.
+        sql, params = mock_authz_query.await_args_list[0].args
+        assert "approval_tiers" in sql
+        assert "manager" in params
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_approval_ceiling_follows_edited_table_value(self, mock_authz_query):
+        # Proves it reads the table, not APPROVAL_CEILING_CENTS: a DIFFERENT
+        # mocked row for the SAME role yields a DIFFERENT ceiling. This is the
+        # §5.1 defect — an admin editing the tier moves the real 403 boundary.
+        mock_authz_query.return_value = [{"max_value_cents": 7_500_000}]
+        assert await authz.approval_ceiling_cents("manager") == 7_500_000
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_approval_ceiling_null_max_is_unlimited(self, mock_authz_query):
+        # CEO's top tier has max_value_cents NULL → unlimited.
+        mock_authz_query.return_value = [{"max_value_cents": None}]
+        assert await authz.approval_ceiling_cents("ceo") is None
 
 
 # ── Line-item edit mutations (widened role set) ──────────────────────────────
@@ -200,58 +220,89 @@ def _est(status="approved", value_cents=5_000_000, **over):
     return row
 
 
+def _live_user(role: str, active: int = 1):
+    """The users-table re-read (role + active) that approver guards now do."""
+    return [{"role": role, "active": active}]
+
+
+def _tier(max_value_cents):
+    """The approval_tiers ceiling re-read the authority guard now does."""
+    return [{"max_value_cents": max_value_cents}]
+
+
 class TestApproverOwnedActions:
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_estimator_cannot_approve_handback(self, mock_query, mock_exec, as_role):
+    def test_estimator_cannot_approve_handback(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
         as_role("install_estimating")
+        mock_authz_query.return_value = _live_user("install_estimating")
         resp = client.post(
             "/api/estimating/estimates/est-1/approve-handback", json={}
         )
         assert resp.status_code == 403
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_manager_can_approve_below_100k(self, mock_query, mock_load, mock_exec, as_role):
+    def test_manager_can_approve_below_100k(
+        self, mock_query, mock_load, mock_exec, mock_authz_query, as_role
+    ):
         as_role("manager")
         mock_query.return_value = [_est(value_cents=5_000_000)]  # $50k
+        # require_approver re-read, then approval_ceiling_cents tier read.
+        mock_authz_query.side_effect = [_live_user("manager"), _tier(10_000_000)]
         mock_load.return_value = {"id": "est-1", "status": "handed_back"}
         resp = client.post(
             "/api/estimating/estimates/est-1/approve-handback", json={}
         )
         assert resp.status_code == 200
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_manager_cannot_approve_over_100k(self, mock_query, mock_load, mock_exec, as_role):
+    def test_manager_cannot_approve_over_100k(
+        self, mock_query, mock_load, mock_exec, mock_authz_query, as_role
+    ):
         as_role("manager")
         mock_query.return_value = [_est(value_cents=60_000_000)]  # $600k
+        mock_authz_query.side_effect = [_live_user("manager"), _tier(10_000_000)]
         resp = client.post(
             "/api/estimating/estimates/est-1/approve-handback", json={}
         )
         assert resp.status_code == 403
         assert "tier" in resp.json()["detail"].lower()
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_ceo_can_approve_over_1m(self, mock_query, mock_load, mock_exec, as_role):
+    def test_ceo_can_approve_over_1m(
+        self, mock_query, mock_load, mock_exec, mock_authz_query, as_role
+    ):
         as_role("ceo")
         mock_query.return_value = [_est(value_cents=150_000_000)]  # $1.5M
+        mock_authz_query.side_effect = [_live_user("ceo"), _tier(None)]
         mock_load.return_value = {"id": "est-1", "status": "handed_back"}
         resp = client.post(
             "/api/estimating/estimates/est-1/approve-handback", json={}
         )
         assert resp.status_code == 200
 
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_actor_comes_from_jwt_not_body(self, mock_query, mock_load, mock_exec, as_role):
+    def test_actor_comes_from_jwt_not_body(
+        self, mock_query, mock_load, mock_exec, mock_authz_query, as_role
+    ):
         as_role("manager", name="Jane Manager")
         mock_query.return_value = [_est()]
+        mock_authz_query.side_effect = [_live_user("manager"), _tier(10_000_000)]
         mock_load.return_value = {"id": "est-1", "status": "handed_back"}
         resp = client.post(
             "/api/estimating/estimates/est-1/approve-handback",
@@ -270,6 +321,38 @@ class TestApproverOwnedActions:
             assert "Jane Manager" in params
             assert "Spoofed Actor" not in params
 
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_demoted_manager_403s_despite_stale_jwt(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        # B.2: the JWT still says manager, but the live users row now says
+        # sales. The very next approver call must 403 — role is re-read.
+        as_role("manager")
+        mock_query.return_value = [_est(value_cents=5_000_000)]
+        mock_authz_query.return_value = _live_user("sales")
+        resp = client.post(
+            "/api/estimating/estimates/est-1/approve-handback", json={}
+        )
+        assert resp.status_code == 403
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_deactivated_approver_403s(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        # B.2: still a manager by role, but active=0 → approval authority
+        # revoked immediately, before the token expires.
+        as_role("manager")
+        mock_query.return_value = [_est(value_cents=5_000_000)]
+        mock_authz_query.return_value = _live_user("manager", active=0)
+        resp = client.post(
+            "/api/estimating/estimates/est-1/approve-handback", json={}
+        )
+        assert resp.status_code == 403
+
 
 # ── Estimate PATCH ownership split (C1 — margin/value approver-owned) ────────
 
@@ -278,6 +361,7 @@ def _patch_row(status="in_progress"):
              "aspire_opportunity_id": None}]
 
 
+@patch("api.authz.query", new_callable=AsyncMock)
 @patch("api.estimating._push_takeoff_qtys_bg", new_callable=AsyncMock)
 @patch("api.estimating._sync_status_bg", new_callable=AsyncMock)
 @patch("api.estimating._load_estimate", new_callable=AsyncMock)
@@ -297,9 +381,10 @@ class TestEstimatePatchOwnershipSplit:
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
 
     def test_sales_cannot_patch_target_margin(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         as_role("sales")
+        mock_authz_query.return_value = _live_user("sales")  # live re-read (B.2)
         resp = client.patch(
             "/api/estimating/estimates/est-1", json={"targetMargin": 0.55}
         )
@@ -307,9 +392,10 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_not_awaited()
 
     def test_estimator_cannot_patch_target_margin(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         as_role("maintenance_estimating")
+        mock_authz_query.return_value = _live_user("maintenance_estimating")
         resp = client.patch(
             "/api/estimating/estimates/est-1", json={"targetMargin": 0.55}
         )
@@ -317,7 +403,7 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_not_awaited()
 
     def test_estimator_can_patch_contract_value(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         # contractValueCents mirrors the line-item rollup the estimator edits;
         # there's no server-side rollup, so a Save legitimately includes it.
@@ -330,7 +416,7 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_awaited()
 
     def test_sales_cannot_patch_contract_value(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         as_role("sales")
         resp = client.patch(
@@ -340,7 +426,7 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_not_awaited()
 
     def test_estimator_can_patch_name(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         as_role("maintenance_estimating")
         self._ok_mocks(mock_query, mock_load)
@@ -351,7 +437,7 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_awaited()
 
     def test_estimator_can_patch_status(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         as_role("maintenance_estimating")
         self._ok_mocks(mock_query, mock_load, status="queued")
@@ -362,7 +448,7 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_awaited()
 
     def test_approver_can_send_back_via_status(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         # ApprovalQueue.handleSendBack: an approver PATCHes {status:
         # 'in_progress'} from pending_approval (a legal edge) — status is not
@@ -376,7 +462,7 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_awaited()
 
     def test_sales_can_mark_lost_via_status(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         # LostTransition: a sales rep PATCHes {status: 'lost'} after hand-back
         # (handed_back → lost is a legal edge).
@@ -389,7 +475,7 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_awaited()
 
     def test_sales_cannot_patch_name(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         # Plain scalar fields stay estimator-owned — sales only drives status.
         as_role("sales")
@@ -400,9 +486,10 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_not_awaited()
 
     def test_approver_can_patch_target_margin(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         as_role("manager")
+        mock_authz_query.return_value = _live_user("manager")  # live re-read (B.2)
         self._ok_mocks(mock_query, mock_load)
         resp = client.patch(
             "/api/estimating/estimates/est-1",
@@ -412,7 +499,7 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_awaited()
 
     def test_approver_can_patch_plain_estimator_fields(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         # manager-tier roles now pass require_estimator for all
         # estimator-owned fields, including top-level estimate scalars like name.
@@ -425,9 +512,10 @@ class TestEstimatePatchOwnershipSplit:
         mock_exec.assert_awaited()
 
     def test_admin_passes_both_sides_of_the_split(
-        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, as_role
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, mock_authz_query, as_role
     ):
         as_role("admin")
+        mock_authz_query.return_value = _live_user("admin")  # live re-read (B.2)
         self._ok_mocks(mock_query, mock_load)
         for body in ({"targetMargin": 0.5}, {"name": "Renamed"}):
             resp = client.patch("/api/estimating/estimates/est-1", json=body)
@@ -436,83 +524,119 @@ class TestEstimatePatchOwnershipSplit:
 
 # ── Branch scoping (BRD I-9.5) ───────────────────────────────────────────────
 
-class TestBranchScoping:
+class TestBranchScope:
+    """resolve_branch_scope now derives a LIST of aspire_branch_id ints from
+    user_branches (Amendment B.1), keyed on the JWT user id — not a single
+    resolved territory string.
+    """
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_scoped_role_gets_int_id_list(self, mock_authz_query):
+        # A manager holding two Fort Myers rows (Install 1403, Maint 3696).
+        mock_authz_query.return_value = [
+            {"aspire_branch_id": 1403}, {"aspire_branch_id": 3696}
+        ]
+        scope = await authz.resolve_branch_scope(_user("manager"))
+        assert scope.kind == "branch"
+        assert scope.ids == [1403, 3696]
+        # Keyed on the JWT user id against user_branches.
+        sql, params = mock_authz_query.await_args_list[0].args
+        assert "user_branches" in sql
+        assert params == ["u1"]
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_regional_director_holds_many_rows(self, mock_authz_query):
+        # RD reach comes from holding ~8 user_branches rows, NOT the role set.
+        ids = [1401, 1402, 1403, 3694, 3695, 3696, 3679, 3680]
+        mock_authz_query.return_value = [{"aspire_branch_id": i} for i in ids]
+        scope = await authz.resolve_branch_scope(_user("regional_director"))
+        assert scope.kind == "branch"
+        assert scope.ids == ids
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_no_rows_yields_none_scope(self, mock_authz_query):
+        mock_authz_query.return_value = []
+        scope = await authz.resolve_branch_scope(_user("manager"))
+        assert scope.kind == "none"
+        assert scope.ids == []
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_exec_roles_see_all(self, mock_authz_query):
+        for role in ("admin", "vice_president", "ceo"):
+            scope = await authz.resolve_branch_scope(_user(role))
+            assert scope.kind == "all", role
+        # sees_all short-circuits before touching user_branches.
+        mock_authz_query.assert_not_awaited()
+
+
+class TestBranchScopedQueries:
+    """The two consuming endpoints build an aspire_branch_id IN (...) clause
+    with exactly the scoped ids, and return [] for a none-scope.
+    """
+
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_non_admin_scope_ignores_client_branch_param(
+    def test_list_estimates_builds_in_clause(
         self, mock_est_query, mock_authz_query, as_role
     ):
-        as_role("sales", branch_id="Orlando, FL")
-        mock_authz_query.return_value = [{"name": "Orlando, FL"}]
+        as_role("manager")
+        mock_authz_query.return_value = [
+            {"aspire_branch_id": 1403}, {"aspire_branch_id": 3696}
+        ]
         mock_est_query.return_value = []
-        resp = client.get("/api/estimating/estimates?branch=Raleigh, NC")
+        resp = client.get("/api/estimating/estimates")
         assert resp.status_code == 200
         sql, params = mock_est_query.await_args_list[0].args
-        assert "branch = %s" in sql
-        assert "Orlando, FL" in params
-        assert "Raleigh, NC" not in params
+        assert "aspire_branch_id IN (%s, %s)" in sql
+        assert 1403 in params and 3696 in params
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_branch_id_resolves_via_sales_territories_table(
+    def test_list_estimates_none_scope_returns_empty(
         self, mock_est_query, mock_authz_query, as_role
     ):
-        as_role("maintenance_estimating", branch_id="Raleigh, NC")
-        mock_authz_query.return_value = [{"name": "Raleigh, NC"}]
-        mock_est_query.return_value = []
-        client.get("/api/estimating/estimates")
-        # Resolved the territory id → canonical name via sales_territories.
-        authz_sql, authz_params = mock_authz_query.await_args_list[0].args
-        assert "sales_territories" in authz_sql
-        assert authz_params == ["Raleigh, NC"]
-        _, params = mock_est_query.await_args_list[0].args
-        assert "Raleigh, NC" in params
+        as_role("manager")
+        mock_authz_query.return_value = []  # no user_branches rows
+        resp = client.get("/api/estimating/estimates")
+        assert resp.status_code == 200
+        assert resp.json() == []
+        mock_est_query.assert_not_awaited()
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_unmapped_branch_id_falls_back_to_raw_value(
-        self, mock_est_query, mock_authz_query, as_role
-    ):
-        # crm rows where branch_id already holds the branch name keep working.
-        as_role("manager", branch_id="Phoenix-Desert")
-        mock_authz_query.return_value = []
-        mock_est_query.return_value = []
-        client.get("/api/estimating/estimates")
-        _, params = mock_est_query.await_args_list[0].args
-        assert "Phoenix-Desert" in params
-
-    @patch("api.authz.query", new_callable=AsyncMock)
-    @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_exec_roles_see_all_branches(self, mock_est_query, mock_authz_query, as_role):
-        for role in ("admin", "vice_president", "ceo"):
-            as_role(role, branch_id="b1")
-            mock_est_query.reset_mock()
-            mock_est_query.return_value = []
-            resp = client.get("/api/estimating/estimates")
-            assert resp.status_code == 200
-            sql = mock_est_query.await_args_list[0].args[0]
-            assert "branch = %s" not in sql, role
-        app.dependency_overrides.clear()
-
-    @patch("api.authz.query", new_callable=AsyncMock)
-    @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_exec_may_still_filter_by_branch_param(
+    def test_list_estimates_exec_has_no_branch_restriction(
         self, mock_est_query, mock_authz_query, as_role
     ):
         as_role("admin")
         mock_est_query.return_value = []
-        client.get("/api/estimating/estimates?branch=Raleigh")
-        sql, params = mock_est_query.await_args_list[0].args
-        assert "branch = %s" in sql
-        assert "Raleigh" in params
+        resp = client.get("/api/estimating/estimates")
+        assert resp.status_code == 200
+        sql = mock_est_query.await_args_list[0].args[0]
+        assert "aspire_branch_id IN" not in sql
+        mock_authz_query.assert_not_awaited()
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_branchless_non_admin_sees_nothing(
+    def test_list_itb_projects_builds_in_clause_on_estimates(
         self, mock_est_query, mock_authz_query, as_role
     ):
-        as_role("sales", branch_id=None)
-        resp = client.get("/api/estimating/estimates")
+        as_role("manager")
+        mock_authz_query.return_value = [{"aspire_branch_id": 1403}]
+        mock_est_query.return_value = []  # no projects → early return
+        resp = client.get("/api/estimating/itb/projects")
+        assert resp.status_code == 200
+        sql, params = mock_est_query.await_args_list[0].args
+        assert "e.aspire_branch_id IN (%s)" in sql
+        assert 1403 in params
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_list_itb_projects_none_scope_returns_empty(
+        self, mock_est_query, mock_authz_query, as_role
+    ):
+        as_role("manager")
+        mock_authz_query.return_value = []
+        resp = client.get("/api/estimating/itb/projects")
         assert resp.status_code == 200
         assert resp.json() == []
         mock_est_query.assert_not_awaited()

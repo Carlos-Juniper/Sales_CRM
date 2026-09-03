@@ -1,10 +1,11 @@
 """
 Onboard or update a CRM user (no password — auth is Microsoft Entra SSO only).
 
-Identity is proven by Entra SSO at login. Users are auto-provisioned on first
-login with role=inside_sales and branch_id=NULL. Use this script to change a
-user's role or branch_id (e.g., promote to manager, add branch scoping) after
-they've already signed in.
+Identity is proven by Entra SSO at login, but there is NO auto-provisioning:
+``entra_callback`` returns 403 "User not provisioned" when no ``users`` row
+matches the token's email. Every user must be onboarded with this script first.
+Re-running it also changes an existing user's role or branch_id (e.g., promote
+to manager, add branch scoping).
 
 This writes to the SAME store the SSO callback reads from — the GCP Cloud SQL
 MySQL ``users`` table, via the shared ``query``/``execute`` helpers. That is
@@ -17,9 +18,9 @@ Usage:
     python -m api.seed_auth --email jane.doe@juniperlandscaping.com \
         --name "Jane Doe" --role manager --branch-id b1
 
-    # Assign outside_sales without a branch (branch_id is nullable for this role):
+    # Onboard an inside sales rep without a branch (branch_id is nullable):
     python -m api.seed_auth --email pat.lee@juniperlandscaping.com \
-        --name "Pat Lee" --role outside_sales
+        --name "Pat Lee" --role inside_sales
 
 Running this script again for the same email updates that user's name/role/branch
 (upsert keyed on the normalized email), so it's an "edit role or branch" tool
@@ -36,8 +37,8 @@ from typing import Optional
 from db import execute, query
 from api.authz import CANONICAL_ROLES, normalize_role
 
-# The nine canonical business roles (single role vocabulary).
-# Legacy inputs inside_sales/outside_sales are accepted and stored as `sales`.
+# The ten canonical business roles (single role vocabulary).
+# The legacy input `outside_sales` is accepted and stored as `sales`.
 VALID_ROLES = CANONICAL_ROLES
 
 # Roles that require a branch_id. Managers are scoped to a branch; other roles

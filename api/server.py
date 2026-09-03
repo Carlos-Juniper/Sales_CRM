@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import os
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -53,17 +54,29 @@ if _extra_origins:
 async def lifespan(app):
     # Schema migrations are applied via scripts/migrate.py before each deploy,
     # not at app boot.
-    sweep_task = None
+    sweep_tasks = []
     # Durability sweep for best-effort Aspire pushes — only when sync is enabled,
     # so tests and standalone runs never spawn it.
     if os.environ.get("ASPIRE_SYNC_ENABLED", "false").strip().lower() in ("1", "true", "yes"):
         from api.estimating import sweep_loop
-        sweep_task = asyncio.create_task(sweep_loop())
+        sweep_tasks.append(asyncio.create_task(sweep_loop()))
+    # Beam reconciler — recovery for callbacks Attentive dead-lettered after its
+    # own 24h retry window. Read-only against Attentive; it can never order.
+    if os.environ.get("BEAM_SYNC_ENABLED", "false").strip().lower() in ("1", "true", "yes"):
+        from api.beam_sync import sweep_loop as beam_sweep_loop
+        sweep_tasks.append(asyncio.create_task(beam_sweep_loop()))
+    # Headless Chromium for server-side PDF rendering — only when explicitly enabled.
+    # Tests must NOT set PDF_RENDER_ENABLED so no browser is spawned during pytest.
+    if os.environ.get("PDF_RENDER_ENABLED", "").strip().lower() in ("1", "true", "yes"):
+        from api.proposal_render import start_browser
+        await start_browser()
     try:
         yield
     finally:
-        if sweep_task is not None:
-            sweep_task.cancel()
+        for task in sweep_tasks:
+            task.cancel()
+        from api.proposal_render import stop_browser
+        await stop_browser()
         await close_pool()
 
 
@@ -312,7 +325,10 @@ class PatchPMContactBody(BaseModel):
 
 # ── Auth dependency ──────────────────────────────────────────────────────────
 
-async def require_auth(session: Optional[str] = Cookie(default=None)) -> dict:
+async def require_auth(
+    request: Request,
+    session: Optional[str] = Cookie(default=None),
+) -> dict:
     if not session:
         raise HTTPException(status_code=401, detail="Not authenticated")
     if not JWT_SECRET:
@@ -323,6 +339,47 @@ async def require_auth(session: Optional[str] = Cookie(default=None)) -> dict:
         raise HTTPException(status_code=401, detail="Session expired")
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Session expired or invalid")
+
+    # ── Render-token scope guard ─────────────────────────────────────────────
+    # Render tokens are short-lived (120 s) JWTs with scope="proposal_render".
+    # They are only valid for:
+    #   • GET requests
+    #   • /api/proposals/config/... (config look-up routes, no proposal-id check)
+    #   • /api/proposals/{their proposal_id} and sub-paths
+    #   • /api/leads/{their lead_id} and /api/estimating/estimates/{their
+    #     estimate_id} — exact paths, no sub-paths. The print route blocks on
+    #     both before it sets __PROPOSAL_READY__, so denying them means every
+    #     render times out. Pinned to the ids named in the token: a render token
+    #     still cannot read any other lead or estimate.
+    # Any other use → 403.
+    if payload.get("scope") == "proposal_render":
+        if request.method != "GET":
+            raise HTTPException(
+                status_code=403,
+                detail="Render token not valid for this resource",
+            )
+        path = request.url.path
+        # Config routes are always allowed (check first so "config" is not
+        # mistaken for a proposal_id).
+        if path.startswith("/api/proposals/config/"):
+            return payload
+        # Proposal-scoped routes: must match the token's proposal_id exactly.
+        pid = payload.get("proposal_id", "")
+        pattern = rf"^/api/proposals/{re.escape(pid)}(/.*)?$"
+        if pid and re.match(pattern, path):
+            return payload
+        # The proposal's own lead and estimate — exact paths only.
+        lead_id = payload.get("lead_id") or ""
+        estimate_id = payload.get("estimate_id") or ""
+        if lead_id and path == f"/api/leads/{lead_id}":
+            return payload
+        if estimate_id and path == f"/api/estimating/estimates/{estimate_id}":
+            return payload
+        raise HTTPException(
+            status_code=403,
+            detail="Render token not valid for this resource",
+        )
+
     return payload
 
 
@@ -330,9 +387,17 @@ async def require_auth(session: Optional[str] = Cookie(default=None)) -> dict:
 # Routes live in api/estimating.py; registered here so they share require_auth.
 from api import estimating as _estimating  # noqa: E402
 from api import properties as _properties  # noqa: E402
+from api import beam_routes as _beam_routes  # noqa: E402
+from api import proposals as _proposals    # noqa: E402
+from api import settings as _settings      # noqa: E402
 
 _estimating.register(app, require_auth)
 _properties.register(app, require_auth)
+# Beam also registers /webhooks/attentive, deliberately OUTSIDE require_auth:
+# Attentive cannot send auth headers, so that route gates on a URL query token.
+_beam_routes.register(app, require_auth)
+_proposals.register(app, require_auth)
+_settings.register(app, require_auth)
 
 
 # ── Leads ────────────────────────────────────────────────────────────────────
@@ -346,6 +411,8 @@ async def list_leads(
     states: Optional[str] = None,
     min_score: Optional[int] = None,
     property_id: Optional[str] = None,
+    sources: Optional[str] = None,
+    mine: bool = False,
     sort_by: str = "score",
     sort_dir: str = "desc",
     page: int = 1,
@@ -384,6 +451,19 @@ async def list_leads(
             placeholders, vals = _in_clause(state_list)
             conditions.append(f"state IN ({placeholders})")
             params.extend(vals)
+
+    if sources:
+        source_list = [s.strip() for s in sources.split(",") if s.strip()]
+        if source_list:
+            placeholders, vals = _in_clause(source_list)
+            conditions.append(f"source IN ({placeholders})")
+            params.extend(vals)
+
+    # User-scoped "Leads" tab. The identity comes from the JWT, never from a
+    # client-supplied param (BRD I-9.5) — `mine` is a boolean switch, not an id.
+    if mine:
+        conditions.append("(assigned_to = %s OR created_by = %s)")
+        params.extend([_user["id"], _user["id"]])
 
     if min_score is not None:
         conditions.append("score >= %s")
@@ -429,11 +509,13 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
         INSERT INTO leads
             (id, source, lead_type, property_name, city, state,
              estimated_contract_value, estimated_acreage, units, status,
-             contact_name, contact_email, property_id, created_at, updated_at)
+             contact_name, contact_email, property_id, created_by,
+             created_at, updated_at)
         VALUES
             (%s, 'manual', %s, %s, %s, %s,
              %s, %s, %s, %s,
-             %s, %s, %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+             %s, %s, %s, %s,
+             CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
             new_id,
@@ -448,6 +530,7 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
             body.contact_name,
             body.contact_email,
             body.property_id,
+            _user["id"],
         ],
     )
     return await _fetch_lead(new_id)
@@ -1444,21 +1527,65 @@ async def list_users(
     branch_id: Optional[str] = None,
     _user: dict = Depends(require_auth),
 ) -> list:
+    """List users, enriched with active, aspireRepId, and branches[].
+
+    Additive enrichment over the original id/name/email/role/branch_id/avatar_initials
+    response — existing callers are unaffected. branches[] is the set of
+    aspire_branch_ids from user_branches, returned via GROUP_CONCAT subquery so
+    the list remains a single DB round-trip.
+
+    Filter rules:
+      - ?role=<r>: restrict to that role AND active=1 (assignee pickers must
+        exclude deactivated reps; Slice 6 deactivates, never deletes).
+      - plain GET: returns ALL rows including inactive so historical name lookups
+        on old estimates still resolve.
+    """
     conditions: list[str] = []
     params: list[Any] = []
     if role:
         conditions.append("role = %s")
         params.append(role)
+        # A role filter drives the assignee pickers (e.g. ?role=sales for the
+        # lead-assignee picker, §2.8), so it must exclude DEACTIVATED users:
+        # Slice 6 deactivates instead of deleting, and a deactivated rep must
+        # not be assignable. A plain listing (no role) keeps returning inactive
+        # rows so historical name lookups still resolve.
+        conditions.append("active = 1")
     if branch_id:
         conditions.append("branch_id = %s")
         params.append(branch_id)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    # GROUP_CONCAT subquery for user_branches — avoids an N+1 per-user query.
+    # The subquery returns NULL when there are no rows; we parse that below.
     rows = await query(
-        f"SELECT id, name, email, role, branch_id, avatar_initials FROM users {where}",
+        f"""SELECT u.id, u.name, u.email, u.role, u.branch_id, u.avatar_initials,
+                   u.active, u.aspire_rep_id,
+                   (SELECT GROUP_CONCAT(ub.aspire_branch_id ORDER BY ub.aspire_branch_id)
+                      FROM user_branches ub WHERE ub.user_id = u.id) AS aspire_branch_ids
+              FROM users u {where}""",
         params or None,
     )
-    return list(rows)
+
+    result = []
+    for r in rows:
+        raw_ids = r.get("aspire_branch_ids")
+        if raw_ids:
+            branches: list[int] = [int(x) for x in str(raw_ids).split(",") if x]
+        else:
+            branches = []
+        result.append({
+            "id": r["id"],
+            "name": r["name"],
+            "email": r["email"],
+            "role": r["role"],
+            "branch_id": r.get("branch_id"),
+            "avatar_initials": r.get("avatar_initials"),
+            "active": bool(r.get("active", 1)),
+            "aspireRepId": r.get("aspire_rep_id"),
+            "branches": branches,
+        })
+    return result
 
 
 # ── Dashboard ────────────────────────────────────────────────────────────────
@@ -1506,6 +1633,33 @@ def _issue_jwt(user: dict, response: Response) -> dict:
         max_age=SESSION_DURATION,
     )
     return {k: v for k, v in payload.items() if k != "exp"}
+
+
+@app.post("/api/proposals/{proposal_id}/render-token")
+async def issue_render_token(
+    proposal_id: str,
+    user: dict = Depends(require_auth),
+) -> dict:
+    """Mint a short-lived (120 s) render-scoped JWT for a specific proposal.
+
+    The caller must hold a normal session cookie.  The returned token may be
+    used only for GET requests against /api/proposals/<proposal_id>/... and
+    /api/proposals/config/... routes.
+    """
+    if not JWT_SECRET:
+        raise HTTPException(status_code=500, detail="JWT_SECRET not configured")
+    payload = {
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": user["role"],
+        "branch_id": user["branch_id"],
+        "scope": "proposal_render",
+        "proposal_id": proposal_id,
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=120),
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return {"token": token}
 
 
 def _avatar_initials(name: str) -> str:

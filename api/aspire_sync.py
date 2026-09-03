@@ -111,6 +111,56 @@ def _resolve_client(client: Optional[AspireClient]) -> tuple[bool, AspireClient]
     return True, AspireClient()
 
 
+# ── Contact resolution (email → Aspire ContactID) ────────────────────────────
+
+async def resolve_aspire_rep_id(
+    email: str, client: Optional[AspireClient] = None
+) -> Optional[int]:
+    """Resolve a sales rep's Aspire ContactID from their email, or None.
+
+    Backs the §2.8 hard-block: a user saved with role='sales' MUST resolve to an
+    Aspire contact so the opportunity push can stamp SalesRepID. This is the
+    single source of truth for that resolution (the port owns all Aspire field
+    names) and is reused by the "Link Aspire Rep" action.
+
+    Returns the integer ContactID on an exact (case-insensitive) email match, or
+    None when Aspire is unreachable, sync is disabled, the email is blank, or no
+    contact carries that email. None is the caller's cue to REJECT a sales save
+    (prevent-don't-repair) — never a silently-linkless save.
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    # When sync is off the app runs fully standalone; there is nothing to resolve
+    # against, so a sales save cannot be un-blocked here (the litmus test).
+    if not sync_enabled():
+        return None
+
+    owns, client = _resolve_client(client)
+    try:
+        # Aspire OData: filter Contacts by email. Single-quotes are the OData
+        # string delimiter; a doubled '' escapes an embedded quote.
+        safe = email.replace("'", "''")
+        data = await client.get(
+            "/Contacts", params={"$filter": f"Email eq '{safe}'"}
+        )
+    except AspireError:
+        return None
+    finally:
+        if owns:
+            await client.close()
+
+    records = (
+        data
+        if isinstance(data, list)
+        else (data.get("value", []) if isinstance(data, dict) else [])
+    )
+    if not records:
+        return None
+    contact_id = records[0].get("ContactID")
+    return int(contact_id) if contact_id is not None else None
+
+
 # ── Pure mapping helpers (Aspire vocabulary lives here) ──────────────────────
 
 def division_id(service_line: str) -> Optional[int]:
@@ -137,6 +187,11 @@ def extract_aspire_number(record: dict) -> Optional[str]:
 # ── Payload builders (Aspire vocabulary) ─────────────────────────────────────
 
 def build_opportunity_payload(inp: OpportunityInput) -> dict:
+    # TODO(slice8-bonus): the estimate now persists aspire_branch_id directly
+    # (Slice 8), so BranchID could come straight from it instead of round-
+    # tripping branch_city through ASPIRE_BRANCH_MAP. Deferred: it means adding
+    # the id to OpportunityInput and re-baselining the aspire push tests, which
+    # is outside the Slice 8 create-estimate contract.
     payload: dict = {
         "OpportunityName": inp.name,
         "PropertyID": inp.aspire_property_id,

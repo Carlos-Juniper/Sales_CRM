@@ -34,62 +34,46 @@ import { BranchProfileSection } from '@/views/settings/branch/BranchProfileSecti
 
 const BRANCH_ID = 42
 
-const MATERIAL_CALCS = [
-  {
-    id: 'mc-mulch',
-    materialKey: 'mulch',
-    label: 'Mulch',
-    computeType: 'mulch',
-    factors: { sfPerTonAtDepthIn: { '2': 160, '3': 108 }, defaultDepthIn: 2 },
-    unitSellCents: 5500,
-    unitCostCents: 3200,
-    uom: 'ton',
-  },
-  {
-    id: 'mc-sod',
-    materialKey: 'sod',
-    label: 'Sod',
-    computeType: 'divRoll',
-    factors: { rollSf: 10 },
-    unitSellCents: 900,
-    unitCostCents: 600,
-    uom: 'roll',
-  },
-]
+// Enriched branch GET payload — the single source for crew rate, material
+// factors, and production rates (commits 32c58fe / 2750a9d).
+const ENRICHED_BRANCH = {
+  aspireBranchId: BRANCH_ID,
+  crewRateCentsPerHour: 6500,
+  materialFactors: [
+    {
+      materialKey: 'mulch',
+      factors: { sfPerTonAtDepthIn: { '2': 160, '3': 108 }, defaultDepthIn: 2 },
+      source: 'override',
+    },
+    {
+      materialKey: 'sod',
+      factors: { rollSf: 10 },
+      source: 'inherited',
+    },
+  ],
+  productionRates: [
+    {
+      catalogItemId: 'ci-mow',
+      description: 'Weekly Mow',
+      productionRate: 12000,
+      source: 'inherited',
+    },
+  ],
+}
 
-const CATALOG_ITEMS = [
-  {
-    id: 'ci-mow',
-    description: 'Weekly Mow',
-    uom: 'visit',
-    unitCostCents: 0,
-    unitSellCents: 0,
-    targetGm: 0.5,
-    kitType: 'maintenance_hours',
-    productionRate: 12000,
-    branch: 'Naples',
-    active: true,
-    serviceType: 'Maintenance',
-  },
-]
+function mockEnrichedBranch(data = ENRICHED_BRANCH) {
+  server.use(
+    http.get(`*/api/settings/branch/${BRANCH_ID}`, () =>
+      HttpResponse.json(data),
+    ),
+  )
+}
 
 function mockCrewRate(crewRateCentsPerHour: number | null) {
   server.use(
     http.get(`*/api/settings/branch/${BRANCH_ID}`, () =>
       HttpResponse.json({ aspireBranchId: BRANCH_ID, crewRateCentsPerHour }),
     ),
-  )
-}
-function mockMaterialCalcs(rows = MATERIAL_CALCS) {
-  server.use(
-    http.get('*/api/estimating/config/material-calcs', () =>
-      HttpResponse.json(rows),
-    ),
-  )
-}
-function mockCatalogItems(rows = CATALOG_ITEMS) {
-  server.use(
-    http.get('*/api/estimating/catalog-items', () => HttpResponse.json(rows)),
   )
 }
 
@@ -194,7 +178,9 @@ describe('CrewRateForm', () => {
 
 describe('MaterialFactorsForm', () => {
   it('renders factor fields and NO unit_cost/unit_sell control', async () => {
-    mockMaterialCalcs()
+    // MaterialFactorsForm reads from the enriched branch GET (commits
+    // 32c58fe / 2750a9d) — no separate material-calcs endpoint call.
+    mockEnrichedBranch()
     renderComp(<MaterialFactorsForm aspireBranchId={BRANCH_ID} />)
     // A scalar factor field is editable (sod rollSf = 10).
     const rollSf = (await screen.findByLabelText(
@@ -207,7 +193,7 @@ describe('MaterialFactorsForm', () => {
   })
 
   it('PATCHes only the changed factor, keyed on materialKey', async () => {
-    mockMaterialCalcs()
+    mockEnrichedBranch()
     let body: Record<string, unknown> | null = null
     server.use(
       http.patch(`*/api/settings/branch/${BRANCH_ID}`, async ({ request }) => {
@@ -233,7 +219,9 @@ describe('MaterialFactorsForm', () => {
 
 describe('ProductionRatesForm', () => {
   it('renders a production-rate field per maintenance kit', async () => {
-    mockCatalogItems()
+    // ProductionRatesForm now reads from the enriched branch GET (commits
+    // 32c58fe / 2750a9d) — no separate catalog-items endpoint call.
+    mockEnrichedBranch()
     renderComp(<ProductionRatesForm aspireBranchId={BRANCH_ID} />)
     const rate = (await screen.findByLabelText(
       /weekly mow/i,
@@ -242,7 +230,7 @@ describe('ProductionRatesForm', () => {
   })
 
   it('PATCHes the changed production_rate keyed on catalog item id', async () => {
-    mockCatalogItems()
+    mockEnrichedBranch()
     let body: Record<string, unknown> | null = null
     server.use(
       http.patch(`*/api/settings/branch/${BRANCH_ID}`, async ({ request }) => {
@@ -257,6 +245,74 @@ describe('ProductionRatesForm', () => {
     const rate = (await screen.findByLabelText(
       /weekly mow/i,
     )) as HTMLInputElement
+    fireEvent.change(rate, { target: { value: '13000' } })
+    fireEvent.click(screen.getByRole('button', { name: /save/i }))
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(body).toEqual({ production_rates: { 'ci-mow': 13000 } })
+  })
+})
+
+// ── Source badges: inherited vs override ─────────────────────────────────────
+
+// These tests use the enriched branch GET which now returns materialFactors and
+// productionRates directly (each row carries a `source` field). The forms must
+// show the appropriate badge per row without hardcoding the source value.
+// ENRICHED_BRANCH and mockEnrichedBranch are defined near the top of the file
+// and shared across all describe blocks that need the enriched payload.
+
+describe('MaterialFactorsForm — source badges', () => {
+  it('shows an "override" badge for a material factor with source=override', async () => {
+    mockEnrichedBranch()
+    renderComp(<MaterialFactorsForm aspireBranchId={BRANCH_ID} />)
+    // Mulch has source: 'override' — find its badge.
+    const badge = await screen.findByTestId('source-badge-mulch')
+    expect(badge).toHaveTextContent(/branch override/i)
+  })
+
+  it('shows an "inherited" badge for a material factor with source=inherited', async () => {
+    mockEnrichedBranch()
+    renderComp(<MaterialFactorsForm aspireBranchId={BRANCH_ID} />)
+    const badge = await screen.findByTestId('source-badge-sod')
+    expect(badge).toHaveTextContent(/inherited/i)
+  })
+
+  it('still PATCHes correctly when editing an inherited factor (creates override)', async () => {
+    mockEnrichedBranch()
+    let body: Record<string, unknown> | null = null
+    server.use(
+      http.patch(`*/api/settings/branch/${BRANCH_ID}`, async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ aspireBranchId: BRANCH_ID, crewRateCentsPerHour: null })
+      }),
+    )
+    renderComp(<MaterialFactorsForm aspireBranchId={BRANCH_ID} />)
+    const rollSf = (await screen.findByLabelText(/sod.*rollSf|rollSf.*sod/i)) as HTMLInputElement
+    fireEvent.change(rollSf, { target: { value: '12' } })
+    fireEvent.click(screen.getByRole('button', { name: /save/i }))
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(body).toEqual({ material_factors: { sod: { rollSf: 12 } } })
+  })
+})
+
+describe('ProductionRatesForm — source badges', () => {
+  it('shows an "inherited" badge for a production rate with source=inherited', async () => {
+    mockEnrichedBranch()
+    renderComp(<ProductionRatesForm aspireBranchId={BRANCH_ID} />)
+    const badge = await screen.findByTestId('source-badge-ci-mow')
+    expect(badge).toHaveTextContent(/inherited/i)
+  })
+
+  it('still PATCHes correctly from the enriched branch response', async () => {
+    mockEnrichedBranch()
+    let body: Record<string, unknown> | null = null
+    server.use(
+      http.patch(`*/api/settings/branch/${BRANCH_ID}`, async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ aspireBranchId: BRANCH_ID, crewRateCentsPerHour: null })
+      }),
+    )
+    renderComp(<ProductionRatesForm aspireBranchId={BRANCH_ID} />)
+    const rate = (await screen.findByLabelText(/weekly mow/i)) as HTMLInputElement
     fireEvent.change(rate, { target: { value: '13000' } })
     fireEvent.click(screen.getByRole('button', { name: /save/i }))
     await waitFor(() => expect(body).not.toBeNull())

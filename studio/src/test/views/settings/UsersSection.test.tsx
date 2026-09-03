@@ -218,6 +218,61 @@ describe('UsersSection — authorize from M365 directory', () => {
   })
 })
 
+// ── Enriched fields: active flag + branches + aspireRepId ────────────────────
+
+describe('UsersSection — enriched backend fields', () => {
+  it('reads active state from the real `active` field (not inferred)', async () => {
+    // Omar has active: 0 — the row must show Inactive badge from that real flag.
+    renderSection()
+    await screen.findByText('Carla Reyes')
+    const omarRow = screen.getByTestId('user-row-u-omar')
+    expect(omarRow).toHaveTextContent(/inactive/i)
+    // Carla has active: 1 — no Inactive badge.
+    expect(screen.getByTestId('user-row-u-carla')).not.toHaveTextContent(/inactive/i)
+  })
+
+  it('seeds the branch editor from the user real `branches` array', async () => {
+    // Carla has branches: [101]. Opening the editor must pre-check branch 101
+    // (Naples) and leave 202 (Sarasota) unchecked.
+    renderSection()
+    await screen.findByText('Carla Reyes')
+    fireEvent.click(screen.getByRole('button', { name: /edit carla reyes/i }))
+    // Branch 101 checkbox must be checked (seeded from real branches).
+    const naplesCheck = screen.getByTestId('edit-branch-u-carla-101') as HTMLInputElement
+    expect(naplesCheck.checked).toBe(true)
+    // Branch 202 must not be checked.
+    const sarasotaCheck = screen.getByTestId('edit-branch-u-carla-202') as HTMLInputElement
+    expect(sarasotaCheck.checked).toBe(false)
+  })
+
+  it('shows the Aspire rep hint for a sales user with a null aspireRepId', async () => {
+    // Inject a sales user with no resolved rep id.
+    mockUsers([
+      {
+        id: 'u-sal',
+        name: 'Sal Unlinked',
+        email: 'sal@juniper.com',
+        role: 'sales',
+        active: 1,
+        aspire_rep_id: null,
+        branches: [],
+      },
+    ])
+    renderSection()
+    // Open the editor for Sal — the "no Aspire rep" hint must appear.
+    fireEvent.click(await screen.findByRole('button', { name: /edit sal unlinked/i }))
+    expect(screen.getByTestId('aspire-rep-hint-u-sal')).toBeInTheDocument()
+  })
+
+  it('does NOT show the Aspire rep hint for a sales user with a resolved aspireRepId', async () => {
+    // Carla has aspire_rep_id: 42 — no hint should appear.
+    renderSection()
+    await screen.findByText('Carla Reyes')
+    fireEvent.click(screen.getByRole('button', { name: /edit carla reyes/i }))
+    expect(screen.queryByTestId('aspire-rep-hint-u-carla')).not.toBeInTheDocument()
+  })
+})
+
 // ── Edit / activate-deactivate ───────────────────────────────────────────────
 
 describe('UsersSection — edit + deactivate', () => {

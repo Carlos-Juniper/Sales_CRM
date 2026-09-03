@@ -134,6 +134,17 @@ function UserRowEditor({
         />
       </div>
 
+      {/* For a sales user with no resolved Aspire rep, hint that the link is
+          needed before estimates push correctly to Aspire. */}
+      {role === 'sales' && user.aspire_rep_id == null && (
+        <p
+          data-testid={`aspire-rep-hint-${user.id}`}
+          className="text-xs text-amber-700"
+        >
+          No Aspire rep linked — use "Link Aspire Rep" to resolve.
+        </p>
+      )}
+
       <div className="flex gap-2">
         <button
           type="button"

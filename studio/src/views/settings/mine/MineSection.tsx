@@ -1,14 +1,10 @@
 import { ThemeSection } from './ThemeSection'
-import { SidebarSection } from './SidebarSection'
-import { QueueFiltersSection } from './QueueFiltersSection'
 import { ConnectionsSection } from './ConnectionsSection'
 
-type MineSectionSlug = 'theme' | 'sidebar' | 'queue-filters' | 'connections'
+type MineSectionSlug = 'theme' | 'connections'
 
 const MINE_SECTIONS: Record<MineSectionSlug, () => React.ReactElement> = {
   theme: ThemeSection,
-  sidebar: SidebarSection,
-  'queue-filters': QueueFiltersSection,
   connections: ConnectionsSection,
 }
 

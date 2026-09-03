@@ -80,8 +80,6 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     branchScoped: false,
     sections: [
       { slug: 'theme', label: 'Theme' },
-      { slug: 'sidebar', label: 'Sidebar' },
-      { slug: 'queue-filters', label: 'Queue filters' },
       { slug: 'connections', label: 'Connections' },
     ],
   },

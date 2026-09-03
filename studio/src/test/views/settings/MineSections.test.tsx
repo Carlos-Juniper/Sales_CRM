@@ -1,11 +1,9 @@
 // ---------------------------------------------------------------------------
 // Slice 12 — Mine settings sections + dead-route cleanup.
 //
-// mine group: theme / sidebar / queue-filters / connections
+// mine group: theme / connections
 //   - renders for any authed user (plain sales role)
 //   - theme: reads + writes uiStore.theme
-//   - sidebar: reads + writes uiStore.sidebarCollapsed
-//   - queue-filters: reads + resets leadsStore filters
 //   - connections: renders the M365 connections UI (absorbed from ConnectionsPage)
 //
 // Router:
@@ -32,7 +30,6 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { SettingsPage } from '@/views/settings/SettingsPage'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
-import { useLeadsStore } from '@/store/leadsStore'
 import { makeUser } from '@/test/utils'
 import type { UserRole } from '@/types'
 import type { LegacyUserRole } from '@/types'
@@ -89,13 +86,13 @@ describe('Mine group — visibility', () => {
     expect(await screen.findByTestId('settings-group-mine')).toBeInTheDocument()
   })
 
-  it('the Mine group has theme, sidebar, queue-filters, and connections nav items', async () => {
+  it('the Mine group has theme and connections nav items', async () => {
     renderSettings('sales', ['/settings/theme'])
     const mineGroup = await screen.findByTestId('settings-group-mine')
     expect(mineGroup).toHaveTextContent('Theme')
-    expect(mineGroup).toHaveTextContent('Sidebar')
-    expect(mineGroup).toHaveTextContent('Queue filters')
     expect(mineGroup).toHaveTextContent('Connections')
+    expect(mineGroup).not.toHaveTextContent('Sidebar')
+    expect(mineGroup).not.toHaveTextContent('Queue filters')
   })
 })
 
@@ -128,77 +125,6 @@ describe('Mine — theme section', () => {
     const select = screen.getByRole('combobox', { name: /theme/i }) as HTMLSelectElement
     fireEvent.change(select, { target: { value: 'dark' } })
     await waitFor(() => expect(useUIStore.getState().theme).toBe('dark'))
-  })
-})
-
-// ── Sidebar section ──────────────────────────────────────────────────────────
-
-describe('Mine — sidebar section', () => {
-  beforeEach(() => {
-    useAuthStore.setState({ user: makeUser({ role: 'sales' }) })
-    useUIStore.setState({ sidebarCollapsed: false })
-    mockBranches()
-  })
-
-  it('renders the sidebar section for /settings/sidebar', async () => {
-    renderSettings('sales', ['/settings/sidebar'])
-    expect(await screen.findByTestId('settings-section-sidebar')).toBeInTheDocument()
-  })
-
-  it('reflects the current sidebarCollapsed value from uiStore', async () => {
-    useUIStore.setState({ sidebarCollapsed: true })
-    renderSettings('sales', ['/settings/sidebar'])
-    await screen.findByTestId('settings-section-sidebar')
-    const checkbox = screen.getByRole('checkbox', { name: /collapse sidebar/i }) as HTMLInputElement
-    expect(checkbox.checked).toBe(true)
-  })
-
-  it('toggles sidebarCollapsed when the checkbox is clicked', async () => {
-    useUIStore.setState({ sidebarCollapsed: false })
-    renderSettings('sales', ['/settings/sidebar'])
-    await screen.findByTestId('settings-section-sidebar')
-    const checkbox = screen.getByRole('checkbox', { name: /collapse sidebar/i })
-    fireEvent.click(checkbox)
-    await waitFor(() => expect(useUIStore.getState().sidebarCollapsed).toBe(true))
-  })
-})
-
-// ── Queue-filters section ────────────────────────────────────────────────────
-
-describe('Mine — queue-filters section', () => {
-  beforeEach(() => {
-    useAuthStore.setState({ user: makeUser({ role: 'sales' }) })
-    useLeadsStore.setState({
-      filters: {
-        search: 'test-search',
-        leadTypes: [],
-        minScore: 50,
-        states: [],
-        assignedOnly: true,
-        unassignedOnly: false,
-      },
-    })
-    mockBranches()
-  })
-
-  it('renders the queue-filters section for /settings/queue-filters', async () => {
-    renderSettings('sales', ['/settings/queue-filters'])
-    expect(
-      await screen.findByTestId('settings-section-queue-filters'),
-    ).toBeInTheDocument()
-  })
-
-  it('shows a reset button and resets filters to defaults on click', async () => {
-    renderSettings('sales', ['/settings/queue-filters'])
-    await screen.findByTestId('settings-section-queue-filters')
-    const resetBtn = screen.getByRole('button', { name: /reset/i })
-    fireEvent.click(resetBtn)
-    await waitFor(() => {
-      const { filters } = useLeadsStore.getState()
-      expect(filters.search).toBe('')
-      expect(filters.minScore).toBe(0)
-      expect(filters.assignedOnly).toBe(false)
-    })
   })
 })
 

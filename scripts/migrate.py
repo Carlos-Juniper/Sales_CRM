@@ -405,6 +405,23 @@ def detect_020(conn) -> bool:
     return column_exists(conn, "estimates", "crew_rate_cents_per_hour")
 
 
+def detect_022(conn) -> bool:
+    """022 applied ↔ estimates.branch column is absent.
+
+    Keying on estimates.branch (the first DROP in the file) rather than
+    catalog_items.branch: if a partial run dropped estimates.branch only,
+    re-running will skip the already-applied DROP and execute the remaining
+    catalog_items DROP — but MySQL ALTER TABLE DROP COLUMN on a missing column
+    raises an error. In practice, both ALTERs are atomic statements and the
+    runner stops on any failure, so a partial apply is unlikely. The estimates
+    column is chosen because it is the primary motivation for the migration.
+
+    Note: detect_022 deliberately does NOT key on users.branch_id — that column
+    is deferred to a separate later migration (Handoff 38 Amendment B.3).
+    """
+    return not column_exists(conn, "estimates", "branch")
+
+
 # ── Migration 004 conditional execution ──────────────────────────────────────
 
 def _is_create_table_users(stmt: str) -> bool:
@@ -485,6 +502,7 @@ _DETECT: dict = {
     "013_section_services_discipline":           detect_013,
     "019_branch_model":                          detect_019,
     "020_settings_storage":                      detect_020,
+    "022_contract_drop_branch_columns":          detect_022,
 }
 
 

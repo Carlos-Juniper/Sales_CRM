@@ -248,10 +248,12 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         "name": r["name"],
         "aspireNumber": r["aspire_number"],
         "clientName": r["client_name"],
-        # Branch identity rides on the Aspire BranchID (int); the legacy
-        # `branch` city string is display-only until Slice 14 drops it.
+        # Branch identity rides on the Aspire BranchID (int).
+        # Slice 14: branchCity now comes from the LEFT JOIN to branches on
+        # aspire_branch_id (aliased as branch_city in _load_estimate's SELECT).
+        # NULL when aspire_branch_id is not set or matches no branches row.
         "aspireBranchId": r.get("aspire_branch_id"),
-        "branchCity": r["branch"],
+        "branchCity": r.get("branch_city"),
         # Frozen crew-rate snapshot (cents/hr) captured at submission (Slice 7);
         # NULL for in_progress / pre-migration rows. Slice 11b: the Margin
         # Analysis panel prices maintenance margin off THIS when present, so a
@@ -301,8 +303,20 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
 
 
 async def _load_estimate(estimate_id: str) -> Optional[dict]:
-    """Assemble the full estimate → sections → services → components tree."""
-    rows = await query("SELECT * FROM estimates WHERE id = %s", [estimate_id])
+    """Assemble the full estimate → sections → services → components tree.
+
+    Slice 14: LEFT JOIN to branches on aspire_branch_id so that branchCity is
+    sourced from the canonical branches table rather than the legacy estimates.branch
+    city string. The alias `branch_city` is consumed by _estimate_out. NULL when
+    aspire_branch_id is unset or no matching branches row exists (§2.3 no-fallback).
+    """
+    rows = await query(
+        "SELECT e.*, b.city AS branch_city "
+        "FROM estimates e "
+        "LEFT JOIN branches b ON b.aspire_branch_id = e.aspire_branch_id "
+        "WHERE e.id = %s",
+        [estimate_id],
+    )
     if not rows:
         return None
     est = rows[0]
@@ -1022,8 +1036,9 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
             estimate_id,
             body.get("name", ""),
             body.get("aspireNumber"),
-            # ITB project carries the display branch city (Slice 8: intake sends
-            # branchCity; legacy `branch` kept as a fallback for older callers).
+            # ITB project carries the display branch city.
+            # TODO(slice14-contract): after migration 022 is applied to live and
+            #   itb_projects.branch is also dropped (or nullable), remove this write.
             body.get("branchCity") or body.get("branch", ""),
             body.get("crmRep"),
             body.get("assignedLsEstimator"),
@@ -1052,6 +1067,9 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
 
 
 def _catalog_item_out(r: dict) -> dict:
+    # Slice 14: `branch` city string removed; identity carried by aspire_branch_id
+    # (NULL = company-wide per §2.3 convention). The legacy `branch` key is NOT
+    # passed through — once 022 is applied the column will not exist in the row.
     return {
         "id": r["id"],
         "description": r["description"],
@@ -1061,7 +1079,7 @@ def _catalog_item_out(r: dict) -> dict:
         "targetGm": _num(r["target_gm"]),
         "kitType": r["kit_type"],
         "productionRate": _num(r["production_rate"]),
-        "branch": r["branch"],
+        "aspireBranchId": r.get("aspire_branch_id"),
         "active": bool(r["active"]),
         "serviceType": r["service_type"],
     }
@@ -1184,7 +1202,9 @@ _UPDATABLE = {
     "name": "name",
     "aspireNumber": "aspire_number",
     "clientName": "client_name",
-    "branch": "branch",
+    # Slice 14: "branch" (legacy city string) removed from PATCH surface.
+    # No caller should send it; if they do it is silently ignored (the key
+    # simply won't appear in _UPDATABLE so no SET clause is generated for it).
     "customerType": "customer_type",
     "acreage": "acreage",
     "contractValueCents": "contract_value_cents",
@@ -1295,20 +1315,17 @@ def register(app, require_auth) -> None:
     async def list_estimates(
         estimate_type: Optional[str] = Query(default=None),
         status: Optional[str] = Query(default=None),
-        branch: Optional[str] = Query(default=None),
+        # Slice 14: the `branch` city-string convenience filter is removed.
+        # Cross-branch roles should pass aspireBranchId for narrower views once
+        # that query param is added (pending follow-up). Branch-scoped users are
+        # already filtered via aspire_branch_id from their user_branches rows.
         # Slice 4 (Handoff 37): filter by the lead that originated the estimate.
         # Uses estimates.lead_id (added in migration 010). Allows BidTab to fetch
-        # only the approved estimate for this lead without client-side filtering
-        # of the full list (§7). Note: estimates.branch is a territory string
-        # (e.g. "Fort Myers, FL") while leads.branch_id is the same vocabulary —
-        # they are independent of aspire_branch_id (Amendment A.1).
+        # only the approved estimate for this lead without client-side filtering.
         lead_id: Optional[str] = Query(default=None, alias="leadId"),
         _user: dict = Depends(require_auth),
     ) -> list:
-        # Branch scope is derived from the AUTHENTICATED user (BRD I-9.5)
-        # — the client `branch` param is never the authority. It
-        # survives only as an optional convenience filter for cross-branch
-        # (exec/admin) roles.
+        # Branch scope is derived from the AUTHENTICATED user (BRD I-9.5).
         scope = await authz.resolve_branch_scope(_user)
         if scope.kind == "none":
             return []
@@ -1326,11 +1343,6 @@ def register(app, require_auth) -> None:
             placeholders = ", ".join(["%s"] * len(scope.ids))
             conditions.append(f"aspire_branch_id IN ({placeholders})")
             params.extend(scope.ids)
-        elif branch:  # cross-branch role opting into a narrower view
-            # This convenience param is still the legacy territory string; the
-            # authoritative scoped path above filters on aspire_branch_id.
-            conditions.append("branch = %s")
-            params.append(branch)
         if lead_id:
             # Filter to estimates linked to the given lead (migration 010 column).
             conditions.append("lead_id = %s")
@@ -1348,19 +1360,18 @@ def register(app, require_auth) -> None:
         est_type = body.get("estimateType")
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
-        # Slice 8 cutover: branch identity rides on the Aspire BranchID (int),
-        # captured at intake from the selected branch. The legacy `branch` city
-        # column stays NOT NULL until Slice 14, so we resolve a display city from
-        # the id (mirroring GET /config/branches) and persist both.
+        # Branch identity rides on the Aspire BranchID (int), captured at intake.
+        # TODO(slice14-contract): once Carlos applies migration 022 to live, the
+        #   estimates.branch NOT NULL constraint is gone. Remove the branch_city
+        #   write from the INSERT below and drop this city-resolution block.
         aspire_branch_id = body.get("aspireBranchId")
         if not isinstance(aspire_branch_id, int) or isinstance(aspire_branch_id, bool):
             raise HTTPException(
                 status_code=400,
                 detail="aspireBranchId is required — select a branch from the intake form",
             )
-        # Prefer the client-supplied display city (resolved from the same option
-        # list the backend serves); fall back to a reverse lookup of the map so
-        # the NOT NULL `branch` column is never left empty.
+        # Resolve a display city from the id so the still-NOT-NULL estimates.branch
+        # column is never left empty (live DB has NOT NULL until 022 is applied).
         branch_city = (body.get("branchCity") or "").strip()
         if not branch_city:
             branch_city = next(
@@ -2529,7 +2540,8 @@ def register(app, require_auth) -> None:
 
     @app.get("/api/estimating/catalog-items")
     async def list_catalog_items(
-        branch: Optional[str] = Query(default=None),
+        # Slice 14: the `branch` city-string filter is removed; callers should
+        # filter by aspireBranchId (int) once that param is wired (follow-up).
         kit_type: Optional[str] = Query(default=None),
         active: Optional[str] = Query(default=None),
         _user: dict = Depends(require_auth),
@@ -2541,9 +2553,6 @@ def register(app, require_auth) -> None:
             )
         conditions: list[str] = []
         params: list[Any] = []
-        if branch:
-            conditions.append("branch = %s")
-            params.append(branch)
         if kit_type:
             conditions.append("kit_type = %s")
             params.append(kit_type)

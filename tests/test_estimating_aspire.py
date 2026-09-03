@@ -229,15 +229,19 @@ class TestCreateBranchIdentityContract:
         mock_exec.assert_not_awaited()
 
     def test_estimate_out_exposes_aspire_branch_id_and_branch_city(self):
+        # Slice 14: branchCity now sourced from the branches JOIN alias `branch_city`,
+        # not from the legacy estimates.branch column.
         out = est._estimate_out(
-            {**_est_row(aspire_branch_id=3668, branch="Orlando, FL"),
+            {**_est_row(aspire_branch_id=3668),
              "aspire_number": None, "client_name": "HOA", "acreage": None,
              "contract_value_cents": 0, "target_margin": 0.22, "lifecycle": "bidding",
              "aspire_owner": "estimating", "priority": "medium", "win_probability": 0.2,
              "site_walk_date": None, "due_back_date": None, "anticipated_close_date": None,
              "service_start_date": None, "assigned_ls_estimator": None,
              "assigned_irr_estimator": None, "crm_rep": None, "notify_bm_rd_on_return": None,
-             "created_at": None, "updated_at": None},
+             "created_at": None, "updated_at": None,
+             # The JOIN result supplies branchCity now (not estimates.branch)
+             "branch_city": "Orlando, FL"},
             sections=[],
         )
         assert out["aspireBranchId"] == 3668
@@ -247,14 +251,14 @@ class TestCreateBranchIdentityContract:
         # Slice 11b: the frozen crew-rate snapshot (estimates.crew_rate_cents_per_hour)
         # must reach the client so the Margin Analysis panel prices maintenance
         # margin off the value frozen at submission — never a live re-read.
-        base = {**_est_row(aspire_branch_id=3668, branch="Orlando, FL"),
+        base = {**_est_row(aspire_branch_id=3668),
                 "aspire_number": None, "client_name": "HOA", "acreage": None,
                 "contract_value_cents": 0, "target_margin": 0.22, "lifecycle": "bidding",
                 "aspire_owner": "estimating", "priority": "medium", "win_probability": 0.2,
                 "site_walk_date": None, "due_back_date": None, "anticipated_close_date": None,
                 "service_start_date": None, "assigned_ls_estimator": None,
                 "assigned_irr_estimator": None, "crm_rep": None, "notify_bm_rd_on_return": None,
-                "created_at": None, "updated_at": None}
+                "created_at": None, "updated_at": None, "branch_city": "Orlando, FL"}
         frozen = est._estimate_out({**base, "crew_rate_cents_per_hour": 19500}, sections=[])
         assert frozen["crewRateCentsPerHour"] == 19500
         # An estimate with no snapshot (in_progress / pre-migration) hands back null,
@@ -458,3 +462,119 @@ class TestSweep:
         await est.sweep_once()
         mock_new.assert_awaited_once()          # est-1 not yet synced
         mock_status.assert_awaited_once()       # est-2 terminal, already has opp id
+
+
+# ── Slice 14: cut readers off legacy branch columns ───────────────────────────
+
+def _est_row_full(**over) -> dict:
+    """Full estimate DB row for _estimate_out tests (all columns present).
+
+    Mirrors the shape returned by _load_estimate's SELECT e.*, b.city AS branch_city
+    query after Slice 14: no `branch` key, `branch_city` from the branches JOIN.
+    """
+    base = {
+        "id": "est-1", "estimate_type": "maintenance", "name": "Sunny HOA",
+        "aspire_number": None, "client_name": "HOA", "customer_type": "hoa",
+        "acreage": None, "contract_value_cents": 0, "target_margin": 0.22,
+        "status": "new_from_sales", "lifecycle": "bidding",
+        "aspire_owner": "estimating", "priority": "medium", "win_probability": 0.2,
+        "site_walk_date": None, "due_back_date": None, "anticipated_close_date": None,
+        "service_start_date": None, "assigned_ls_estimator": None,
+        "assigned_irr_estimator": None, "crm_rep": None, "notify_bm_rd_on_return": None,
+        "created_at": None, "updated_at": None,
+        # Slice 8 identity columns
+        "aspire_branch_id": 3668,
+        # Slice 14: the branches JOIN result supplies city; `branch` column absent
+        "branch_city": "Orlando, FL",
+    }
+    base.update(over)
+    return base
+
+
+class TestSlice14BranchCutover:
+    """Slice 14: _estimate_out / _catalog_item_out no longer read estimates.branch
+    or catalog_items.branch; branchCity comes from the branches JOIN alias."""
+
+    # ── _estimate_out: branchCity from JOIN, not estimates.branch ────────────
+
+    def test_estimate_out_branch_city_from_join_alias(self):
+        """branchCity is sourced from 'branch_city' (branches JOIN alias), not 'branch'."""
+        row = _est_row_full(branch_city="Fort Myers, FL")
+        out = est._estimate_out(row, sections=[])
+        assert out["branchCity"] == "Fort Myers, FL"
+
+    def test_estimate_out_branch_city_null_when_no_join_match(self):
+        """When the branches JOIN yields no row (NULL aspire_branch_id), branchCity is null."""
+        row = _est_row_full(branch_city=None, aspire_branch_id=None)
+        out = est._estimate_out(row, sections=[])
+        assert out["branchCity"] is None
+
+    def test_estimate_out_does_not_raise_if_branch_column_absent(self):
+        """_estimate_out must not KeyError if the legacy 'branch' column is missing
+        (i.e. after migration 022 drops it from estimates)."""
+        row = _est_row_full()
+        # Explicitly confirm 'branch' key is NOT in the row
+        assert "branch" not in row
+        # Must not raise
+        out = est._estimate_out(row, sections=[])
+        assert "branchCity" in out
+
+    def test_estimate_out_aspire_branch_id_still_present(self):
+        """aspireBranchId is still sourced from estimates.aspire_branch_id (unchanged)."""
+        row = _est_row_full(aspire_branch_id=3668)
+        out = est._estimate_out(row, sections=[])
+        assert out["aspireBranchId"] == 3668
+
+    # ── _catalog_item_out: branch field dropped ───────────────────────────────
+
+    def test_catalog_item_out_no_longer_exposes_branch_string(self):
+        """After Slice 14, _catalog_item_out does not include the legacy 'branch' city string.
+        Identity is carried by aspire_branch_id (NULL = company-wide per §2.3)."""
+        row = {
+            "id": "kit-1", "description": "Tree Trimming", "uom": "EA",
+            "unit_cost_cents": 5000, "unit_sell_cents": 8000,
+            "target_gm": 0.37, "kit_type": "install_quantity",
+            "production_rate": None, "active": 1, "service_type": "Install",
+            "aspire_branch_id": 3668,
+            # 'branch' intentionally absent — post-022 schema
+        }
+        out = est._catalog_item_out(row)
+        assert "branch" not in out
+        assert out["aspireBranchId"] == 3668
+
+    def test_catalog_item_out_null_aspire_branch_id_is_company_wide(self):
+        """aspire_branch_id=NULL in the output means company-wide (§2.3 convention)."""
+        row = {
+            "id": "kit-2", "description": "Mow Trim", "uom": "SQ",
+            "unit_cost_cents": 100, "unit_sell_cents": 200,
+            "target_gm": 0.50, "kit_type": "maintenance_hours",
+            "production_rate": 0.5, "active": 1, "service_type": "Maintenance",
+            "aspire_branch_id": None,
+        }
+        out = est._catalog_item_out(row)
+        assert out["aspireBranchId"] is None
+
+    # ── create_estimate: branch write preserved (NOT NULL until 022 applied) ──
+
+    @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
+    @patch("api.estimating._load_estimate", new_callable=AsyncMock)
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_create_estimate_still_writes_branch_column(
+        self, mock_query, mock_exec, mock_load, mock_bg, authed
+    ):
+        """create_estimate must keep writing estimates.branch until Carlos applies 022
+        (the column is still NOT NULL on live). The write should be present in the INSERT."""
+        mock_query.return_value = []  # itb_scopes
+        mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
+        resp = client.post("/api/estimating/estimates", json={
+            "estimateType": "maintenance", "name": "Test", "clientName": "HOA",
+            "aspireBranchId": 3668, "branchCity": "Orlando, FL",
+        })
+        assert resp.status_code == 201, resp.text
+        insert_sql, insert_params = mock_exec.call_args_list[0].args
+        # `branch` column still in INSERT to satisfy the live NOT NULL constraint
+        assert "branch" in insert_sql
+        # and the resolved city value is non-empty
+        city_val = next((p for p in insert_params if p == "Orlando, FL"), None)
+        assert city_val is not None, "branch city must be written to the INSERT params"

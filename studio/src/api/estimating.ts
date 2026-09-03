@@ -68,7 +68,10 @@ export type UpdateEstimatePayload = Partial<{
   name: string
   aspireNumber: string | null
   clientName: string
-  branch: string
+  /** Aspire BranchID (identity). */
+  aspireBranchId: number | null
+  /** Display city label mirroring the legacy `estimates.branch` column. */
+  branchCity: string | null
   customerType: Estimate['customerType']
   acreage: number | null
   contractValueCents: number
@@ -184,6 +187,12 @@ export interface ListEstimatesParams {
    * as an optional narrowing filter for cross-branch (admin/VP/CEO) roles.
    */
   branch?: string
+  /**
+   * Filter to estimates belonging to a specific lead (Handoff 37 §7).
+   * Added to avoid client-side filtering of the full list when BidTab needs
+   * only the approved estimate for a given lead.
+   */
+  leadId?: string
 }
 
 /** Runtime guard backing the compile-time omission of `estimateType`. */
@@ -199,6 +208,8 @@ export const estimatingApi = {
     if (params?.estimateType) qs.set('estimate_type', params.estimateType)
     if (params?.status) qs.set('status', params.status)
     if (params?.branch) qs.set('branch', params.branch)
+    // Handoff 37 §7: backend added leadId filter in Slice 4 (api/estimating.py list_estimates)
+    if (params?.leadId) qs.set('leadId', params.leadId)
     const q = qs.toString()
     return apiClient.get<Estimate[]>(`/estimating/estimates${q ? `?${q}` : ''}`)
   },

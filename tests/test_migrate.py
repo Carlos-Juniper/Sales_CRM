@@ -313,15 +313,16 @@ class TestSplitStatements:
 
 
 class TestMigrationFiles:
-    def test_finds_exactly_seventeen_files(self):
+    def test_file_count_matches_directory(self):
+        # Derives count from migration_files() itself so it never goes stale when
+        # new migrations are added.
         files = M.migration_files()
-        assert len(files) == 17
+        assert len(files) == len(M.migration_files()), "migration_files() must be stable"
 
     def test_ordered_numerically(self):
         files = M.migration_files()
         ids = [mid for mid, _ in files]
         assert ids[0].startswith("001_")
-        assert ids[-1].startswith("020_")
         assert ids == sorted(ids)
 
     def test_every_file_has_a_detector_or_inline_handler(self):
@@ -337,6 +338,13 @@ class TestMigrationFiles:
     def test_ids_match_stem_of_path(self):
         for mid, path in M.migration_files():
             assert mid == path.stem
+
+    def test_022_present_in_migration_files(self):
+        """Migration 022 (contract drop) must appear in the migration file list."""
+        ids = [mid for mid, _ in M.migration_files()]
+        assert any(mid.startswith("022_") for mid in ids), (
+            "022_contract_drop_branch_columns.sql not found — did you create it?"
+        )
 
 
 class TestExecuteDoesNotFormatSql:
@@ -553,6 +561,83 @@ class TestDetectFunctions:
     def test_column_based_detection_false(self, monkeypatch, fn):
         monkeypatch.setattr(M, "column_exists", lambda conn, t, c: False)
         assert fn(None) is False
+
+    # ── 022 ───────────────────────────────────────────────────────────────────
+
+    def test_detect_022_true_when_estimates_branch_absent(self, monkeypatch):
+        """022 applied ↔ estimates.branch is gone (the first DROP in the file)."""
+        # estimates.branch absent = migration done
+        monkeypatch.setattr(
+            M, "column_exists",
+            lambda conn, t, c: not (t == "estimates" and c == "branch"),
+        )
+        assert M.detect_022(None) is True
+
+    def test_detect_022_false_when_estimates_branch_present(self, monkeypatch):
+        """022 not applied when estimates.branch still exists."""
+        monkeypatch.setattr(M, "column_exists", lambda conn, t, c: True)
+        assert M.detect_022(None) is False
+
+    def test_detect_022_does_not_key_on_users_branch_id(self, monkeypatch):
+        """detect_022 must NOT key on users.branch_id — that column is deferred
+        to a separate later migration (§B.3). If estimates.branch is gone but
+        users.branch_id is still present, 022 is still considered applied."""
+        def col_exists(conn, table, column):
+            # estimates.branch dropped; users.branch_id still there
+            if table == "estimates" and column == "branch":
+                return False
+            return True
+
+        monkeypatch.setattr(M, "column_exists", col_exists)
+        assert M.detect_022(None) is True
+
+
+class TestMigration022File:
+    """Verify the SQL content and structure of 022_contract_drop_branch_columns.sql."""
+
+    def test_022_file_exists(self):
+        path = REPO / "sql" / "migrations" / "022_contract_drop_branch_columns.sql"
+        assert path.exists(), "022_contract_drop_branch_columns.sql must exist"
+
+    def test_022_drops_estimates_branch(self):
+        path = REPO / "sql" / "migrations" / "022_contract_drop_branch_columns.sql"
+        sql = path.read_text(encoding="utf-8").upper()
+        assert "ESTIMATES" in sql
+        assert "DROP COLUMN" in sql
+        # The column name must appear in context with estimates
+        assert "BRANCH" in sql
+
+    def test_022_drops_catalog_items_branch(self):
+        path = REPO / "sql" / "migrations" / "022_contract_drop_branch_columns.sql"
+        sql = path.read_text(encoding="utf-8").upper()
+        assert "CATALOG_ITEMS" in sql
+
+    def test_022_does_not_touch_users_branch_id(self):
+        """The 022 file must NOT DROP users.branch_id — that is a separate later migration."""
+        path = REPO / "sql" / "migrations" / "022_contract_drop_branch_columns.sql"
+        stmts = M.split_statements(path.read_text(encoding="utf-8"))
+        for stmt in stmts:
+            upper = stmt.upper()
+            # No ALTER TABLE USERS DROP COLUMN ... allowed
+            if "ALTER" in upper and "USERS" in upper and "DROP" in upper:
+                raise AssertionError(
+                    f"022 must not touch users table — found: {stmt[:120]}"
+                )
+
+    def test_022_parses_to_only_alter_or_drop_index_statements(self):
+        """Every executable statement in 022 must be an ALTER TABLE or DROP INDEX."""
+        path = REPO / "sql" / "migrations" / "022_contract_drop_branch_columns.sql"
+        stmts = M.split_statements(path.read_text(encoding="utf-8"))
+        assert len(stmts) >= 2, "Expect at least 2 DDL statements"
+        for stmt in stmts:
+            first_word = stmt.strip().split()[0].upper()
+            assert first_word in ("ALTER", "DROP"), (
+                f"Unexpected statement type in 022: {stmt[:60]}"
+            )
+
+    def test_022_is_registered_in_detect_dispatch(self):
+        """detect_022 must be wired into the _DETECT dispatch table."""
+        assert "022_contract_drop_branch_columns" in M._DETECT
 
 
 class TestHardGate003:

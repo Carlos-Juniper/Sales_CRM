@@ -90,7 +90,7 @@ function seedScopedList(estimates: Estimate[], serverScope?: string) {
       const url = new URL(request.url)
       requests.push(url)
       return HttpResponse.json(
-        serverScope ? estimates.filter((e) => e.branch === serverScope) : estimates,
+        serverScope ? estimates.filter((e) => e.branchCity === serverScope) : estimates,
       )
     }),
   )
@@ -378,7 +378,7 @@ describe('EstimateQueue — role & branch scoping (BRD I-9.5)', () => {
   it('renders only what the server-scoped query returns', async () => {
     const outOfScope = buildInstallEstimate({
       name: 'Echo Raleigh Campus',
-      branch: 'Raleigh',
+      branchCity: 'Raleigh',
     })
     renderQueue({
       estimates: [...fixtures(), outOfScope],

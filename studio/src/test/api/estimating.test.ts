@@ -38,9 +38,9 @@ describe('fixture builders', () => {
   })
 
   it('applies overrides', () => {
-    const est = buildMaintenanceEstimate({ name: 'Override Test', branch: 'Raleigh' })
+    const est = buildMaintenanceEstimate({ name: 'Override Test', branchCity: 'Raleigh' })
     expect(est.name).toBe('Override Test')
-    expect(est.branch).toBe('Raleigh')
+    expect(est.branchCity).toBe('Raleigh')
   })
 })
 

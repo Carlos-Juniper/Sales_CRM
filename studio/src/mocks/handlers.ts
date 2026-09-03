@@ -153,7 +153,7 @@ function itbProjectForEstimate(e: Estimate): MockItbProject {
     estimateId: e.id,
     name: e.name,
     aspireNumber: e.aspireNumber ?? null,
-    branch: e.branch,
+    branch: e.branchCity ?? '',
     salesRep: e.crmRep ?? null,
     lsEstimator: e.assignedLsEstimator ?? null,
     irrEstimator: e.assignedIrrEstimator ?? null,
@@ -375,6 +375,17 @@ const allHandlers = [
     return HttpResponse.json(mockConnections)
   }),
 
+  // GET /api/settings/branches — the Settings branch-picker source (Slice 9).
+  // Scope + roster filtering is server-side; this mock returns two operating
+  // branches sorted by name. Tests override with server.use() as needed.
+  http.get(`${API}/settings/branches`, async () => {
+    await delay(50)
+    return HttpResponse.json([
+      { aspireBranchId: 1403, branchName: 'Bonita Springs', city: 'Bonita Springs' },
+      { aspireBranchId: 3696, branchName: 'Fort Myers', city: 'Fort Myers' },
+    ])
+  }),
+
   // ---------------------------------------------------------------------
   // Estimating config read APIs — read-only; the seeded config
   // tables mirrored here. Tests override with server.use() to simulate DB
@@ -496,10 +507,12 @@ const allHandlers = [
     const status = url.searchParams.get('status')
     // Row-level branch scope (BRD I-9.5) — enforced server-side in production.
     const branch = url.searchParams.get('branch')
+    const leadId = url.searchParams.get('leadId')
     let filtered = [...estimates]
     if (estimateType) filtered = filtered.filter((e) => e.estimateType === estimateType)
     if (status) filtered = filtered.filter((e) => e.status === status)
-    if (branch) filtered = filtered.filter((e) => e.branch === branch)
+    if (branch) filtered = filtered.filter((e) => e.branchCity === branch)
+    if (leadId) filtered = filtered.filter((e) => e.leadId === leadId)
     return HttpResponse.json(filtered)
   }),
 

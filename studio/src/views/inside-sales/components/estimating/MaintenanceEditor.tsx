@@ -225,7 +225,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
           </div>
           <p className="mt-1 text-xs text-[hsl(var(--muted-fg))]">
             ≈ {acresFromSqft(totalSqft).toFixed(1)} ac · {formatCents(contractCents)} ·{' '}
-            <span className="font-medium text-[hsl(var(--fg))]">{draft.branch}</span>{' '}
+            <span className="font-medium text-[hsl(var(--fg))]">{draft.branchCity}</span>{' '}
             · Target margin {Math.round(draft.targetMargin * 100)}%
           </p>
         </div>

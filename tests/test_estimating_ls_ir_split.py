@@ -52,7 +52,7 @@ def _itb_insert_params(mock_exec) -> tuple:
 def _create_body(**over) -> dict:
     body = {
         "estimateType": "install", "name": "X", "clientName": "Y",
-        "branch": "Orlando", "contractValueCents": 100000,
+        "aspireBranchId": 3579, "branchCity": "Orlando, FL", "contractValueCents": 100000,
     }
     body.update(over)
     return body
@@ -284,7 +284,7 @@ class TestRecomputeEndToEnd:
     def test_split_updates_as_lines_are_added_after_real_intake(self, estimator, db):
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield", "clientName": "LLC",
-            "branch": "Orlando, FL", "contractValueCents": 100000,
+            "aspireBranchId": 3579, "branchCity": "Orlando, FL", "contractValueCents": 100000,
             "dueBackDate": "2026-09-30", "sections": [],  # real intake shape
         })
         assert resp.status_code == 201
@@ -326,7 +326,7 @@ class TestRecomputeEndToEnd:
         landscape-classified lines directly, so it can never be negative."""
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield", "clientName": "LLC",
-            "branch": "Orlando, FL", "contractValueCents": 100000,
+            "aspireBranchId": 3579, "branchCity": "Orlando, FL", "contractValueCents": 100000,
             "dueBackDate": "2026-09-30", "sections": [],
         })
         estimate_id = resp.json()["id"]

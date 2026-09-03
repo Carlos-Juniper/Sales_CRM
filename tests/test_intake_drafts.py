@@ -215,7 +215,7 @@ class TestRfiStatusFirstClass:
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield", "clientName": "LLC",
-            "branch": "Orlando, FL",
+            "aspireBranchId": 3579, "branchCity": "Orlando, FL",
             "rfiStatus": "Awaiting GC response on storm drain details",
         })
         assert resp.status_code == 201

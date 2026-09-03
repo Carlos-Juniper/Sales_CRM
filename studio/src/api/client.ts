@@ -13,12 +13,13 @@ class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, skipContentType = false): Promise<T> {
+  const defaultHeaders: HeadersInit = skipContentType ? {} : { 'Content-Type': 'application/json' }
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      ...defaultHeaders,
       ...options.headers,
     },
   })
@@ -43,6 +44,12 @@ export const apiClient = {
   post: <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
   patch: <T>(path: string, body: unknown) => request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /**
+   * Multipart form-data POST. Omits Content-Type so the browser sets the
+   * multipart boundary automatically when body is a FormData instance.
+   */
+  postForm: <T>(path: string, form: FormData) =>
+    request<T>(path, { method: 'POST', body: form }, /* skipContentType */ true),
 }
 
 export { ApiError }

@@ -1,0 +1,827 @@
+/* ---------------------------------------------------------------------------
+   Proposal print stylesheet — Handoff 40
+
+   Imported by ProposalPreview.tsx so Vite bundles and fingerprints it. Every
+   rule here must resolve same-origin: the headless renderer (api/proposal_render.py)
+   loads the print route with no network egress, so a cross-origin font or image
+   request would hang the readiness gate and 503 the render.
+
+   Tokens live under .proposal-root, NOT in index.css's @theme block. @theme is
+   app-wide — putting --jn-green there would restyle the whole CRM.
+   --------------------------------------------------------------------------- */
+
+/* --- Brand faces -----------------------------------------------------------
+   Lato, Open Sans and Mrs Saint Delafield are the faces embedded in the real
+   Proposify exports (extracted from "business docs/Coral Bay HOA.pdf"). All
+   three are Google Fonts under OFL/Apache, so server-side embedding is clear.
+
+   latin subset only (U+0000-00FF covers the accented characters in client and
+   signer names). Glyphs outside it fall back to fonts-liberation /
+   fonts-dejavu-core, installed in the render image for exactly this reason.
+
+   font-display: block, never swap — a swap-driven FOUT can be captured
+   mid-render and ship a PDF in the fallback face.
+   --------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Lato';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('/fonts/lato-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Lato';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url('/fonts/lato-700.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('/fonts/opensans-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url('/fonts/opensans-700.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Mrs Saint Delafield';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('/fonts/mrs-saint-delafield-400.woff2') format('woff2');
+}
+
+/* --- Tokens ---------------------------------------------------------------
+   Colours sampled from the live Proposify exports and independently confirmed
+   by the fills in the supplied brand vectors.
+   --------------------------------------------------------------------------- */
+
+.proposal-root {
+  --jn-display: 'Lato', 'Liberation Sans', Arial, sans-serif;
+  --jn-body: 'Open Sans', 'Liberation Sans', Arial, sans-serif;
+  --jn-script: 'Mrs Saint Delafield', cursive;
+
+  --jn-green: #038442;
+  --jn-green-dark: #026634;
+  --jn-orange: #e87825;
+  --jn-ink: #2a2a2a;
+  --jn-ink-soft: #4a4a4a;
+  --jn-band: #f0f0f0;
+  --jn-hairline: #d8d8d8;
+
+  --jn-page-w: 8.5in;
+  --jn-page-h: 11in;
+  --jn-gutter: 0.58in;
+  --jn-top: 0.52in;
+  --jn-footer-h: 0.34in;
+
+  font-family: var(--jn-body);
+  color: var(--jn-ink);
+}
+
+.proposal-root h1,
+.proposal-root h2,
+.proposal-root h3,
+.proposal-root h4 {
+  font-family: var(--jn-display);
+}
+
+/* --- Page geometry ---------------------------------------------------------
+   US Letter, and margin:0 is load-bearing. The real proposals bleed photography
+   and the green footer bar to the paper edge, which a non-zero @page margin
+   makes impossible. The margins become padding on .well instead.
+
+   Consequence, and the reason api/proposal_render.py sets
+   display_header_footer=False: Chromium renders header/footer templates *into
+   the page margin box*. Zero margin means zero box, so those templates clip to
+   nothing. The footer below is in the document body instead — which is also the
+   only way to put a logo and a coloured bar in it.
+
+   Unconditional, not inside @media print: the on-screen preview is supposed to
+   be the PDF. Fixed height plus overflow:hidden means content that would spill
+   in the PDF visibly spills in the preview, rather than surprising a rep after
+   they hit Generate.
+   --------------------------------------------------------------------------- */
+
+@page {
+  size: letter;
+  margin: 0;
+}
+
+.proposal-root .print-page {
+  position: relative;
+  box-sizing: border-box;
+  width: var(--jn-page-w);
+  height: var(--jn-page-h);
+  overflow: hidden;
+  background: #fff;
+  page-break-after: always;
+  break-after: page;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.proposal-root .print-page:last-child {
+  page-break-after: auto;
+  break-after: auto;
+}
+
+/* Content well — everything that is not full-bleed lives in here. Bottom
+   padding clears the footer bar, which is positioned over the page. */
+.proposal-root .well {
+  position: relative;
+  z-index: 2;
+  padding: var(--jn-top) var(--jn-gutter) calc(var(--jn-footer-h) + 0.18in);
+  height: 100%;
+}
+
+/* Escapes the well's horizontal padding to reach the paper edge. */
+.proposal-root .bleed {
+  margin-left: calc(-1 * var(--jn-gutter));
+  margin-right: calc(-1 * var(--jn-gutter));
+}
+
+/* --- Footer bar ----------------------------------------------------------- */
+
+.proposal-root .footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--jn-footer-h);
+  background: var(--jn-green);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--jn-gutter);
+  z-index: 5;
+}
+
+.proposal-root .footer .mark {
+  width: 0.62in;
+  height: 0.2in;
+}
+
+.proposal-root .footer .meta {
+  font-family: var(--jn-display);
+  color: #fff;
+  font-size: 7pt;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* --- Palm-frond watermark --------------------------------------------------
+   A very low-contrast frond texture sits behind most pages in the real
+   proposals. Inline SVG data-URL, not a file: the render captures as soon as
+   __PROPOSAL_READY__ flips and a background-image fetch is not something the
+   readiness gate can await.
+   --------------------------------------------------------------------------- */
+
+.proposal-root .print-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='420' height='420' viewBox='0 0 420 420'><g fill='none' stroke='%23000' stroke-opacity='.035' stroke-width='1.1'><path d='M210 420 C 210 300 210 190 210 40'/><path d='M210 330 C 150 300 110 250 90 190'/><path d='M210 330 C 270 300 310 250 330 190'/><path d='M210 280 C 160 250 130 205 115 155'/><path d='M210 280 C 260 250 290 205 305 155'/><path d='M210 230 C 172 205 148 168 138 128'/><path d='M210 230 C 248 205 272 168 282 128'/><path d='M210 180 C 182 160 165 130 158 100'/><path d='M210 180 C 238 160 255 130 262 100'/><path d='M210 130 C 192 116 182 96 178 76'/><path d='M210 130 C 228 116 238 96 242 76'/></g></svg>");
+  background-size: 420px 420px;
+}
+
+.proposal-root .print-page.no-frond::before {
+  display: none;
+}
+
+/* --- Type scale ------------------------------------------------------------ */
+
+.proposal-root .eyebrow {
+  font-family: var(--jn-display);
+  color: var(--jn-orange);
+  font-size: 7.6pt;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0 0 0.04in;
+}
+
+.proposal-root .eyebrow.green {
+  color: var(--jn-green);
+}
+
+.proposal-root .page-title {
+  font-family: var(--jn-display);
+  color: var(--jn-green);
+  font-size: 30pt;
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.005em;
+  margin: 0 0 0.14in;
+}
+
+.proposal-root .page-title.caps {
+  text-transform: uppercase;
+}
+
+.proposal-root .page-title.sm {
+  font-size: 24pt;
+}
+
+.proposal-root .sub {
+  font-family: var(--jn-display);
+  color: var(--jn-green);
+  font-size: 14pt;
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0.18in 0 0.06in;
+}
+
+.proposal-root .kicker {
+  font-family: var(--jn-display);
+  color: var(--jn-orange);
+  font-size: 9.5pt;
+  font-weight: 700;
+  margin: 0.14in 0 0.05in;
+}
+
+.proposal-root p,
+.proposal-root li {
+  font-size: 8.8pt;
+  line-height: 1.52;
+  color: var(--jn-ink-soft);
+  margin: 0 0 0.08in;
+}
+
+.proposal-root .lede {
+  font-size: 9.4pt;
+  color: var(--jn-ink);
+  max-width: 6.6in;
+}
+
+/* --- Lists ----------------------------------------------------------------- */
+
+.proposal-root ul.leaf {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.proposal-root ul.leaf > li {
+  position: relative;
+  padding-left: 0.24in;
+  margin-bottom: 0.055in;
+}
+
+.proposal-root ul.leaf > li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.045in;
+  width: 0.13in;
+  height: 0.13in;
+  background: var(--jn-orange);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M22 3C12 3 4 8 4 16v5h3v-4c0-6 6-10 15-10-5 1-9 4-11 8 6 1 11-3 11-12z'/></svg>")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M22 3C12 3 4 8 4 16v5h3v-4c0-6 6-10 15-10-5 1-9 4-11 8 6 1 11-3 11-12z'/></svg>")
+    center / contain no-repeat;
+}
+
+.proposal-root ul.dot {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.proposal-root ul.dot > li {
+  position: relative;
+  padding-left: 0.2in;
+  margin-bottom: 0.06in;
+}
+
+.proposal-root ul.dot > li::before {
+  content: '';
+  position: absolute;
+  left: 0.04in;
+  top: 0.075in;
+  width: 0.05in;
+  height: 0.05in;
+  border-radius: 50%;
+  background: var(--jn-orange);
+}
+
+/* --- Layout helpers -------------------------------------------------------- */
+
+.proposal-root .cols-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.34in;
+}
+
+.proposal-root .cols-2.narrow-left {
+  grid-template-columns: 0.85fr 1fr;
+}
+
+.proposal-root .cols-2.wide-left {
+  grid-template-columns: 1.9fr 1.1fr;
+  gap: 0.3in;
+  margin-top: 0.24in;
+}
+
+.proposal-root .cols-2.branch-cols {
+  grid-template-columns: 1.15fr 1fr;
+  align-items: start;
+}
+
+/* Page header with the leaf mark set opposite the title. */
+.proposal-root .page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.proposal-root .head-leaves {
+  width: 1.15in;
+  height: 0.62in;
+  margin-top: 0.05in;
+  flex: none;
+}
+
+/* Edge-to-edge grey section band.
+   Combine with .bleed ONLY when the band sits in normal flow inside the well. A
+   band that is absolutely positioned with left:0/right:0 is already edge to
+   edge; adding .bleed on top double-offsets it and pushes content off the left
+   edge of the sheet. */
+.proposal-root .band {
+  background: var(--jn-band);
+  padding: 0.34in var(--jn-gutter) 0.38in;
+}
+
+/* --- Photos ---------------------------------------------------------------- */
+
+.proposal-root .photo {
+  background: repeating-linear-gradient(135deg, #dde5dd 0 10px, #d5ded5 10px 20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a998a;
+  font-size: 7pt;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  overflow: hidden;
+}
+
+.proposal-root .collage {
+  display: grid;
+  gap: 3px;
+}
+
+.proposal-root .capbar {
+  background: var(--jn-green);
+  color: #fff;
+  font-size: 8pt;
+  text-align: center;
+  padding: 0.05in 0;
+}
+
+.proposal-root .capbar.orange {
+  background: var(--jn-orange);
+}
+
+/* --- 30-60-90 schedule cards ----------------------------------------------- */
+
+.proposal-root .sched {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.26in;
+  position: relative;
+}
+
+.proposal-root .sched-head {
+  border: 1.5px solid var(--jn-orange);
+  color: var(--jn-orange);
+  font-family: var(--jn-display);
+  font-size: 8.6pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 0.1in 0.06in;
+  background: #fff;
+  line-height: 1.25;
+}
+
+.proposal-root .sched-body {
+  background: var(--jn-green);
+  color: #fff;
+  text-align: center;
+  padding: 0.17in 0.1in;
+  font-size: 9pt;
+  line-height: 1.45;
+  margin-top: 0.09in;
+}
+
+.proposal-root .sched-rule {
+  position: absolute;
+  top: 0.155in;
+  left: 12%;
+  right: 12%;
+  height: 1.5px;
+  background: var(--jn-orange);
+  z-index: -1;
+}
+
+/* --- Org chart ------------------------------------------------------------- */
+
+.proposal-root .org-node {
+  border: 1.5px solid var(--jn-green);
+  border-radius: 3px;
+  padding: 0.12in 0.1in;
+  text-align: center;
+  background: #fff;
+}
+
+.proposal-root .org-node .t {
+  font-family: var(--jn-display);
+  font-size: 7.4pt;
+  color: var(--jn-orange);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.proposal-root .org-node .n {
+  font-family: var(--jn-display);
+  font-size: 10.5pt;
+  font-weight: 700;
+  color: var(--jn-green);
+}
+
+.proposal-root .org-node.filled {
+  background: var(--jn-green);
+  border-color: var(--jn-green);
+}
+
+.proposal-root .org-node.filled .t {
+  color: #ffd9bc;
+}
+
+.proposal-root .org-node.filled .n {
+  color: #fff;
+}
+
+.proposal-root .org-row {
+  display: grid;
+  gap: 0.12in;
+}
+
+.proposal-root .org-stem {
+  width: 1.5px;
+  height: 0.3in;
+  background: var(--jn-green);
+  margin: 0 auto;
+}
+
+.proposal-root .org-bar {
+  height: 1.5px;
+  background: var(--jn-green);
+  margin: 0 16%;
+}
+
+.proposal-root .org-chart {
+  margin-top: 0.3in;
+}
+
+/* A single node centred under the tier above it. */
+.proposal-root .org-solo {
+  width: 2.6in;
+  margin: 0 auto;
+}
+
+.proposal-root .org-crew .crew-count {
+  font-size: 7.6pt;
+  color: var(--jn-ink-soft);
+  line-height: 1.3;
+}
+
+/* --- Team cards ------------------------------------------------------------ */
+
+.proposal-root .team-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5in 0.38in;
+}
+
+.proposal-root .team-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3in 0.34in;
+  margin-top: 0.34in;
+}
+
+.proposal-root .team-card {
+  display: grid;
+  grid-template-columns: 1.35in 1fr;
+  gap: 0.17in;
+  break-inside: avoid;
+}
+
+.proposal-root .team-photo {
+  width: 1.35in;
+  height: 1.65in;
+  object-fit: cover;
+}
+
+.proposal-root .headshot-initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--jn-green) 10%, #fff);
+  color: var(--jn-green);
+  font-family: var(--jn-display);
+  font-size: 22pt;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.proposal-root .team-card .nm {
+  font-family: var(--jn-display);
+  font-size: 11.5pt;
+  font-weight: 700;
+  color: var(--jn-green);
+  line-height: 1.15;
+}
+
+.proposal-root .team-card .ti {
+  font-family: var(--jn-display);
+  font-size: 7.6pt;
+  font-weight: 700;
+  color: var(--jn-orange);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.04in;
+}
+
+.proposal-root .team-card .lo {
+  font-size: 7.4pt;
+  color: #7a7a7a;
+  margin-bottom: 0.05in;
+}
+
+.proposal-root .team-card .bi {
+  font-size: 7.8pt;
+  line-height: 1.45;
+  color: var(--jn-ink-soft);
+}
+
+/* --- Client references ------------------------------------------------------ */
+
+.proposal-root .ref-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3in 0.34in;
+  margin-top: 0.34in;
+}
+
+.proposal-root .ref-card {
+  border-left: 2.5px solid var(--jn-orange);
+  padding-left: 0.16in;
+  break-inside: avoid;
+}
+
+.proposal-root .ref-card .nm {
+  font-family: var(--jn-display);
+  font-size: 11pt;
+  font-weight: 700;
+  color: var(--jn-green);
+  line-height: 1.2;
+}
+
+.proposal-root .ref-card .ti {
+  font-size: 8pt;
+  color: var(--jn-ink-soft);
+  margin-top: 0.03in;
+}
+
+.proposal-root .ref-card .since {
+  font-family: var(--jn-display);
+  font-size: 7.4pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--jn-orange);
+  margin-top: 0.05in;
+}
+
+.proposal-root .ref-card .ct {
+  font-size: 7.8pt;
+  line-height: 1.5;
+  color: var(--jn-ink-soft);
+  margin-top: 0.08in;
+}
+
+/* --- Insurance -------------------------------------------------------------- */
+
+.proposal-root .cert-card {
+  background: var(--jn-band);
+  border-left: 2.5px solid var(--jn-green);
+  padding: 0.16in 0.2in;
+  margin: 0.26in 0;
+}
+
+.proposal-root .cert-card .nm {
+  font-family: var(--jn-display);
+  font-size: 10.5pt;
+  font-weight: 700;
+  color: var(--jn-green);
+}
+
+.proposal-root .cert-card .ct {
+  font-size: 8.4pt;
+  color: var(--jn-ink-soft);
+  margin-top: 0.04in;
+}
+
+.proposal-root .footnote {
+  font-size: 8pt;
+  font-style: italic;
+  color: var(--jn-ink-soft);
+}
+
+/* --- Portfolio -------------------------------------------------------------- */
+
+.proposal-root .portfolio-item {
+  margin-top: 0.3in;
+  break-inside: avoid;
+}
+
+/* --- Stat rows -------------------------------------------------------------- */
+
+.proposal-root .stat {
+  display: flex;
+  align-items: center;
+  gap: 0.14in;
+  margin-bottom: 0.2in;
+}
+
+.proposal-root .stat .num {
+  font-family: var(--jn-display);
+  font-size: 19pt;
+  font-weight: 700;
+  color: var(--jn-green);
+  line-height: 1;
+}
+
+.proposal-root .stat .lbl {
+  font-family: var(--jn-display);
+  font-size: 7.2pt;
+  font-weight: 700;
+  color: var(--jn-orange);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+}
+
+/* --- Branch tables --------------------------------------------------------- */
+
+.proposal-root .branch-tbl {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.proposal-root .branch-tbl th {
+  background: var(--jn-green);
+  color: #fff;
+  font-family: var(--jn-display);
+  font-size: 7.4pt;
+  text-align: left;
+  padding: 0.045in 0.08in;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.proposal-root .branch-tbl td {
+  font-size: 7.6pt;
+  padding: 0.032in 0.08in;
+  border-bottom: 0.5px solid #e6e6e6;
+  color: var(--jn-ink-soft);
+}
+
+.proposal-root .local-branches {
+  border-top: 1px solid var(--jn-hairline);
+  padding-top: 0.12in;
+  margin-top: 0.42in;
+}
+
+.proposal-root .local-branches-title {
+  margin: 0 0 0.1in;
+  font-size: 11pt;
+}
+
+.proposal-root .local-branches-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.3in;
+}
+
+/* Stand-in for the Florida branch map. Artwork is pending from Proposify; a
+   flat tonal block is the treatment that reads as intentional in a document a
+   rep sends to a client. */
+.proposal-root .map-pending {
+  height: 4.35in;
+  background: var(--jn-band);
+}
+
+.proposal-root .local-branches .bname {
+  font-family: var(--jn-display);
+  color: var(--jn-orange);
+  font-size: 8pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.proposal-root .local-branches .baddr {
+  font-size: 7.6pt;
+  color: var(--jn-ink-soft);
+  line-height: 1.4;
+}
+
+/* Signature block — the real proposals sign in a script face. */
+.proposal-root .signature {
+  font-family: var(--jn-script);
+  font-size: 26pt;
+  line-height: 1;
+  color: var(--jn-ink);
+  margin: 0.1in 0 0.02in;
+}
+
+.proposal-root .signer-lines {
+  margin: 0;
+  font-size: 8.4pt;
+  line-height: 1.45;
+}
+
+.proposal-root .signer-lines strong {
+  color: var(--jn-ink);
+}
+
+/* --- Cover ---------------------------------------------------------------- */
+
+.proposal-root .cover {
+  padding-top: 1.5in;
+  text-align: center;
+}
+
+.proposal-root .cover-mark {
+  width: 2.5in;
+  height: 2.2in;
+}
+
+.proposal-root .cover-eyebrow {
+  font-family: var(--jn-display);
+  margin: 0.9in 0 0.1in;
+  font-size: 11pt;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--jn-ink);
+  text-transform: uppercase;
+}
+
+.proposal-root .cover .page-title {
+  font-size: 38pt;
+  margin-bottom: 0.06in;
+}
+
+.proposal-root .cover .page-title:last-child {
+  margin-bottom: 0;
+}
+
+/* --- Letter pages --------------------------------------------------------- */
+
+.proposal-root .letter-date {
+  font-size: 8.4pt;
+  color: var(--jn-ink-soft);
+  margin: 0 0 0.3in;
+}
+
+.proposal-root .letter {
+  max-width: 6.6in;
+}
+
+.proposal-root .letter p {
+  margin: 0 0 0.14in;
+}
+
+.proposal-root .letter-closing {
+  margin-top: 0.2in;
+}

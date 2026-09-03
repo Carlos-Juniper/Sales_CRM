@@ -82,7 +82,8 @@ function fillMinimumFieldsFast() {
 /** Wait for async branch options to appear then select one — required before submit. */
 async function selectInstallBranch() {
   await screen.findByRole('option', { name: 'Bradenton, FL' })
-  fireEvent.change(screen.getByLabelText(/install branch/i), { target: { value: 'Bradenton, FL' } })
+  // Option value is now the Aspire BranchID (int) string — install Bradenton = 1374.
+  fireEvent.change(screen.getByLabelText(/install branch/i), { target: { value: '1374' } })
 }
 
 beforeEach(() => {
@@ -487,6 +488,29 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
     await waitFor(() => expect(created).toHaveLength(1))
     expect(created[0].estimateType).toBe('install')
     expect(created[0].status).toBe('new_from_sales')
+  })
+
+  it('submits the selected branch as aspireBranchId (int), not a city string (Slice 8)', async () => {
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildInstallEstimate({ id: 'test-install-branch', status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json({ ...fakeEstimate, ...body, id: 'test-install-branch' }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    fillMinimumFieldsFast()
+    await selectInstallBranch() // selects "Bradenton, FL" → install aspire_branch_id 1374
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    // Identity now rides on the int id, not the display city string.
+    expect(created[0].aspireBranchId).toBe(1374)
+    expect((created[0] as unknown as { branch?: unknown }).branch).toBeUndefined()
   })
 
   it('sets dueBackDate (SLA clock starts on create)', async () => {

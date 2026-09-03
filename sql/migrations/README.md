@@ -43,16 +43,21 @@ for at least one real deploy cycle.
 - **011** — renames `leads.status = 'handed_off'` → `'estimating'` (data-only; idempotent `UPDATE WHERE`). Run before deploying the renamed frontend/backend code.
 - **012** — adds `estimates.turf_area_acres`, `estimates.curb_miles`, and wires takeoff-scan attachments (Handoff 27).
 - **013** — adds `section_services.discipline` (nullable LS/IR override, Handoff 29).
-- **025** — creates `beam_requests` + `beam_outputs` and adds `estimates.takeoff_changed_at` (Beam/Attentive takeoff integration). Detection keys on the `estimates` column — the file's only non-idempotent statement. Originally numbered 014 on `feat/estimating-tab-redesign`; renumbered to avoid collision with `worktree-proposify`'s `014_proposal_config_tables.sql` (already applied to the CRM DB).
+- **014** — creates `proposal_config_tables`: `team_members`, `client_references`, `portfolio_properties`, `insurance_certificates` (Handoff 37).
+- **015** — seeds `proposal_config` tables with initial data (Handoff 37).
+- **016** — creates `proposal_requests` table (Handoff 37 Slice 4).
+- **017** — creates `proposal_renders` table for server-side PDF render results (Handoff 39).
+- **025** — creates `beam_requests` + `beam_outputs` and adds `estimates.takeoff_changed_at` (Beam/Attentive takeoff integration). Detection keys on the `estimates` column — the file's only non-idempotent statement. Originally numbered 014 on `feat/estimating-tab-redesign`; renumbered to avoid collision with 014–017 (already applied to CRM DB).
 - **026** — adds `leads.created_by` plus indexes on `created_by`, `assigned_to` and `source`, backing the user-scoped Leads tab (`?mine=true`) and the gov-only Public Leads feed (`?sources=higher_gov,sam_gov`). Originally numbered 015; renumbered for same reason as 025.
 
 ### Numbering history
 
-`worktree-proposify` consumed 014–024 (proposal config, seed, requests, renders, licenses,
-branch model, settings storage, geocode backfill, contract column drops, soft-delete parity, crew
-rate). This branch originally had 014/015 for Beam/Leads; those were renumbered to 025/026 during
-the consolidation merge (2026-09-03) to avoid silent collision. The runner keys detection on the
-filename prefix — a duplicate number would be silently skipped, not surfaced as a merge conflict.
+Migrations 014–024 were authored in `worktree-proposify` (proposal config, seed, requests, renders,
+licenses, branch model, settings storage, geocode backfill, contract column drops, soft-delete
+parity, crew rate) and applied to the CRM DB before this consolidation. The estimating branch
+independently created 014/015 for Beam/Leads; those were renumbered to 025/026 during the
+consolidation merge (2026-09-03). The runner keys detection on the filename prefix — a duplicate
+number would be silently skipped, not surfaced as a merge conflict.
 
 ---
 

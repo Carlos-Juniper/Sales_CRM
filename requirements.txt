@@ -11,3 +11,5 @@ azure-identity>=1.15.0
 google-cloud-kms>=2.21
 google-cloud-storage>=2.14
 aiomysql>=0.2.0
+playwright>=1.47,<2.0
+python-multipart>=0.0.9

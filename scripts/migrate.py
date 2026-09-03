@@ -428,6 +428,44 @@ def detect_026(conn) -> bool:
     return column_exists(conn, "leads", "created_by")
 
 
+def detect_022(conn) -> bool:
+    """022 applied ↔ estimates.branch column is absent.
+
+    Keying on estimates.branch (the first DROP in the file) rather than
+    catalog_items.branch: if a partial run dropped estimates.branch only,
+    re-running will skip the already-applied DROP and execute the remaining
+    catalog_items DROP — but MySQL ALTER TABLE DROP COLUMN on a missing column
+    raises an error. In practice, both ALTERs are atomic statements and the
+    runner stops on any failure, so a partial apply is unlikely. The estimates
+    column is chosen because it is the primary motivation for the migration.
+
+    Note: detect_022 deliberately does NOT key on users.branch_id — that column
+    is deferred to a separate later migration (Handoff 38 Amendment B.3).
+    """
+    return not column_exists(conn, "estimates", "branch")
+
+
+def detect_023(conn) -> bool:
+    """023 applied ↔ portfolio_properties.active column exists.
+
+    Keying on the first column added by the migration (portfolio_properties.active).
+    Both ALTER TABLE statements use idempotent PREPARE guards so a partial run is
+    safe to re-run; the tracking row is the primary idempotency gate.
+    """
+    return column_exists(conn, "portfolio_properties", "active")
+
+
+def detect_024(conn) -> bool:
+    """024 applied ↔ estimates.prior_crew_rate_cents_per_hour column exists.
+
+    The migration adds a single nullable BIGINT column. Keyed on that column —
+    the only statement in the file is the ALTER TABLE, which is non-idempotent
+    against an existing column (MySQL raises "Duplicate column name"), so the
+    tracking row is the primary idempotency gate once detection returns True.
+    """
+    return column_exists(conn, "estimates", "prior_crew_rate_cents_per_hour")
+
+
 # ── Migration 004 conditional execution ──────────────────────────────────────
 
 def _is_create_table_users(stmt: str) -> bool:
@@ -506,10 +544,13 @@ _DETECT: dict = {
     "011_leads_status_estimating_rename":        detect_011,
     "012_takeoff_scan_and_manual_metadata":      detect_012,
     "013_section_services_discipline":           detect_013,
-    "025_beam_takeoff":                          detect_025,
-    "026_leads_created_by":                      detect_026,
     "019_branch_model":                          detect_019,
     "020_settings_storage":                      detect_020,
+    "022_contract_drop_branch_columns":          detect_022,
+    "023_config_soft_delete":                    detect_023,
+    "024_estimate_prior_crew_rate":              detect_024,
+    "025_beam_takeoff":                          detect_025,
+    "026_leads_created_by":                      detect_026,
 }
 
 

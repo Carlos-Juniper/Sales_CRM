@@ -220,7 +220,7 @@ def _create_estimate(estimate_type: str = "install") -> str:
             "estimateType": estimate_type,
             "name": "Takeoff Test",
             "clientName": "Acme",
-            "branch": "Raleigh",
+            "aspireBranchId": 3688, "branchCity": "Raleigh, NC",
             "customerType": "commercial",
         },
     )

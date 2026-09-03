@@ -4,6 +4,7 @@ import { CANONICAL_ROLES, type UserRole } from '@/types'
 const ROLE_LABELS: Record<UserRole, string> = {
   procurement: 'Procurement',
   sales: 'Sales',
+  inside_sales: 'Inside Sales',
   admin: 'Admin',
   manager: 'Branch Manager',
   regional_director: 'Regional Director',

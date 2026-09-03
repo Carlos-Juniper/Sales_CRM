@@ -1,6 +1,6 @@
 """Canonical role model + server-side authorization.
 
-One role vocabulary for the whole app (nine business roles), the
+One role vocabulary for the whole app (ten business roles), the
 estimator/approver ownership split enforced server-side, the approval-tier
 authority ladder, and branch scoping derived from the authenticated user —
 never from a client-supplied query param (BRD I-9.5).
@@ -23,6 +23,7 @@ from db import query
 CANONICAL_ROLES = frozenset({
     "procurement",
     "sales",
+    "inside_sales",
     "admin",
     "manager",
     "regional_director",
@@ -32,9 +33,10 @@ CANONICAL_ROLES = frozenset({
     "ceo",
 })
 
-# Legacy auth roles collapse into `sales` (inside/outside distinction retired).
+# `inside_sales` qualifies raw public/government leads and assigns them on to a
+# `sales` CRM, so the two are distinct personas and only inside sales reaches the
+# public lead feed. `outside_sales` remains retired and collapses into `sales`.
 LEGACY_ROLE_MAP = {
-    "inside_sales": "sales",
     "outside_sales": "sales",
 }
 

@@ -60,7 +60,7 @@ function renderRoute(initialEntries: string[], user: AuthUser | null = null) {
   )
 }
 
-describe('Router - Auth & Role Guards (canonical 9-role model)', () => {
+describe('Router - Auth & Role Guards (canonical 10-role model)', () => {
   beforeEach(() => {
     useAuthStore.setState({ user: null })
   })
@@ -87,12 +87,9 @@ describe('Router - Auth & Role Guards (canonical 9-role model)', () => {
     expect(screen.getByText('Sales Role Content')).toBeInTheDocument()
   })
 
-  it('legacy inside_sales/outside_sales users normalize to sales and pass sales gates', () => {
-    for (const legacy of ['inside_sales', 'outside_sales'] as const) {
-      const { unmount } = renderRoute(['/sales-role'], makeUser({ role: legacy }))
-      expect(screen.getByText('Sales Role Content')).toBeInTheDocument()
-      unmount()
-    }
+  it('legacy outside_sales users normalize to sales and pass sales gates', () => {
+    renderRoute(['/sales-role'], makeUser({ role: 'outside_sales' }))
+    expect(screen.getByText('Sales Role Content')).toBeInTheDocument()
   })
 
   it('manager can access the sales role-gated route (listed explicitly)', () => {

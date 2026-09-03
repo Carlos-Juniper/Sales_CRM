@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { Lead, HandoffPayload } from '@/types'
+import type { Lead, AssignCrmPayload } from '@/types'
 
 export interface LeadsResponse {
   data: Lead[]
@@ -18,6 +18,10 @@ export interface LeadQueryParams {
   min_score?: number
   /** Canonical properties.id — look up the lead(s) for one property. */
   property_id?: string
+  /** Comma-separated `leads.source` values — e.g. GOV_LEAD_SOURCES. */
+  sources?: string
+  /** Scope to the caller's own leads. The id comes from the JWT server-side. */
+  mine?: boolean
   page?: number
   page_size?: number
   sort_by?: string
@@ -51,12 +55,13 @@ export const leadsApi = {
   get: (id: string) => apiClient.get<Lead>(`/leads/${id}`),
   patch: (id: string, body: Partial<Lead>) => apiClient.patch<Lead>(`/leads/${id}`, body),
   deleteLead: (id: string): Promise<void> => apiClient.delete(`/leads/${id}`),
-  handoff: (payload: HandoffPayload) =>
+  // Assigning to a CRM is a qualification handoff, not an estimating handoff —
+  // the lead reaches `estimating` later, when an estimate is actually requested.
+  assignToCrm: (payload: AssignCrmPayload) =>
     apiClient.patch<Lead>(`/leads/${payload.lead_id}`, {
-      status: 'estimating',
+      status: 'qualified',
       assigned_to: payload.assigned_to,
       handoff_notes: payload.handoff_notes,
-      division_id: payload.division_id ?? null,
     }),
 }
 

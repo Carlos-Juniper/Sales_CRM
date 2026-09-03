@@ -59,15 +59,16 @@ def as_role():
 # ── Canonical role model ─────────────────────────────────────────────────────
 
 class TestRoleModel:
-    def test_nine_canonical_roles(self):
+    def test_ten_canonical_roles(self):
         assert authz.CANONICAL_ROLES == frozenset({
-            "procurement", "sales", "admin", "manager", "regional_director",
-            "maintenance_estimating", "install_estimating", "vice_president", "ceo",
+            "procurement", "sales", "inside_sales", "admin", "manager",
+            "regional_director", "maintenance_estimating", "install_estimating",
+            "vice_president", "ceo",
         })
 
-    def test_legacy_roles_normalize_to_sales(self):
-        assert authz.normalize_role("inside_sales") == "sales"
+    def test_only_outside_sales_normalizes_to_sales(self):
         assert authz.normalize_role("outside_sales") == "sales"
+        assert authz.normalize_role("inside_sales") == "inside_sales"
         assert authz.normalize_role("manager") == "manager"
 
     def test_estimator_roles(self):

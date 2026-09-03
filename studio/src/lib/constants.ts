@@ -73,6 +73,10 @@ export const DISQUALIFY_REASONS = [
 
 export const PAGE_SIZE = 25
 
+// `leads.source` values written by the gov-bids scrapers. The Public Leads feed
+// narrows to these so manually-created leads stay on the user-scoped Leads tab.
+export const GOV_LEAD_SOURCES = 'higher_gov,sam_gov'
+
 export const MS_PER_DAY = 86_400_000
 export const BID_URGENCY_THRESHOLD_DAYS = 7
 

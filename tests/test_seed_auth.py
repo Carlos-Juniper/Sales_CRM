@@ -47,7 +47,7 @@ def test_provision_inserts_new_user():
     values = list(params)
     assert "new.rep@juniperlandscaping.com" in values
     assert "New Rep" in values
-    assert "sales" in values  # legacy inside_sales normalizes to sales
+    assert "inside_sales" in values  # canonical role, stored verbatim
     assert "b1" in values
 
 
@@ -93,11 +93,12 @@ def test_provision_rejects_unknown_role():
         )
 
 
-def test_valid_roles_are_the_nine_canonical_roles():
+def test_valid_roles_are_the_ten_canonical_roles():
     # One canonical role vocabulary, backend-validated.
     assert seed_auth.VALID_ROLES == frozenset({
-        "procurement", "sales", "admin", "manager", "regional_director",
-        "maintenance_estimating", "install_estimating", "vice_president", "ceo",
+        "procurement", "sales", "inside_sales", "admin", "manager",
+        "regional_director", "maintenance_estimating", "install_estimating",
+        "vice_president", "ceo",
     })
 
 
@@ -114,19 +115,18 @@ def test_provision_accepts_new_canonical_roles():
     assert "ceo" in list(params)
 
 
-def test_provision_normalizes_legacy_roles_to_sales():
-    # Legacy inside_sales/outside_sales collapse into `sales`.
-    for legacy in ("inside_sales", "outside_sales"):
-        _, execute_mock = _run(
-            existing=[],
-            email=f"{legacy}@juniperlandscaping.com",
-            name="Legacy Rep",
-            role=legacy,
-            branch_id=None,
-        )
-        params = list(execute_mock.await_args[0][1])
-        assert "sales" in params
-        assert legacy not in params
+def test_provision_normalizes_outside_sales_to_sales():
+    # `outside_sales` is the only retired role left; it collapses into `sales`.
+    _, execute_mock = _run(
+        existing=[],
+        email="outside_sales@juniperlandscaping.com",
+        name="Legacy Rep",
+        role="outside_sales",
+        branch_id=None,
+    )
+    params = list(execute_mock.await_args[0][1])
+    assert "sales" in params
+    assert "outside_sales" not in params
 
 
 def test_provision_requires_branch_for_manager():

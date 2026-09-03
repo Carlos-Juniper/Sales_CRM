@@ -2,7 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Inbox, FileText, GitBranch,
   ChevronLeft, ChevronRight, LogOut, Leaf, Settings,
-  Map, Calculator, Building, Calendar,
+  Map, Calculator, Building, Calendar, Globe,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
@@ -20,7 +20,10 @@ interface NavItem {
 }
 
 // Canonical roles. `admin` sees everything via canAccess.
-const SALES_NAV: UserRole[] = ['sales', 'manager']
+const SALES_NAV: UserRole[] = ['sales', 'inside_sales', 'manager']
+// The public/government feed is the inside-sales qualification queue; CRMs work
+// their own assigned leads on the Leads tab instead.
+const PUBLIC_LEADS_NAV: UserRole[] = ['inside_sales']
 const ESTIMATING_NAV: UserRole[] = [
   'sales',
   'manager',
@@ -34,7 +37,8 @@ const ESTIMATING_NAV: UserRole[] = [
 
 const navItems: NavItem[] = [
   { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: SALES_NAV },
-  { label: 'Public Leads', icon: Inbox, href: '/inside-sales/leads', roles: SALES_NAV },
+  { label: 'Public Leads', icon: Globe, href: '/inside-sales/leads', roles: PUBLIC_LEADS_NAV },
+  { label: 'Leads', icon: Inbox, href: '/inside-sales/my-leads', roles: SALES_NAV },
   { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: SALES_NAV },
   { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: SALES_NAV },
   { label: 'Calendar', icon: Calendar, href: '/inside-sales/calendar', roles: SALES_NAV },

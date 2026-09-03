@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// RoleGate under the canonical 9-role model:
-//   * legacy inside_sales/outside_sales normalize to `sales`
+// RoleGate under the canonical 10-role model:
+//   * `inside_sales` is canonical; only legacy `outside_sales` maps to `sales`
 //   * `admin` is the super-role; `manager` narrows to its approval tier
 // ---------------------------------------------------------------------------
 
@@ -41,18 +41,26 @@ describe('RoleGate', () => {
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
   })
 
-  it('legacy inside_sales/outside_sales users normalize to sales and pass sales gates', () => {
-    for (const legacy of ['inside_sales', 'outside_sales'] as const) {
-      useAuthStore.setState({ user: null })
-      setUser(legacy)
-      const { unmount } = render(
-        <RoleGate roles={['sales']}>
-          <div>Sales Content {legacy}</div>
-        </RoleGate>,
-      )
-      expect(screen.getByText(`Sales Content ${legacy}`)).toBeInTheDocument()
-      unmount()
-    }
+  it('legacy outside_sales users normalize to sales and pass sales gates', () => {
+    useAuthStore.setState({ user: null })
+    setUser('outside_sales')
+    render(
+      <RoleGate roles={['sales']}>
+        <div>Sales Content</div>
+      </RoleGate>,
+    )
+    expect(screen.getByText('Sales Content')).toBeInTheDocument()
+  })
+
+  it('inside_sales is canonical — it passes its own gate, not the sales gate', () => {
+    useAuthStore.setState({ user: null })
+    setUser('inside_sales')
+    render(
+      <RoleGate roles={['inside_sales']}>
+        <div>Inside Sales Content</div>
+      </RoleGate>,
+    )
+    expect(screen.getByText('Inside Sales Content')).toBeInTheDocument()
   })
 
   it('admin is the super-role and passes any gate', () => {

@@ -217,11 +217,14 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         # display only: nothing gates approval on it. (.get keeps pre-migration
         # rows working.)
         "rfiStatus": r.get("rfi_status"),
-        # Manual takeoff metadata (turf/curb). Manual entry today;
-        # Beam AI automated takeoff will populate these later. (.get keeps
-        # pre-migration rows working.)
+        # Takeoff metadata (turf/curb). Estimator-entered, and also written by
+        # Beam ingest after unit conversion — Beam returns sq ft and ft, these
+        # columns are acres and miles. (.get keeps pre-migration rows working.)
         "turfAreaAcres": _num(r.get("turf_area_acres")),
         "curbMiles": _num(r.get("curb_miles")),
+        # Set when Attentive redelivered measurements after this estimate was
+        # priced. Non-null means the price on screen may be stale.
+        "takeoffChangedAt": _iso(r["takeoff_changed_at"]) if r.get("takeoff_changed_at") else None,
         "sections": sections,
         "createdAt": _iso(r["created_at"]),
         "updatedAt": _iso(r["updated_at"]),
@@ -319,7 +322,7 @@ async def _build_opportunity_input(est_row: dict, service_line: Optional[str] = 
     rep_contact_id: Optional[int] = None
     if est_row.get("crm_rep"):
         urows = await query(
-            "SELECT aspire_rep_id FROM crm_users WHERE id = %s", [est_row["crm_rep"]]
+            "SELECT aspire_rep_id FROM users WHERE id = %s", [est_row["crm_rep"]]
         )
         if urows:
             rep_contact_id = urows[0].get("aspire_rep_id")
@@ -1509,7 +1512,10 @@ def register(app, require_auth) -> None:
 
     @app.post("/api/estimating/estimates/{estimate_id}/retry-aspire-sync", status_code=202)
     async def retry_aspire_sync(
-        estimate_id: str, background: BackgroundTasks, _user: dict = Depends(require_auth)
+        estimate_id: str,
+        background: BackgroundTasks,
+        response: Response,
+        _user: dict = Depends(require_auth),
     ) -> dict:
         rows = await query(
             "SELECT id, status, aspire_opportunity_id FROM estimates WHERE id = %s",
@@ -1522,6 +1528,11 @@ def register(app, require_auth) -> None:
             background.add_task(_sync_new_opportunity_bg, estimate_id)
         elif r.get("status") in ("won", "lost"):
             background.add_task(_sync_status_bg, estimate_id, r["status"])
+        else:
+            # Already has an opportunity and no status to propagate — nothing to
+            # schedule. 202 "queued" here would report success for a no-op.
+            response.status_code = 200
+            return {"status": "not_needed"}
         return {"status": "queued"}
 
     @app.post("/api/estimating/estimates/{estimate_id}/approve-handback")

@@ -80,6 +80,22 @@ class TestBuildOpportunityInput:
         inp = await est._build_opportunity_input(_est_row())
         assert inp.aspire_property_id is None
 
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    async def test_rep_lookup_targets_users_not_legacy_crm_users(self, mock_query):
+        """H38 §5.2 — `crm_users` is dropped by migration 004's rename path.
+
+        Reading it throws on any DB that took the rename, which kills the whole
+        Aspire opportunity push. Every other query in the codebase uses `users`.
+        """
+        mock_query.side_effect = [
+            [{"aspire_property_id": 1, "branch_city": "Orlando, FL"}],
+            [{"aspire_rep_id": 278690}],
+        ]
+        await est._build_opportunity_input(_est_row())
+        rep_sql = mock_query.call_args_list[1].args[0]
+        assert "crm_users" not in rep_sql
+        assert "FROM users" in rep_sql
+
 
 # ── persistence of a SyncResult back onto the estimate ───────────────────────
 
@@ -291,6 +307,35 @@ class TestRetryEndpoint:
         mock_query.return_value = []
         resp = client.post("/api/estimating/estimates/nope/retry-aspire-sync")
         assert resp.status_code == 404
+
+    @patch("api.estimating._sync_status_bg", new_callable=AsyncMock)
+    @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_retry_reports_no_op_when_nothing_to_push(
+        self, mock_query, mock_new_bg, mock_status_bg, authed
+    ):
+        """H38 §5.3 — an already-synced, non-won/lost estimate queues nothing.
+
+        The endpoint used to answer "queued" regardless, reporting success for
+        work it never scheduled.
+        """
+        mock_query.return_value = [
+            _est_row(aspire_opportunity_id=4711, status="handed_back")
+        ]
+        resp = client.post("/api/estimating/estimates/est-1/retry-aspire-sync")
+        mock_new_bg.assert_not_awaited()
+        mock_status_bg.assert_not_awaited()
+        assert resp.json()["status"] != "queued"
+        assert resp.status_code == 200
+
+    @patch("api.estimating._sync_status_bg", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_retry_queues_status_push_for_won(self, mock_query, mock_bg, authed):
+        mock_query.return_value = [_est_row(aspire_opportunity_id=4711, status="won")]
+        resp = client.post("/api/estimating/estimates/est-1/retry-aspire-sync")
+        mock_bg.assert_awaited_once()
+        assert resp.status_code == 202
+        assert resp.json()["status"] == "queued"
 
 
 # ── background sweep over pending/failed rows ────────────────────────────────

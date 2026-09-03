@@ -59,7 +59,10 @@ CREATE TABLE IF NOT EXISTS leads (
     hoa_property_id  VARCHAR(36) DEFAULT NULL,
     status           VARCHAR(30) DEFAULT NULL,
     deleted_at       DATETIME    DEFAULT NULL,
-    raw_data         JSON        DEFAULT NULL
+    raw_data         JSON        DEFAULT NULL,
+    -- 026 adds created_by AFTER assigned_to and indexes all three.
+    assigned_to      VARCHAR(36)  DEFAULT NULL,
+    source           VARCHAR(50)  DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS hoa_properties (
@@ -74,9 +77,15 @@ CREATE TABLE IF NOT EXISTS hoa_properties (
 );
 
 CREATE TABLE IF NOT EXISTS estimates (
-    id          VARCHAR(36)    NOT NULL PRIMARY KEY,
-    property_id VARCHAR(36)    DEFAULT NULL,
-    acreage     DECIMAL(10,2)  DEFAULT NULL
+    id            VARCHAR(36)    NOT NULL PRIMARY KEY,
+    property_id   VARCHAR(36)    DEFAULT NULL,
+    acreage       DECIMAL(10,2)  DEFAULT NULL,
+    -- 019 backfills aspire_branch_id by joining sales_territories on `branch`
+    -- and switching on `estimate_type`; 020 adds a column AFTER target_margin.
+    estimate_type ENUM('maintenance','install') NOT NULL DEFAULT 'maintenance',
+    client_name   VARCHAR(255)   NOT NULL DEFAULT '',
+    branch        VARCHAR(100)   NOT NULL DEFAULT '',
+    target_margin DECIMAL(6,4)   NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS intake_submissions (
@@ -91,7 +100,11 @@ CREATE TABLE IF NOT EXISTS itb_projects (
 
 CREATE TABLE IF NOT EXISTS approval_tiers (
     id               VARCHAR(50) NOT NULL PRIMARY KEY,
-    role_key         ENUM('branch_manager','bp','coo') NOT NULL,
+    -- The pre-007 vocabulary, which included regional_director unchanged —
+    -- 007 renames branch_manager/bp/coo and then narrows the ENUM to the
+    -- canonical four. Omitting regional_director here forces the RD seed row
+    -- to be stored as 'coo', which 007's narrowing step then truncates.
+    role_key         ENUM('branch_manager','regional_director','bp','coo') NOT NULL,
     label            VARCHAR(100) NOT NULL DEFAULT '',
     min_value_cents  INT DEFAULT NULL,
     max_value_cents  INT DEFAULT NULL,
@@ -123,6 +136,25 @@ CREATE TABLE IF NOT EXISTS catalog_items (
     service_type     VARCHAR(100)   NOT NULL DEFAULT ''
 );
 
+-- 013 adds section_services.discipline AFTER catalog_item_id.
+CREATE TABLE IF NOT EXISTS section_services (
+    id              VARCHAR(36)  NOT NULL PRIMARY KEY,
+    section_id      VARCHAR(36)  NOT NULL,
+    catalog_item_id VARCHAR(36)  DEFAULT NULL,
+    label           VARCHAR(255) NOT NULL DEFAULT ''
+);
+
+-- 020 adds aspire_branch_id AFTER material_key and replaces uq_material_key.
+CREATE TABLE IF NOT EXISTS material_calcs (
+    id              VARCHAR(36)  NOT NULL PRIMARY KEY,
+    material_key    VARCHAR(50)  NOT NULL,
+    label           VARCHAR(255) NOT NULL DEFAULT '',
+    unit_sell_cents BIGINT       NOT NULL DEFAULT 0,
+    unit_cost_cents BIGINT       NOT NULL DEFAULT 0,
+    uom             VARCHAR(20)  NOT NULL DEFAULT '',
+    UNIQUE KEY uq_material_key (material_key)
+);
+
 CREATE TABLE IF NOT EXISTS intake_attachments (
     id                    VARCHAR(36) NOT NULL PRIMARY KEY,
     intake_submission_id  VARCHAR(36) NOT NULL,
@@ -137,24 +169,40 @@ _APPROVAL_TIER_SEED = """
 INSERT IGNORE INTO approval_tiers
     (id, role_key, label, min_value_cents, max_value_cents, tier_order, estimate_type) VALUES
     ('tier-maint-bm',  'branch_manager', 'Branch Manager',   0,          10000000, 1, 'maintenance'),
-    ('tier-maint-rd',  'coo',            'Regional Director',10000000,   25000000, 2, 'maintenance'),
+    ('tier-maint-rd',  'regional_director', 'Regional Director', 10000000, 25000000, 2, 'maintenance'),
     ('tier-maint-bp',  'bp',             'Business Partner', 25000000,  100000000, 3, 'maintenance'),
     ('tier-maint-coo', 'coo',            'COO',              100000000, NULL,      4, 'maintenance');
 """
 
-_ALL_TABLE_NAMES = [
-    "schema_migrations", "properties", "users", "branches", "sales_territories",
-    "leads", "hoa_properties", "estimates", "intake_submissions", "itb_projects",
-    "approval_tiers", "estimate_adjustments", "takeoff_lines", "catalog_items",
-    "intake_attachments", "crm_users",
-]
+def _drop_all_tables(conn) -> None:
+    """Empty the test database completely.
+
+    Deliberately not a hand-maintained name list. The previous list went stale
+    the moment a migration created a table nobody added to it, and any survivor
+    leaks into the next test's supposedly-clean schema — a stray table carrying
+    a foreign key into `users` is enough to make 004's RENAME fail with a
+    "foreign key incorrectly formed" error that points nowhere near the cause.
+
+    Safe because _TEST_DB is a private database this suite owns end to end.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT table_name AS t FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+        )
+        names = [r["t"] for r in cur.fetchall()]
+        cur.execute("SET FOREIGN_KEY_CHECKS = 0")
+        for t in names:
+            cur.execute(f"DROP TABLE IF EXISTS `{t}`")
+        cur.execute("SET FOREIGN_KEY_CHECKS = 1")
 
 
 @pytest.fixture
 def db_conn():
     """
     Provide a clean pymysql connection against the test database.
-    Drops and re-creates all relevant tables before the test, drops them after.
+    Empties the database and lays down _BASE_SCHEMA before the test, empties it
+    again after.
     """
     import pymysql
     import pymysql.cursors
@@ -167,21 +215,14 @@ def db_conn():
         autocommit=True,
         cursorclass=pymysql.cursors.DictCursor,
     )
+    _drop_all_tables(conn)
     with conn.cursor() as cur:
-        cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-        for t in _ALL_TABLE_NAMES:
-            cur.execute(f"DROP TABLE IF EXISTS `{t}`")
-        cur.execute("SET FOREIGN_KEY_CHECKS = 1")
         for stmt in M.split_statements(_BASE_SCHEMA):
             cur.execute(stmt)
         for stmt in M.split_statements(_APPROVAL_TIER_SEED):
             cur.execute(stmt)
     yield conn
-    with conn.cursor() as cur:
-        cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-        for t in _ALL_TABLE_NAMES:
-            cur.execute(f"DROP TABLE IF EXISTS `{t}`")
-        cur.execute("SET FOREIGN_KEY_CHECKS = 1")
+    _drop_all_tables(conn)
     conn.close()
 
 
@@ -249,6 +290,18 @@ class TestSplitStatements:
         assert "INSERT" in keywords
         assert "UPDATE" in keywords
 
+    def test_real_migration_019_splits_cleanly_and_has_no_selects(self):
+        path = REPO / "sql" / "migrations" / "019_branch_model.sql"
+        stmts = M.split_statements(path.read_text())
+        kws = {s.strip().split()[0].upper() for s in stmts}
+        assert kws == {"CREATE", "ALTER", "UPDATE", "INSERT"}
+
+    def test_real_migration_020_splits_cleanly_and_has_no_selects(self):
+        path = REPO / "sql" / "migrations" / "020_settings_storage.sql"
+        stmts = M.split_statements(path.read_text())
+        kws = {s.strip().split()[0].upper() for s in stmts}
+        assert kws == {"CREATE", "ALTER", "INSERT"}
+
     def test_real_migration_004_contains_create_and_insert(self):
         path = REPO / "sql" / "migrations" / "004_users_and_branches.sql"
         stmts = M.split_statements(path.read_text())
@@ -260,20 +313,65 @@ class TestSplitStatements:
 
 
 class TestMigrationFiles:
-    def test_finds_exactly_thirteen_files(self):
+    def test_finds_exactly_seventeen_files(self):
         files = M.migration_files()
-        assert len(files) == 13
+        assert len(files) == 17
 
     def test_ordered_numerically(self):
         files = M.migration_files()
         ids = [mid for mid, _ in files]
         assert ids[0].startswith("001_")
-        assert ids[12].startswith("013_")
+        assert ids[-1].startswith("020_")
         assert ids == sorted(ids)
+
+    def test_every_file_has_a_detector_or_inline_handler(self):
+        """A file with no detector re-executes on a DB that already has it."""
+        inline = {
+            "002_backfill_leads_property_id",
+            "003_drop_leads_hoa_property_id",
+            "004_users_and_branches",
+        }
+        for mid, _ in M.migration_files():
+            assert mid in M._DETECT or mid in inline, f"{mid} has no detection path"
 
     def test_ids_match_stem_of_path(self):
         for mid, path in M.migration_files():
             assert mid == path.stem
+
+
+class TestExecuteDoesNotFormatSql:
+    """A migration file is raw SQL, never a % format string.
+
+    pymysql interpolates whenever `args` is not None, so passing an empty tuple
+    makes `LIKE '%DO NOT USE%'` raise "not enough arguments for format string".
+    This took migration 019 down mid-file against the live database.
+    """
+
+    def test_literal_percent_passes_through_untouched(self):
+        conn = MagicMock()
+        cur = conn.cursor.return_value.__enter__.return_value
+        sql = "UPDATE branches SET f = 0 WHERE name LIKE '%DO NOT USE%'"
+
+        M._execute(conn, sql)
+
+        cur.execute.assert_called_once_with(sql)
+
+    def test_exec_statements_does_not_format(self):
+        conn = MagicMock()
+        cur = conn.cursor.return_value.__enter__.return_value
+
+        M.exec_statements(conn, ["UPDATE t SET x = 1 WHERE s LIKE '%50%'"])
+
+        assert cur.execute.call_args.args == ("UPDATE t SET x = 1 WHERE s LIKE '%50%'",)
+
+    def test_params_still_passed_when_present(self):
+        """RELEASE_LOCK(%s) and friends must keep their placeholders working."""
+        conn = MagicMock()
+        cur = conn.cursor.return_value.__enter__.return_value
+
+        M._execute(conn, "SELECT RELEASE_LOCK(%s)", ("lk",))
+
+        cur.execute.assert_called_once_with("SELECT RELEASE_LOCK(%s)", ("lk",))
 
 
 class TestChecksum:
@@ -439,6 +537,8 @@ class TestDetectFunctions:
         (M.detect_008, "takeoff_lines","catalog_item_id"),
         (M.detect_010, "estimates",    "lead_id"),
         (M.detect_012, "estimates",    "turf_area_acres"),
+        (M.detect_019, "estimates",    "aspire_branch_id"),
+        (M.detect_020, "estimates",    "crew_rate_cents_per_hour"),
     ])
     def test_column_based_detection_true(self, monkeypatch, fn, table, column):
         monkeypatch.setattr(
@@ -448,6 +548,7 @@ class TestDetectFunctions:
 
     @pytest.mark.parametrize("fn", [
         M.detect_005, M.detect_006, M.detect_008, M.detect_010, M.detect_012,
+        M.detect_019, M.detect_020,
     ])
     def test_column_based_detection_false(self, monkeypatch, fn):
         monkeypatch.setattr(M, "column_exists", lambda conn, t, c: False)
@@ -470,6 +571,19 @@ class TestHardGate003:
         # leads.property_id doesn't exist.  The gate must return 0 (safe to proceed)
         # rather than erroring — 002 will run first and add the column.
         monkeypatch.setattr(M, "column_exists", lambda conn, t, c: False)
+        assert M.check_003_gate(None) == 0
+
+    def test_gate_returns_zero_when_hoa_property_id_column_absent(self, monkeypatch):
+        # The mirror case: 003 has already run, so hoa_property_id is gone while
+        # property_id remains. There is nothing left to gate, and the gate must
+        # say so rather than raise "Unknown column 'hoa_property_id'".
+        monkeypatch.setattr(
+            M, "column_exists", lambda conn, t, c: c == "property_id"
+        )
+        monkeypatch.setattr(
+            M, "_fetch_one",
+            lambda conn, sql, params=(): pytest.fail("gate must not query after 003"),
+        )
         assert M.check_003_gate(None) == 0
 
 
@@ -711,20 +825,24 @@ class TestRunOrchestration:
 
 @requires_mysql
 class TestFullFreshApply:
-    def test_all_twelve_migrations_apply_on_clean_schema(self, db_conn):
+    def test_every_migration_applies_on_clean_schema(self, db_conn):
+        """The whole set, start to finish, against nothing but _BASE_SCHEMA.
+
+        Counted against migration_files() rather than a literal: this assertion
+        was pinned at 12 and silently stopped covering 013-020, which is how
+        _BASE_SCHEMA drifted far enough that 007 no longer applied at all.
+        """
+        expected = [mid for mid, _ in M.migration_files()]
+
         ok = M.run(conn=db_conn)
         assert ok is True
 
-        tracked = []
         with db_conn.cursor() as cur:
             cur.execute("SELECT * FROM schema_migrations ORDER BY id")
             tracked = cur.fetchall()
 
-        assert len(tracked) == 12
+        assert [row["id"] for row in tracked] == expected
         assert all(row["detected"] == 0 for row in tracked)
-        ids = [row["id"] for row in tracked]
-        assert ids[0].startswith("001_")
-        assert ids[-1].startswith("012_")
 
     def test_all_tracking_rows_have_valid_checksums(self, db_conn):
         M.run(conn=db_conn)
@@ -771,7 +889,8 @@ class TestIdempotency:
 class TestPartialStateDetection:
     def test_detects_004_already_applied_by_hand(self, db_conn):
         """Simulate 004 applied by hand: users + branches + sales_territories exist,
-        but no schema_migrations rows. Runner should detect 001–004 and apply 005–012."""
+        but no schema_migrations rows. The runner should detect 001-004 and apply
+        everything after them."""
         # Apply just 001–004 by executing their files directly (bypasses runner)
         for mid in ("001_canonical_properties", "002_backfill_leads_property_id",
                     "003_drop_leads_hoa_property_id", "004_users_and_branches"):
@@ -785,14 +904,15 @@ class TestPartialStateDetection:
             cur.execute("SELECT id, detected FROM schema_migrations ORDER BY id")
             rows = {r["id"]: r["detected"] for r in cur.fetchall()}
 
-        assert len(rows) == 12
+        assert set(rows) == {mid for mid, _ in M.migration_files()}
         # 001–004 were pre-applied → detected=1
         assert rows["001_canonical_properties"] == 1
         assert rows["003_drop_leads_hoa_property_id"] == 1
         assert rows["004_users_and_branches"] == 1
-        # 005–012 applied fresh → detected=0
+        # everything after them applied fresh → detected=0
         assert rows["005_intake_modal_completions"] == 0
         assert rows["012_takeoff_scan_and_manual_metadata"] == 0
+        assert rows["020_settings_storage"] == 0
 
 
 @requires_mysql

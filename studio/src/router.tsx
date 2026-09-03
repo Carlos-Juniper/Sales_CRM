@@ -4,7 +4,7 @@ import { RequireAuth } from '@/views/auth/RoleGate'
 import LoginPage from '@/views/auth/LoginPage'
 import AuthCallbackPage from '@/views/auth/AuthCallbackPage'
 import {
-  DashboardPage, LeadFeedPage, BidTrackerPage,
+  DashboardPage, LeadFeedPage, MyLeadsPage, BidTrackerPage,
   PipelinePage, MapPage, EstimatingPage, CalendarPage,
 } from '@/views/inside-sales'
 import AccountsPage from '@/views/inside-sales/AccountsPage'
@@ -37,6 +37,10 @@ export const router = createBrowserRouter([
       {
         path: 'inside-sales/leads',
         element: <InsideSalesGuard><LeadFeedPage /></InsideSalesGuard>,
+      },
+      {
+        path: 'inside-sales/my-leads',
+        element: <InsideSalesGuard><MyLeadsPage /></InsideSalesGuard>,
       },
       {
         path: 'inside-sales/bids',

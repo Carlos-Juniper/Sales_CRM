@@ -65,6 +65,50 @@ export interface MarginBenchmarkConfig {
   treeWorkSaleCents: number[]
 }
 
+// TODO(margin-benchmarks): these values are FABRICATED and must not ship as-is.
+//
+// Every number below is invented demo data, and `region: 'Desert'` is not even one of
+// Juniper's regions — the real ones come from the `regions` config table (Handoff 37
+// Amendment A.3). A wrong benchmark tells an approver a correctly-priced bid is
+// out of band, or that an underpriced one is fine.
+//
+// These are explicitly OUT of the Settings page's scope, and deliberately so: the fix is
+// NOT to make them admin-editable. BRD III-6 specifies a benchmark auto-calculator
+// compiled from historical WON-BID data. A settings form would just be a hardcode with a
+// nicer input box, and would ask someone to type numbers the database can derive.
+//
+// Implementation plan (own handoff, depends on the Settings-page branch migration):
+//
+//  1. SOURCE. Won bids are `estimates WHERE lifecycle = 'won'` — already persisted, with
+//     `contract_value_cents`, `acreage`, `estimate_type`, `customer_type`, and (post-
+//     migration) `aspire_branch_id`. `sections.square_feet` + `section_services` give the
+//     per-service detail the mowing band needs. No new capture is required.
+//
+//  2. COHORT. A benchmark is only meaningful against comparables, which is what the fake
+//     `note` fields ("120-ac govt parks · Desert region") were gesturing at. Define a
+//     cohort as (region, estimate_type, customer_type, acreage bucket). Acreage buckets
+//     want to come from the data, not be guessed — start with quartiles over won bids.
+//
+//  3. COMPUTE. Per cohort: p25/median/p75 of contract $/acre, of annual contract value,
+//     and of mowing $/occurrence (derived from the mowing `section_services` line). Band
+//     = p25..p75; median reported separately, as `mowingPerOccurrence.medianCents`
+//     already expects. `treeWorkSaleCents` becomes the last N won tree-work line sale
+//     prices for the cohort, not a literal array.
+//
+//  4. MINIMUM SAMPLE. Below a floor (start at n = 5) a cohort has no band. Render
+//     "Not enough comparable won bids (n=2)" — never widen the cohort silently to
+//     manufacture one, and never fall back to a company-wide number, which would
+//     reintroduce exactly the confidently-wrong display this TODO exists to remove.
+//
+//  5. REFRESH. Nightly materialized rollup keyed on cohort, not a per-render query —
+//     the panel reads one row. Recompute on `lifecycle -> 'won'` is optional.
+//
+//  6. PROVENANCE. Keep the `provisional` flag's spirit: the panel must always state the
+//     cohort and sample size it is comparing against ("vs 14 won bids · 100-150ac ·
+//     HOA · West Coast"), so an approver can weigh the comparison instead of trusting a
+//     bare band. Until step 3 lands, the panel should show no bands at all rather than
+//     these literals.
+//
 export const MARGIN_BENCHMARKS: MarginBenchmarkConfig = {
   provisional: true,
   region: 'Desert',

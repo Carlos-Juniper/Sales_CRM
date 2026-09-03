@@ -53,17 +53,22 @@ if _extra_origins:
 async def lifespan(app):
     # Schema migrations are applied via scripts/migrate.py before each deploy,
     # not at app boot.
-    sweep_task = None
+    sweep_tasks = []
     # Durability sweep for best-effort Aspire pushes — only when sync is enabled,
     # so tests and standalone runs never spawn it.
     if os.environ.get("ASPIRE_SYNC_ENABLED", "false").strip().lower() in ("1", "true", "yes"):
         from api.estimating import sweep_loop
-        sweep_task = asyncio.create_task(sweep_loop())
+        sweep_tasks.append(asyncio.create_task(sweep_loop()))
+    # Beam reconciler — recovery for callbacks Attentive dead-lettered after its
+    # own 24h retry window. Read-only against Attentive; it can never order.
+    if os.environ.get("BEAM_SYNC_ENABLED", "false").strip().lower() in ("1", "true", "yes"):
+        from api.beam_sync import sweep_loop as beam_sweep_loop
+        sweep_tasks.append(asyncio.create_task(beam_sweep_loop()))
     try:
         yield
     finally:
-        if sweep_task is not None:
-            sweep_task.cancel()
+        for task in sweep_tasks:
+            task.cancel()
         await close_pool()
 
 
@@ -330,9 +335,13 @@ async def require_auth(session: Optional[str] = Cookie(default=None)) -> dict:
 # Routes live in api/estimating.py; registered here so they share require_auth.
 from api import estimating as _estimating  # noqa: E402
 from api import properties as _properties  # noqa: E402
+from api import beam_routes as _beam_routes  # noqa: E402
 
 _estimating.register(app, require_auth)
 _properties.register(app, require_auth)
+# Beam also registers /webhooks/attentive, deliberately OUTSIDE require_auth:
+# Attentive cannot send auth headers, so that route gates on a URL query token.
+_beam_routes.register(app, require_auth)
 
 
 # ── Leads ────────────────────────────────────────────────────────────────────
@@ -346,6 +355,8 @@ async def list_leads(
     states: Optional[str] = None,
     min_score: Optional[int] = None,
     property_id: Optional[str] = None,
+    sources: Optional[str] = None,
+    mine: bool = False,
     sort_by: str = "score",
     sort_dir: str = "desc",
     page: int = 1,
@@ -384,6 +395,19 @@ async def list_leads(
             placeholders, vals = _in_clause(state_list)
             conditions.append(f"state IN ({placeholders})")
             params.extend(vals)
+
+    if sources:
+        source_list = [s.strip() for s in sources.split(",") if s.strip()]
+        if source_list:
+            placeholders, vals = _in_clause(source_list)
+            conditions.append(f"source IN ({placeholders})")
+            params.extend(vals)
+
+    # User-scoped "Leads" tab. The identity comes from the JWT, never from a
+    # client-supplied param (BRD I-9.5) — `mine` is a boolean switch, not an id.
+    if mine:
+        conditions.append("(assigned_to = %s OR created_by = %s)")
+        params.extend([_user["id"], _user["id"]])
 
     if min_score is not None:
         conditions.append("score >= %s")
@@ -429,11 +453,13 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
         INSERT INTO leads
             (id, source, lead_type, property_name, city, state,
              estimated_contract_value, estimated_acreage, units, status,
-             contact_name, contact_email, property_id, created_at, updated_at)
+             contact_name, contact_email, property_id, created_by,
+             created_at, updated_at)
         VALUES
             (%s, 'manual', %s, %s, %s, %s,
              %s, %s, %s, %s,
-             %s, %s, %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+             %s, %s, %s, %s,
+             CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
             new_id,
@@ -448,6 +474,7 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
             body.contact_name,
             body.contact_email,
             body.property_id,
+            _user["id"],
         ],
     )
     return await _fetch_lead(new_id)

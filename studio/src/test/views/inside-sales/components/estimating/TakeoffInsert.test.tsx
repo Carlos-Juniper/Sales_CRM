@@ -117,9 +117,9 @@ describe('TakeoffInsert — scanned map card', () => {
     expect(screen.queryByRole('img', { name: /scanned property boundary map/i })).not.toBeInTheDocument()
   })
 
-  it('always shows the "Manual takeoff — human interpreted" badge', async () => {
+  it('always shows the "Estimator QA\'d — human interpreted" badge', async () => {
     await openTakeoffTab(buildMaintenanceEstimate())
-    expect(screen.getByText('Manual takeoff — human interpreted')).toBeInTheDocument()
+    expect(screen.getByText("Estimator QA'd — human interpreted")).toBeInTheDocument()
   })
 })
 
@@ -136,7 +136,7 @@ describe('TakeoffInsert — scan persistence', () => {
     expect(screen.getByText('dobson-ranch-boundary.png')).toBeInTheDocument()
     expect(screen.getByText('Replace scan')).toBeInTheDocument()
     // Badge persists over the real scan — human interpretation is deliberate.
-    expect(screen.getByText('Manual takeoff — human interpreted')).toBeInTheDocument()
+    expect(screen.getByText("Estimator QA'd — human interpreted")).toBeInTheDocument()
 
     // The presign → PUT → confirm flow completed: the scan is durable now.
     expect(await screen.findByText(/saved to estimate/i)).toBeInTheDocument()

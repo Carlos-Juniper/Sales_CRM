@@ -189,13 +189,18 @@ export interface EstimateBase {
    */
   rfiStatus?: string | null
   /**
-   * Manual takeoff metadata (Takeoff Insert stat grid). Manual
-   * estimator entry today, persisted on the estimate. Beam AI automated
-   * takeoff (paused) is the eventual source and will write
-   * these same fields. Acreage & sqft stay DERIVED from sections.
+   * Takeoff metadata (Takeoff Insert stat grid). Written either by estimator
+   * entry or by Beam ingest, which converts Attentive's sq ft / ft into the
+   * acres and miles these fields hold. Acreage & sqft stay DERIVED from sections.
    */
   turfAreaAcres?: number | null
   curbMiles?: number | null
+  /**
+   * Set when Beam redelivered measurements after this estimate was priced.
+   * Non-null means the displayed price may be stale and the estimator has a
+   * diff to accept — Beam never silently overwrites a priced estimate.
+   */
+  takeoffChangedAt?: string | null
   sections: EstimateSection[]
   createdAt: string
   updatedAt: string

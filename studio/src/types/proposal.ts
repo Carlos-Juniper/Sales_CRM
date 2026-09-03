@@ -157,6 +157,8 @@ export interface ProposalRender {
   proposalId: string
   version: number
   objectKey: string
+  /** Signed GCS URL included when status === 'complete'. */
+  downloadUrl?: string | null
   pageCount: number | null
   status: 'complete' | 'pending' | 'failed'
   errorMessage: string | null

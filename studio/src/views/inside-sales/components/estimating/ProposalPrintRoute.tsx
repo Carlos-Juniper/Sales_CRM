@@ -9,7 +9,7 @@
 // renderer (or any PDF service) polls this flag before capturing.
 // ---------------------------------------------------------------------------
 
-import { useEffect } from 'react'
+import React, { useEffect } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
   useProposal,
@@ -21,7 +21,7 @@ import { useLead } from '@/hooks/useLeads'
 import { useEstimate } from '@/hooks/useEstimate'
 import { ProposalPreview } from './ProposalPreview'
 import type { ProposalFormState } from './ProposalBuilder'
-import type { OptionalSection } from '@/types/proposal'
+import type { OptionalSection } from './ProposalBuilder'
 
 const OPTIONAL_SECTION_KEYS: OptionalSection[] = [
   'startup_plan_30_60_90',
@@ -40,7 +40,7 @@ const BRAND_FACES = [
   '400 12px "Mrs Saint Delafield"',
 ]
 
-export default function ProposalPrintRoute(): JSX.Element {
+export default function ProposalPrintRoute(): React.ReactElement {
   const { id } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   // ?autoprint=1 is set by the in-app "Print" button. The headless renderer

@@ -25,10 +25,18 @@ export interface ManageableBranch {
  * config endpoints (material-calcs / catalog-items) and written back through
  * this endpoint's PATCH.
  */
+export interface BranchProductionRate {
+  catalogItemId: string
+  description: string
+  productionRate: number | null
+  source: 'override' | 'inherited'
+}
+
 export interface BranchSettings {
   aspireBranchId: number
   /** Dollars-per-hour stored as cents; null ⇒ not configured (no fallback). */
   crewRateCentsPerHour: number | null
+  productionRates?: BranchProductionRate[]
 }
 
 /**

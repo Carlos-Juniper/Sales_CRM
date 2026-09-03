@@ -58,7 +58,6 @@ import type {
   BranchCoverageGroup,
   BranchProfile,
   OrgChartInput,
-  OrgChartCrewCounts,
   StartupPlanInput,
 } from '@/types/proposal'
 import type { ProposalFormState } from './ProposalBuilder'

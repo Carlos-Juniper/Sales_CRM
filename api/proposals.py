@@ -217,13 +217,20 @@ def _portfolio_property_out(r: dict) -> dict:
 
 
 def _insurance_cert_out(r: dict) -> dict:
-    """Map an insurance_certificates row to the API response shape."""
+    """Map a licenses_certifications row (kind='insurance') to the API response shape.
+
+    Handoff 42: insurance data now lives in licenses_certifications. The output
+    shape is intentionally stable so proposal consumers are unaffected. The
+    'label' field is sourced from 'name' (insurance rows store their label in
+    name per the migration 027 COALESCE). 'uploadedAt' is mapped from
+    updated_at (the closest equivalent after the table merge).
+    """
     return {
         "id": r["id"],
-        "objectKey": r["object_key"],
-        "expiryDate": _iso(r["expiry_date"]),
-        "label": r.get("label"),
-        "uploadedAt": _iso(r["uploaded_at"]),
+        "objectKey": r.get("object_key"),
+        "expiryDate": _iso(r.get("expiry_date")),
+        "label": r.get("name"),  # insurance rows store display name in 'name'
+        "uploadedAt": _iso(r.get("updated_at")),
     }
 
 
@@ -493,8 +500,14 @@ def register(app, require_auth) -> None:
     async def get_proposal_insurance(
         _user: dict = Depends(require_auth),
     ) -> Optional[dict]:
+        # Handoff 42: insurance data migrated from insurance_certificates into
+        # licenses_certifications (kind='insurance'). Ordered by updated_at DESC
+        # (equivalent to the former uploaded_at DESC). Company-wide rows only
+        # (aspire_branch_id IS NULL) — insurance is not branch-filtered here.
         rows = await query(
-            "SELECT * FROM insurance_certificates ORDER BY uploaded_at DESC LIMIT 1",
+            "SELECT * FROM licenses_certifications "
+            "WHERE kind = 'insurance' AND active = 1 "
+            "ORDER BY updated_at DESC LIMIT 1",
         )
         if not rows:
             return None
@@ -512,7 +525,10 @@ def register(app, require_auth) -> None:
         include_expired: bool = Query(False),
         _user: dict = Depends(require_auth),
     ) -> dict:
-        conditions = ["active = 1"]
+        # Handoff 42: insurance kind rows are excluded here — proposals read
+        # insurance via GET /api/proposals/config/insurance. License and
+        # certification rows are unaffected.
+        conditions = ["active = 1", "kind IN ('license', 'certification')"]
         params: list = []
         if aspire_branch_id is not None:
             conditions.append("(aspire_branch_id IS NULL OR aspire_branch_id = %s)")

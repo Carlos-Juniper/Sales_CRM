@@ -364,17 +364,19 @@ class LicenseCreate(BaseModel):
     """Create body for a licenses_certifications row.
 
     aspireBranchId=None = company-wide (admin-only). A BM/RD may create rows
-    only for branches in their user_branches scope. kind must be 'license' or
-    'certification'. issuedDate/expiryDate are ISO-8601 strings (YYYY-MM-DD).
+    only for branches in their user_branches scope. kind must be 'license',
+    'certification', or 'insurance'. expiryDate is REQUIRED for all kinds —
+    the settings surface shows a renewal warning; pass '9999-12-31' for
+    credentials that never expire. issuedDate is optional.
     """
-    kind: str  # 'license' | 'certification'
+    kind: str  # 'license' | 'certification' | 'insurance'
     name: str
+    expiryDate: str  # ISO YYYY-MM-DD — required for all kinds
     issuingBody: Optional[str] = None
     identifier: Optional[str] = None
     holderName: Optional[str] = None
     aspireBranchId: Optional[int] = None
     issuedDate: Optional[str] = None  # ISO YYYY-MM-DD
-    expiryDate: Optional[str] = None  # ISO YYYY-MM-DD; None = non-expiring
     objectKey: Optional[str] = None
     sortOrder: int = 0
 
@@ -406,31 +408,9 @@ _LC_UPDATABLE: dict[str, str] = {
 }
 
 
-class InsuranceCreate(BaseModel):
-    """Create body for an insurance_certificates row.
-
-    object_key is required (the cert IS the upload). expiryDate is required —
-    the settings handoff shows a renewal warning off this date. label is optional
-    (useful when tracking multiple policy types). Company-wide, admin-only.
-    """
-    objectKey: str
-    expiryDate: str  # ISO YYYY-MM-DD — NOT NULL in the schema
-    label: Optional[str] = None
-
-
-class InsurancePatch(BaseModel):
-    """Partial update for insurance_certificates."""
-    objectKey: Optional[str] = None
-    expiryDate: Optional[str] = None
-    label: Optional[str] = None
-
-
-# Updatable columns for InsurancePatch (camelCase -> DB).
-_INS_UPDATABLE: dict[str, str] = {
-    "objectKey": "object_key",
-    "expiryDate": "expiry_date",
-    "label": "label",
-}
+# InsuranceCreate / InsurancePatch / _INS_UPDATABLE removed — insurance documents
+# are now managed through the unified /api/settings/licenses endpoints with
+# kind='insurance'. See migration 027 and Handoff 42.
 
 
 # ── Company setting column map (camel-free: bodies already use snake_case columns).
@@ -481,21 +461,10 @@ def _license_settings_out(r: dict) -> dict:
     }
 
 
-def _insurance_settings_out(r: dict) -> dict:
-    """Map an insurance_certificates DB row to the settings API response shape.
-
-    Applies coerce_row so expiry_date/uploaded_at serialize as ISO strings.
-    Field names match _insurance_cert_out in proposals.py so the proposals read
-    endpoint and the settings write endpoints round-trip the same shape.
-    """
-    coerced = coerce_row(dict(r))
-    return {
-        "id": coerced["id"],
-        "objectKey": coerced["object_key"],
-        "expiryDate": coerced.get("expiry_date"),
-        "label": coerced.get("label"),
-        "uploadedAt": coerced.get("uploaded_at"),
-    }
+# _insurance_settings_out removed — insurance rows now use _license_settings_out
+# (all columns are present in licenses_certifications; kind='insurance' rows
+# will have issuing_body/identifier/holder_name/issued_date as NULL). See
+# migration 027 and Handoff 42.
 
 
 def register(app, require_auth) -> None:
@@ -1650,24 +1619,29 @@ def register(app, require_auth) -> None:
         )
         return {"id": property_id, "active": False}
 
-    # ── Slice 15a: licenses_certifications CRUD ───────────────────────────────
+    # ── Handoff 42: Documents (licenses_certifications) CRUD ─────────────────
     #
+    # Single API for all document kinds: 'license', 'certification', 'insurance'.
     # Branch-scoped (aspire_branch_id NULL = company-wide, admin-only).
-    # SOFT-DELETE ONLY (active=0) — an expired license is a historical record
+    # SOFT-DELETE ONLY (active=0) — an expired document is a historical record
     # that past proposals referenced. NEVER issue a DELETE. §6 AC.
     # Scope derivation follows the same pattern as team_members / client_references:
     # the writable branch comes from resolve_branch_scope, never the body.
+    # Insurance-kind rows are branch-scoped like licenses — no admin-only guard.
 
     @app.get("/api/settings/licenses")
+    @app.get("/api/settings/documents")
     async def list_licenses(
         include_expired: bool = False,
         user: dict = Depends(require_auth),
     ) -> list[dict]:
         """List licenses_certifications rows visible to the caller.
 
-        Admin sees all rows (any branch + company-wide). BM/RD see only rows
-        for their branches plus company-wide rows. include_expired=true includes
+        Returns all document kinds (license, certification, insurance). Admin
+        sees all rows (any branch + company-wide). BM/RD see only rows for
+        their branches plus company-wide rows. include_expired=true includes
         deactivated and past-expiry rows (for the Settings management surface).
+        Accessible at both /api/settings/licenses and /api/settings/documents.
         """
         scope = await authz.resolve_branch_scope(user)
 
@@ -1698,15 +1672,26 @@ def register(app, require_auth) -> None:
         return [_license_settings_out(r) for r in rows]
 
     @app.post("/api/settings/licenses", status_code=201)
+    @app.post("/api/settings/documents", status_code=201)
     async def create_license(
         body: LicenseCreate,
         user: dict = Depends(require_auth),
     ) -> dict:
         """Create a licenses_certifications row with branch-scope or company-wide guard.
 
-        Company-wide rows (aspireBranchId=None) require admin (Amendment C.5).
-        Branch rows require admin or a BM/RD whose user_branches includes that branch.
+        Accepts kind='license', 'certification', or 'insurance'. expiryDate is
+        required for all kinds. Company-wide rows (aspireBranchId=None) require
+        admin. Branch rows require admin or a BM/RD with write scope for that branch.
+        Insurance-kind rows follow the same branch-scoping rules as licenses.
+        Accessible at both /api/settings/licenses and /api/settings/documents.
         """
+        _VALID_KINDS = {"license", "certification", "insurance"}
+        if body.kind not in _VALID_KINDS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"kind must be one of: {', '.join(sorted(_VALID_KINDS))}",
+            )
+
         actor = _actor(user)
 
         if body.aspireBranchId is None:
@@ -1763,15 +1748,17 @@ def register(app, require_auth) -> None:
         }
 
     @app.patch("/api/settings/licenses/{license_id}")
+    @app.patch("/api/settings/documents/{license_id}")
     async def patch_license(
         license_id: str,
         body: LicensePatch,
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Partial update of one licenses_certifications row.
+        """Partial update of one licenses_certifications row (any kind).
 
         Scope is derived from the EXISTING row's aspire_branch_id — a body-supplied
         branch cannot widen scope. Company-wide rows (NULL) are admin-only.
+        Accessible at both /api/settings/licenses/{id} and /api/settings/documents/{id}.
         """
         rows = await query(
             "SELECT * FROM licenses_certifications WHERE id = %s", [license_id]
@@ -1822,15 +1809,17 @@ def register(app, require_auth) -> None:
         return _license_settings_out(r)
 
     @app.delete("/api/settings/licenses/{license_id}")
+    @app.delete("/api/settings/documents/{license_id}")
     async def deactivate_license(
         license_id: str,
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Soft-delete a licenses_certifications row (active=0). NEVER a hard DELETE.
+        """Soft-delete a licenses_certifications row (any kind) — active=0. NEVER hard DELETE.
 
-        An expired license is a historical record referenced by past proposals.
-        Setting active=0 removes it from proposal generation while preserving the
-        audit trail. §6 AC — no DELETE SQL may ever be emitted for this table.
+        An expired/deactivated document is a historical record referenced by past
+        proposals. Setting active=0 removes it from proposal generation while
+        preserving the audit trail. §6 AC — no DELETE SQL may ever be emitted.
+        Accessible at both /api/settings/licenses/{id} and /api/settings/documents/{id}.
         """
         rows = await query(
             "SELECT * FROM licenses_certifications WHERE id = %s", [license_id]
@@ -1865,18 +1854,22 @@ def register(app, require_auth) -> None:
         return {"id": license_id, "active": False}
 
     @app.post("/api/settings/licenses/{license_id}/scan", status_code=200)
+    @app.post("/api/settings/documents/{license_id}/scan", status_code=200)
     async def upload_license_scan(
         license_id: str,
         file: UploadFile = File(...),
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Upload a scan PDF/image for a licenses_certifications row.
+        """Upload a file (PDF or image) for any licenses_certifications row.
 
-        Writes bytes through api.attachments.upload_bytes (the ONLY upload path
-        — no parallel uploader is added). The GCS object key is constructed from
-        the row id and file extension, then stored in the row's object_key column.
+        Accepts any document kind (license, certification, insurance). Writes
+        bytes through api.attachments.upload_bytes (the ONLY upload path — no
+        parallel uploader is added). The GCS object key is constructed from the
+        row id and file extension, then stored in the row's object_key column.
         The existing media-url signer (GET /api/proposals/config/media-url) is
-        reused to serve the scan — no second signing route is added here.
+        reused to serve the file — no second signing route is added here.
+        Accessible at both /api/settings/licenses/{id}/scan and
+        /api/settings/documents/{id}/scan.
         """
         rows = await query(
             "SELECT * FROM licenses_certifications WHERE id = %s", [license_id]
@@ -1928,205 +1921,13 @@ def register(app, require_auth) -> None:
         )
         return {"id": license_id, "objectKey": object_key}
 
-    # ── Slice 15a: insurance_certificates CRUD ────────────────────────────────
+    # ── Handoff 42: insurance_certificates endpoints removed ──────────────────
     #
-    # Schema divergence vs licenses_certifications (noted in Amendment C.3 intent):
-    #   - NO aspire_branch_id → company-wide only, admin-only writes (§C.5).
-    #   - NO active column    → no soft-delete available without a migration.
-    #                           Removal is a hard DELETE (same situation as
-    #                           portfolio_properties). Flag for migration follow-up.
-    #   - NO sort_order       → ordered by uploaded_at DESC.
-    #   - object_key NOT NULL → required on creation (the cert IS the upload).
-    #   - uploaded_at auto    → set by DB DEFAULT CURRENT_TIMESTAMP.
-
-    @app.get("/api/settings/insurance")
-    async def list_insurance(
-        include_inactive: bool = False,
-        user: dict = Depends(require_auth),
-    ) -> list[dict]:
-        """List insurance_certificates — admin-only, newest first.
-
-        By default returns only active rows (active=1). include_inactive=true
-        returns all rows for the admin management surface.
-        Migration 023 added the active column; before that migration is applied
-        every row has implicit active=1.
-        """
-        await _require_admin(user)
-        where = "" if include_inactive else "WHERE active = 1"
-        rows = await query(
-            f"SELECT * FROM insurance_certificates {where} ORDER BY uploaded_at DESC",
-        )
-        return [_insurance_settings_out(r) for r in rows]
-
-    @app.post("/api/settings/insurance", status_code=201)
-    async def create_insurance(
-        body: InsuranceCreate,
-        user: dict = Depends(require_auth),
-    ) -> dict:
-        """Create an insurance_certificates row — admin-only, company-scoped.
-
-        object_key and expiryDate are required (both NOT NULL in the schema).
-        The object_key should come from a prior call to the upload endpoint.
-        """
-        await _require_admin(user)
-        actor = _actor(user)
-
-        row_id = str(uuid.uuid4())
-        await execute(
-            """INSERT INTO insurance_certificates
-                 (id, object_key, expiry_date, label)
-               VALUES (%s, %s, %s, %s)""",
-            [row_id, body.objectKey, body.expiryDate, body.label],
-        )
-        await _audit(
-            scope_type="company",
-            scope_id=None,
-            setting_key=f"insurance.{row_id}.create",
-            from_value=None,
-            to_value=body.objectKey,
-            actor=actor,
-        )
-        return {
-            "id": row_id,
-            "objectKey": body.objectKey,
-            "expiryDate": body.expiryDate,
-            "label": body.label,
-        }
-
-    @app.patch("/api/settings/insurance/{cert_id}")
-    async def patch_insurance(
-        cert_id: str,
-        body: InsurancePatch,
-        user: dict = Depends(require_auth),
-    ) -> dict:
-        """Partial update of an insurance_certificates row — admin-only."""
-        await _require_admin(user)
-
-        rows = await query(
-            "SELECT * FROM insurance_certificates WHERE id = %s", [cert_id]
-        )
-        if not rows:
-            raise HTTPException(status_code=404, detail="Insurance certificate not found")
-        current = rows[0]
-
-        updates = {
-            camel: col
-            for camel, col in _INS_UPDATABLE.items()
-            if getattr(body, camel) is not None
-        }
-        if not updates:
-            raise HTTPException(status_code=400, detail="No insurance certificate fields to update")
-
-        set_clause = ", ".join(f"{col} = %s" for col in updates.values())
-        params: list[Any] = [getattr(body, camel) for camel in updates] + [cert_id]
-        await execute(
-            f"UPDATE insurance_certificates SET {set_clause} WHERE id = %s", params
-        )
-
-        actor = _actor(user)
-        for camel, col in updates.items():
-            await _audit(
-                scope_type="company",
-                scope_id=None,
-                setting_key=f"insurance.{cert_id}.{col}",
-                from_value=current.get(col),
-                to_value=getattr(body, camel),
-                actor=actor,
-            )
-
-        refreshed = await query(
-            "SELECT * FROM insurance_certificates WHERE id = %s", [cert_id]
-        )
-        r = refreshed[0] if refreshed else current
-        return _insurance_settings_out(r)
-
-    @app.delete("/api/settings/insurance/{cert_id}")
-    async def deactivate_insurance(
-        cert_id: str,
-        user: dict = Depends(require_auth),
-    ) -> dict:
-        """Soft-delete an insurance_certificates row (active=0) — admin-only.
-
-        Migration 023 added insurance_certificates.active so this handler now
-        mirrors team_members and client_references: never a hard DELETE.
-        The cert record (object_key, expiry_date) must remain retrievable for
-        historical proposal references after deactivation.
-        """
-        await _require_admin(user)
-
-        rows = await query(
-            "SELECT * FROM insurance_certificates WHERE id = %s", [cert_id]
-        )
-        if not rows:
-            raise HTTPException(status_code=404, detail="Insurance certificate not found")
-        current = rows[0]
-
-        await execute(
-            "UPDATE insurance_certificates SET active = %s WHERE id = %s",
-            [0, cert_id],
-        )
-        await _audit(
-            scope_type="company",
-            scope_id=None,
-            setting_key=f"insurance.{cert_id}.active",
-            from_value=current.get("active"),
-            to_value=0,
-            actor=_actor(user),
-        )
-        return {"id": cert_id, "active": False}
-
-    @app.post("/api/settings/insurance/upload", status_code=201)
-    async def upload_insurance_cert(
-        file: UploadFile = File(...),
-        expiryDate: str = Form(...),
-        label: Optional[str] = Form(None),
-        user: dict = Depends(require_auth),
-    ) -> dict:
-        """Upload an insurance cert PDF, store key, and create the DB record.
-
-        Combines upload + create in one request for the Settings UI flow. Bytes
-        route through api.attachments.upload_bytes (the ONLY upload path). The
-        existing media-url signer (GET /api/proposals/config/media-url) is reused
-        to serve the cert — no second signing route is added here.
-        """
-        await _require_admin(user)
-        actor = _actor(user)
-
-        from api.attachments import upload_bytes as _upload_bytes
-        _EXT_MAP = {
-            "application/pdf": "pdf",
-            "image/png": "png",
-            "image/jpeg": "jpg",
-        }
-        content_type = file.content_type or "application/pdf"
-        ext = _EXT_MAP.get(content_type, "bin")
-        cert_id = str(uuid.uuid4())
-        object_key = f"credentials/insurance/{cert_id}.{ext}"
-
-        data = await file.read()
-        # Upload via the ONLY upload path — no second GCS client or signing route.
-        _upload_bytes(object_key, data, content_type)
-
-        await execute(
-            """INSERT INTO insurance_certificates
-                 (id, object_key, expiry_date, label)
-               VALUES (%s, %s, %s, %s)""",
-            [cert_id, object_key, expiryDate, label],
-        )
-        await _audit(
-            scope_type="company",
-            scope_id=None,
-            setting_key=f"insurance.{cert_id}.create",
-            from_value=None,
-            to_value=object_key,
-            actor=actor,
-        )
-        return {
-            "id": cert_id,
-            "objectKey": object_key,
-            "expiryDate": expiryDate,
-            "label": label,
-        }
+    # The /api/settings/insurance GET/POST/PATCH/DELETE endpoints and the
+    # /api/settings/insurance/upload endpoint have been removed. Insurance
+    # documents are now managed through the unified /api/settings/licenses
+    # (or /api/settings/documents) endpoints with kind='insurance'. See
+    # migration 027 for the data migration from insurance_certificates.
 
 
 async def _replace_user_branches(

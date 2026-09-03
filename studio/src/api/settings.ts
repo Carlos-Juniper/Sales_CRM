@@ -322,46 +322,6 @@ export const settingsApi = {
     )
   },
 
-  // ── Slice 15b: insurance_certificates CRUD (admin-only, company-scoped) ─────
-
-  /**
-   * GET /api/settings/insurance — list insurance certificates, newest first.
-   * Admin-only server-side. The expiry banner checks expiryDate on these rows.
-   */
-  listInsurance: () =>
-    apiClient.get<InsuranceCert[]>('/settings/insurance'),
-
-  /** POST /api/settings/insurance — create a cert row given an existing objectKey. */
-  createInsurance: (body: InsuranceCreateBody) =>
-    apiClient.post<InsuranceCert>('/settings/insurance', body),
-
-  /** PATCH /api/settings/insurance/:id — partial update. */
-  updateInsurance: (certId: string, body: InsurancePatchBody) =>
-    apiClient.patch<InsuranceCert>(`/settings/insurance/${certId}`, body),
-
-  /**
-   * DELETE /api/settings/insurance/:id — hard delete (no active column).
-   * NOTE: insurance_certificates has no active column (migration 014).
-   */
-  deleteInsurance: (certId: string) =>
-    apiClient.delete<void>(`/settings/insurance/${certId}`),
-
-  /**
-   * POST /api/settings/insurance/upload — upload a cert PDF + create the DB row
-   * in one request. This is the preferred flow for the Settings UI (avoids a
-   * separate POST after the upload). Returns the created InsuranceCert row.
-   */
-  uploadInsuranceCert: (params: {
-    file: File
-    expiryDate: string
-    label?: string | null
-  }) => {
-    const form = new FormData()
-    form.append('file', params.file)
-    form.append('expiry_date', params.expiryDate)
-    if (params.label) form.append('label', params.label)
-    return apiClient.postForm<InsuranceCert>('/settings/insurance/upload', form)
-  },
 }
 
 // ── H37 request/response shapes ──────────────────────────────────────────────
@@ -413,14 +373,17 @@ export interface PortfolioPropertyCreateBody {
 
 export type PortfolioPropertyPatchBody = Partial<PortfolioPropertyCreateBody>
 
-// ── Slice 15b: licenses/certifications request/response shapes ────────────────
-// These mirror LicenseCreate / LicensePatch / InsuranceCreate / InsurancePatch
-// in api/settings.py. The read path from /settings/licenses returns this shape
-// (NOTE: isExpired is absent — only /proposals/config/licenses computes it).
+// ── Documents (unified licenses/certifications/insurance) shapes ──────────────
+// All three kinds share one endpoint: GET/POST/PATCH/DELETE /api/settings/licenses
+// (alias /api/settings/documents). The `kind` field distinguishes them.
+// expiryDate is REQUIRED by the backend for all kinds.
+// isExpired is NOT present — only /proposals/config/licenses computes it.
+
+export type DocumentKind = 'license' | 'certification' | 'insurance'
 
 export interface LicenseSettingsRow {
   id: string
-  kind: 'license' | 'certification'
+  kind: DocumentKind
   name: string
   issuingBody: string | null
   identifier: string | null
@@ -428,7 +391,8 @@ export interface LicenseSettingsRow {
   /** null = company-wide (admin-only create; BM sees read-only). */
   aspireBranchId: number | null
   issuedDate: string | null
-  expiryDate: string | null
+  /** Required by the backend — always present on a valid row. */
+  expiryDate: string
   objectKey: string | null
   active: boolean
   sortOrder: number
@@ -436,33 +400,17 @@ export interface LicenseSettingsRow {
 }
 
 export interface LicenseCreateBody {
-  kind: 'license' | 'certification'
+  kind: DocumentKind
   name: string
+  /** Required by the backend. */
+  expiryDate: string
   issuingBody?: string | null
   identifier?: string | null
   holderName?: string | null
   aspireBranchId?: number | null
   issuedDate?: string | null
-  expiryDate?: string | null
   objectKey?: string | null
   sortOrder?: number
 }
 
 export type LicensePatchBody = Partial<Omit<LicenseCreateBody, 'aspireBranchId'>>
-
-/** Insurance certificate — admin-only, company-scoped. */
-export interface InsuranceCert {
-  id: string
-  objectKey: string
-  expiryDate: string | null
-  label: string | null
-  uploadedAt: string | null
-}
-
-export interface InsuranceCreateBody {
-  objectKey: string
-  expiryDate: string
-  label?: string | null
-}
-
-export type InsurancePatchBody = Partial<InsuranceCreateBody>

@@ -1,16 +1,18 @@
 // ---------------------------------------------------------------------------
-// Slice 15b — Credentials section: insurance + licenses/certifications CRUD.
+// Handoff 42 — Documents section (formerly Credentials): unified license,
+// certification, and insurance CRUD.
 //
 // ACs tested:
-//   1. One section shows BOTH insurance AND licenses under a single expiry banner.
-//   2. Deactivating a license calls DELETE (soft-delete); "include expired" toggle
-//      re-queries with include_expired=true and the row still appears.
-//   3. BM sees company-wide (aspireBranchId===null) license as read-only; branch-
-//      scoped license shows controls.
-//   4. Scan upload POSTs to /api/settings/licenses/:id/scan; view link is built
-//      via the /api/proposals/config/media-url signer (not a hand-built URL).
-//   5. Expiry banner uses the server isExpired flag (client never recomputes from
-//      the date string itself).
+//   1. One unified section manages all three document kinds (license,
+//      certification, insurance) in a single list with kind selector.
+//   2. Creating a document requires kind, name, and expiryDate; insurance can be
+//      created by any BM (not admin-gated in the UI).
+//   3. Deactivating a document calls DELETE (soft-delete); "include expired"
+//      toggle re-queries with include_expired=true.
+//   4. BM sees company-wide rows as read-only; branch-scoped rows show controls.
+//   5. Each row supports uploading exactly one file via /scan; view link via
+//      media-url signer (not a hand-built URL).
+//   6. Expiry banner uses server isExpired flag — client never recomputes.
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach } from 'vitest'
@@ -28,7 +30,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { makeUser } from '@/test/utils'
 import { useAuthStore } from '@/store/authStore'
 import { CredentialsSection } from '@/views/settings/credentials/CredentialsSection'
-import type { LicenseSettingsRow, InsuranceCert } from '@/views/settings/credentials/CredentialsSection'
+import type { LicenseSettingsRow } from '@/views/settings/credentials/CredentialsSection'
 
 const BRANCH_ID = 42
 
@@ -76,20 +78,27 @@ const EXPIRED_LICENSE: LicenseSettingsRow = {
   aspireBranchId: BRANCH_ID,
   issuedDate: '2018-01-01',
   expiryDate: '2023-01-01',
-  // NOTE: isExpired comes from the /proposals/config/licenses endpoint,
-  // NOT from the /settings/licenses endpoint (which lacks isExpired).
   objectKey: null,
   active: true,
   sortOrder: 2,
   updatedAt: '2023-01-01T00:00:00Z',
 }
 
-const INSURANCE_CERT: InsuranceCert = {
+// Insurance is now a unified document row with kind='insurance'
+const INSURANCE_DOC: LicenseSettingsRow = {
   id: 'ins-1',
-  objectKey: 'credentials/insurance/ins-1.pdf',
+  kind: 'insurance',
+  name: 'General Liability',
+  issuingBody: null,
+  identifier: null,
+  holderName: null,
+  aspireBranchId: BRANCH_ID,
+  issuedDate: null,
   expiryDate: '2099-12-31', // far future — non-expired
-  label: 'General Liability',
-  uploadedAt: '2024-01-15T10:00:00Z',
+  objectKey: 'credentials/insurance/ins-1.pdf',
+  active: true,
+  sortOrder: 3,
+  updatedAt: '2024-01-15T10:00:00Z',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -116,56 +125,53 @@ function renderComp(
   )
 }
 
-function mockLicenses(licenses: LicenseSettingsRow[], certifications: LicenseSettingsRow[] = []) {
+function mockDocuments(docs: LicenseSettingsRow[]) {
   server.use(
     http.get('*/api/settings/licenses', () =>
-      HttpResponse.json([...licenses, ...certifications]),
-    ),
-  )
-}
-
-function mockInsurance(certs: InsuranceCert[]) {
-  server.use(
-    http.get('*/api/settings/insurance', () =>
-      HttpResponse.json(certs),
+      HttpResponse.json(docs),
     ),
   )
 }
 
 beforeEach(() => {
   useAuthStore.setState({ user: makeUser({ role: 'manager' }) })
-  // Default: empty lists so tests that don't care about content still load
-  mockLicenses([])
-  mockInsurance([])
+  // Default: empty list so tests that don't care about content still load
+  mockDocuments([])
+  server.use(
+    http.get('*/api/proposals/config/licenses', () =>
+      HttpResponse.json({ licenses: [], certifications: [] }),
+    ),
+  )
 })
 
-// ── AC-1: One section, one banner covering both insurance and licenses ─────────
+// ── AC-1: Unified section manages all three kinds ─────────────────────────────
 
-describe('CredentialsSection — unified section with shared expiry banner', () => {
-  it('renders both insurance and license subsections in a single section', async () => {
-    mockLicenses([BRANCH_LICENSE])
-    mockInsurance([INSURANCE_CERT])
-    server.use(
-      http.get('*/api/proposals/config/licenses', () =>
-        HttpResponse.json({ licenses: [], certifications: [] }),
-      ),
-    )
+describe('CredentialsSection — unified documents section', () => {
+  it('renders the documents section under credentials testid', async () => {
+    mockDocuments([BRANCH_LICENSE, INSURANCE_DOC])
 
     renderComp({}, 'admin')
 
-    // Both sub-areas appear under a single credentials wrapper
     expect(await screen.findByTestId('settings-section-credentials')).toBeInTheDocument()
-    // Insurance area
-    expect(screen.getByTestId('credentials-insurance-area')).toBeInTheDocument()
-    // Licenses area
+    // One unified list area
     expect(screen.getByTestId('credentials-licenses-area')).toBeInTheDocument()
-    // License data visible (async — wait for fetch)
+    // All document kinds appear in the same list
     expect(await screen.findByText('General Contractor License')).toBeInTheDocument()
+    expect(await screen.findByText('General Liability')).toBeInTheDocument()
   })
 
-  it('shows a single expiry-warning banner when a license row has isExpired=true from the API', async () => {
-    // The /proposals/config/licenses endpoint returns isExpired.
-    // We stub that endpoint for the banner check (banner uses the proposals endpoint).
+  it('shows kind badge for each document row', async () => {
+    mockDocuments([BRANCH_LICENSE, INSURANCE_DOC])
+
+    renderComp({}, 'admin')
+
+    await screen.findByText('General Contractor License')
+    // Kind badges are rendered as text
+    expect(screen.getByText('license')).toBeInTheDocument()
+    expect(screen.getByText('insurance')).toBeInTheDocument()
+  })
+
+  it('shows a single expiry-warning banner when a license has isExpired=true from the API', async () => {
     server.use(
       http.get('*/api/proposals/config/licenses', () =>
         HttpResponse.json({
@@ -174,17 +180,14 @@ describe('CredentialsSection — unified section with shared expiry banner', () 
         }),
       ),
     )
-    mockInsurance([])
-    mockLicenses([EXPIRED_LICENSE])
+    mockDocuments([EXPIRED_LICENSE])
 
     renderComp({}, 'admin')
 
-    // Wait for the banner to appear
     const banner = await screen.findByTestId('credentials-expiry-banner')
     expect(banner).toBeInTheDocument()
-    // Only ONE banner element exists covering the whole section
-    const banners = screen.getAllByTestId('credentials-expiry-banner')
-    expect(banners).toHaveLength(1)
+    // Only ONE banner element
+    expect(screen.getAllByTestId('credentials-expiry-banner')).toHaveLength(1)
   })
 
   it('does NOT show the expiry banner when no rows are flagged expired by the API', async () => {
@@ -196,31 +199,20 @@ describe('CredentialsSection — unified section with shared expiry banner', () 
         }),
       ),
     )
-    mockInsurance([INSURANCE_CERT])
-    mockLicenses([BRANCH_LICENSE])
+    mockDocuments([BRANCH_LICENSE])
 
     renderComp({}, 'admin')
 
     await screen.findByText('General Contractor License')
-    // No banner when nothing is expired
     expect(screen.queryByTestId('credentials-expiry-banner')).not.toBeInTheDocument()
   })
 
-  it('shows expiry banner when insurance expiryDate is in the past (server-flagged via isExpired on license list)', async () => {
-    // Insurance expiry is surfaced through the insurance list + the banner.
-    // We flag an insurance cert as expired by having a past expiryDate; the
-    // banner logic checks expiryDate server value, not recomputes.
-    const expiredInsurance: InsuranceCert = {
-      ...INSURANCE_CERT,
-      expiryDate: '2020-01-01', // past date — component reads this field verbatim
+  it('shows expiry banner when an insurance document row has a past expiryDate', async () => {
+    const expiredInsuranceDoc: LicenseSettingsRow = {
+      ...INSURANCE_DOC,
+      expiryDate: '2020-01-01', // past — banner fires on expired insurance rows
     }
-    mockInsurance([expiredInsurance])
-    server.use(
-      http.get('*/api/proposals/config/licenses', () =>
-        HttpResponse.json({ licenses: [], certifications: [] }),
-      ),
-    )
-    mockLicenses([])
+    mockDocuments([expiredInsuranceDoc])
 
     renderComp({}, 'admin')
 
@@ -229,17 +221,74 @@ describe('CredentialsSection — unified section with shared expiry banner', () 
   })
 })
 
-// ── AC-2: Deactivate (soft-delete) + include-expired toggle ──────────────────
+// ── AC-2: Creating a document requires kind, name, expiryDate ─────────────────
+
+describe('CredentialsSection — document creation', () => {
+  it('shows the Add document button for BMs (not admin-gated)', async () => {
+    mockDocuments([])
+
+    // BM (manager role) should see the Add button for branch-scoped creation
+    renderComp({ aspireBranchId: BRANCH_ID }, 'manager')
+
+    // Wait for loading to complete (empty state text appears after fetch)
+    expect(await screen.findByText(/no documents yet/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add document/i })).toBeInTheDocument()
+  })
+
+  it('kind selector includes License, Certification, and Insurance options', async () => {
+    mockDocuments([])
+
+    renderComp({}, 'admin')
+
+    // Wait for loading to finish
+    await screen.findByText(/no documents yet/i)
+    fireEvent.click(screen.getByRole('button', { name: /add document/i }))
+
+    const kindSelect = screen.getByRole('combobox')
+    const options = Array.from(kindSelect.querySelectorAll('option')).map((o) => o.value)
+    expect(options).toContain('license')
+    expect(options).toContain('certification')
+    expect(options).toContain('insurance')
+  })
+
+  it('POSTs to /api/settings/licenses with kind, name, and expiryDate', async () => {
+    mockDocuments([])
+
+    let postedBody: Record<string, unknown> | null = null
+    server.use(
+      http.post('*/api/settings/licenses', async ({ request }) => {
+        postedBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ ...INSURANCE_DOC, id: 'ins-new', ...postedBody }, { status: 201 })
+      }),
+    )
+
+    renderComp({}, 'admin')
+
+    // Wait for loading to finish
+    await screen.findByText(/no documents yet/i)
+    fireEvent.click(screen.getByRole('button', { name: /add document/i }))
+
+    // Set kind to insurance
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'insurance' } })
+    // Fill name
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: 'General Liability' } })
+    // Fill expiry date
+    fireEvent.change(screen.getByLabelText(/expiry date/i), { target: { value: '2027-12-31' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /^create$/i }))
+
+    await waitFor(() => expect(postedBody).not.toBeNull())
+    expect(postedBody?.kind).toBe('insurance')
+    expect(postedBody?.name).toBe('General Liability')
+    expect(postedBody?.expiryDate).toBe('2027-12-31')
+  })
+})
+
+// ── AC-3: Deactivate (soft-delete) + include-expired toggle ──────────────────
 
 describe('CredentialsSection — deactivate and include-expired toggle', () => {
   it('fires DELETE /api/settings/licenses/:id on deactivate', async () => {
-    mockLicenses([BRANCH_LICENSE])
-    mockInsurance([])
-    server.use(
-      http.get('*/api/proposals/config/licenses', () =>
-        HttpResponse.json({ licenses: [{ ...BRANCH_LICENSE, isExpired: false }], certifications: [] }),
-      ),
-    )
+    mockDocuments([BRANCH_LICENSE])
 
     let deletedId: string | null = null
     server.use(
@@ -258,13 +307,6 @@ describe('CredentialsSection — deactivate and include-expired toggle', () => {
   })
 
   it('passes include_expired=true when the toggle is on', async () => {
-    mockInsurance([])
-    server.use(
-      http.get('*/api/proposals/config/licenses', () =>
-        HttpResponse.json({ licenses: [], certifications: [] }),
-      ),
-    )
-
     let capturedUrl: string | null = null
     server.use(
       http.get('*/api/settings/licenses', ({ request }) => {
@@ -275,19 +317,16 @@ describe('CredentialsSection — deactivate and include-expired toggle', () => {
 
     renderComp({}, 'admin')
 
-    // Wait for initial load
     await waitFor(() => expect(capturedUrl).not.toBeNull())
     capturedUrl = null // reset to capture the toggled call
 
-    // Toggle "include expired"
     const toggle = await screen.findByRole('checkbox', { name: /include.*expired|show.*inactive/i })
     fireEvent.click(toggle)
 
     await waitFor(() => expect(capturedUrl).toContain('include_expired=true'))
   })
 
-  it('still shows an expired row when include-expired is on', async () => {
-    mockInsurance([])
+  it('shows an expired row when include-expired is on', async () => {
     server.use(
       http.get('*/api/proposals/config/licenses', () =>
         HttpResponse.json({
@@ -309,83 +348,54 @@ describe('CredentialsSection — deactivate and include-expired toggle', () => {
     const toggle = await screen.findByRole('checkbox', { name: /include.*expired|show.*inactive/i })
     fireEvent.click(toggle)
 
-    // The expired row now appears
     expect(await screen.findByText('Irrigation Certification')).toBeInTheDocument()
   })
 })
 
-// ── AC-3: BM read-only for company-wide rows ──────────────────────────────────
+// ── AC-4: BM read-only for company-wide rows ──────────────────────────────────
 
-describe('CredentialsSection — BM read-only for company-wide licenses', () => {
+describe('CredentialsSection — BM read-only for company-wide documents', () => {
   it('BM sees company-wide license as read-only (no deactivate control)', async () => {
-    mockInsurance([])
-    server.use(
-      http.get('*/api/proposals/config/licenses', () =>
-        HttpResponse.json({ licenses: [], certifications: [] }),
-      ),
-    )
-    mockLicenses([COMPANY_LICENSE]) // aspireBranchId === null
+    mockDocuments([COMPANY_LICENSE]) // aspireBranchId === null
 
     renderComp({ aspireBranchId: BRANCH_ID }, 'manager')
 
     await screen.findByText('Pesticide Applicator')
 
-    // The read-only badge should be present
     expect(screen.getByTestId('license-lic-2-readonly')).toBeInTheDocument()
-    // No deactivate button next to the company-wide row — the controls are absent
     const deactivateButtons = screen.queryAllByRole('button', { name: /deactivate/i })
     expect(deactivateButtons).toHaveLength(0)
   })
 
   it('BM can edit a branch-scoped license (has deactivate control)', async () => {
-    mockInsurance([])
-    server.use(
-      http.get('*/api/proposals/config/licenses', () =>
-        HttpResponse.json({ licenses: [], certifications: [] }),
-      ),
-    )
-    mockLicenses([BRANCH_LICENSE]) // aspireBranchId === BRANCH_ID
+    mockDocuments([BRANCH_LICENSE]) // aspireBranchId === BRANCH_ID
 
     renderComp({ aspireBranchId: BRANCH_ID }, 'manager')
 
     await screen.findByText('General Contractor License')
 
-    // Branch-scoped row: NO read-only badge, HAS deactivate button
     expect(screen.queryByTestId('license-lic-1-readonly')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /deactivate/i })).toBeInTheDocument()
   })
 
-  it('admin can edit company-wide licenses (no read-only restriction)', async () => {
-    mockInsurance([])
-    server.use(
-      http.get('*/api/proposals/config/licenses', () =>
-        HttpResponse.json({ licenses: [], certifications: [] }),
-      ),
-    )
-    mockLicenses([COMPANY_LICENSE])
+  it('admin can edit company-wide documents (no read-only restriction)', async () => {
+    mockDocuments([COMPANY_LICENSE])
 
     renderComp({ aspireBranchId: BRANCH_ID }, 'admin')
 
     await screen.findByText('Pesticide Applicator')
 
-    // Admin sees no readonly badge and sees controls
     expect(screen.queryByTestId('license-lic-2-readonly')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /deactivate/i })).toBeInTheDocument()
   })
 })
 
-// ── AC-4: Scan upload → media-url signer ──────────────────────────────────────
+// ── AC-5: File upload per row → /scan endpoint ────────────────────────────────
 
-describe('CredentialsSection — scan upload and media-url signer', () => {
+describe('CredentialsSection — file upload and media-url signer', () => {
   it('POSTs to /api/settings/licenses/:id/scan on upload', async () => {
-    const licenseWithNoScan: LicenseSettingsRow = { ...BRANCH_LICENSE, objectKey: null }
-    mockLicenses([licenseWithNoScan])
-    mockInsurance([])
-    server.use(
-      http.get('*/api/proposals/config/licenses', () =>
-        HttpResponse.json({ licenses: [], certifications: [] }),
-      ),
-    )
+    const docWithNoFile: LicenseSettingsRow = { ...BRANCH_LICENSE, objectKey: null }
+    mockDocuments([docWithNoFile])
 
     let uploadedToId: string | null = null
     server.use(
@@ -398,7 +408,6 @@ describe('CredentialsSection — scan upload and media-url signer', () => {
     renderComp({}, 'admin')
     await screen.findByText('General Contractor License')
 
-    // Find and trigger the upload input
     const uploadInput = screen.getByTestId('license-lic-1-scan-upload')
     const file = new File(['pdf content'], 'scan.pdf', { type: 'application/pdf' })
     fireEvent.change(uploadInput, { target: { files: [file] } })
@@ -407,17 +416,11 @@ describe('CredentialsSection — scan upload and media-url signer', () => {
   })
 
   it('calls the media-url signer to build the view link (not a hand-built URL)', async () => {
-    const licenseWithScan: LicenseSettingsRow = {
+    const docWithFile: LicenseSettingsRow = {
       ...BRANCH_LICENSE,
       objectKey: 'credentials/licenses/lic-1.pdf',
     }
-    mockLicenses([licenseWithScan])
-    mockInsurance([])
-    server.use(
-      http.get('*/api/proposals/config/licenses', () =>
-        HttpResponse.json({ licenses: [], certifications: [] }),
-      ),
-    )
+    mockDocuments([docWithFile])
 
     let signerCalled = false
     let signerKey: string | null = null
@@ -432,26 +435,22 @@ describe('CredentialsSection — scan upload and media-url signer', () => {
     renderComp({}, 'admin')
     await screen.findByText('General Contractor License')
 
-    // The view link should appear and trigger the signer
     await waitFor(() => expect(signerCalled).toBe(true))
     expect(signerKey).toBe('credentials/licenses/lic-1.pdf')
 
-    // The rendered href uses the signed URL
     const viewLink = screen.getByRole('link', { name: /view scan|view|download/i })
     expect(viewLink).toHaveAttribute('href', 'https://signed.example.com/lic-1.pdf')
   })
 })
 
-// ── AC-5: Expiry banner uses server isExpired (no client recompute) ───────────
+// ── AC-6: Expiry banner uses server isExpired (no client recompute) ───────────
 
 describe('CredentialsSection — server-side isExpired only', () => {
   it('shows expiry banner given API isExpired=true even if expiryDate appears future-like', async () => {
-    // The date itself is technically in the future but the server says expired.
-    // The component must trust the server's isExpired flag, not recompute.
     const serverSaysExpired = {
       ...BRANCH_LICENSE,
-      expiryDate: '2099-01-01', // would look non-expired if client recomputed
-      isExpired: true,           // but server says expired
+      expiryDate: '2099-01-01',
+      isExpired: true, // server says expired despite future date
     }
     server.use(
       http.get('*/api/proposals/config/licenses', () =>
@@ -461,22 +460,19 @@ describe('CredentialsSection — server-side isExpired only', () => {
         }),
       ),
     )
-    mockInsurance([])
-    mockLicenses([BRANCH_LICENSE])
+    mockDocuments([BRANCH_LICENSE])
 
     renderComp({}, 'admin')
 
-    // Banner must appear because the server said isExpired=true
     const banner = await screen.findByTestId('credentials-expiry-banner')
     expect(banner).toBeInTheDocument()
   })
 
   it('does NOT show expiry banner when server isExpired=false even if expiryDate is in the past', async () => {
-    // Simulate a grace period or future-dating edge case where server says not expired.
     const serverSaysNotExpired = {
       ...BRANCH_LICENSE,
-      expiryDate: '2020-01-01', // past date
-      isExpired: false,          // but server says not expired
+      expiryDate: '2020-01-01',
+      isExpired: false, // server says not expired despite past date
     }
     server.use(
       http.get('*/api/proposals/config/licenses', () =>
@@ -486,13 +482,11 @@ describe('CredentialsSection — server-side isExpired only', () => {
         }),
       ),
     )
-    mockInsurance([])
-    mockLicenses([BRANCH_LICENSE])
+    mockDocuments([BRANCH_LICENSE])
 
     renderComp({}, 'admin')
 
     await screen.findByText('General Contractor License')
-    // No banner because server said isExpired=false
     expect(screen.queryByTestId('credentials-expiry-banner')).not.toBeInTheDocument()
   })
 })

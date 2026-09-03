@@ -498,43 +498,72 @@ class TestLicensesScanUpload:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# insurance_certificates CRUD
+# Handoff 42: Insurance documents via the unified /api/settings/licenses endpoint
 # ════════════════════════════════════════════════════════════════════════════════
 #
-# Schema divergence vs licenses_certifications (documented for migration follow-up):
-#   - NO aspire_branch_id  → company-wide only, admin-only writes
-#   - NO active column     → no soft-delete; removal is a hard DELETE
-#                            (same situation as portfolio_properties; flag for migration)
-#   - NO sort_order        → ordering by uploaded_at DESC
-#   - object_key NOT NULL  → required on creation (the cert IS the upload)
-#   - uploaded_at auto     → set by DB DEFAULT CURRENT_TIMESTAMP
+# After migration 027, insurance_certificates is dropped and its data lives in
+# licenses_certifications with kind='insurance'. Insurance documents are now
+# branch-scoped like licenses (no admin-only guard). The /api/settings/insurance
+# endpoints have been removed; all operations go through /api/settings/licenses
+# (or the /api/settings/documents alias) with kind='insurance'.
 
-class TestInsuranceCreate:
-    """POST /api/settings/insurance — admin-only, company-wide."""
+
+def _ins_lc_row(**over) -> dict:
+    """An insurance-kind licenses_certifications DB row (post migration 027)."""
+    row = {
+        "id": "ins-001",
+        "kind": "insurance",
+        "name": "General Liability",   # label is now stored in name
+        "issuing_body": None,
+        "identifier": None,
+        "holder_name": None,
+        "aspire_branch_id": None,       # company-wide
+        "issued_date": None,
+        "expiry_date": datetime.date(2027, 6, 30),
+        "object_key": "credentials/insurance/ins-001.pdf",
+        "active": 1,
+        "sort_order": 0,
+        "updated_at": datetime.datetime(2026, 6, 1, 12, 0, 0),
+    }
+    row.update(over)
+    return row
+
+
+class TestInsuranceViaUnifiedEndpoint:
+    """POST /api/settings/licenses with kind='insurance' — Handoff 42 AC.
+
+    Insurance documents are now branch-scoped like licenses. Company-wide
+    (aspireBranchId=None) rows still require admin; branch rows can be
+    created by BM/RD with scope for that branch.
+    """
 
     _VALID_BODY = {
-        "objectKey": "proposal/insurance/gl-2026.pdf",
+        "kind": "insurance",
+        "name": "General Liability",
         "expiryDate": "2027-06-30",
-        "label": "General Liability",
+        "objectKey": "credentials/insurance/gl-2026.pdf",
+        "aspireBranchId": None,  # company-wide
     }
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_admin_creates_201(
+    async def test_admin_creates_insurance_company_wide_201(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
+        """Admin can create a company-wide insurance document (aspireBranchId=None)."""
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
-        r = client.post("/api/settings/insurance", json=self._VALID_BODY)
+        r = client.post("/api/settings/licenses", json=self._VALID_BODY)
         assert r.status_code == 201
         body = r.json()
-        assert body["objectKey"] == "proposal/insurance/gl-2026.pdf"
-        assert body["label"] == "General Liability"
+        assert body["kind"] == "insurance"
+        assert body["name"] == "General Liability"
+        assert body["expiryDate"] == "2027-06-30"
 
         inserts = [
             c for c in mock_exec.await_args_list
-            if "insurance_certificates" in c.args[0] and "INSERT" in c.args[0].upper()
+            if "licenses_certifications" in c.args[0] and "INSERT" in c.args[0].upper()
         ]
         assert len(inserts) == 1
 
@@ -547,198 +576,280 @@ class TestInsuranceCreate:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_non_admin_create_403(
+    async def test_non_admin_cannot_create_company_wide_insurance_403(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
+        """BM cannot create a company-wide insurance document (aspireBranchId=None → admin-only)."""
         as_role("manager")
-        mock_authz_query.return_value = _live("manager")
-        r = client.post("/api/settings/insurance", json=self._VALID_BODY)
+        mock_authz_query.return_value = _scoped_to(1403)
+        r = client.post("/api/settings/licenses", json=self._VALID_BODY)
         assert r.status_code == 403
         mock_exec.assert_not_awaited()
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_missing_required_fields_422(
+    async def test_bm_creates_branch_scoped_insurance_201(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
-        as_role("admin")
-        mock_authz_query.return_value = _live("admin")
-        r = client.post("/api/settings/insurance", json={"label": "GL"})
-        assert r.status_code == 422
+        """Handoff 42 AC: BM can create branch-scoped insurance (no longer admin-only)."""
+        as_role("manager")
+        mock_authz_query.return_value = _scoped_to(1403)
+        body = {**self._VALID_BODY, "aspireBranchId": 1403}
+        r = client.post("/api/settings/licenses", json=body)
+        assert r.status_code == 201
+        result = r.json()
+        assert result["kind"] == "insurance"
+        assert result["aspireBranchId"] == 1403
 
-
-class TestInsuranceUpdate:
-    """PATCH /api/settings/insurance/{id} — admin-only."""
+        audits = _audit_calls(mock_exec)
+        assert len(audits) == 1
+        flat = _flat_audit(audits[0])
+        assert "branch" in flat
+        assert "1403" in flat
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_admin_updates_label_200(
+    async def test_expiry_date_required_for_insurance_422(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """Handoff 42 AC: expiryDate is required when creating any document kind."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        body = {"kind": "insurance", "name": "GL", "aspireBranchId": None}
+        r = client.post("/api/settings/licenses", json=body)
+        assert r.status_code == 422
+        mock_exec.assert_not_awaited()
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_expiry_date_required_for_license_422(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """Handoff 42 AC: expiryDate is required for all kinds, including 'license'."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        # Missing expiryDate — should 422
+        body = {
+            "kind": "license",
+            "name": "Certified Pest Control Operator",
+            "aspireBranchId": None,
+        }
+        r = client.post("/api/settings/licenses", json=body)
+        assert r.status_code == 422
+        mock_exec.assert_not_awaited()
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_invalid_kind_422(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """kind must be one of: license, certification, insurance."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        body = {**self._VALID_BODY, "kind": "contract"}
+        r = client.post("/api/settings/licenses", json=body)
+        assert r.status_code == 422
+        mock_exec.assert_not_awaited()
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_old_insurance_endpoint_removed_404(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """Verify the /api/settings/insurance endpoint no longer exists (404)."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        r = client.post("/api/settings/insurance", json=self._VALID_BODY)
+        assert r.status_code == 404
+
+
+class TestInsuranceDeactivateViaUnified:
+    """DELETE /api/settings/licenses/{id} for kind='insurance' rows.
+
+    Insurance documents now use the same soft-delete path as licenses.
+    Branch-scoped: company-wide rows (aspire_branch_id=None) still require admin.
+    """
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_admin_deactivates_company_wide_insurance_200(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """Admin can soft-delete a company-wide insurance doc."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = [_ins_lc_row()]  # aspire_branch_id=None
+        r = client.delete("/api/settings/licenses/ins-001")
+        assert r.status_code == 200
+
+        updates = [
+            c for c in mock_exec.await_args_list
+            if "UPDATE" in c.args[0].upper() and "licenses_certifications" in c.args[0]
+        ]
+        hard_deletes = [
+            c for c in mock_exec.await_args_list
+            if "DELETE" in c.args[0].upper() and "licenses_certifications" in c.args[0]
+        ]
+        assert len(updates) == 1
+        assert len(hard_deletes) == 0, "Hard DELETE must never be issued"
+        assert 0 in updates[0].args[1]
+
+        audits = _audit_calls(mock_exec)
+        assert len(audits) == 1
+        flat = _flat_audit(audits[0])
+        assert "company" in flat
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_bm_deactivates_own_branch_insurance_200(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """Handoff 42 AC: BM can soft-delete a branch-scoped insurance row."""
+        as_role("manager")
+        mock_authz_query.return_value = _scoped_to(1403)
+        mock_query.return_value = [_ins_lc_row(aspire_branch_id=1403)]
+        r = client.delete("/api/settings/licenses/ins-001")
+        assert r.status_code == 200
+        audits = _audit_calls(mock_exec)
+        assert len(audits) == 1
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_bm_cannot_deactivate_company_wide_insurance_403(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """Company-wide insurance rows (aspire_branch_id=None) still require admin to deactivate."""
+        as_role("manager")
+        mock_authz_query.return_value = _scoped_to(1403)
+        mock_query.return_value = [_ins_lc_row()]  # aspire_branch_id=None
+        r = client.delete("/api/settings/licenses/ins-001")
+        assert r.status_code == 403
+        mock_exec.assert_not_awaited()
+
+
+class TestInsuranceUpdateViaUnified:
+    """PATCH /api/settings/licenses/{id} for insurance rows."""
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_admin_patches_insurance_name_200(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
-        mock_query.return_value = [_ins_row()]
-        r = client.patch("/api/settings/insurance/ins-001", json={"label": "Workers Comp"})
+        mock_query.return_value = [_ins_lc_row()]
+        r = client.patch("/api/settings/licenses/ins-001", json={"name": "Workers Comp"})
         assert r.status_code == 200
         body = r.json()
         assert body["id"] == "ins-001"
 
         updates = [
             c for c in mock_exec.await_args_list
-            if "UPDATE" in c.args[0].upper() and "insurance_certificates" in c.args[0]
+            if "UPDATE" in c.args[0].upper() and "licenses_certifications" in c.args[0]
         ]
         assert len(updates) == 1
         audits = _audit_calls(mock_exec)
         assert len(audits) == 1
-        flat = _flat_audit(audits[0])
-        assert "company" in flat
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_non_admin_update_403(
+    async def test_bm_patches_own_branch_insurance_200(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
+        """Handoff 42 AC: BM can patch branch-scoped insurance (no longer admin-only)."""
         as_role("manager")
-        mock_authz_query.return_value = _live("manager")
-        mock_query.return_value = [_ins_row()]
-        r = client.patch("/api/settings/insurance/ins-001", json={"label": "Hack"})
-        assert r.status_code == 403
-
-
-class TestInsuranceDelete:
-    """DELETE /api/settings/insurance/{id} — admin-only soft-delete (active=0).
-
-    Migration 023 added insurance_certificates.active. The DELETE handler now
-    emits UPDATE active=0 (never a hard DELETE), consistent with team_members,
-    client_references, and portfolio_properties.
-    """
-
-    @patch("api.authz.query", new_callable=AsyncMock)
-    @patch("api.settings.execute", new_callable=AsyncMock)
-    @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_admin_deactivate_emits_update_active_zero(
-        self, mock_query, mock_exec, mock_authz_query, as_role
-    ):
-        """Core AC: deactivating emits UPDATE active=0; NO hard DELETE."""
-        as_role("admin")
-        mock_authz_query.return_value = _live("admin")
-        mock_query.return_value = [_ins_row()]
-        r = client.delete("/api/settings/insurance/ins-001")
+        mock_authz_query.return_value = _scoped_to(1403)
+        mock_query.return_value = [_ins_lc_row(aspire_branch_id=1403)]
+        r = client.patch("/api/settings/licenses/ins-001", json={"expiryDate": "2028-01-01"})
         assert r.status_code == 200
 
-        updates = [
-            c for c in mock_exec.await_args_list
-            if "UPDATE" in c.args[0].upper() and "insurance_certificates" in c.args[0]
-        ]
-        hard_deletes = [
-            c for c in mock_exec.await_args_list
-            if "DELETE" in c.args[0].upper() and "insurance_certificates" in c.args[0]
-        ]
-        assert len(updates) == 1
-        assert len(hard_deletes) == 0, "Hard DELETE must never be issued for insurance_certificates"
 
-        update_params = updates[0].args[1]
-        assert 0 in update_params
-
-        audits = _audit_calls(mock_exec)
-        assert len(audits) == 1
-        flat = _flat_audit(audits[0])
-        assert "company" in flat
-
-    @patch("api.authz.query", new_callable=AsyncMock)
-    @patch("api.settings.execute", new_callable=AsyncMock)
-    @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_non_admin_delete_403(
-        self, mock_query, mock_exec, mock_authz_query, as_role
-    ):
-        as_role("manager")
-        mock_authz_query.return_value = _live("manager")
-        mock_query.return_value = [_ins_row()]
-        r = client.delete("/api/settings/insurance/ins-001")
-        assert r.status_code == 403
-        mock_exec.assert_not_awaited()
-
-
-class TestInsuranceList:
-    """GET /api/settings/insurance — admin-only list with active filter."""
+class TestInsuranceListViaUnified:
+    """GET /api/settings/licenses returns insurance-kind rows alongside license/certification."""
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_admin_list_200(
+    async def test_list_includes_insurance_rows(
         self, mock_query, mock_authz_query, as_role
     ):
+        """The unified list returns all kinds including insurance."""
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
-        mock_query.return_value = [_ins_row()]
-        r = client.get("/api/settings/insurance")
+        mock_query.return_value = [
+            _lc_row(),                # kind='license'
+            _ins_lc_row(),            # kind='insurance'
+        ]
+        r = client.get("/api/settings/licenses")
+        assert r.status_code == 200
+        items = r.json()
+        kinds = {item["kind"] for item in items}
+        assert "license" in kinds
+        assert "insurance" in kinds
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_documents_alias_works(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        """GET /api/settings/documents is an alias for /api/settings/licenses."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = [_ins_lc_row()]
+        r = client.get("/api/settings/documents")
         assert r.status_code == 200
         items = r.json()
         assert len(items) == 1
-        item = items[0]
-        # Dates must serialize as ISO strings.
-        assert item["expiryDate"] == "2027-06-30"
-        assert isinstance(item["uploadedAt"], str)
-        # Default list must filter active=1.
-        sql = mock_query.call_args[0][0]
-        assert "active = 1" in sql
-
-    @patch("api.authz.query", new_callable=AsyncMock)
-    @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_non_admin_list_403(
-        self, mock_query, mock_authz_query, as_role
-    ):
-        as_role("manager")
-        mock_authz_query.return_value = _live("manager")
-        r = client.get("/api/settings/insurance")
-        assert r.status_code == 403
+        assert items[0]["kind"] == "insurance"
 
 
-# ── GCS scan upload for insurance_certificates ────────────────────────────────
-
-class TestInsuranceScanUpload:
-    """POST /api/settings/insurance/upload — upload cert bytes via upload_bytes."""
+class TestInsuranceScanUploadViaUnified:
+    """POST /api/settings/licenses/{id}/scan for insurance-kind rows."""
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
     @patch("api.attachments.upload_bytes")
-    async def test_upload_calls_upload_bytes_and_creates_record(
+    async def test_admin_uploads_insurance_scan_200(
         self, mock_upload, mock_query, mock_exec, mock_authz_query, as_role
     ):
-        """Upload routes bytes through upload_bytes; creates an insurance record with the key."""
+        """Upload endpoint works for insurance-kind rows (company-wide → admin)."""
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = [_ins_lc_row(object_key=None)]
         mock_upload.return_value = None
 
-        pdf_bytes = b"%PDF-1.4 cert"
+        pdf_bytes = b"%PDF-1.4 insurance cert"
         r = client.post(
-            "/api/settings/insurance/upload",
+            "/api/settings/licenses/ins-001/scan",
             files={"file": ("cert.pdf", BytesIO(pdf_bytes), "application/pdf")},
-            data={"expiryDate": "2027-06-30", "label": "General Liability"},
         )
-        assert r.status_code == 201
+        assert r.status_code == 200
         body = r.json()
         assert "objectKey" in body
         stored_key = body["objectKey"]
         assert stored_key
 
-        # upload_bytes must have been called exactly once.
         mock_upload.assert_called_once()
         call_args = mock_upload.call_args
         assert call_args[0][1] == pdf_bytes
-        assert call_args[0][0] == stored_key
 
-        # An INSERT into insurance_certificates must have run.
-        inserts = [
+        updates = [
             c for c in mock_exec.await_args_list
-            if "insurance_certificates" in c.args[0] and "INSERT" in c.args[0].upper()
+            if "UPDATE" in c.args[0].upper() and "licenses_certifications" in c.args[0]
         ]
-        assert len(inserts) == 1
+        assert len(updates) == 1
+        assert stored_key in updates[0].args[1]
 
-        # One audit row.
         audits = _audit_calls(mock_exec)
         assert len(audits) == 1
 
@@ -746,16 +857,18 @@ class TestInsuranceScanUpload:
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
     @patch("api.attachments.upload_bytes")
-    async def test_non_admin_upload_403(
+    async def test_bm_uploads_own_branch_insurance_200(
         self, mock_upload, mock_query, mock_exec, mock_authz_query, as_role
     ):
+        """Handoff 42 AC: BM can upload file for branch-scoped insurance row."""
         as_role("manager")
-        mock_authz_query.return_value = _live("manager")
+        mock_authz_query.return_value = _scoped_to(1403)
+        mock_query.return_value = [_ins_lc_row(aspire_branch_id=1403, object_key=None)]
+        mock_upload.return_value = None
+
         r = client.post(
-            "/api/settings/insurance/upload",
+            "/api/settings/licenses/ins-001/scan",
             files={"file": ("cert.pdf", BytesIO(b"pdf"), "application/pdf")},
-            data={"expiryDate": "2027-06-30"},
         )
-        assert r.status_code == 403
-        mock_upload.assert_not_called()
-        mock_exec.assert_not_awaited()
+        assert r.status_code == 200
+        mock_upload.assert_called_once()

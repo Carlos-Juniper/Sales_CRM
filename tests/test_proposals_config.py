@@ -122,12 +122,22 @@ def _portfolio_row(**over) -> dict:
 
 
 def _insurance_row(**over) -> dict:
+    # Handoff 42: rows now come from licenses_certifications (kind='insurance').
+    # 'label' is stored in 'name'; 'uploaded_at' maps to 'updated_at'.
     row = {
         "id": "ins-cert-001",
+        "kind": "insurance",
+        "name": "General Liability",   # formerly label in insurance_certificates
         "object_key": "proposal/insurance/juniper-certificate-of-liability-2026.pdf",
         "expiry_date": "2027-03-31",
-        "label": "General Liability",
-        "uploaded_at": "2026-08-26 00:00:00",
+        "updated_at": "2026-08-26 00:00:00",   # formerly uploaded_at
+        "issuing_body": None,
+        "identifier": None,
+        "holder_name": None,
+        "aspire_branch_id": None,
+        "issued_date": None,
+        "active": 1,
+        "sort_order": 0,
     }
     row.update(over)
     return row
@@ -517,6 +527,8 @@ class TestPortfolio:
 
 class TestInsurance:
     def test_returns_current_cert(self, authed):
+        # Handoff 42: row comes from licenses_certifications (kind='insurance').
+        # 'label' in the response is sourced from 'name'; 'uploadedAt' from 'updated_at'.
         with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
             mock_q.return_value = [_insurance_row()]
             res = client.get("/api/proposals/config/insurance")
@@ -525,7 +537,7 @@ class TestInsurance:
         assert body["id"] == "ins-cert-001"
         assert body["objectKey"] == "proposal/insurance/juniper-certificate-of-liability-2026.pdf"
         assert body["expiryDate"] == "2027-03-31"
-        assert body["label"] == "General Liability"
+        assert body["label"] == "General Liability"   # mapped from name
 
     def test_returns_null_when_no_cert_seeded(self, authed):
         """Frontend must handle null gracefully (shows placeholder on Insurance page)."""
@@ -535,13 +547,18 @@ class TestInsurance:
         assert res.status_code == 200
         assert res.json() is None
 
-    def test_orders_by_uploaded_at_desc(self, authed):
-        """Most recently uploaded cert is the current one."""
+    def test_orders_by_updated_at_desc(self, authed):
+        """Handoff 42: most recently updated insurance row is the current cert.
+        The query now reads from licenses_certifications (kind='insurance') and
+        orders by updated_at DESC (equivalent to the former uploaded_at DESC).
+        """
         with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
             mock_q.return_value = []
             client.get("/api/proposals/config/insurance")
         sql = mock_q.call_args.args[0]
-        assert "ORDER BY uploaded_at DESC LIMIT 1" in sql
+        assert "licenses_certifications" in sql
+        assert "kind = 'insurance'" in sql
+        assert "ORDER BY updated_at DESC LIMIT 1" in sql
 
 
 # ── Read-only guard: no write methods on config paths ────────────────────────

@@ -451,3 +451,112 @@ class TestLinkAspireRep:
         r = client.post("/api/settings/users/u9/link-aspire-rep")
         assert r.status_code in (400, 422)
         assert r.json()["detail"] == SALES_BLOCK_COPY
+
+
+# ── Task #15: enrich GET /api/users (active, aspire_rep_id, branches) ─────────
+
+
+class TestListUsersEnriched:
+    """GET /api/users must include active, aspireRepId, and branches[] fields.
+
+    Additive enrichment — existing ?role= filter behavior must be preserved.
+    Callers that only look at id/name/email/role are unaffected.
+    """
+
+    @patch("api.server.query", new_callable=AsyncMock)
+    async def test_plain_list_includes_active_and_aspire_rep_id(
+        self, mock_server_query, as_role
+    ):
+        """Plain GET /api/users must return active and aspireRepId fields."""
+        as_role("admin")
+        mock_server_query.return_value = [
+            {
+                "id": "u1", "name": "Alice Sales", "email": "a@x.com",
+                "role": "sales", "branch_id": "b1", "avatar_initials": "AS",
+                "active": 1, "aspire_rep_id": 4242,
+                "aspire_branch_ids": None,  # second query returns branch ids
+            }
+        ]
+        r = client.get("/api/users")
+        assert r.status_code == 200
+        users = r.json()
+        assert len(users) >= 1
+        u = users[0]
+        assert "active" in u, "active field must be present"
+        assert "aspireRepId" in u, "aspireRepId field must be present"
+        assert "branches" in u, "branches array must be present"
+
+    @patch("api.server.query", new_callable=AsyncMock)
+    async def test_role_filter_excludes_inactive_and_returns_enriched_fields(
+        self, mock_server_query, as_role
+    ):
+        """?role=sales must filter active=1 AND return active/aspireRepId/branches."""
+        as_role("admin")
+        mock_server_query.return_value = [
+            {
+                "id": "u1", "name": "Active Sales", "email": "a@x.com",
+                "role": "sales", "branch_id": "b1", "avatar_initials": "AS",
+                "active": 1, "aspire_rep_id": 4242,
+                "aspire_branch_ids": "1403,3696",
+            }
+        ]
+        r = client.get("/api/users", params={"role": "sales"})
+        assert r.status_code == 200
+
+        # SQL must carry both filters.
+        sql = mock_server_query.await_args_list[0].args[0]
+        assert "active = 1" in sql
+        assert "role = %s" in sql
+
+        users = r.json()
+        u = users[0]
+        assert u["active"] is True or u["active"] == 1
+        assert u["aspireRepId"] == 4242
+        # branches must be a list (even if empty).
+        assert isinstance(u["branches"], list)
+
+    @patch("api.server.query", new_callable=AsyncMock)
+    async def test_plain_list_still_returns_inactive_users(
+        self, mock_server_query, as_role
+    ):
+        """A plain GET /api/users (no role param) must still return inactive users
+        so historical name lookups resolve for old estimates."""
+        as_role("admin")
+        mock_server_query.return_value = [
+            {
+                "id": "u9", "name": "Old Hand", "email": "old@x.com",
+                "role": "sales", "branch_id": None, "avatar_initials": "OH",
+                "active": 0, "aspire_rep_id": None,
+                "aspire_branch_ids": None,
+            }
+        ]
+        r = client.get("/api/users")
+        assert r.status_code == 200
+        assert any(u["name"] == "Old Hand" for u in r.json())
+
+        # No active=1 filter in SQL for plain list.
+        sql = mock_server_query.await_args_list[0].args[0]
+        assert "active = 1" not in sql
+
+    @patch("api.server.query", new_callable=AsyncMock)
+    async def test_branches_array_populated_from_user_branches(
+        self, mock_server_query, as_role
+    ):
+        """branches[] must contain the user's aspire_branch_ids from user_branches."""
+        as_role("admin")
+        # Simulate user with two branches (returned as comma-separated string
+        # from GROUP_CONCAT or as a second query — implementation detail).
+        mock_server_query.return_value = [
+            {
+                "id": "u1", "name": "BM", "email": "bm@x.com",
+                "role": "manager", "branch_id": None, "avatar_initials": "BM",
+                "active": 1, "aspire_rep_id": None,
+                "aspire_branch_ids": "1403,3696",
+            }
+        ]
+        r = client.get("/api/users")
+        assert r.status_code == 200
+        u = r.json()[0]
+        assert isinstance(u["branches"], list)
+        assert 1403 in u["branches"]
+        assert 3696 in u["branches"]

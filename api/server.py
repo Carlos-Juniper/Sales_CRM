@@ -1500,6 +1500,19 @@ async def list_users(
     branch_id: Optional[str] = None,
     _user: dict = Depends(require_auth),
 ) -> list:
+    """List users, enriched with active, aspireRepId, and branches[].
+
+    Additive enrichment over the original id/name/email/role/branch_id/avatar_initials
+    response — existing callers are unaffected. branches[] is the set of
+    aspire_branch_ids from user_branches, returned via GROUP_CONCAT subquery so
+    the list remains a single DB round-trip.
+
+    Filter rules:
+      - ?role=<r>: restrict to that role AND active=1 (assignee pickers must
+        exclude deactivated reps; Slice 6 deactivates, never deletes).
+      - plain GET: returns ALL rows including inactive so historical name lookups
+        on old estimates still resolve.
+    """
     conditions: list[str] = []
     params: list[Any] = []
     if role:
@@ -1516,11 +1529,36 @@ async def list_users(
         params.append(branch_id)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    # GROUP_CONCAT subquery for user_branches — avoids an N+1 per-user query.
+    # The subquery returns NULL when there are no rows; we parse that below.
     rows = await query(
-        f"SELECT id, name, email, role, branch_id, avatar_initials FROM users {where}",
+        f"""SELECT u.id, u.name, u.email, u.role, u.branch_id, u.avatar_initials,
+                   u.active, u.aspire_rep_id,
+                   (SELECT GROUP_CONCAT(ub.aspire_branch_id ORDER BY ub.aspire_branch_id)
+                      FROM user_branches ub WHERE ub.user_id = u.id) AS aspire_branch_ids
+              FROM users u {where}""",
         params or None,
     )
-    return list(rows)
+
+    result = []
+    for r in rows:
+        raw_ids = r.get("aspire_branch_ids")
+        if raw_ids:
+            branches: list[int] = [int(x) for x in str(raw_ids).split(",") if x]
+        else:
+            branches = []
+        result.append({
+            "id": r["id"],
+            "name": r["name"],
+            "email": r["email"],
+            "role": r["role"],
+            "branch_id": r.get("branch_id"),
+            "avatar_initials": r.get("avatar_initials"),
+            "active": bool(r.get("active", 1)),
+            "aspireRepId": r.get("aspire_rep_id"),
+            "branches": branches,
+        })
+    return result
 
 
 # ── Dashboard ────────────────────────────────────────────────────────────────

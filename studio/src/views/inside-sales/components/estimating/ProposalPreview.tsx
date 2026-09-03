@@ -60,7 +60,6 @@ import type {
   OrgChartInput,
   StartupPlanInput,
 } from '@/types/proposal'
-import type { ProposalFormState } from './ProposalBuilder'
 
 // ---------------------------------------------------------------------------
 // Print stylesheet — injected once as a <style> tag inside the preview

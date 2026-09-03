@@ -717,17 +717,27 @@ class TestPortfolioPropertiesDeactivate:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_admin_delete_200_hard_deletes_and_audits(
+    async def test_admin_delete_200_soft_deletes_and_audits(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
+        """Migration 023: DELETE emits UPDATE active=0 (soft-delete), never hard DELETE."""
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
         mock_query.return_value = [self._EXISTING_ROW]
         r = client.delete("/api/settings/portfolio/pp-1")
         assert r.status_code == 200
 
-        deletes = [c for c in mock_exec.await_args_list if "DELETE" in c.args[0].upper() and "portfolio_properties" in c.args[0]]
-        assert len(deletes) == 1
+        updates = [
+            c for c in mock_exec.await_args_list
+            if "UPDATE" in c.args[0].upper() and "portfolio_properties" in c.args[0]
+        ]
+        hard_deletes = [
+            c for c in mock_exec.await_args_list
+            if "DELETE" in c.args[0].upper() and "portfolio_properties" in c.args[0]
+        ]
+        assert len(updates) == 1
+        assert len(hard_deletes) == 0, "Hard DELETE must never be issued for portfolio_properties"
+        assert 0 in updates[0].args[1]
 
         audits = _audit_calls(mock_exec)
         assert len(audits) == 1

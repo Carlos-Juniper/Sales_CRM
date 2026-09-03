@@ -422,6 +422,16 @@ def detect_022(conn) -> bool:
     return not column_exists(conn, "estimates", "branch")
 
 
+def detect_023(conn) -> bool:
+    """023 applied ↔ portfolio_properties.active column exists.
+
+    Keying on the first column added by the migration (portfolio_properties.active).
+    Both ALTER TABLE statements use idempotent PREPARE guards so a partial run is
+    safe to re-run; the tracking row is the primary idempotency gate.
+    """
+    return column_exists(conn, "portfolio_properties", "active")
+
+
 # ── Migration 004 conditional execution ──────────────────────────────────────
 
 def _is_create_table_users(stmt: str) -> bool:
@@ -503,6 +513,7 @@ _DETECT: dict = {
     "019_branch_model":                          detect_019,
     "020_settings_storage":                      detect_020,
     "022_contract_drop_branch_columns":          detect_022,
+    "023_config_soft_delete":                    detect_023,
 }
 
 

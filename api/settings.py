@@ -1319,10 +1319,52 @@ def register(app, require_auth) -> None:
     # ── Slice 13a: portfolio_properties CRUD ──────────────────────────────────
     # Company-wide, admin-only.
     #
-    # SCHEMA NOTE: portfolio_properties has NO `active` column (see migration 014).
-    # Deactivate therefore performs a hard DELETE. A follow-up migration should add
-    #   ALTER TABLE portfolio_properties ADD COLUMN `active` TINYINT(1) NOT NULL DEFAULT 1;
-    # to enable soft-delete consistent with the other config tables.
+    # Migration 023 added portfolio_properties.active (TINYINT(1) NOT NULL DEFAULT 1).
+    # The DELETE handler is now a soft-delete (UPDATE active=0), consistent with
+    # team_members, client_references, and licenses_certifications.
+
+    @app.get("/api/settings/portfolio")
+    async def list_portfolio_properties(
+        include_inactive: bool = False,
+        user: dict = Depends(require_auth),
+    ) -> list[dict]:
+        """List portfolio_properties rows — admin-only.
+
+        By default returns only active rows (active=1). include_inactive=true
+        returns all rows for the admin management surface.
+        """
+        await _require_admin(user)
+
+        where = "" if include_inactive else "WHERE active = 1"
+        rows = await query(
+            f"SELECT * FROM portfolio_properties {where} ORDER BY sort_order, name",
+        )
+        result = []
+        import json as _json  # local alias avoids shadowing the module-level import
+        for r in rows:
+            photo_keys = r.get("photo_object_keys") or "[]"
+            if isinstance(photo_keys, str):
+                try:
+                    photo_keys = _json.loads(photo_keys)
+                except (ValueError, TypeError):
+                    photo_keys = []
+            ba_keys = r.get("before_after_object_keys")
+            if isinstance(ba_keys, str):
+                try:
+                    ba_keys = _json.loads(ba_keys)
+                except (ValueError, TypeError):
+                    ba_keys = None
+            result.append({
+                "id": r["id"],
+                "name": r["name"],
+                "cityState": r["city_state"],
+                "regionId": r["region_id"],
+                "photoObjectKeys": photo_keys if isinstance(photo_keys, list) else [],
+                "beforeAfterObjectKeys": ba_keys,
+                "sortOrder": r["sort_order"],
+                "active": bool(r.get("active", 1)),
+            })
+        return result
 
     @app.post("/api/settings/portfolio", status_code=201)
     async def create_portfolio_property(
@@ -1442,16 +1484,17 @@ def register(app, require_auth) -> None:
         }
 
     @app.delete("/api/settings/portfolio/{property_id}")
-    async def delete_portfolio_property(
+    async def deactivate_portfolio_property(
         property_id: str,
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Hard-delete a portfolio_properties row — admin-only.
+        """Soft-delete a portfolio_properties row (active=0) — admin-only.
 
-        portfolio_properties has no `active` column (see migration 014), so there
-        is no soft-delete path. A follow-up migration should add an `active`
-        TINYINT(1) NOT NULL DEFAULT 1 column so this can be converted to a
-        soft-delete consistent with team_members and client_references.
+        Migration 023 added portfolio_properties.active so this handler now
+        mirrors team_members and client_references: never a hard DELETE.
+        Historical references to a portfolio property in past proposal_requests
+        must remain resolvable; setting active=0 removes it from the generation
+        surface while preserving the record.
         """
         await _require_admin(user)
 
@@ -1463,17 +1506,18 @@ def register(app, require_auth) -> None:
         current = rows[0]
 
         await execute(
-            "DELETE FROM portfolio_properties WHERE id = %s", [property_id]
+            "UPDATE portfolio_properties SET active = %s WHERE id = %s",
+            [0, property_id],
         )
         await _audit(
             scope_type="company",
             scope_id=None,
-            setting_key=f"portfolio_property.{property_id}.delete",
-            from_value=current.get("name"),
-            to_value=None,
+            setting_key=f"portfolio_property.{property_id}.active",
+            from_value=current.get("active"),
+            to_value=0,
             actor=_actor(user),
         )
-        return {"id": property_id, "deleted": True}
+        return {"id": property_id, "active": False}
 
     # ── Slice 15a: licenses_certifications CRUD ───────────────────────────────
     #
@@ -1766,12 +1810,20 @@ def register(app, require_auth) -> None:
 
     @app.get("/api/settings/insurance")
     async def list_insurance(
+        include_inactive: bool = False,
         user: dict = Depends(require_auth),
     ) -> list[dict]:
-        """List insurance_certificates, newest first — admin-only."""
+        """List insurance_certificates — admin-only, newest first.
+
+        By default returns only active rows (active=1). include_inactive=true
+        returns all rows for the admin management surface.
+        Migration 023 added the active column; before that migration is applied
+        every row has implicit active=1.
+        """
         await _require_admin(user)
+        where = "" if include_inactive else "WHERE active = 1"
         rows = await query(
-            "SELECT * FROM insurance_certificates ORDER BY uploaded_at DESC",
+            f"SELECT * FROM insurance_certificates {where} ORDER BY uploaded_at DESC",
         )
         return [_insurance_settings_out(r) for r in rows]
 
@@ -1858,16 +1910,16 @@ def register(app, require_auth) -> None:
         return _insurance_settings_out(r)
 
     @app.delete("/api/settings/insurance/{cert_id}")
-    async def delete_insurance(
+    async def deactivate_insurance(
         cert_id: str,
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Hard-delete an insurance_certificates row — admin-only.
+        """Soft-delete an insurance_certificates row (active=0) — admin-only.
 
-        NOTE: insurance_certificates has no `active` column (migration 014), so
-        soft-delete is not possible without a schema change. This is flagged for
-        a follow-up migration (same situation as portfolio_properties). Until then,
-        a hard DELETE is the only available removal path.
+        Migration 023 added insurance_certificates.active so this handler now
+        mirrors team_members and client_references: never a hard DELETE.
+        The cert record (object_key, expiry_date) must remain retrievable for
+        historical proposal references after deactivation.
         """
         await _require_admin(user)
 
@@ -1879,17 +1931,18 @@ def register(app, require_auth) -> None:
         current = rows[0]
 
         await execute(
-            "DELETE FROM insurance_certificates WHERE id = %s", [cert_id]
+            "UPDATE insurance_certificates SET active = %s WHERE id = %s",
+            [0, cert_id],
         )
         await _audit(
             scope_type="company",
             scope_id=None,
-            setting_key=f"insurance.{cert_id}.delete",
-            from_value=current.get("object_key"),
-            to_value=None,
+            setting_key=f"insurance.{cert_id}.active",
+            from_value=current.get("active"),
+            to_value=0,
             actor=_actor(user),
         )
-        return {"id": cert_id, "deleted": True}
+        return {"id": cert_id, "active": False}
 
     @app.post("/api/settings/insurance/upload", status_code=201)
     async def upload_insurance_cert(

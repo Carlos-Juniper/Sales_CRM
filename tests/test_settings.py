@@ -496,3 +496,282 @@ class TestDirectorySearchMissingSecret:
         assert "ENTRA_CLIENT_SECRET" in detail, (
             f"Detail should name the missing var; got: {detail!r}"
         )
+
+
+# ── Task #18: soft-delete parity — portfolio_properties + insurance_certificates
+
+
+class TestPortfolioSoftDelete:
+    """DELETE /api/settings/portfolio/{id} must UPDATE active=0, never hard DELETE.
+
+    After migration 023, portfolio_properties gains an `active` column and the
+    DELETE handler is converted from a hard DELETE to a soft-delete (active=0).
+    The list endpoint filters active=1 by default; include_inactive=true returns
+    all rows.
+    """
+
+    _EXISTING_ROW = {
+        "id": "pp-001",
+        "name": "Bonita Springs Estate",
+        "city_state": "Bonita Springs, FL",
+        "region_id": "east-coast",
+        "photo_object_keys": "[]",
+        "before_after_object_keys": None,
+        "sort_order": 0,
+        "active": 1,
+    }
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_delete_emits_update_active_zero_never_hard_delete(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """Core AC: DELETE /api/settings/portfolio/{id} must UPDATE active=0, NOT DELETE."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = [self._EXISTING_ROW]
+        r = client.delete("/api/settings/portfolio/pp-001")
+        assert r.status_code == 200
+
+        # Must emit UPDATE active=0 — never a hard DELETE on portfolio_properties.
+        updates = [
+            c for c in mock_exec.await_args_list
+            if "UPDATE" in c.args[0].upper() and "portfolio_properties" in c.args[0]
+        ]
+        hard_deletes = [
+            c for c in mock_exec.await_args_list
+            if "DELETE" in c.args[0].upper() and "portfolio_properties" in c.args[0]
+        ]
+        assert len(updates) == 1, "Expected exactly one UPDATE on portfolio_properties"
+        assert len(hard_deletes) == 0, "Hard DELETE must never be issued for portfolio_properties"
+
+        # The UPDATE params must include 0 (the active=0 value).
+        update_params = updates[0].args[1]
+        assert 0 in update_params
+
+        # One config_audit row must be written.
+        audits = [c for c in mock_exec.await_args_list if "config_audit" in c.args[0]]
+        assert len(audits) == 1
+        flat = " ".join(str(p) for p in audits[0].args[1])
+        assert "company" in flat
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_list_portfolio_default_excludes_inactive(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        """Default GET /api/settings/portfolio must filter active=1."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = []
+        r = client.get("/api/settings/portfolio")
+        assert r.status_code == 200
+        # Verify the SQL carries the active filter.
+        sql = mock_query.call_args[0][0]
+        assert "active = 1" in sql
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_list_portfolio_include_inactive_returns_all(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        """include_inactive=true must omit the active=1 filter."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        inactive_row = {**self._EXISTING_ROW, "active": 0}
+        mock_query.return_value = [inactive_row]
+        r = client.get("/api/settings/portfolio?include_inactive=true")
+        assert r.status_code == 200
+        items = r.json()
+        assert len(items) == 1
+        # The inactive row is included.
+        assert items[0]["name"] == "Bonita Springs Estate"
+
+
+class TestInsuranceSoftDelete:
+    """DELETE /api/settings/insurance/{id} must UPDATE active=0, never hard DELETE.
+
+    After migration 023, insurance_certificates gains an `active` column and the
+    DELETE handler is converted from a hard DELETE to a soft-delete (active=0).
+    The list endpoint filters active=1 by default; include_inactive=true returns
+    all rows.
+    """
+
+    _EXISTING_ROW = {
+        "id": "ins-001",
+        "object_key": "proposal/insurance/gl-2026.pdf",
+        "expiry_date": "2027-06-30",
+        "label": "General Liability",
+        "uploaded_at": "2026-06-01T12:00:00",
+        "active": 1,
+    }
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_delete_emits_update_active_zero_never_hard_delete(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """Core AC: DELETE /api/settings/insurance/{id} must UPDATE active=0, NOT DELETE."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = [self._EXISTING_ROW]
+        r = client.delete("/api/settings/insurance/ins-001")
+        assert r.status_code == 200
+
+        updates = [
+            c for c in mock_exec.await_args_list
+            if "UPDATE" in c.args[0].upper() and "insurance_certificates" in c.args[0]
+        ]
+        hard_deletes = [
+            c for c in mock_exec.await_args_list
+            if "DELETE" in c.args[0].upper() and "insurance_certificates" in c.args[0]
+        ]
+        assert len(updates) == 1, "Expected exactly one UPDATE on insurance_certificates"
+        assert len(hard_deletes) == 0, "Hard DELETE must never be issued for insurance_certificates"
+
+        update_params = updates[0].args[1]
+        assert 0 in update_params
+
+        audits = [c for c in mock_exec.await_args_list if "config_audit" in c.args[0]]
+        assert len(audits) == 1
+        flat = " ".join(str(p) for p in audits[0].args[1])
+        assert "company" in flat
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_list_insurance_default_excludes_inactive(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        """Default GET /api/settings/insurance must filter active=1."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = []
+        r = client.get("/api/settings/insurance")
+        assert r.status_code == 200
+        sql = mock_query.call_args[0][0]
+        assert "active = 1" in sql
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_list_insurance_include_inactive_returns_all(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        """include_inactive=true must omit the active=1 filter."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        inactive_row = {**self._EXISTING_ROW, "active": 0}
+        mock_query.return_value = [inactive_row]
+        r = client.get("/api/settings/insurance?include_inactive=true")
+        assert r.status_code == 200
+        items = r.json()
+        assert len(items) == 1
+        assert items[0]["label"] == "General Liability"
+
+
+# ── Task #16: enrich GET /api/settings/branch/{id} ────────────────────────────
+
+
+class TestBranchSettingsEnriched:
+    """GET /api/settings/branch/{id} must return materialFactors and productionRates
+    in addition to crewRateCentsPerHour, with source flags (override/inherited).
+
+    Rules:
+      - A branch with a material_calcs row where aspire_branch_id = X → source='override'.
+      - A branch with no override row → returns the company-wide (NULL branch) row
+        flagged source='inherited'.
+      - productionRates: returns catalog_items.production_rate for items with a
+        branch-level override or (if none) the base company value.
+      - crewRateCentsPerHour is unchanged.
+    """
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_branch_with_override_returns_override_flag(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        """A branch override row must come back flagged source='override'."""
+        as_role("admin")
+        mock_authz_query.return_value = []  # admin → kind='all'
+
+        # query side-effects: (1) branch_settings, (2) material_calcs, (3) catalog_items
+        branch_row = {"crew_rate_cents_per_hour": 20000}
+        override_factor_row = {
+            "material_key": "mulch", "factors": '{"depth_in": 3}',
+            "aspire_branch_id": 1403,
+        }
+        catalog_row = {
+            "id": "ci-001", "name": "Mulch Install", "production_rate": 1200.0,
+            "aspire_branch_id": 1403,
+        }
+        mock_query.side_effect = [
+            [branch_row],           # branch_settings query
+            [override_factor_row],  # material_calcs query for branch
+            [catalog_row],          # catalog_items query
+        ]
+        r = client.get("/api/settings/branch/1403")
+        assert r.status_code == 200
+        body = r.json()
+
+        assert body["crewRateCentsPerHour"] == 20000
+        assert "materialFactors" in body
+        assert "productionRates" in body
+
+        # The override row must be flagged source='override'.
+        factors = body["materialFactors"]
+        assert len(factors) >= 1
+        override_factor = next((f for f in factors if f["materialKey"] == "mulch"), None)
+        assert override_factor is not None, "mulch factor row must be present"
+        assert override_factor["source"] == "override"
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_branch_without_override_returns_inherited_flag(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        """When a branch has no material_calcs override, the company-wide row
+        must be returned flagged source='inherited'."""
+        as_role("admin")
+        mock_authz_query.return_value = []
+
+        branch_row = {"crew_rate_cents_per_hour": 18000}
+        company_wide_row = {
+            "material_key": "mulch", "factors": '{"depth_in": 3}',
+            "aspire_branch_id": None,  # company-wide
+        }
+        catalog_row = {
+            "id": "ci-001", "name": "Mulch Install", "production_rate": 900.0,
+            "aspire_branch_id": None,
+        }
+        mock_query.side_effect = [
+            [branch_row],            # branch_settings
+            [company_wide_row],      # material_calcs (company-wide fallback)
+            [catalog_row],           # catalog_items
+        ]
+        r = client.get("/api/settings/branch/3696")
+        assert r.status_code == 200
+        body = r.json()
+
+        factors = body["materialFactors"]
+        assert len(factors) >= 1
+        company_factor = next((f for f in factors if f["materialKey"] == "mulch"), None)
+        assert company_factor is not None
+        assert company_factor["source"] == "inherited"
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_crew_rate_unchanged_in_enriched_response(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        """crewRateCentsPerHour must survive enrichment unchanged."""
+        as_role("admin")
+        mock_authz_query.return_value = []
+        mock_query.side_effect = [
+            [{"crew_rate_cents_per_hour": 22500}],
+            [],  # no material_calcs rows
+            [],  # no catalog_items rows
+        ]
+        r = client.get("/api/settings/branch/1403")
+        assert r.status_code == 200
+        assert r.json()["crewRateCentsPerHour"] == 22500

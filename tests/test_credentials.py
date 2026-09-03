@@ -609,30 +609,39 @@ class TestInsuranceUpdate:
 
 
 class TestInsuranceDelete:
-    """DELETE /api/settings/insurance/{id} — admin-only hard delete (no active column).
+    """DELETE /api/settings/insurance/{id} — admin-only soft-delete (active=0).
 
-    NOTE: insurance_certificates has no `active` column so soft-delete is not
-    possible without a schema migration. This is flagged for follow-up (same
-    situation as portfolio_properties). Hard delete is the current implementation.
+    Migration 023 added insurance_certificates.active. The DELETE handler now
+    emits UPDATE active=0 (never a hard DELETE), consistent with team_members,
+    client_references, and portfolio_properties.
     """
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_admin_delete_200(
+    async def test_admin_deactivate_emits_update_active_zero(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
+        """Core AC: deactivating emits UPDATE active=0; NO hard DELETE."""
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
         mock_query.return_value = [_ins_row()]
         r = client.delete("/api/settings/insurance/ins-001")
         assert r.status_code == 200
 
-        deletes = [
+        updates = [
+            c for c in mock_exec.await_args_list
+            if "UPDATE" in c.args[0].upper() and "insurance_certificates" in c.args[0]
+        ]
+        hard_deletes = [
             c for c in mock_exec.await_args_list
             if "DELETE" in c.args[0].upper() and "insurance_certificates" in c.args[0]
         ]
-        assert len(deletes) == 1
+        assert len(updates) == 1
+        assert len(hard_deletes) == 0, "Hard DELETE must never be issued for insurance_certificates"
+
+        update_params = updates[0].args[1]
+        assert 0 in update_params
 
         audits = _audit_calls(mock_exec)
         assert len(audits) == 1
@@ -654,7 +663,7 @@ class TestInsuranceDelete:
 
 
 class TestInsuranceList:
-    """GET /api/settings/insurance — admin-only list."""
+    """GET /api/settings/insurance — admin-only list with active filter."""
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
@@ -672,6 +681,9 @@ class TestInsuranceList:
         # Dates must serialize as ISO strings.
         assert item["expiryDate"] == "2027-06-30"
         assert isinstance(item["uploadedAt"], str)
+        # Default list must filter active=1.
+        sql = mock_query.call_args[0][0]
+        assert "active = 1" in sql
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)

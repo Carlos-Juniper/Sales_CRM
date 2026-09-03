@@ -100,6 +100,25 @@ async def _audit(
     )
 
 
+# ── Branch settings helpers ──────────────────────────────────────────────────
+
+def _parse_factors(raw: Any) -> Any:
+    """Deserialise the material_calcs.factors JSON column to a Python dict.
+
+    The column is stored as TEXT (JSON blob). aiomysql may return it as either
+    a str or already-parsed dict depending on the driver version. Always returns
+    a dict (possibly empty) so callers don't need to handle None/str themselves.
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+
+
 # ── Live admin re-read (company writes) ──────────────────────────────────────
 
 async def _require_admin(user: dict) -> None:
@@ -667,24 +686,91 @@ def register(app, require_auth) -> None:
     async def get_branch_settings(
         aspire_branch_id: int, user: dict = Depends(require_auth)
     ) -> dict:
-        """Read one branch's settings. Scoped read: a caller may see only a
-        branch in its resolve_branch_scope; admin sees any.
+        """Read one branch's settings, enriched with materialFactors and productionRates.
+
+        Scope guard matches the write path (resolve_branch_scope; admin sees any).
 
         crew_rate_cents_per_hour has NO fallback (migration 020 §2): an
         unconfigured branch returns crewRateCentsPerHour=None so the UI shows
         "no crew rate configured", never an invented number.
+
+        materialFactors: the effective set of material_calcs rows for this branch,
+        each with source='override' (branch-specific row) or source='inherited'
+        (company-wide NULL row shown because the branch has no override). Branch
+        rows take precedence; for any material_key not overridden the company-wide
+        row is returned flagged inherited.
+
+        productionRates: catalog_items production_rate values. No per-branch
+        production-rate table exists (catalog_items.production_rate is a single
+        company-wide value written by PATCH /api/settings/branch/{id}), so all
+        items are returned flagged source='inherited' (no branch-level override
+        is distinguishable from the DB schema alone).
         """
         await _require_branch_write_scope(user, aspire_branch_id)
-        rows = await query(
+
+        # ── crew rate ─────────────────────────────────────────────────────────
+        bs_rows = await query(
             "SELECT * FROM branch_settings WHERE aspire_branch_id = %s",
             [aspire_branch_id],
         )
-        crew_rate = rows[0].get("crew_rate_cents_per_hour") if rows else None
+        crew_rate = bs_rows[0].get("crew_rate_cents_per_hour") if bs_rows else None
+
+        # ── material factors — effective set (override | inherited) ───────────
+        # 1. Load all branch override rows.
+        branch_factor_rows = await query(
+            """SELECT material_key, factors, aspire_branch_id
+                 FROM material_calcs
+                WHERE aspire_branch_id = %s""",
+            [aspire_branch_id],
+        )
+        # 2. Load company-wide rows (aspire_branch_id IS NULL).
+        company_factor_rows = await query(
+            """SELECT material_key, factors, aspire_branch_id
+                 FROM material_calcs
+                WHERE aspire_branch_id IS NULL""",
+        )
+
+        # Build effective set: branch overrides win; company-wide fills the rest.
+        overridden_keys: set[str] = {r["material_key"] for r in branch_factor_rows}
+        effective_factors: list[dict] = []
+        for r in branch_factor_rows:
+            effective_factors.append({
+                "materialKey": r["material_key"],
+                "factors": _parse_factors(r.get("factors")),
+                "source": "override",
+            })
+        for r in company_factor_rows:
+            if r["material_key"] not in overridden_keys:
+                effective_factors.append({
+                    "materialKey": r["material_key"],
+                    "factors": _parse_factors(r.get("factors")),
+                    "source": "inherited",
+                })
+
+        # ── production rates — catalog_items (company-wide; no per-branch table)
+        # All items are flagged source='inherited': catalog_items.production_rate
+        # is the single company-wide value; per-branch overrides are not stored
+        # in a separate column so the distinction doesn't apply here.
+        catalog_rows = await query(
+            """SELECT id, description, production_rate
+                 FROM catalog_items
+                WHERE active = 1 AND production_rate IS NOT NULL""",
+        )
+        production_rates: list[dict] = [
+            {
+                "catalogItemId": r["id"],
+                "description": r.get("description"),
+                "productionRate": float(r["production_rate"]),
+                "source": "inherited",
+            }
+            for r in catalog_rows
+        ]
+
         return {
             "aspireBranchId": aspire_branch_id,
-            "crewRateCentsPerHour": (
-                None if crew_rate is None else int(crew_rate)
-            ),
+            "crewRateCentsPerHour": None if crew_rate is None else int(crew_rate),
+            "materialFactors": effective_factors,
+            "productionRates": production_rates,
         }
 
     @app.patch("/api/settings/branch/{aspire_branch_id}")
@@ -953,14 +1039,59 @@ def register(app, require_auth) -> None:
         return {"id": user_id, "aspire_rep_id": resolved}
 
     async def get_branch_settings_payload(aspire_branch_id: int) -> dict:
-        rows = await query(
+        """Return the enriched branch settings payload after a PATCH.
+
+        Reuses the same enrichment logic as GET /api/settings/branch/{id}: crew
+        rate, materialFactors (override/inherited), productionRates. The PATCH
+        return value and the GET response are therefore always in sync.
+        """
+        bs_rows = await query(
             "SELECT * FROM branch_settings WHERE aspire_branch_id = %s",
             [aspire_branch_id],
         )
-        crew_rate = rows[0].get("crew_rate_cents_per_hour") if rows else None
+        crew_rate = bs_rows[0].get("crew_rate_cents_per_hour") if bs_rows else None
+
+        branch_factor_rows = await query(
+            "SELECT material_key, factors, aspire_branch_id FROM material_calcs WHERE aspire_branch_id = %s",
+            [aspire_branch_id],
+        )
+        company_factor_rows = await query(
+            "SELECT material_key, factors, aspire_branch_id FROM material_calcs WHERE aspire_branch_id IS NULL",
+        )
+        overridden_keys: set[str] = {r["material_key"] for r in branch_factor_rows}
+        effective_factors: list[dict] = []
+        for r in branch_factor_rows:
+            effective_factors.append({
+                "materialKey": r["material_key"],
+                "factors": _parse_factors(r.get("factors")),
+                "source": "override",
+            })
+        for r in company_factor_rows:
+            if r["material_key"] not in overridden_keys:
+                effective_factors.append({
+                    "materialKey": r["material_key"],
+                    "factors": _parse_factors(r.get("factors")),
+                    "source": "inherited",
+                })
+
+        catalog_rows = await query(
+            "SELECT id, description, production_rate FROM catalog_items WHERE active = 1 AND production_rate IS NOT NULL",
+        )
+        production_rates: list[dict] = [
+            {
+                "catalogItemId": r["id"],
+                "description": r.get("description"),
+                "productionRate": float(r["production_rate"]),
+                "source": "inherited",
+            }
+            for r in catalog_rows
+        ]
+
         return {
             "aspireBranchId": aspire_branch_id,
             "crewRateCentsPerHour": None if crew_rate is None else int(crew_rate),
+            "materialFactors": effective_factors,
+            "productionRates": production_rates,
         }
 
     # ── Slice 13a: team_members CRUD ─────────────────────────────────────────

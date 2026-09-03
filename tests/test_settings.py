@@ -205,8 +205,16 @@ class TestBranchSettingsScope:
     ):
         as_role("manager")
         mock_authz_query.return_value = [{"aspire_branch_id": 1403}]
-        # Read the current crew rate (from_value source).
-        mock_query.return_value = [{"crew_rate_cents_per_hour": 18000}]
+        # PATCH /branch/{id} makes these queries in order:
+        #   (1) read current crew rate (from_value), (2-5) get_branch_settings_payload
+        #   payload queries: branch_settings, material_calcs branch, material_calcs company, catalog_items
+        mock_query.side_effect = [
+            [{"crew_rate_cents_per_hour": 18000}],  # (1) from_value read in PATCH
+            [{"crew_rate_cents_per_hour": 20000}],  # (2) payload: branch_settings
+            [],                                      # (3) payload: material_calcs branch
+            [],                                      # (4) payload: material_calcs company
+            [],                                      # (5) payload: catalog_items
+        ]
         r = client.patch(
             "/api/settings/branch/1403",
             json={"crew_rate_cents_per_hour": 20000},
@@ -253,7 +261,13 @@ class TestBranchSettingsScope:
         # admin → resolve_branch_scope returns kind='all' without touching
         # user_branches; still, keep authz.query benign.
         mock_authz_query.return_value = []
-        mock_query.return_value = [{"crew_rate_cents_per_hour": 18000}]
+        mock_query.side_effect = [
+            [{"crew_rate_cents_per_hour": 18000}],  # (1) from_value read in PATCH
+            [{"crew_rate_cents_per_hour": 21000}],  # (2) payload: branch_settings
+            [],                                      # (3) payload: material_calcs branch
+            [],                                      # (4) payload: material_calcs company
+            [],                                      # (5) payload: catalog_items
+        ]
         r = client.patch(
             "/api/settings/branch/3696",
             json={"crew_rate_cents_per_hour": 21000},
@@ -695,20 +709,22 @@ class TestBranchSettingsEnriched:
         as_role("admin")
         mock_authz_query.return_value = []  # admin → kind='all'
 
-        # query side-effects: (1) branch_settings, (2) material_calcs, (3) catalog_items
+        # 4 sequential query calls in get_branch_settings:
+        #   (1) branch_settings, (2) material_calcs branch overrides,
+        #   (3) material_calcs company-wide, (4) catalog_items
         branch_row = {"crew_rate_cents_per_hour": 20000}
         override_factor_row = {
             "material_key": "mulch", "factors": '{"depth_in": 3}',
             "aspire_branch_id": 1403,
         }
         catalog_row = {
-            "id": "ci-001", "name": "Mulch Install", "production_rate": 1200.0,
-            "aspire_branch_id": 1403,
+            "id": "ci-001", "description": "Mulch Install", "production_rate": 1200.0,
         }
         mock_query.side_effect = [
-            [branch_row],           # branch_settings query
-            [override_factor_row],  # material_calcs query for branch
-            [catalog_row],          # catalog_items query
+            [branch_row],           # (1) branch_settings
+            [override_factor_row],  # (2) material_calcs branch overrides
+            [],                     # (3) material_calcs company-wide (mulch overridden, nothing extra)
+            [catalog_row],          # (4) catalog_items
         ]
         r = client.get("/api/settings/branch/1403")
         assert r.status_code == 200
@@ -741,13 +757,13 @@ class TestBranchSettingsEnriched:
             "aspire_branch_id": None,  # company-wide
         }
         catalog_row = {
-            "id": "ci-001", "name": "Mulch Install", "production_rate": 900.0,
-            "aspire_branch_id": None,
+            "id": "ci-001", "description": "Mulch Install", "production_rate": 900.0,
         }
         mock_query.side_effect = [
-            [branch_row],            # branch_settings
-            [company_wide_row],      # material_calcs (company-wide fallback)
-            [catalog_row],           # catalog_items
+            [branch_row],           # (1) branch_settings
+            [],                     # (2) material_calcs branch overrides — none
+            [company_wide_row],     # (3) material_calcs company-wide row
+            [catalog_row],          # (4) catalog_items
         ]
         r = client.get("/api/settings/branch/3696")
         assert r.status_code == 200
@@ -768,9 +784,10 @@ class TestBranchSettingsEnriched:
         as_role("admin")
         mock_authz_query.return_value = []
         mock_query.side_effect = [
-            [{"crew_rate_cents_per_hour": 22500}],
-            [],  # no material_calcs rows
-            [],  # no catalog_items rows
+            [{"crew_rate_cents_per_hour": 22500}],  # (1) branch_settings
+            [],   # (2) material_calcs branch overrides
+            [],   # (3) material_calcs company-wide
+            [],   # (4) catalog_items
         ]
         r = client.get("/api/settings/branch/1403")
         assert r.status_code == 200

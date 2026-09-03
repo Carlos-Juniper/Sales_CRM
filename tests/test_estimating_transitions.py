@@ -325,3 +325,156 @@ class TestDiscrepancyThresholdSource:
         assert res.json()[0]["flagged"] is False
         joined = " ".join(str(c.args[0]) for c in mock_query.await_args_list)
         assert "company_settings" in joined
+
+
+# ── §2.6 CLEAR path: entering in_progress moves snapshot → prior, nulls current ─
+#
+# The single UPDATE must atomically preserve the submitted-at rate into
+# prior_crew_rate_cents_per_hour before nulling crew_rate_cents_per_hour.
+# This is the only way the frontend can render the rate-change notice without
+# a second trip to the DB at render time.
+
+@patch("api.estimating._push_takeoff_qtys_bg", new_callable=AsyncMock)
+@patch("api.estimating._sync_status_bg", new_callable=AsyncMock)
+@patch("api.estimating._load_estimate", new_callable=AsyncMock)
+@patch("api.estimating.execute", new_callable=AsyncMock)
+@patch("api.estimating.query", new_callable=AsyncMock)
+class TestClearPathPreservesPriorRate:
+    """Entering in_progress must copy the frozen snapshot to prior_crew_rate_cents_per_hour
+    in ONE atomic UPDATE statement (never two separate writes)."""
+
+    def _setup(self, mock_query, mock_load, *, crew_rate=_BRANCH_RATE, frm="review"):
+        est = _estimate_row(frm, crew_rate=crew_rate)
+        mock_query.side_effect = _query_side_effect(est, _branch_settings_rows())
+        mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
+
+    def test_clear_path_preserves_snapshot_into_prior_in_one_update(
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, authed
+    ):
+        self._setup(mock_query, mock_load, crew_rate=_BRANCH_RATE)
+        resp = client.patch("/api/estimating/estimates/est-1", json={"status": "in_progress"})
+        assert resp.status_code == 200, resp.text
+
+        # Exactly ONE UPDATE that touches prior_crew_rate_cents_per_hour
+        prior_writes = [
+            c for c in mock_exec.await_args_list
+            if "prior_crew_rate_cents_per_hour" in (c.args[0] if c.args else "")
+        ]
+        assert len(prior_writes) == 1, (
+            f"Expected exactly 1 UPDATE with prior_crew_rate_cents_per_hour, "
+            f"got {len(prior_writes)}"
+        )
+        sql = prior_writes[0].args[0]
+        # Must set prior = current crew_rate (DB-side assignment) in the same UPDATE
+        assert "prior_crew_rate_cents_per_hour = crew_rate_cents_per_hour" in sql
+        # Must null the current rate in the same statement
+        assert "crew_rate_cents_per_hour = NULL" in sql.replace(
+            "prior_crew_rate_cents_per_hour = crew_rate_cents_per_hour", ""
+        )
+
+    def test_clear_path_is_one_write_not_two(
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, authed
+    ):
+        """Two separate UPDATEs would leave a window where prior is set but current
+        is not yet NULL (or vice-versa). Verify the single-statement contract."""
+        self._setup(mock_query, mock_load, crew_rate=_BRANCH_RATE)
+        resp = client.patch("/api/estimating/estimates/est-1", json={"status": "in_progress"})
+        assert resp.status_code == 200, resp.text
+
+        crew_updates = _crew_rate_writes(mock_exec)
+        # Only ONE UPDATE involving the crew_rate column(s)
+        assert len(crew_updates) == 1, (
+            "Clear path must issue exactly ONE crew-rate UPDATE (atomic, no split write)"
+        )
+
+    def test_clear_path_when_snapshot_was_null(
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, authed
+    ):
+        """An estimate handed back without a prior snapshot: prior becomes NULL,
+        current becomes NULL — no error, just NULL→NULL (still the right thing)."""
+        self._setup(mock_query, mock_load, crew_rate=None, frm="review")
+        resp = client.patch("/api/estimating/estimates/est-1", json={"status": "in_progress"})
+        assert resp.status_code == 200, resp.text
+
+        prior_writes = [
+            c for c in mock_exec.await_args_list
+            if "prior_crew_rate_cents_per_hour" in (c.args[0] if c.args else "")
+        ]
+        assert len(prior_writes) == 1, "Must still issue the UPDATE even when snapshot is NULL"
+
+
+@patch("api.estimating._push_takeoff_qtys_bg", new_callable=AsyncMock)
+@patch("api.estimating._sync_status_bg", new_callable=AsyncMock)
+@patch("api.estimating._load_estimate", new_callable=AsyncMock)
+@patch("api.estimating.execute", new_callable=AsyncMock)
+@patch("api.estimating.query", new_callable=AsyncMock)
+class TestFreezePathDoesNotTouchPriorRate:
+    """Freeze transitions (→ review / pending_approval / approved) must NOT write
+    prior_crew_rate_cents_per_hour. Only the CLEAR path (→ in_progress) writes it."""
+
+    def test_freeze_to_review_does_not_set_prior_rate(
+        self, mock_query, mock_exec, mock_load, mock_sync, mock_push, authed
+    ):
+        est = _estimate_row("in_progress", crew_rate=None)
+        mock_query.side_effect = _query_side_effect(est, _branch_settings_rows())
+        mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
+
+        resp = client.patch("/api/estimating/estimates/est-1", json={"status": "review"})
+        assert resp.status_code == 200, resp.text
+
+        for c in mock_exec.await_args_list:
+            sql = c.args[0] if c.args else ""
+            assert "prior_crew_rate_cents_per_hour" not in sql, (
+                f"Freeze transition must not touch prior_crew_rate_cents_per_hour, "
+                f"but found it in: {sql!r}"
+            )
+
+
+# ── §2.6 _estimate_out exposes priorCrewRateCentsPerHour ─────────────────────
+
+class TestEstimateOutExposesPriorCrewRate:
+    """_estimate_out must include priorCrewRateCentsPerHour (keyed via .get so
+    pre-migration rows that lack the column degrade to None gracefully)."""
+
+    def _row(self, **over) -> dict:
+        base = {
+            "id": "est-1", "estimate_type": "maintenance", "name": "Test",
+            "aspire_number": None, "client_name": "C", "customer_type": "hoa",
+            "acreage": None, "contract_value_cents": 0, "target_margin": 0.22,
+            "status": "in_progress", "lifecycle": "bidding", "aspire_owner": "estimating",
+            "priority": "medium", "win_probability": 0.20,
+            "site_walk_date": None, "due_back_date": "2026-09-15",
+            "anticipated_close_date": None, "service_start_date": None,
+            "assigned_ls_estimator": None, "assigned_irr_estimator": None,
+            "crm_rep": None, "notify_bm_rd_on_return": True, "notes": None,
+            "property_id": None, "lead_id": None, "aspire_opportunity_id": None,
+            "aspire_sync_status": None, "rfi_status": None,
+            "turf_area_acres": None, "curb_miles": None, "takeoff_changed_at": None,
+            "created_at": "2026-09-01T00:00:00", "updated_at": "2026-09-01T00:00:00",
+            "crew_rate_cents_per_hour": None,
+            "prior_crew_rate_cents_per_hour": None,
+            # Slice 14 fields
+            "aspire_branch_id": None, "branch_city": None,
+        }
+        base.update(over)
+        return base
+
+    def test_prior_rate_exposed_when_set(self):
+        import api.estimating as est
+        out = est._estimate_out(self._row(prior_crew_rate_cents_per_hour=18_000), [])
+        assert "priorCrewRateCentsPerHour" in out
+        assert out["priorCrewRateCentsPerHour"] == 18_000
+
+    def test_prior_rate_is_none_when_null(self):
+        import api.estimating as est
+        out = est._estimate_out(self._row(prior_crew_rate_cents_per_hour=None), [])
+        assert "priorCrewRateCentsPerHour" in out
+        assert out["priorCrewRateCentsPerHour"] is None
+
+    def test_prior_rate_missing_key_degrades_to_none(self):
+        """Pre-migration rows that lack the column entirely must not KeyError."""
+        import api.estimating as est
+        row = self._row()
+        del row["prior_crew_rate_cents_per_hour"]  # simulate absent column
+        out = est._estimate_out(row, [])
+        assert out.get("priorCrewRateCentsPerHour") is None

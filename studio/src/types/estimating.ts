@@ -177,6 +177,15 @@ export interface EstimateBase {
    * NEVER an invented default (§2.3, no-fallback).
    */
   crewRateCentsPerHour?: number | null
+  /**
+   * Submitted-at crew rate preserved when clearing on hand-back to in_progress
+   * (§2.6, migration 024). Non-null when an estimate was handed back after a
+   * freeze and the branch rate has since changed. The Margin Analysis panel
+   * shows "Crew rate changed $X.XX → $Y.YY since this was submitted" when this
+   * differs from the current live branch rate. Null for fresh in_progress
+   * estimates and pre-migration rows.
+   */
+  priorCrewRateCentsPerHour?: number | null
   acreage: number | null
   /** Derived roll-up, persisted for queue/reporting. Integer cents. */
   contractValueCents: number

@@ -314,6 +314,95 @@ describe('MarginAnalysis — install branch (materials-inclusive, II-9.7)', () =
   })
 })
 
+// ---------------------------------------------------------------------------
+// §2.6 hand-back rate-change notice (Handoff 38, Slice 11b deferred item).
+//
+// When an in_progress estimate has priorCrewRateCentsPerHour set (meaning it
+// was handed back after a freeze) AND the current live branch rate differs from
+// that prior rate, the panel shows:
+//   "Crew rate changed $X.XX/hr → $Y.YY/hr since this was submitted."
+//
+// If prior equals the live rate (no change) or prior is null, render nothing.
+// ---------------------------------------------------------------------------
+describe('MarginAnalysis — crew-rate-changed notice (§2.6 hand-back)', () => {
+  const BRANCH_ID = 3696
+
+  beforeEach(() => {
+    useAuthStore.setState({ user: makeUser({ name: 'Estimator', role: 'maintenance_estimating' }) })
+  })
+
+  function mockBranchRate(crewRateCentsPerHour: number | null) {
+    server.use(
+      http.get(`/api/settings/branch/${BRANCH_ID}`, () =>
+        HttpResponse.json({ aspireBranchId: BRANCH_ID, crewRateCentsPerHour }),
+      ),
+    )
+  }
+
+  it('shows the rate-changed notice when prior differs from current live rate', async () => {
+    // Prior rate: $180.00/hr (submitted-at); current live: $195.00/hr
+    mockBranchRate(19_500)
+    const estimate = {
+      ...buildMaintenanceEstimate(),
+      status: 'in_progress' as const,
+      aspireBranchId: BRANCH_ID,
+      crewRateCentsPerHour: null,
+      priorCrewRateCentsPerHour: 18_000,
+    }
+    renderTab(estimate)
+
+    const notice = await screen.findByTestId('crew-rate-changed-notice')
+    expect(notice).toHaveTextContent('$180.00')
+    expect(notice).toHaveTextContent('$195.00')
+    expect(notice).toHaveTextContent('since this was submitted')
+  })
+
+  it('does not show the notice when prior equals the current live rate (no change)', async () => {
+    // Same rate — no drift since submission
+    mockBranchRate(18_000)
+    const estimate = {
+      ...buildMaintenanceEstimate(),
+      status: 'in_progress' as const,
+      aspireBranchId: BRANCH_ID,
+      crewRateCentsPerHour: null,
+      priorCrewRateCentsPerHour: 18_000,
+    }
+    renderTab(estimate)
+
+    // Wait for live fetch to settle
+    await screen.findByTestId('crew-rate-provenance')
+    expect(screen.queryByTestId('crew-rate-changed-notice')).not.toBeInTheDocument()
+  })
+
+  it('does not show the notice when priorCrewRateCentsPerHour is null', async () => {
+    // No prior rate means this is a fresh in_progress (never been through a freeze cycle)
+    mockBranchRate(19_500)
+    const estimate = {
+      ...buildMaintenanceEstimate(),
+      status: 'in_progress' as const,
+      aspireBranchId: BRANCH_ID,
+      crewRateCentsPerHour: null,
+      priorCrewRateCentsPerHour: null,
+    }
+    renderTab(estimate)
+
+    await screen.findByTestId('crew-rate-provenance')
+    expect(screen.queryByTestId('crew-rate-changed-notice')).not.toBeInTheDocument()
+  })
+
+  it('does not show the notice on a frozen estimate (review status)', () => {
+    // Review status has a snapshot — it is not in_progress, so no notice
+    const estimate = {
+      ...buildMaintenanceEstimate(),
+      status: 'review' as const,
+      crewRateCentsPerHour: 18_000,
+      priorCrewRateCentsPerHour: 16_000,
+    }
+    renderTab(estimate)
+    expect(screen.queryByTestId('crew-rate-changed-notice')).not.toBeInTheDocument()
+  })
+})
+
 describe('MarginAnalysis — benchmark check', () => {
   it('shows the verdict badge from the config $/acre band', () => {
     renderTab(maint)

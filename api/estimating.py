@@ -103,14 +103,25 @@ async def _snapshot_crew_rate_on_transition(
     Freezes (snapshots) the branch rate on first entry to a frozen state, clears
     it on the hand-back to in_progress, and does nothing otherwise. No-op when the
     status is not actually changing.
+
+    CLEAR path (§2.6): when entering in_progress, the frozen snapshot is
+    preserved into prior_crew_rate_cents_per_hour in ONE atomic UPDATE so the
+    estimator's notice ("Crew rate changed $X → $Y since this was submitted")
+    can compare the submitted-at rate against the current live branch rate.
     """
     if target_status == current.get("status"):
         return  # same-status PATCH — not a transition
 
     if target_status == "in_progress":
-        # Hand-back to the estimating queue: the margin is live again.
+        # Hand-back to the estimating queue: copy the frozen snapshot into
+        # prior_crew_rate_cents_per_hour BEFORE nulling it — single atomic write
+        # so the submitted-at rate is never lost. prior=NULL when the estimate
+        # had no snapshot (e.g. handed back before any freeze occurred).
         await execute(
-            "UPDATE estimates SET crew_rate_cents_per_hour = NULL WHERE id = %s",
+            "UPDATE estimates "
+            "SET prior_crew_rate_cents_per_hour = crew_rate_cents_per_hour, "
+            "    crew_rate_cents_per_hour = NULL "
+            "WHERE id = %s",
             [estimate_id],
         )
         return
@@ -260,6 +271,11 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         # later branch-rate change never moves a frozen estimate's margin. Never
         # substitutes an invented number — null flows straight through (§2.3).
         "crewRateCentsPerHour": r.get("crew_rate_cents_per_hour"),
+        # Submitted-at crew rate preserved when clearing on hand-back (§2.6).
+        # Non-null when an estimate was handed back after a freeze; null for fresh
+        # in_progress estimates and pre-migration rows. The frontend uses this to
+        # show "Crew rate changed $X → $Y since this was submitted".
+        "priorCrewRateCentsPerHour": r.get("prior_crew_rate_cents_per_hour"),
         "customerType": r["customer_type"],
         "acreage": _num(r["acreage"]),
         "contractValueCents": int(r["contract_value_cents"]),

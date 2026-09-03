@@ -432,6 +432,17 @@ def detect_023(conn) -> bool:
     return column_exists(conn, "portfolio_properties", "active")
 
 
+def detect_024(conn) -> bool:
+    """024 applied ↔ estimates.prior_crew_rate_cents_per_hour column exists.
+
+    The migration adds a single nullable BIGINT column. Keyed on that column —
+    the only statement in the file is the ALTER TABLE, which is non-idempotent
+    against an existing column (MySQL raises "Duplicate column name"), so the
+    tracking row is the primary idempotency gate once detection returns True.
+    """
+    return column_exists(conn, "estimates", "prior_crew_rate_cents_per_hour")
+
+
 # ── Migration 004 conditional execution ──────────────────────────────────────
 
 def _is_create_table_users(stmt: str) -> bool:
@@ -514,6 +525,7 @@ _DETECT: dict = {
     "020_settings_storage":                      detect_020,
     "022_contract_drop_branch_columns":          detect_022,
     "023_config_soft_delete":                    detect_023,
+    "024_estimate_prior_crew_rate":              detect_024,
 }
 
 

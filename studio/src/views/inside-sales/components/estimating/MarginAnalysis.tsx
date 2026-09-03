@@ -325,6 +325,25 @@ export function MarginAnalysis() {
         </p>
       ) : null}
 
+      {/* §2.6 hand-back rate-change notice — maintenance in_progress only.
+          Shows when the estimate was handed back and the branch crew rate has
+          changed since it was submitted. prior = submitted-at rate, live =
+          current branch rate. Only shown when both numbers are real (never
+          fabricated) and they actually differ. */}
+      {isMaintenance &&
+      estimate.status === 'in_progress' &&
+      estimate.priorCrewRateCentsPerHour != null &&
+      crew.liveRateCents !== null &&
+      crew.liveRateCents !== estimate.priorCrewRateCentsPerHour ? (
+        <p
+          data-testid="crew-rate-changed-notice"
+          className="text-[11px] text-amber-700 dark:text-amber-400"
+        >
+          Crew rate changed {formatCents(estimate.priorCrewRateCentsPerHour)}/hr →{' '}
+          {formatCents(crew.liveRateCents)}/hr since this was submitted.
+        </p>
+      ) : null}
+
       {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Card>

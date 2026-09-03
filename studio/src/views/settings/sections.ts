@@ -53,7 +53,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       { slug: 'discrepancy-threshold', label: 'Discrepancy threshold' },
       { slug: 'intake-defaults', label: 'Intake defaults' },
       { slug: 'portfolio', label: 'Portfolio' },
-      { slug: 'credentials', label: 'Credentials' },
+      { slug: 'credentials', label: 'Documents' },
     ],
   },
   {

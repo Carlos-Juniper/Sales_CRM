@@ -606,13 +606,13 @@ class TestPortfolioSoftDelete:
 class TestInsuranceSoftDelete:
     """Handoff 42: Insurance soft-delete via unified /api/settings/licenses endpoint.
 
-    After migration 027, insurance_certificates is dropped. Insurance documents
+    After migration 028, insurance_certificates is dropped. Insurance documents
     live in licenses_certifications (kind='insurance') and use the same
     soft-delete path as licenses. The old /api/settings/insurance endpoints
     are removed.
     """
 
-    # An insurance-kind row in licenses_certifications (post migration 027).
+    # An insurance-kind row in licenses_certifications (post migration 028).
     _EXISTING_ROW = {
         "id": "ins-001",
         "kind": "insurance",

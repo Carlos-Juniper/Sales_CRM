@@ -188,6 +188,17 @@ async def render_proposal_pdf(proposal_id: str, user: dict) -> RenderResult:
          user["id"], duration_ms),
     )
 
+    estimate_id = prop_rows[0]["estimate_id"]
+    if estimate_id:
+        await execute(
+            """
+            UPDATE estimates
+            SET latest_proposal_render_id = %s, latest_proposal_object_key = %s
+            WHERE id = %s
+            """,
+            (render_id, object_key, estimate_id),
+        )
+
     logger.info(
         "Proposal %s rendered: v%d, %d pages, %d ms",
         proposal_id, next_version, page_count or 0, duration_ms,

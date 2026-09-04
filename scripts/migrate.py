@@ -429,9 +429,22 @@ def detect_026(conn) -> bool:
 
 
 def detect_027(conn) -> bool:
-    """027 applied ↔ insurance_certificates table is absent.
+    """027 applied ↔ estimates.latest_proposal_render_id column exists.
 
-    027 merges insurance_certificates into licenses_certifications and DROPs the
+    The migration adds two nullable columns in one ALTER; keyed on the first
+    since both are added atomically by a single statement.
+    """
+    return column_exists(conn, "estimates", "latest_proposal_render_id")
+
+
+def detect_028(conn) -> bool:
+    """028 applied ↔ insurance_certificates table is absent.
+
+    Originally numbered 027 on feat/handoff-42-documents-unification; renumbered
+    to 028 to avoid collision with the estimate-proposal-pdf-link branch's
+    027_estimate_proposal_pdf_link.sql, merged to staging first.
+
+    028 merges insurance_certificates into licenses_certifications and DROPs the
     source table as its final step. The DROP is the cleanest non-idempotent
     signal: once the table is gone the migration has run to completion. Keying on
     the absence of insurance_certificates (rather than the widened kind ENUM or
@@ -564,7 +577,8 @@ _DETECT: dict = {
     "024_estimate_prior_crew_rate":              detect_024,
     "025_beam_takeoff":                          detect_025,
     "026_leads_created_by":                      detect_026,
-    "027_documents_unification":                 detect_027,
+    "027_estimate_proposal_pdf_link":            detect_027,
+    "028_documents_unification":                 detect_028,
 }
 
 

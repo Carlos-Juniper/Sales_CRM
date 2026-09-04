@@ -1,5 +1,8 @@
 -- ---------------------------------------------------------------------------
--- Migration 027 — Handoff 42: Documents Unification
+-- Migration 028 — Handoff 42: Documents Unification
+--
+-- Originally numbered 027; renumbered to 028 to avoid colliding with
+-- 027_estimate_proposal_pdf_link.sql, which merged to staging first.
 --
 -- Merges insurance_certificates into licenses_certifications so that a single
 -- table and a single set of API endpoints manage all three document kinds:

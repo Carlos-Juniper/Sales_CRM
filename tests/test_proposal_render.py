@@ -531,3 +531,12 @@ class TestRenderPdfPageSetupContract:
         assert not hasattr(m, "_HEADER_TEMPLATE"), (
             "_HEADER_TEMPLATE was removed; it must not reappear at module level"
         )
+
+    def test_estimates_row_updated_with_latest_render(self):
+        """A successful render writes latest_proposal_render_id/object_key onto
+        the parent estimate (migration 027) — the only direct pointer from an
+        estimate to its proposal PDF; proposal_renders is the join-based history."""
+        src = self._pdf_call_source()
+        assert "UPDATE estimates" in src
+        assert "latest_proposal_render_id" in src
+        assert "latest_proposal_object_key" in src

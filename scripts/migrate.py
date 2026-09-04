@@ -428,6 +428,15 @@ def detect_026(conn) -> bool:
     return column_exists(conn, "leads", "created_by")
 
 
+def detect_027(conn) -> bool:
+    """027 applied ↔ estimates.latest_proposal_render_id column exists.
+
+    The migration adds two nullable columns in one ALTER; keyed on the first
+    since both are added atomically by a single statement.
+    """
+    return column_exists(conn, "estimates", "latest_proposal_render_id")
+
+
 def detect_022(conn) -> bool:
     """022 applied ↔ estimates.branch column is absent.
 
@@ -551,6 +560,7 @@ _DETECT: dict = {
     "024_estimate_prior_crew_rate":              detect_024,
     "025_beam_takeoff":                          detect_025,
     "026_leads_created_by":                      detect_026,
+    "027_estimate_proposal_pdf_link":            detect_027,
 }
 
 

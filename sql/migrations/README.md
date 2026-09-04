@@ -49,6 +49,7 @@ for at least one real deploy cycle.
 - **017** — creates `proposal_renders` table for server-side PDF render results (Handoff 39).
 - **025** — creates `beam_requests` + `beam_outputs` and adds `estimates.takeoff_changed_at` (Beam/Attentive takeoff integration). Detection keys on the `estimates` column — the file's only non-idempotent statement. Originally numbered 014 on `feat/estimating-tab-redesign`; renumbered to avoid collision with 014–017 (already applied to CRM DB).
 - **026** — adds `leads.created_by` plus indexes on `created_by`, `assigned_to` and `source`, backing the user-scoped Leads tab (`?mine=true`) and the gov-only Public Leads feed (`?sources=higher_gov,sam_gov`). Originally numbered 015; renumbered for same reason as 025.
+- **027** — adds `estimates.latest_proposal_render_id` + `estimates.latest_proposal_object_key`, a denormalized pointer to the most recent successful proposal PDF render. Written by `api/proposal_render.py` after each render; `proposal_renders` remains the source of truth for full version history.
 
 ### Numbering history
 

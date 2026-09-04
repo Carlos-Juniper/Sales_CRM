@@ -604,21 +604,29 @@ class TestPortfolioSoftDelete:
 
 
 class TestInsuranceSoftDelete:
-    """DELETE /api/settings/insurance/{id} must UPDATE active=0, never hard DELETE.
+    """Handoff 42: Insurance soft-delete via unified /api/settings/licenses endpoint.
 
-    After migration 023, insurance_certificates gains an `active` column and the
-    DELETE handler is converted from a hard DELETE to a soft-delete (active=0).
-    The list endpoint filters active=1 by default; include_inactive=true returns
-    all rows.
+    After migration 028, insurance_certificates is dropped. Insurance documents
+    live in licenses_certifications (kind='insurance') and use the same
+    soft-delete path as licenses. The old /api/settings/insurance endpoints
+    are removed.
     """
 
+    # An insurance-kind row in licenses_certifications (post migration 028).
     _EXISTING_ROW = {
         "id": "ins-001",
-        "object_key": "proposal/insurance/gl-2026.pdf",
+        "kind": "insurance",
+        "name": "General Liability",
+        "issuing_body": None,
+        "identifier": None,
+        "holder_name": None,
+        "aspire_branch_id": None,  # company-wide
+        "issued_date": None,
         "expiry_date": "2027-06-30",
-        "label": "General Liability",
-        "uploaded_at": "2026-06-01T12:00:00",
+        "object_key": "credentials/insurance/ins-001.pdf",
         "active": 1,
+        "sort_order": 0,
+        "updated_at": "2026-06-01T12:00:00",
     }
 
     @patch("api.authz.query", new_callable=AsyncMock)
@@ -627,23 +635,24 @@ class TestInsuranceSoftDelete:
     async def test_delete_emits_update_active_zero_never_hard_delete(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
-        """Core AC: DELETE /api/settings/insurance/{id} must UPDATE active=0, NOT DELETE."""
+        """Core AC: DELETE /api/settings/licenses/{id} for insurance kind must
+        UPDATE active=0 on licenses_certifications, never hard DELETE."""
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
         mock_query.return_value = [self._EXISTING_ROW]
-        r = client.delete("/api/settings/insurance/ins-001")
+        r = client.delete("/api/settings/licenses/ins-001")
         assert r.status_code == 200
 
         updates = [
             c for c in mock_exec.await_args_list
-            if "UPDATE" in c.args[0].upper() and "insurance_certificates" in c.args[0]
+            if "UPDATE" in c.args[0].upper() and "licenses_certifications" in c.args[0]
         ]
         hard_deletes = [
             c for c in mock_exec.await_args_list
-            if "DELETE" in c.args[0].upper() and "insurance_certificates" in c.args[0]
+            if "DELETE" in c.args[0].upper() and "licenses_certifications" in c.args[0]
         ]
-        assert len(updates) == 1, "Expected exactly one UPDATE on insurance_certificates"
-        assert len(hard_deletes) == 0, "Hard DELETE must never be issued for insurance_certificates"
+        assert len(updates) == 1, "Expected exactly one UPDATE on licenses_certifications"
+        assert len(hard_deletes) == 0, "Hard DELETE must never be issued for licenses_certifications"
 
         update_params = updates[0].args[1]
         assert 0 in update_params
@@ -658,30 +667,44 @@ class TestInsuranceSoftDelete:
     async def test_list_insurance_default_excludes_inactive(
         self, mock_query, mock_authz_query, as_role
     ):
-        """Default GET /api/settings/insurance must filter active=1."""
+        """Default GET /api/settings/licenses must filter active=1 (covers insurance rows)."""
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
         mock_query.return_value = []
-        r = client.get("/api/settings/insurance")
+        r = client.get("/api/settings/licenses")
         assert r.status_code == 200
         sql = mock_query.call_args[0][0]
         assert "active = 1" in sql
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_list_insurance_include_inactive_returns_all(
+    async def test_list_include_expired_returns_inactive_insurance(
         self, mock_query, mock_authz_query, as_role
     ):
-        """include_inactive=true must omit the active=1 filter."""
+        """include_expired=true must return inactive/expired rows including insurance kind."""
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
         inactive_row = {**self._EXISTING_ROW, "active": 0}
         mock_query.return_value = [inactive_row]
-        r = client.get("/api/settings/insurance?include_inactive=true")
+        r = client.get("/api/settings/licenses?include_expired=true")
         assert r.status_code == 200
         items = r.json()
         assert len(items) == 1
-        assert items[0]["label"] == "General Liability"
+        # name carries the display label for insurance rows
+        assert items[0]["name"] == "General Liability"
+        assert items[0]["kind"] == "insurance"
+        assert items[0]["active"] is False
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_old_insurance_list_endpoint_gone_404(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        """The old /api/settings/insurance endpoint must return 404 (removed)."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        r = client.get("/api/settings/insurance")
+        assert r.status_code == 404
 
 
 # ── Task #16: enrich GET /api/settings/branch/{id} ────────────────────────────

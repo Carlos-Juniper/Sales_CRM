@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { useRole } from '@/hooks/useRole'
 import { useProposalLicenses, useProposalMediaUrl } from '@/hooks/useProposals'
 import {
@@ -7,40 +7,34 @@ import {
   useUpdateLicense,
   useDeactivateLicense,
   useUploadLicenseScan,
-  useSettingsInsurance,
-  useDeleteInsurance,
-  useUploadInsuranceCert,
-  useUpdateInsurance,
 } from '@/hooks/useCredentials'
 import { SettingsFormShell, FormStatus } from '../company/formStatus'
 import type {
   LicenseCreateBody,
   LicensePatchBody,
-  InsurancePatchBody,
   LicenseSettingsRow,
-  InsuranceCert,
+  DocumentKind,
 } from '@/api/settings'
 
 // ── Public types (re-exported so tests can import them here) ──────────────────
 
-export type { LicenseSettingsRow, InsuranceCert }
+export type { LicenseSettingsRow }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 /**
- * Unified Credentials section — rendered for BOTH the company `credentials` slug
+ * Unified Documents section — manages licenses, certifications, and insurance
+ * documents in a single list. Rendered for BOTH the company `credentials` slug
  * (aspireBranchId=null, admin-only) and the branch `branch-credentials` slug
  * (aspireBranchId=number, BM-scoped).
  *
- * Scope rules (C.5):
- *   - Company-wide rows (aspireBranchId===null on the row): BM sees read-only;
- *     admin may edit/deactivate.
+ * Scope rules (Handoff 42):
+ *   - Company-wide rows (row.aspireBranchId===null): BM sees read-only; admin may edit/deactivate.
  *   - Branch-scoped rows: BM can create/edit/deactivate within their branch.
- *   - Insurance: admin-only management; BM sees the list read-only.
+ *   - Insurance is no longer admin-only — branch-scoped insurance can be created by BMs.
  *
- * One shared expiry-warning banner (C.3) at the top covers BOTH insurance and
- * licenses. Expiry state uses the server-computed isExpired from
- * /proposals/config/licenses — the frontend NEVER recomputes from the date.
+ * Expiry banner (C.3) uses server-computed isExpired from /proposals/config/licenses.
+ * The frontend NEVER recomputes expiry from the date string.
  */
 export function CredentialsSection({
   aspireBranchId,
@@ -50,77 +44,52 @@ export function CredentialsSection({
   const { isAdmin } = useRole()
   const [includeExpired, setIncludeExpired] = useState(false)
 
-  // ── Settings-path lists (management: create/edit/deactivate) ─────────────
-  const licensesQuery = useSettingsLicenses({ aspireBranchId: aspireBranchId ?? undefined, includeExpired })
-  const insuranceQuery = useSettingsInsurance()
+  // Settings-path list — all kinds in one query
+  const docsQuery = useSettingsLicenses({ aspireBranchId: aspireBranchId ?? undefined, includeExpired })
 
-  // ── Proposals-path list (expiry flag — server-computed isExpired) ─────────
+  // Proposals-path list — carries server-computed isExpired; used only for the banner
   const expiryQuery = useProposalLicenses({ aspireBranchId: aspireBranchId ?? undefined })
 
-  const licenseRows = licensesQuery.data ?? []
-  const insuranceCerts = insuranceQuery.data ?? []
+  const rows = docsQuery.data ?? []
   const expiryData = expiryQuery.data
 
-  // ── Expiry banner: trust server isExpired, never recompute ────────────────
-  const hasExpiredLicense =
+  // Banner: trust server isExpired, never recompute from date string
+  const hasExpiredDoc =
     expiryData !== undefined &&
     ([...expiryData.licenses, ...expiryData.certifications].some((l) => l.isExpired))
 
-  // Insurance: banner also fires when the most-recent cert has a past expiryDate.
-  // The settings endpoint doesn't return isExpired for insurance, but the expiryDate
-  // IS the server-stored value (not client-computed). We surface it if present.
-  const hasExpiredInsurance = insuranceCerts.some((cert) => {
-    if (!cert.expiryDate) return false
-    return cert.expiryDate < new Date().toISOString().slice(0, 10)
+  // Insurance rows from the unified list: check expiryDate verbatim (server value)
+  const hasExpiredInsuranceRow = rows.some((row) => {
+    if (row.kind !== 'insurance') return false
+    return row.expiryDate < new Date().toISOString().slice(0, 10)
   })
 
-  const showExpiryBanner = hasExpiredLicense || hasExpiredInsurance
-
-  // Determine the slug for the section shell testid.
-  // Both company-wide (null) and branch-scoped views share the slug key 'credentials'.
-  const sectionSlug = aspireBranchId === null ? 'credentials' : 'credentials'
+  const showExpiryBanner = hasExpiredDoc || hasExpiredInsuranceRow
 
   return (
     <SettingsFormShell
-      slug={sectionSlug}
-      title="Credentials"
+      slug="credentials"
+      title="Documents"
       description={
         aspireBranchId === null
-          ? 'Company-wide licenses, certifications, and insurance certificate.'
-          : 'Branch licenses, certifications, and company insurance certificate.'
+          ? 'Company-wide licenses, certifications, and insurance documents.'
+          : 'Branch licenses, certifications, and insurance documents.'
       }
     >
-      {/* Shared expiry-warning banner — ONE element covering both subsections */}
+      {/* Shared expiry-warning banner covering all document kinds */}
       {showExpiryBanner && (
         <div
           data-testid="credentials-expiry-banner"
           className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3"
         >
           <p className="text-xs font-medium text-amber-800">
-            One or more credentials are expired or expiring soon. Review the items below.
+            One or more documents are expired or expiring soon. Review the items below.
           </p>
         </div>
       )}
 
-      {/* ── Insurance area ─────────────────────────────────────────────────── */}
-      <div data-testid="credentials-insurance-area" className="mb-8">
-        <h3 className="mb-2 text-xs font-semibold text-[var(--fg)] uppercase tracking-wide">
-          Insurance certificate
-        </h3>
-        <InsuranceArea
-          certs={insuranceCerts}
-          isLoading={insuranceQuery.isLoading}
-          isError={insuranceQuery.isError}
-          isAdmin={isAdmin}
-        />
-      </div>
-
-      {/* ── Licenses & certifications area ────────────────────────────────── */}
+      {/* ── Unified documents area ──────────────────────────────────────────── */}
       <div data-testid="credentials-licenses-area">
-        <h3 className="mb-2 text-xs font-semibold text-[var(--fg)] uppercase tracking-wide">
-          Licenses &amp; certifications
-        </h3>
-
         <label className="mb-3 flex items-center gap-2 text-xs text-[var(--fg)] opacity-70 cursor-pointer">
           <input
             type="checkbox"
@@ -132,10 +101,10 @@ export function CredentialsSection({
           Include expired / inactive
         </label>
 
-        <LicensesArea
-          rows={licenseRows}
-          isLoading={licensesQuery.isLoading}
-          isError={licensesQuery.isError}
+        <DocumentsArea
+          rows={rows}
+          isLoading={docsQuery.isLoading}
+          isError={docsQuery.isError}
           aspireBranchId={aspireBranchId}
           isAdmin={isAdmin}
         />
@@ -144,237 +113,9 @@ export function CredentialsSection({
   )
 }
 
-// ── Insurance area ────────────────────────────────────────────────────────────
+// ── Documents list area ───────────────────────────────────────────────────────
 
-function InsuranceArea({
-  certs,
-  isLoading,
-  isError,
-  isAdmin,
-}: {
-  certs: InsuranceCert[]
-  isLoading: boolean
-  isError: boolean
-  isAdmin: boolean
-}) {
-  const [showUpload, setShowUpload] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const deleteInsurance = useDeleteInsurance()
-
-  if (isLoading) return <p className="text-xs opacity-60">Loading…</p>
-  if (isError) return <p role="alert" className="text-xs text-red-600">Could not load insurance certificates.</p>
-
-  return (
-    <div>
-      {certs.length === 0 && !showUpload && (
-        <p className="text-xs text-[var(--fg)] opacity-60 mb-3">No insurance certificate on file.</p>
-      )}
-
-      <ul className="space-y-2 mb-4">
-        {certs.map((cert) => (
-          editingId === cert.id ? (
-            <li key={cert.id}>
-              <InsurancePatchForm
-                cert={cert}
-                onDone={() => setEditingId(null)}
-              />
-            </li>
-          ) : (
-            <li
-              key={cert.id}
-              className="flex items-start justify-between rounded-md border border-[var(--border)] px-3 py-2 text-xs"
-            >
-              <div>
-                <span className="font-medium text-[var(--fg)]">
-                  {cert.label ?? 'Insurance certificate'}
-                </span>
-                {cert.expiryDate && (
-                  <span className="ml-2 text-[var(--fg)] opacity-60">
-                    Expires {cert.expiryDate}
-                  </span>
-                )}
-                <InsuranceScanLink objectKey={cert.objectKey} />
-              </div>
-              {isAdmin && (
-                <div className="flex gap-2 ml-3 flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setEditingId(cert.id)}
-                    className="text-[var(--fg)] opacity-60 hover:opacity-100 text-[10px]"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => deleteInsurance.mutate(cert.id)}
-                    disabled={deleteInsurance.isPending}
-                    className="text-red-600 opacity-70 hover:opacity-100 text-[10px] disabled:opacity-30"
-                  >
-                    Remove
-                  </button>
-                </div>
-              )}
-            </li>
-          )
-        ))}
-      </ul>
-
-      {isAdmin && (
-        showUpload ? (
-          <InsuranceUploadForm onDone={() => setShowUpload(false)} />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setShowUpload(true)}
-            className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--fg)] hover:bg-[var(--sidebar-hover-bg)]"
-          >
-            Upload insurance certificate
-          </button>
-        )
-      )}
-    </div>
-  )
-}
-
-function InsuranceScanLink({ objectKey }: { objectKey: string }) {
-  const { data } = useProposalMediaUrl(objectKey)
-  if (!data?.url) return null
-  return (
-    <a
-      href={data.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="ml-2 text-blue-600 text-[10px] underline"
-    >
-      View scan
-    </a>
-  )
-}
-
-function InsuranceUploadForm({ onDone }: { onDone: () => void }) {
-  const [expiryDate, setExpiryDate] = useState('')
-  const [label, setLabel] = useState('')
-  const fileRef = useRef<HTMLInputElement>(null)
-  const upload = useUploadInsuranceCert()
-
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const file = fileRef.current?.files?.[0]
-    if (!file || !expiryDate) return
-    upload.mutate({ file, expiryDate, label: label || null }, { onSuccess: onDone })
-  }
-
-  return (
-    <form onSubmit={onSubmit} className="rounded-md border border-[var(--border)] px-3 py-3 space-y-2">
-      <div>
-        <label htmlFor="ins-label" className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">
-          Label (e.g. General Liability)
-        </label>
-        <input
-          id="ins-label"
-          type="text"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
-        />
-      </div>
-      <div>
-        <label htmlFor="ins-expiry" className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">
-          Expiry date <span className="text-red-500">*</span>
-        </label>
-        <input
-          id="ins-expiry"
-          type="date"
-          value={expiryDate}
-          onChange={(e) => setExpiryDate(e.target.value)}
-          required
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
-        />
-      </div>
-      <div>
-        <label htmlFor="ins-file" className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">
-          Certificate PDF <span className="text-red-500">*</span>
-        </label>
-        <input
-          id="ins-file"
-          type="file"
-          ref={fileRef}
-          accept=".pdf,image/*"
-          required
-          className="text-xs"
-        />
-      </div>
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={upload.isPending}
-          className="rounded-md bg-[var(--sidebar-active-bg)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-        >
-          {upload.isPending ? 'Uploading…' : 'Upload'}
-        </button>
-        <button type="button" onClick={onDone} className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs">
-          Cancel
-        </button>
-      </div>
-      <FormStatus isSuccess={upload.isSuccess} isError={upload.isError} />
-    </form>
-  )
-}
-
-function InsurancePatchForm({ cert, onDone }: { cert: InsuranceCert; onDone: () => void }) {
-  const [expiryDate, setExpiryDate] = useState(cert.expiryDate ?? '')
-  const [label, setLabel] = useState(cert.label ?? '')
-  const update = useUpdateInsurance()
-
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const body: InsurancePatchBody = {}
-    if (expiryDate !== (cert.expiryDate ?? '')) body.expiryDate = expiryDate
-    if (label !== (cert.label ?? '')) body.label = label || null
-    if (Object.keys(body).length === 0) { onDone(); return }
-    update.mutate({ certId: cert.id, body }, { onSuccess: onDone })
-  }
-
-  return (
-    <form onSubmit={onSubmit} className="rounded-md border border-[var(--border)] px-3 py-3 space-y-2">
-      <div>
-        <label htmlFor={`ins-edit-label-${cert.id}`} className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">Label</label>
-        <input
-          id={`ins-edit-label-${cert.id}`}
-          type="text"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
-        />
-      </div>
-      <div>
-        <label htmlFor={`ins-edit-expiry-${cert.id}`} className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">Expiry date</label>
-        <input
-          id={`ins-edit-expiry-${cert.id}`}
-          type="date"
-          value={expiryDate}
-          onChange={(e) => setExpiryDate(e.target.value)}
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
-        />
-      </div>
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={update.isPending}
-          className="rounded-md bg-[var(--sidebar-active-bg)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-        >
-          {update.isPending ? 'Saving…' : 'Save'}
-        </button>
-        <button type="button" onClick={onDone} className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs">Cancel</button>
-      </div>
-      <FormStatus isSuccess={update.isSuccess} isError={update.isError} />
-    </form>
-  )
-}
-
-// ── Licenses & certifications area ────────────────────────────────────────────
-
-function LicensesArea({
+function DocumentsArea({
   rows,
   isLoading,
   isError,
@@ -390,17 +131,17 @@ function LicensesArea({
   const [showCreate, setShowCreate] = useState(false)
 
   if (isLoading) return <p className="text-xs opacity-60">Loading…</p>
-  if (isError) return <p role="alert" className="text-xs text-red-600">Could not load licenses.</p>
+  if (isError) return <p role="alert" className="text-xs text-red-600">Could not load documents.</p>
 
   return (
     <div>
       {rows.length === 0 && !showCreate && (
-        <p className="text-xs text-[var(--fg)] opacity-60 mb-3">No licenses or certifications yet.</p>
+        <p className="text-xs text-[var(--fg)] opacity-60 mb-3">No documents yet.</p>
       )}
 
       <ul className="space-y-2 mb-4">
         {rows.map((row) => (
-          <LicenseRow
+          <DocumentRow
             key={row.id}
             row={row}
             aspireBranchId={aspireBranchId}
@@ -409,10 +150,10 @@ function LicensesArea({
         ))}
       </ul>
 
-      {/* Only BM/admin for branch-scoped; only admin for company-wide (null) */}
+      {/* BM can create branch-scoped docs; admin can create company-wide or branch-scoped */}
       {(isAdmin || aspireBranchId !== null) && (
         showCreate ? (
-          <LicenseForm
+          <DocumentForm
             aspireBranchId={aspireBranchId}
             onDone={() => setShowCreate(false)}
           />
@@ -422,7 +163,7 @@ function LicensesArea({
             onClick={() => setShowCreate(true)}
             className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--fg)] hover:bg-[var(--sidebar-hover-bg)]"
           >
-            Add license / certification
+            Add document
           </button>
         )
       )}
@@ -430,7 +171,9 @@ function LicensesArea({
   )
 }
 
-function LicenseRow({
+// ── Document row ──────────────────────────────────────────────────────────────
+
+function DocumentRow({
   row,
   aspireBranchId,
   isAdmin,
@@ -442,14 +185,14 @@ function LicenseRow({
   const [editing, setEditing] = useState(false)
   const deactivate = useDeactivateLicense(aspireBranchId ?? undefined)
 
-  // Company-wide rows (aspireBranchId===null): admin edits freely; BM is read-only.
+  // Company-wide rows (row.aspireBranchId===null): admin edits freely; BM is read-only.
   const isCompanyWide = row.aspireBranchId === null
   const canEdit = isAdmin || !isCompanyWide
 
   if (editing && canEdit) {
     return (
       <li>
-        <LicenseForm
+        <DocumentForm
           aspireBranchId={aspireBranchId}
           existing={row}
           onDone={() => setEditing(false)}
@@ -471,9 +214,7 @@ function LicenseRow({
         {row.identifier && (
           <span className="ml-2 text-[var(--fg)] opacity-50">· {row.identifier}</span>
         )}
-        {row.expiryDate && (
-          <span className="ml-2 text-[var(--fg)] opacity-50">Exp {row.expiryDate}</span>
-        )}
+        <span className="ml-2 text-[var(--fg)] opacity-50">Exp {row.expiryDate}</span>
         {!row.active && (
           <span className="ml-2 rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-500">Inactive</span>
         )}
@@ -485,7 +226,7 @@ function LicenseRow({
             Company-wide (read-only)
           </span>
         )}
-        <LicenseScanCell row={row} canEdit={canEdit} aspireBranchId={aspireBranchId} />
+        <DocumentScanCell row={row} canEdit={canEdit} aspireBranchId={aspireBranchId} />
       </div>
       {canEdit && (
         <div className="flex gap-2 ml-3 flex-shrink-0">
@@ -510,11 +251,13 @@ function LicenseRow({
   )
 }
 
+// ── Scan/file upload cell + signed view link ──────────────────────────────────
+
 /**
- * Scan upload control + signed view link for a license row.
- * The view link is built via the media-url signer — never a hand-built GCS URL.
+ * One file upload per document row (the /scan endpoint). Accepts any file type.
+ * View link is built via the media-url signer — never a hand-built GCS URL.
  */
-function LicenseScanCell({
+function DocumentScanCell({
   row,
   canEdit,
   aspireBranchId,
@@ -565,9 +308,15 @@ function LicenseScanCell({
   )
 }
 
-// ── License create/edit form ───────────────────────────────────────────────────
+// ── Document create/edit form ─────────────────────────────────────────────────
 
-function LicenseForm({
+const KIND_LABELS: Record<DocumentKind, string> = {
+  license: 'License',
+  certification: 'Certification',
+  insurance: 'Insurance',
+}
+
+function DocumentForm({
   aspireBranchId,
   existing,
   onDone,
@@ -576,13 +325,13 @@ function LicenseForm({
   existing?: LicenseSettingsRow
   onDone: () => void
 }) {
-  const [kind, setKind] = useState<'license' | 'certification'>(existing?.kind ?? 'license')
+  const [kind, setKind] = useState<DocumentKind>(existing?.kind ?? 'license')
   const [name, setName] = useState(existing?.name ?? '')
+  const [expiryDate, setExpiryDate] = useState(existing?.expiryDate ?? '')
   const [issuingBody, setIssuingBody] = useState(existing?.issuingBody ?? '')
   const [identifier, setIdentifier] = useState(existing?.identifier ?? '')
   const [holderName, setHolderName] = useState(existing?.holderName ?? '')
   const [issuedDate, setIssuedDate] = useState(existing?.issuedDate ?? '')
-  const [expiryDate, setExpiryDate] = useState(existing?.expiryDate ?? '')
 
   const create = useCreateLicense(aspireBranchId ?? undefined)
   const update = useUpdateLicense(aspireBranchId ?? undefined)
@@ -591,31 +340,35 @@ function LicenseForm({
   const isSuccess = create.isSuccess || update.isSuccess
   const isError = create.isError || update.isError
 
+  // Insurance rows typically leave the license-specific metadata fields null;
+  // hide them when kind='insurance' to keep the form clean.
+  const showLicenseFields = kind !== 'insurance'
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!name.trim()) return
+    if (!name.trim() || !expiryDate) return
 
     if (existing) {
       const body: LicensePatchBody = {}
       if (kind !== existing.kind) body.kind = kind
       if (name !== existing.name) body.name = name
+      if (expiryDate !== existing.expiryDate) body.expiryDate = expiryDate
       if (issuingBody !== (existing.issuingBody ?? '')) body.issuingBody = issuingBody || null
       if (identifier !== (existing.identifier ?? '')) body.identifier = identifier || null
       if (holderName !== (existing.holderName ?? '')) body.holderName = holderName || null
       if (issuedDate !== (existing.issuedDate ?? '')) body.issuedDate = issuedDate || null
-      if (expiryDate !== (existing.expiryDate ?? '')) body.expiryDate = expiryDate || null
       if (Object.keys(body).length === 0) { onDone(); return }
       update.mutate({ licenseId: existing.id, body }, { onSuccess: onDone })
     } else {
       const body: LicenseCreateBody = {
         kind,
         name,
+        expiryDate,
         issuingBody: issuingBody || null,
         identifier: identifier || null,
         holderName: holderName || null,
         aspireBranchId,
         issuedDate: issuedDate || null,
-        expiryDate: expiryDate || null,
       }
       create.mutate(body, { onSuccess: onDone })
     }
@@ -624,48 +377,56 @@ function LicenseForm({
   return (
     <form onSubmit={onSubmit} className="rounded-md border border-[var(--border)] px-3 py-3 space-y-2">
       <div>
-        <label htmlFor="lic-kind" className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">
+        <label htmlFor="doc-kind" className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">
           Type <span className="text-red-500">*</span>
         </label>
         <select
-          id="lic-kind"
+          id="doc-kind"
           value={kind}
-          onChange={(e) => setKind(e.target.value as 'license' | 'certification')}
+          onChange={(e) => setKind(e.target.value as DocumentKind)}
           className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
         >
-          <option value="license">License</option>
-          <option value="certification">Certification</option>
+          {(Object.keys(KIND_LABELS) as DocumentKind[]).map((k) => (
+            <option key={k} value={k}>{KIND_LABELS[k]}</option>
+          ))}
         </select>
       </div>
-      <LicField id="lic-name" label="Name" value={name} onChange={setName} required />
-      <LicField id="lic-body" label="Issuing body" value={issuingBody} onChange={setIssuingBody} />
-      <LicField id="lic-id" label="Identifier / number" value={identifier} onChange={setIdentifier} />
-      <LicField id="lic-holder" label="Holder name" value={holderName} onChange={setHolderName} />
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label htmlFor="lic-issued" className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">Issued date</label>
-          <input
-            id="lic-issued"
-            type="date"
-            value={issuedDate}
-            onChange={(e) => setIssuedDate(e.target.value)}
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
-          />
-        </div>
-        <div>
-          <label htmlFor="lic-expiry" className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">Expiry date</label>
-          <input
-            id="lic-expiry"
-            type="date"
-            value={expiryDate}
-            onChange={(e) => setExpiryDate(e.target.value)}
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
-          />
-        </div>
+
+      <DocField id="doc-name" label="Name" value={name} onChange={setName} required />
+
+      <div>
+        <label htmlFor="doc-expiry" className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">
+          Expiry date <span className="text-red-500">*</span>
+        </label>
+        <input
+          id="doc-expiry"
+          type="date"
+          value={expiryDate}
+          onChange={(e) => setExpiryDate(e.target.value)}
+          required
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
+        />
       </div>
-      <p className="text-[10px] text-[var(--fg)] opacity-50">
-        Leave expiry date blank for non-expiring credentials.
-      </p>
+
+      {/* License/certification metadata fields — hidden for insurance */}
+      {showLicenseFields && (
+        <>
+          <DocField id="doc-body" label="Issuing body" value={issuingBody} onChange={setIssuingBody} />
+          <DocField id="doc-id" label="Identifier / number" value={identifier} onChange={setIdentifier} />
+          <DocField id="doc-holder" label="Holder name" value={holderName} onChange={setHolderName} />
+          <div>
+            <label htmlFor="doc-issued" className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5">Issued date</label>
+            <input
+              id="doc-issued"
+              type="date"
+              value={issuedDate}
+              onChange={(e) => setIssuedDate(e.target.value)}
+              className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
+            />
+          </div>
+        </>
+      )}
+
       <div className="flex gap-2">
         <button
           type="submit"
@@ -689,7 +450,7 @@ function LicenseForm({
 
 // ── Shared field primitive ────────────────────────────────────────────────────
 
-function LicField({
+function DocField({
   id,
   label,
   value,

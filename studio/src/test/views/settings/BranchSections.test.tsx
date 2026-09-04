@@ -328,7 +328,6 @@ describe('BranchSection branch-credentials slug', () => {
     // Stub the three queries CredentialsSection fires so it does not hang.
     server.use(
       http.get('*/api/settings/licenses', () => HttpResponse.json([])),
-      http.get('*/api/settings/insurance', () => HttpResponse.json([])),
       http.get('*/api/proposals/config/licenses', () =>
         HttpResponse.json({ licenses: [], certifications: [] }),
       ),

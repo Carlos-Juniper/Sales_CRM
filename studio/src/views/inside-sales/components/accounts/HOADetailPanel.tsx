@@ -10,7 +10,6 @@ import type { HOAProperty, ManagementCompany } from '@/types/accounts'
 interface HOADetailPanelProps {
   property: HOAProperty
   company: ManagementCompany | null
-  managementCompanies: ManagementCompany[]
   isOpen: boolean
   onClose: () => void
   onCreateBid: (property: HOAProperty) => void
@@ -39,7 +38,7 @@ function InfoRow({ label, value }: { label: string; value: string | null | undef
   )
 }
 
-export function HOADetailPanel({ property, company, managementCompanies, isOpen, onClose, onCreateBid, onCreateLead, onRequestEstimate }: HOADetailPanelProps) {
+export function HOADetailPanel({ property, company, isOpen, onClose, onCreateBid, onCreateLead, onRequestEstimate }: HOADetailPanelProps) {
   const [editOpen, setEditOpen] = useState(false)
   const patchHOAProperty = usePatchHOAProperty()
 
@@ -149,7 +148,6 @@ export function HOADetailPanel({ property, company, managementCompanies, isOpen,
       isOpen={editOpen}
       onClose={() => setEditOpen(false)}
       initialValues={property}
-      managementCompanies={managementCompanies}
       onSave={async () => {}}
       onUpdate={async (body) => {
         await patchHOAProperty.mutateAsync({ id: property.id, body })

@@ -3,7 +3,8 @@ import { SlideOverPanel } from '@/components/shared/SlideOverPanel'
 import { Button } from '@/components/ui/button'
 import { TextField } from '@/components/ui/TextField'
 import { SelectField } from '@/components/ui/SelectField'
-import type { HOAStatus, HOAProperty, ManagementCompany } from '@/types/accounts'
+import { ManagementCompanySearch } from './ManagementCompanySearch'
+import type { HOAStatus, HOAProperty } from '@/types/accounts'
 import type { CreateHOAPropertyPayload, PatchHOAPropertyPayload } from '@/api/hoaProperties'
 
 const HOA_STATUSES: HOAStatus[] = ['Prospect', 'Bidding', 'Active', 'At Risk', 'Lost']
@@ -12,7 +13,6 @@ interface AddHOAPanelProps {
   isOpen: boolean
   onClose: () => void
   onSave: (body: CreateHOAPropertyPayload) => Promise<void>
-  managementCompanies: ManagementCompany[]
   /** Present in edit mode — pre-fills the form and switches submit to PATCH */
   initialValues?: HOAProperty
   onUpdate?: (body: PatchHOAPropertyPayload) => Promise<void>
@@ -65,7 +65,7 @@ function formFromProperty(p: HOAProperty): FormState {
   }
 }
 
-export function AddHOAPanel({ isOpen, onClose, onSave, managementCompanies, initialValues, onUpdate }: AddHOAPanelProps) {
+export function AddHOAPanel({ isOpen, onClose, onSave, initialValues, onUpdate }: AddHOAPanelProps) {
   const isEditMode = initialValues !== undefined
   const [form, setForm] = useState<FormState>(() =>
     isEditMode ? formFromProperty(initialValues) : INITIAL
@@ -77,6 +77,10 @@ export function AddHOAPanel({ isOpen, onClose, onSave, managementCompanies, init
   function set(key: keyof FormState) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setForm((prev) => ({ ...prev, [key]: e.target.value }))
+  }
+
+  function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }))
   }
 
   function handleClose() {
@@ -224,18 +228,10 @@ export function AddHOAPanel({ isOpen, onClose, onSave, managementCompanies, init
             ))}
           </SelectField>
 
-          <SelectField
-            label="Management company"
-            value={form.management_company_id}
-            onChange={set('management_company_id')}
-          >
-            <option value="">Self-managed / none</option>
-            {managementCompanies.map((co) => (
-              <option key={co.id} value={co.id}>
-                {co.company_name}
-              </option>
-            ))}
-          </SelectField>
+          <ManagementCompanySearch
+            value={form.management_company_id || null}
+            onSelect={(id) => setField('management_company_id', id ?? '')}
+          />
         </section>
       </div>
 

@@ -13,6 +13,16 @@ export function useManagementCompanies() {
   })
 }
 
+export function useManagementCompanySearch(term: string) {
+  return useQuery({
+    queryKey: [MGMT_KEY, 'search', term],
+    queryFn: () => managementCompaniesApi.list({ search: term, page_size: 20 }),
+    select: (res) => res.data,
+    enabled: term.length >= 1,
+    staleTime: 30_000,
+  })
+}
+
 export function useCreateManagementCompany() {
   const qc = useQueryClient()
   const toast = useUIStore((s) => s.toast)

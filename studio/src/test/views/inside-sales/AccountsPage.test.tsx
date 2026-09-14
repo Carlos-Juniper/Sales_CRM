@@ -132,6 +132,7 @@ vi.mock('@/hooks/useManagementCompanies', () => ({
     isPending: false,
     isError: false,
   }),
+  useManagementCompanySearch: () => ({ data: [], isLoading: false, isError: false }),
   useCreateManagementCompany: () => makemutation(mockCreateManagementCompany),
   usePatchManagementCompany: () => makemutation(vi.fn()),
   useAddPMContact: () => makemutation(vi.fn()),

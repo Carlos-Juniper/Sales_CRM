@@ -555,6 +555,195 @@ def apply_004(conn, path: Path, verbose: bool = False, branch: str | None = None
         exec_statements(conn, stmts, verbose)
 
 
+def detect_029(conn) -> bool:
+    """029 applied ↔ a real client-reference row (id='cr-real-greyhawk') exists.
+
+    029 is idempotent data DML (Handoff 46 §5): it deletes the placeholder
+    team-member/reference rows shipped by 015 and seeds three real referees from
+    Handoff 45 §4.10. There is no schema change to key on, so — mirroring
+    detect_009, which detects a seed migration by the presence of a seeded row —
+    we key on one of 029's INSERT-IGNORE rows. That id is only ever created by
+    029, so its presence is an unambiguous "already ran" signal. Re-running 029
+    is harmless (all statements are idempotent), but the detector lets migrate.py
+    backfill a tracking row on a DB that already carries the corrected data.
+    """
+    if not table_exists(conn, "client_references"):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM client_references WHERE id = 'cr-real-greyhawk'",
+    )
+    return bool(row and row["cnt"] >= 1)
+
+def detect_030(conn) -> bool:
+    """030 applied ↔ a real executive row (id='tm-exec-cro-001') exists in team_members.
+
+    030 is idempotent data DML only (no schema changes): it UPDATEs existing
+    placeholder bios and INSERTs the real executive team roster. Mirroring
+    detect_009 and detect_029, we key on one of the INSERT IGNORE rows whose id
+    is exclusively created by this migration — tm-exec-cro-001 (Dan DeMont, CRO)
+    does not appear in any earlier migration. Its presence is an unambiguous
+    "already ran" signal. Re-running 030 is harmless (all statements are
+    idempotent), but the detector lets migrate.py backfill a tracking row on a
+    DB that already carries the real bios.
+    """
+    if not table_exists(conn, "team_members"):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM team_members WHERE id = 'tm-exec-cro-001'",
+    )
+    return bool(row and row["cnt"] >= 1)
+
+def detect_031(conn) -> bool:
+    """031 applied ↔ leads.property_id column exists.
+
+    Handoff 49 §3: keyed on the migration's OWN primary effect (leads.property_id),
+    NOT on a sibling artifact like the `properties` table. That is the lesson of
+    detect_001's failure (§2.1): a detector must test the effect of its own
+    migration. property_id is the first ADD in the file; the four other guarded
+    ADDs (idx_property_id + three hoa_properties columns) are individually
+    information_schema-guarded, so a re-run after a partial apply completes the
+    remainder safely.
+    """
+    return column_exists(conn, "leads", "property_id")
+
+def detect_032(conn) -> bool:
+    """032 applied ↔ intake_attachments.sort_order column exists.
+
+    Handoff 47 §3: 032 makes two guarded changes to intake_attachments — widening
+    the `kind` ENUM to add the three proposal kinds, then adding sort_order. Keyed
+    on sort_order (the second and last change) rather than the ENUM widening: the
+    file's statements run in order and each is individually information_schema-
+    guarded, so a True here means both landed, and a re-run after a partial apply
+    completes the remainder safely. Keying on its OWN effect (not a sibling
+    artifact) follows the detect_031/detect_001 lesson.
+    """
+    return column_exists(conn, "intake_attachments", "sort_order")
+
+def detect_034(conn) -> bool:
+    """034 applied ↔ intake_attachments.lead_id column exists.
+
+    034 makes two guarded schema changes: making proposal_requests.estimate_id
+    nullable and adding intake_attachments.lead_id. Keyed on lead_id (the last
+    and most specific change): a True here means both changes landed. The
+    PREPARE/EXECUTE guards in the SQL file make partial re-runs safe.
+    """
+    return column_exists(conn, "intake_attachments", "lead_id")
+
+def detect_035(conn) -> bool:
+    """035 applied ↔ team_members row 'tm-rd-west-001' has name='Rodrigo Leon'.
+
+    035 is data-only DML (four UPDATE statements). Keyed on the unambiguous
+    output of §1: once Rod Leon has been renamed to Rodrigo Leon the migration
+    has been applied. Re-running is harmless (all WHERE guards are on the
+    pre-correction values and will match zero rows after the first apply).
+    """
+    if not table_exists(conn, "team_members"):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM team_members WHERE id = 'tm-rd-west-001' AND name = 'Rodrigo Leon'",
+    )
+    return bool(row and row["cnt"] >= 1)
+
+def detect_036(conn) -> bool:
+    """036 applied ↔ at least one new active portfolio row exists beyond the 3
+    stale placeholder rows (pp-001/002/003).
+
+    036 deactivates pp-001/002/003 and seeds new real portfolio properties
+    starting at pp-004.  The detector checks for any active row whose id is in
+    the pp-0xx range AND is not one of the three stale placeholders, which is
+    exclusively created by this migration.  ON DUPLICATE KEY UPDATE makes
+    re-runs harmless; the tracking row is the primary idempotency gate once
+    detection returns True.
+    """
+    if not table_exists(conn, "portfolio_properties"):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM portfolio_properties "
+        "WHERE id LIKE 'pp-0%' AND active = 1 "
+        "  AND id NOT IN ('pp-001', 'pp-002', 'pp-003')",
+    )
+    return bool(row and row["cnt"] > 0)
+
+def detect_037(conn) -> bool:
+    """037 applied ↔ branches row 3704 (West Orlando Aquatics) has region_id='central'.
+
+    037 is data-only DML (thirteen UPDATE ... WHERE region_id IS NULL
+    statements) backfilling missing branches.region_id for 15 Florida
+    branches. Keyed on aspire_branch_id 3704, the last statement in the file
+    and the one with the widest blast radius (it un-poisons the whole West
+    Orlando address group in get_proposal_branch_coverage's setdefault
+    grouping — see the migration file's Background section). Re-running is
+    harmless: every WHERE guard is on region_id IS NULL and matches zero rows
+    after the first apply.
+    """
+    if not table_exists(conn, "branches"):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM branches WHERE aspire_branch_id = 3704 AND region_id = 'central'",
+    )
+    return bool(row and row["cnt"] >= 1)
+
+def detect_038(conn) -> bool:
+    """038 applied ↔ leads.handoff_notes column exists.
+
+    038 adds a single nullable TEXT column to the leads table via the
+    information_schema-guarded PREPARE/EXECUTE pattern. Keyed on that column —
+    its own effect. Re-running is safe: the PREPARE guard makes the ADD a no-op
+    once handoff_notes is present.
+    """
+    return column_exists(conn, "leads", "handoff_notes")
+
+def detect_039(conn) -> bool:
+    """039 applied ↔ portfolio_properties.before_after_object_keys column is absent.
+
+    039 folds any non-NULL before_after_object_keys values into photo_object_keys
+    (data preservation guard) then DROPs the column via the information_schema-
+    guarded PREPARE/EXECUTE pattern. Keyed on the ABSENCE of the column — the
+    migration's own final effect. A True return means the DROP landed (or the
+    column was never present, which is equally safe). Re-running is safe: the
+    PREPARE guard makes the DROP a no-op when the column is already gone.
+    """
+    if not table_exists(conn, "portfolio_properties"):
+        return False
+    return not column_exists(conn, "portfolio_properties", "before_after_object_keys")
+
+def detect_040(conn) -> bool:
+    """040 applied ↔ proposal_requests.chapter_order column exists.
+
+    040 adds a single nullable TEXT column to proposal_requests via the
+    information_schema-guarded PREPARE/EXECUTE pattern (backs the TOC + chapter
+    reorder feature). Keyed on that column — its own effect. Re-running is
+    safe: the PREPARE guard makes the ADD a no-op once chapter_order is present.
+    """
+    return column_exists(conn, "proposal_requests", "chapter_order")
+
+def detect_041(conn) -> bool:
+    """041 applied ↔ properties.units column exists.
+
+    041 adds two guarded columns to `properties` — acreage then units. Keyed on
+    units (the second and last change): each ADD is individually
+    information_schema-guarded, so a True here means both landed, and a
+    re-run after a partial apply completes the remainder safely.
+    """
+    return column_exists(conn, "properties", "units")
+
+def detect_042(conn) -> bool:
+    """042 applied ↔ proposal_renders.overflowing_pages column exists.
+
+    The migration adds three columns (users.phone, users.title,
+    proposal_renders.overflowing_pages). Keyed on the last of the three so a
+    detection of True means all of them landed — the file's statements run in
+    order, and every one is individually guarded by an information_schema
+    PREPARE, so a re-run after a partial apply completes the remainder safely.
+    """
+    return column_exists(conn, "proposal_renders", "overflowing_pages")
+
+
 # ── Detection dispatch table ──────────────────────────────────────────────────
 
 _DETECT: dict = {
@@ -579,6 +768,19 @@ _DETECT: dict = {
     "026_leads_created_by":                      detect_026,
     "027_estimate_proposal_pdf_link":            detect_027,
     "028_documents_unification":                 detect_028,
+    "029_real_proposal_seed_data":                detect_029,
+    "030_real_team_bios":                         detect_030,
+    "031_add_leads_property_id":                  detect_031,
+    "032_proposal_document_uploads":              detect_032,
+    "034_estimate_optional_proposals":            detect_034,
+    "035_roster_corrections":                     detect_035,
+    "036_portfolio_seed":                         detect_036,
+    "037_branch_region_backfill":                 detect_037,
+    "038_leads_handoff_notes":                    detect_038,
+    "039_retire_portfolio_before_after":          detect_039,
+    "040_proposal_chapter_order":                 detect_040,
+    "041_property_acreage_units":                 detect_041,
+    "042_signer_contact_and_render_overflow":     detect_042,
 }
 
 

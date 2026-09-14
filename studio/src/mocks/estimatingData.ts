@@ -722,6 +722,8 @@ export function buildStoredAttachment(
     status: 'stored',
     objectKey: `estimating/${estimateId}/att-test.pdf`,
     downloadable: true,
+    sortOrder: 0,
+    pageCount: null,
     createdAt: new Date().toISOString(),
     ...overrides,
   }
@@ -741,6 +743,8 @@ export function buildLegacyAttachment(submissionId: string): IntakeAttachment {
     status: 'stored',
     objectKey: null,
     downloadable: false,
+    sortOrder: 0,
+    pageCount: null,
     createdAt: new Date(Date.now() - 86400000).toISOString(),
   }
 }

@@ -10,6 +10,9 @@ export interface CrmLeadContext {
   rep: string
   /** 0.20–1.00 */
   winProbability: number
+  /** WS1: pre-fill the intake contact fields when present on the linked lead. */
+  contactName?: string | null
+  contactEmail?: string | null
 }
 
 /** Default win probability when the linked lead carries no score yet. */
@@ -29,5 +32,7 @@ export function crmLeadFromLead(lead: Lead): CrmLeadContext {
       lead.score != null
         ? Math.min(1, Math.max(0.2, lead.score / 100))
         : DEFAULT_WIN_PROBABILITY,
+    contactName: lead.contact_name ?? null,
+    contactEmail: lead.contact_email ?? null,
   }
 }

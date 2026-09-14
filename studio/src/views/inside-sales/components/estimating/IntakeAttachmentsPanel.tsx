@@ -25,6 +25,10 @@ const KIND_LABEL: Record<AttachmentKind, string> = {
   other: 'Other',
   // The Takeoff Insert scanned boundary map (estimate-scoped).
   takeoff_scan: 'Takeoff Scan',
+  // Handoff 47 proposal documents (estimate-scoped, appended to the PDF).
+  proposal_contract: 'Contract',
+  proposal_measurements: 'Measurements',
+  proposal_other: 'Other Attachment',
 }
 
 export function IntakeAttachmentsPanel({ estimateId }: IntakeAttachmentsPanelProps) {

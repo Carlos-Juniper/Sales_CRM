@@ -13,7 +13,8 @@ function prop(over: Partial<Property> = {}): Property {
   return {
     id: 'prop-1', name: 'Sunny HOA', address1: '123 Palm St', address2: null,
     city: 'Orlando', state: 'FL', zip: '32807', branchCity: 'Orlando, FL',
-    customerType: 'hoa', managementCompanyId: null, aspirePropertyId: 238431,
+    customerType: 'hoa', managementCompanyId: null, acreage: null, units: null,
+    aspirePropertyId: 238431,
     aspireSyncStatus: 'synced', createdAt: null, updatedAt: null, ...over,
   }
 }
@@ -51,23 +52,50 @@ describe('PropertySelector', () => {
 
   it('create-new is only reachable after a search, and creating selects it', async () => {
     const user = userEvent.setup()
+    let body: Record<string, unknown> = {}
     server.use(
       http.get(`${API}/properties`, () => HttpResponse.json([])),
-      http.post(`${API}/properties`, async () =>
-        HttpResponse.json(prop({ id: 'prop-new', name: 'Brand New HOA', aspireSyncStatus: 'pending', aspirePropertyId: null }), { status: 201 }),
-      ),
+      http.post(`${API}/properties`, async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(prop({ id: 'prop-new', name: 'Brand New HOA', aspireSyncStatus: 'pending', aspirePropertyId: null }), { status: 201 })
+      }),
     )
     const onSelect = vi.fn()
-    render(<PropertySelector value={null} onSelect={onSelect} />)
+    render(<PropertySelector value={null} onSelect={onSelect} branchCity="Orlando, FL" />)
     // no create affordance before searching
     expect(screen.queryByRole('button', { name: /create new property/i })).not.toBeInTheDocument()
     await user.type(screen.getByLabelText(/search properties/i), 'brand')
     await user.click(screen.getByRole('button', { name: /^search$/i }))
     await user.click(await screen.findByRole('button', { name: /create new property/i }))
     await user.type(screen.getByLabelText(/property name/i), 'Brand New HOA')
-    await user.selectOptions(screen.getByLabelText(/branch/i), 'Orlando, FL')
+    // no second branch picker — the top-of-form branch is reused automatically
+    expect(screen.queryByLabelText(/^branch$/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/branch:/i)).toHaveTextContent('Orlando, FL')
     await user.click(screen.getByRole('button', { name: /create property/i }))
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'prop-new' })))
+    expect(body.branchCity).toBe('Orlando, FL')
+  })
+
+  it('adds acreage and units to the created property', async () => {
+    const user = userEvent.setup()
+    let body: Record<string, unknown> = {}
+    server.use(
+      http.get(`${API}/properties`, () => HttpResponse.json([])),
+      http.post(`${API}/properties`, async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(prop({ id: 'prop-new' }), { status: 201 })
+      }),
+    )
+    render(<PropertySelector value={null} onSelect={vi.fn()} branchCity="Orlando, FL" />)
+    await user.type(screen.getByLabelText(/search properties/i), 'brand')
+    await user.click(screen.getByRole('button', { name: /^search$/i }))
+    await user.click(await screen.findByRole('button', { name: /create new property/i }))
+    await user.type(screen.getByLabelText(/property name/i), 'Brand New HOA')
+    await user.type(screen.getByLabelText(/^acreage$/i), '2.5')
+    await user.type(screen.getByLabelText(/^units$/i), '42')
+    await user.click(screen.getByRole('button', { name: /create property/i }))
+    await waitFor(() => expect(body.acreage).toBe(2.5))
+    expect(body.units).toBe(42)
   })
 
   it('defaults new properties to manual origin (propertyType/sourceType manual, no sourceId)', async () => {

@@ -73,6 +73,8 @@ export interface Property {
   branchCity: string | null
   customerType: string | null
   managementCompanyId: string | null
+  acreage: number | null
+  units: number | null
   aspirePropertyId: number | null
   aspireSyncStatus: AspireSyncStatus
   createdAt: string | null
@@ -93,6 +95,8 @@ export interface CreatePropertyPayload {
   branchCity?: string | null
   customerType?: string | null
   managementCompanyId?: string | null
+  acreage?: number | null
+  units?: number | null
 }
 
 /**
@@ -515,8 +519,19 @@ export interface IntakeDraft {
 
 // 'takeoff_scan' — the Takeoff Insert scanned boundary map;
 // estimate-scoped (no intake submission) and may be an image, not just PDF.
-export type AttachmentKind = 'property_map' | 'rfp' | 'other' | 'takeoff_scan'
-export type AttachmentStatus = 'pending' | 'stored' | 'failed'
+//
+// 'proposal_contract' | 'proposal_measurements' | 'proposal_other' (Handoff 47)
+// — the three estimate-scoped proposal documents appended to the rendered PDF.
+// Contract is PDF-only; measurements/other accept images too.
+export type AttachmentKind =
+  | 'property_map'
+  | 'rfp'
+  | 'other'
+  | 'takeoff_scan'
+  | 'proposal_contract'
+  | 'proposal_measurements'
+  | 'proposal_other'
+export type AttachmentStatus = 'pending' | 'stored' | 'failed' | 'deleted'
 
 /** Intake attachment row — enriched with GCS columns added in the attachment feature. */
 export interface IntakeAttachment {
@@ -536,6 +551,11 @@ export interface IntakeAttachment {
   objectKey: string | null
   /** True only when status='stored' AND objectKey is set. Legacy rows are false. */
   downloadable: boolean
+  /** Stable order for 'other' proposal attachments (Handoff 47); 0 otherwise. */
+  sortOrder: number
+  /** Server-side page count recorded at confirm for proposal documents; null for
+   *  images before confirm and for pre-032 rows. */
+  pageCount: number | null
   createdAt: string
 }
 

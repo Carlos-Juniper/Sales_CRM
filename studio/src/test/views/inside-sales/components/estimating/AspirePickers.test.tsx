@@ -3,20 +3,9 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@/test/utils'
 import {
-  BranchPicker,
   ServiceLineSelect,
   LostReasonSelect,
 } from '@/views/inside-sales/components/estimating/AspirePickers'
-
-describe('BranchPicker', () => {
-  it('lists city-level branches and reports the selection', async () => {
-    const user = userEvent.setup()
-    const onChange = vi.fn()
-    render(<BranchPicker value="" onChange={onChange} label="Branch" />)
-    await user.selectOptions(screen.getByLabelText('Branch'), 'Orlando, FL')
-    expect(onChange).toHaveBeenCalledWith('Orlando, FL')
-  })
-})
 
 describe('ServiceLineSelect', () => {
   it('sends the exact backend key (double-space Hardscape) as the value', async () => {

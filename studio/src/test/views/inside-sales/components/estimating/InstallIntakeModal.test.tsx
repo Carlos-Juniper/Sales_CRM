@@ -60,20 +60,29 @@ function renderModal({ open = true, onClose = vi.fn(), shell }: RenderModalOptio
   return { shell: resolvedShell, onClose }
 }
 
-/** Fill the minimum required fields for a valid submission (fast path using fireEvent). */
-function fillMinimumFieldsFast() {
+/**
+ * Fill the minimum required fields for a valid submission (fast path using
+ * fireEvent), including selecting/creating a property via the shared
+ * PropertySelector — required to submit now that the standalone Property
+ * section is gone. Skips property creation if one is already selected (e.g.
+ * a resumed draft's pre-selected property).
+ */
+async function fillMinimumFieldsFast() {
   // Requestor section — use exact label text to avoid ambiguity with client fields
   fireEvent.change(screen.getByLabelText(/^requested by/i), { target: { value: 'Alex Reyes' } })
   fireEvent.change(screen.getByLabelText(/^phone \*/i), { target: { value: '602-555-9000' } })
   fireEvent.change(screen.getByLabelText(/^email \*/i), { target: { value: 'areyes@juniper.com' } })
   // Opportunity section
   fireEvent.change(screen.getByLabelText(/opportunity name/i), { target: { value: 'Greenfield Estate Install' } })
-  // Property section
-  fireEvent.change(screen.getByLabelText(/property name/i), { target: { value: 'Greenfield Estate' } })
-  fireEvent.change(screen.getByLabelText(/^address \*/i), { target: { value: '500 Desert Vista Dr' } })
-  fireEvent.change(screen.getByLabelText(/^city \*/i), { target: { value: 'Scottsdale' } })
-  fireEvent.change(screen.getByLabelText(/^state \*/i), { target: { value: 'AZ' } })
-  fireEvent.change(screen.getByLabelText(/^zip \*/i), { target: { value: '85251' } })
+  // Aspire property — search finds nothing, then create it inline.
+  if (!screen.queryByRole('button', { name: /change/i })) {
+    fireEvent.change(screen.getByLabelText(/search properties/i), { target: { value: 'greenfield estate' } })
+    fireEvent.click(screen.getByRole('button', { name: /^search$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /create new property/i }))
+    fireEvent.change(screen.getByLabelText(/property name/i), { target: { value: 'Greenfield Estate' } })
+    fireEvent.click(screen.getByRole('button', { name: /^create property$/i }))
+    await screen.findByRole('button', { name: /change/i })
+  }
   // Client section
   fireEvent.change(screen.getByLabelText(/^company \*/i), { target: { value: 'Greenfield Development LLC' } })
   fireEvent.change(screen.getByLabelText(/contact person/i), { target: { value: 'Morgan Pierce' } })
@@ -170,15 +179,18 @@ describe('InstallIntakeModal — field rendering (AC §3 bullet 1)', () => {
     expect(screen.getAllByLabelText(/^lighting$/i).length).toBeGreaterThanOrEqual(1)
   })
 
-  it('renders the Property section fields', () => {
+  it('has no standalone Property section — location lives in the Aspire property selector instead', () => {
     renderModal()
-    expect(screen.getByLabelText(/property name/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/acreage/i)).toBeInTheDocument()
-    // "Address *" in property; "Client mailing address" in client
-    expect(screen.getByLabelText(/^address \*/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^city \*/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^state \*/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^zip \*/i)).toBeInTheDocument()
+    // The old duplicate location fields are gone…
+    expect(screen.queryByLabelText(/^property name/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^acreage/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^address \*/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^city \*/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^county/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^state \*/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^zip \*/i)).not.toBeInTheDocument()
+    // …and the Aspire property search is the one place a property is found/created.
+    expect(screen.getByLabelText(/search properties/i)).toBeInTheDocument()
   })
 
   it('renders the Client section fields', () => {
@@ -303,7 +315,7 @@ describe('InstallIntakeModal — Requestor checkboxes (AC §3 bullet 6)', () => 
 
     renderModal()
     fireEvent.click(screen.getByLabelText(/duplicate/i))
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -334,7 +346,7 @@ describe('InstallIntakeModal — RFI status (AC §3 bullet 2)', () => {
     fireEvent.change(screen.getByLabelText(/rfi status/i), {
       target: { value: 'Awaiting GC response on storm drain details' },
     })
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -359,7 +371,7 @@ describe('InstallIntakeModal — RFI status (AC §3 bullet 2)', () => {
     fireEvent.change(screen.getByLabelText(/rfi status/i), {
       target: { value: 'Awaiting GC response on storm drain details' },
     })
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -381,7 +393,7 @@ describe('InstallIntakeModal — RFI status (AC §3 bullet 2)', () => {
     )
 
     renderModal()
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -449,7 +461,7 @@ describe('InstallIntakeModal — file attachments (AC §3 bullet 3)', () => {
     const input = area.querySelector('input[type="file"]') as HTMLInputElement
     await user.upload(input, file)
 
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -468,6 +480,57 @@ describe('InstallIntakeModal — file attachments (AC §3 bullet 3)', () => {
 // ---------------------------------------------------------------------------
 
 describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
+  it('blocks submit and shows a message when no property has been selected or created', async () => {
+    const postCalls: unknown[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        postCalls.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+    renderModal()
+    fireEvent.change(screen.getByLabelText(/^requested by/i), { target: { value: 'Alex Reyes' } })
+    fireEvent.change(screen.getByLabelText(/^phone \*/i), { target: { value: '602-555-9000' } })
+    fireEvent.change(screen.getByLabelText(/^email \*/i), { target: { value: 'areyes@juniper.com' } })
+    fireEvent.change(screen.getByLabelText(/opportunity name/i), { target: { value: 'Greenfield Estate Install' } })
+    fireEvent.change(screen.getByLabelText(/^company \*/i), { target: { value: 'Greenfield Development LLC' } })
+    fireEvent.change(screen.getByLabelText(/contact person/i), { target: { value: 'Morgan Pierce' } })
+    await selectInstallBranch()
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+    expect(await screen.findByText(/select or create a property/i)).toBeInTheDocument()
+    expect(postCalls).toHaveLength(0)
+  })
+
+  it('sources the estimate acreage from the selected/created property', async () => {
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildInstallEstimate({ id: 'test-install-acreage', status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json({ ...fakeEstimate, ...body, id: 'test-install-acreage' }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFieldsFast()
+    await selectInstallBranch()
+    // Acreage was entered on the property, not on a per-form field.
+    fireEvent.click(screen.getByRole('button', { name: /change/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^search$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /create new property/i }))
+    fireEvent.change(screen.getByLabelText(/property name/i), { target: { value: 'Greenfield Estate 2' } })
+    fireEvent.change(screen.getByLabelText(/^acreage$/i), { target: { value: '2.5' } })
+    fireEvent.click(screen.getByRole('button', { name: /^create property$/i }))
+    await screen.findByRole('button', { name: /change/i })
+
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].acreage).toBe(2.5)
+  })
+
   it('POSTs an estimate with estimateType="install" on submit', async () => {
     const created: CreateEstimatePayload[] = []
     const fakeEstimate = buildInstallEstimate({ id: 'test-install-1', status: 'new_from_sales' })
@@ -481,7 +544,7 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
     )
 
     renderModal()
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -503,7 +566,7 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
     )
 
     renderModal()
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch() // selects "Bradenton, FL" → install aspire_branch_id 1374
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -526,7 +589,7 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
     )
 
     renderModal()
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -546,7 +609,7 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
 
     const shell = makeShell()
     renderModal({ shell })
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -569,7 +632,7 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
     )
 
     renderModal()
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -597,7 +660,7 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
         </EstimatingShellContext.Provider>
       </EstimatingToastProvider>,
     )
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -624,7 +687,7 @@ describe('InstallIntakeModal — leadId (Pipeline kanban redesign)', () => {
 
     renderModal()
     fireEvent.change(screen.getByLabelText(/lead id/i), { target: { value: 'lead-123' } })
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -645,7 +708,7 @@ describe('InstallIntakeModal — leadId (Pipeline kanban redesign)', () => {
     )
 
     renderModal()
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
@@ -824,7 +887,7 @@ describe('InstallIntakeModal — backend Save Draft (§3.3)', () => {
     await waitFor(() =>
       expect(screen.getByLabelText(/opportunity name/i)).toHaveValue('Draft To Submit'),
     )
-    fillMinimumFieldsFast()
+    await fillMinimumFieldsFast()
     await selectInstallBranch()
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 

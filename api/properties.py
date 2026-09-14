@@ -62,6 +62,8 @@ def _property_out(r: dict) -> dict:
         "branchCity": r.get("branch_city"),
         "customerType": r.get("customer_type"),
         "managementCompanyId": r.get("management_company_id"),
+        "acreage": r.get("acreage"),
+        "units": r.get("units"),
         "aspirePropertyId": r.get("aspire_property_id"),
         "aspireSyncStatus": r.get("aspire_sync_status"),
         "createdAt": _iso(r.get("created_at")),
@@ -204,8 +206,8 @@ def register(app, require_auth) -> None:
             """INSERT INTO properties
                  (id, property_type, source_type, source_id, name, address1,
                   address2, city, state, zip, branch_city, customer_type,
-                  management_company_id)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                  management_company_id, acreage, units)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                ON DUPLICATE KEY UPDATE id = id""",
             [
                 property_id,
@@ -221,6 +223,8 @@ def register(app, require_auth) -> None:
                 body.get("branchCity"),
                 body.get("customerType"),
                 body.get("managementCompanyId"),
+                body.get("acreage"),
+                body.get("units"),
             ],
         )
         # LOCAL-ONLY: no Aspire push here. The row stays 'unsynced' (column

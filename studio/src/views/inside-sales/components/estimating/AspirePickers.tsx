@@ -4,7 +4,6 @@
  */
 import { useId } from 'react'
 import {
-  ASPIRE_BRANCH_CITIES,
   SERVICE_LINES,
   ASPIRE_LOST_REASONS,
 } from '@/lib/estimating/aspireOptions'
@@ -18,26 +17,6 @@ interface StringSelectProps {
   label: string
   placeholder?: string
   id?: string
-}
-
-export function BranchPicker({ value, onChange, label, placeholder = 'Select a branch…', id }: StringSelectProps) {
-  const autoId = useId()
-  const selectId = id ?? autoId
-  return (
-    <div>
-      <label htmlFor={selectId} className="mb-1 block text-xs font-medium text-gray-600">
-        {label}
-      </label>
-      <select id={selectId} className={selectClass} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">{placeholder}</option>
-        {ASPIRE_BRANCH_CITIES.map((city) => (
-          <option key={city} value={city}>
-            {city}
-          </option>
-        ))}
-      </select>
-    </div>
-  )
 }
 
 export function ServiceLineSelect({ value, onChange, label, placeholder, id }: StringSelectProps) {

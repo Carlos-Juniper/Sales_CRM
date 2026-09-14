@@ -55,15 +55,6 @@ export interface FormState {
     lighting: boolean
   }
 
-  // Property
-  propertyName: string
-  acreage: string
-  address: string
-  city: string
-  county: string
-  state: string
-  zip: string
-
   // Client
   company: string
   contactPerson: string
@@ -139,6 +130,8 @@ interface AspireSectionProps {
   onSelectProperty: (p: Property | null) => void
   serviceLine: string
   onChangeServiceLine: (v: string) => void
+  /** The branch already chosen in RequestorSection — reused, not asked twice. */
+  branchCity: string | null
 }
 
 export function AspireSection({
@@ -146,6 +139,7 @@ export function AspireSection({
   onSelectProperty,
   serviceLine,
   onChangeServiceLine,
+  branchCity,
 }: AspireSectionProps) {
   return (
     <section>
@@ -153,7 +147,7 @@ export function AspireSection({
         Aspire property &amp; service line
       </p>
       <div className="space-y-3">
-        <PropertySelector value={selectedProperty} onSelect={onSelectProperty} />
+        <PropertySelector value={selectedProperty} onSelect={onSelectProperty} branchCity={branchCity} />
         <ServiceLineSelect label="Service line" value={serviceLine} onChange={onChangeServiceLine} />
       </div>
     </section>
@@ -456,105 +450,6 @@ export function OpportunitySection({ form, setStr, setServiceType }: Opportunity
               {label}
             </label>
           ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// PropertySection
-// ---------------------------------------------------------------------------
-
-interface PropertySectionProps {
-  form: FormState
-  setStr: SetStr
-}
-
-export function PropertySection({ form, setStr }: PropertySectionProps) {
-  return (
-    <section>
-      <p className="text-xs font-semibold text-[hsl(var(--muted-fg))] uppercase tracking-wide mb-2">
-        Property
-      </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label htmlFor="ii-property-name" className="text-xs">Property name *</Label>
-          <Input
-            id="ii-property-name"
-            value={form.propertyName}
-            onChange={(e) => setStr('propertyName', e.target.value)}
-            placeholder="Greenfield Estate"
-            required
-            className="h-8 text-xs"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-acreage" className="text-xs">Acreage</Label>
-          <Input
-            id="ii-acreage"
-            type="number"
-            min={0}
-            step={0.01}
-            value={form.acreage}
-            onChange={(e) => setStr('acreage', e.target.value)}
-            placeholder="2.5"
-            className="h-8 text-xs bg-[#eff6ff] border-[#bfdbfe]"
-          />
-        </div>
-        <div className="space-y-1 sm:col-span-2">
-          <Label htmlFor="ii-address" className="text-xs">Address *</Label>
-          <Input
-            id="ii-address"
-            value={form.address}
-            onChange={(e) => setStr('address', e.target.value)}
-            placeholder="500 Desert Vista Dr"
-            required
-            className="h-8 text-xs"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-city" className="text-xs">City *</Label>
-          <Input
-            id="ii-city"
-            value={form.city}
-            onChange={(e) => setStr('city', e.target.value)}
-            placeholder="Scottsdale"
-            required
-            className="h-8 text-xs"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-county" className="text-xs">County</Label>
-          <Input
-            id="ii-county"
-            value={form.county}
-            onChange={(e) => setStr('county', e.target.value)}
-            placeholder="Maricopa"
-            className="h-8 text-xs"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-state" className="text-xs">State *</Label>
-          <Input
-            id="ii-state"
-            value={form.state}
-            onChange={(e) => setStr('state', e.target.value)}
-            placeholder="AZ"
-            required
-            className="h-8 text-xs"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-zip" className="text-xs">Zip *</Label>
-          <Input
-            id="ii-zip"
-            value={form.zip}
-            onChange={(e) => setStr('zip', e.target.value)}
-            placeholder="85251"
-            required
-            className="h-8 text-xs"
-          />
         </div>
       </div>
     </section>

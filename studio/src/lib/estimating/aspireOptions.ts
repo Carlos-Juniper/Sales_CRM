@@ -6,38 +6,6 @@
  */
 import type { EstimateType } from '@/types/estimating'
 
-/** City-level branch keys (unique, sorted) — the picker's options. */
-export const ASPIRE_BRANCH_CITIES: readonly string[] = [
-  'Bonita Springs, FL',
-  'Bradenton, FL',
-  'Carlisle, PA',
-  'Daytona, FL',
-  'Estero, FL',
-  'Fort Lauderdale, FL',
-  'Fort Myers, FL',
-  'Hilton Head, SC',
-  'Houston, TX',
-  'Lancaster, PA',
-  'Melbourne, FL',
-  'Naples, FL',
-  'Ocala, FL',
-  'Orlando, FL',
-  'Palm Beach Gardens, FL',
-  'Panama City Beach, FL',
-  'Raleigh, NC',
-  'Riviera Beach, FL',
-  'Sarasota, FL',
-  'South Orlando, FL',
-  'Tampa East, FL',
-  'Tampa North, FL',
-  'Tampa South, FL',
-  'Tyndall, FL',
-  'Venice, FL',
-  'Vero Beach, FL',
-  'West Orlando, FL',
-  'Wilmington, NC',
-]
-
 export interface ServiceLineOption {
   /** Sent to the backend — must equal the ASPIRE_DIVISION_MAP key exactly. */
   value: string

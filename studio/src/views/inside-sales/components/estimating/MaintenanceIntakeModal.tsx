@@ -82,8 +82,6 @@ interface FormState {
   // branchOptions on submit. Empty string ⇒ nothing selected.
   branch: string
   // Property
-  propertyAddress: string
-  county: string
   customerType: MaintenanceCustomerType
   contractStructure: ContractStructure
   homesBudget: string
@@ -118,8 +116,6 @@ export function MaintenanceIntakeModal({
     phone: '',
     email: '',
     branch: '',
-    propertyAddress: '',
-    county: '',
     customerType: 'commercial',
     contractStructure: 'single',
     homesBudget: '',
@@ -144,6 +140,10 @@ export function MaintenanceIntakeModal({
   const [serviceLine, setServiceLine] = useState<string>(DEFAULT_SERVICE_LINE.maintenance)
   // Aspire-derived maintenance branch options.
   const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
+  // Resolved city for the top-of-form branch selection — passed through to
+  // PropertySelector so a newly created property reuses it instead of asking again.
+  const selectedBranchCity =
+    branchOptions.find((b) => String(b.aspire_branch_id) === form.branch)?.city ?? null
 
   // Adopt an incoming property ("Request estimate" pre-fill) when
   // the modal (re)opens with one. Render-phase derived-state pattern — no effect.
@@ -179,8 +179,8 @@ export function MaintenanceIntakeModal({
 
   const leadCtx = crmLead ?? fetchedLead
 
-  // When a lead context arrives (or changes), pre-fill its win probability —
-  // still editable by the salesperson afterwards.
+  // When a lead context arrives (or changes), pre-fill win probability and
+  // contact fields — still editable by the salesperson afterwards.
   const [appliedLeadNumber, setAppliedLeadNumber] = useState<string | null>(
     crmLead?.leadNumber ?? null,
   )
@@ -189,6 +189,9 @@ export function MaintenanceIntakeModal({
     setForm((prev) => ({
       ...prev,
       winProbabilityPct: String(Math.round(leadCtx.winProbability * 100)),
+      // WS1: pre-fill contact fields from the lead if the form fields are still blank.
+      contactName: prev.contactName || leadCtx.contactName || prev.contactName,
+      email: prev.email || leadCtx.contactEmail || prev.email,
     }))
   }
 
@@ -238,6 +241,10 @@ export function MaintenanceIntakeModal({
       show('Select a branch before submitting.')
       return
     }
+    if (!selectedProperty) {
+      show('Select or create a property before submitting.')
+      return
+    }
     setSubmitting(true)
 
     try {
@@ -252,7 +259,7 @@ export function MaintenanceIntakeModal({
       // Branch identity rides on the Aspire BranchID (int); the city label is
       // resolved from the loaded options for the display column.
       const aspireBranchId = Number(form.branch)
-      const branchCity = branchOptions.find((b) => b.aspire_branch_id === aspireBranchId)?.city ?? null
+      const branchCity = selectedBranchCity
 
       // Build intake payload persisted verbatim (I-6.1; parsing uploads is
       // explicitly future scope — files stored for estimator to open).
@@ -263,8 +270,6 @@ export function MaintenanceIntakeModal({
         company: form.company,
         phone: form.phone,
         email: form.email,
-        propertyAddress: form.propertyAddress,
-        county: form.county,
         customerType: form.customerType,
         contractStructure: form.contractStructure,
         ...(form.contractStructure === 'split' && {
@@ -457,7 +462,11 @@ export function MaintenanceIntakeModal({
               Aspire property &amp; service line
             </p>
             <div className="space-y-3">
-              <PropertySelector value={selectedProperty} onSelect={setSelectedProperty} />
+              <PropertySelector
+                value={selectedProperty}
+                onSelect={setSelectedProperty}
+                branchCity={selectedBranchCity}
+              />
               <ServiceLineSelect label="Service line" value={serviceLine} onChange={setServiceLine} />
             </div>
           </section>
@@ -468,33 +477,7 @@ export function MaintenanceIntakeModal({
               Property
             </p>
             <div className="space-y-3">
-              <div className="space-y-1">
-                <Label htmlFor="mi-property-address" className="text-xs">
-                  Property address *
-                </Label>
-                <Input
-                  id="mi-property-address"
-                  value={form.propertyAddress}
-                  onChange={(e) => set('propertyAddress', e.target.value)}
-                  placeholder="123 Desert Way, Phoenix, AZ 85001"
-                  required
-                  className="h-8 text-xs"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <Label htmlFor="mi-county" className="text-xs">
-                    County *
-                  </Label>
-                  <Input
-                    id="mi-county"
-                    value={form.county}
-                    onChange={(e) => set('county', e.target.value)}
-                    placeholder="Maricopa"
-                    required
-                    className="h-8 text-xs"
-                  />
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Customer type — native <select> (jsdom hasPointerCapture workaround) */}
                 <div className="space-y-1">
                   <Label htmlFor="mi-customer-type" className="text-xs">

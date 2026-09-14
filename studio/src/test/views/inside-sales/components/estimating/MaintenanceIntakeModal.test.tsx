@@ -84,17 +84,26 @@ async function fillMinimumFields(
   user: ReturnType<typeof userEvent.setup>,
   container: HTMLElement = document.body,
 ) {
-  const q = (label: RegExp) => within(container as HTMLElement).getByLabelText(label)
+  const scope = within(container as HTMLElement)
+  const q = (label: RegExp) => scope.getByLabelText(label)
   await user.type(q(/contact name/i), 'Jane Smith')
   await user.type(q(/company/i), 'Dobson Ranch HOA')
   await user.type(q(/phone/i), '602-555-1234')
   await user.type(q(/email/i), 'jane@example.com')
-  await user.type(q(/property address/i), '123 Desert Way, Phoenix, AZ')
-  await user.type(q(/county/i), 'Maricopa')
   await user.type(q(/scope of work/i), 'Full grounds maintenance')
   // Branch is now required; wait for async options then select one.
-  await screen.findByRole('option', { name: 'Bradenton, FL' })
+  await scope.findByRole('option', { name: 'Bradenton, FL' })
   await user.selectOptions(q(/^branch/i) as HTMLSelectElement, 'Bradenton, FL')
+  // Selecting/creating a property is now required to submit. Skip if a
+  // property already arrived pre-selected (e.g. "Request estimate" pre-fill).
+  if (!scope.queryByRole('button', { name: /change/i })) {
+    await user.type(q(/search properties/i), 'brand new property')
+    await user.click(scope.getByRole('button', { name: /^search$/i }))
+    await user.click(await scope.findByRole('button', { name: /create new property/i }))
+    await user.type(q(/property name/i), 'Brand New Property')
+    await user.click(scope.getByRole('button', { name: /^create property$/i }))
+    await scope.findByRole('button', { name: /change/i })
+  }
 }
 
 beforeEach(() => {
@@ -122,14 +131,16 @@ describe('MaintenanceIntakeModal — field rendering (AC §3 bullet 1)', () => {
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
   })
 
-  it('renders all property fields including county and customer type', () => {
+  it('renders customer type and contract structure, with no separate address/county fields', () => {
     renderModal()
-    expect(screen.getByLabelText(/property address/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/county/i)).toBeInTheDocument()
     // customer type — native select
     expect(screen.getByLabelText(/customer.*type|project.*type/i)).toBeInTheDocument()
     // contract structure
     expect(screen.getByLabelText(/contract structure/i)).toBeInTheDocument()
+    // Property address/county are gone — the Aspire property selector above is
+    // the only place a property's location is captured now.
+    expect(screen.queryByLabelText(/property address/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^county/i)).not.toBeInTheDocument()
   })
 
   it('renders all scope & date fields', () => {
@@ -365,7 +376,7 @@ describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
     expect((created[0] as unknown as { branch?: unknown }).branch).toBeUndefined()
   })
 
-  it('sends the default service line and a null property link when untouched', async () => {
+  it('sends the default service line and the selected/created property link', async () => {
     const user = userEvent.setup()
     const created: CreateEstimatePayload[] = []
     const fakeEstimate = buildMaintenanceEstimate({ id: 'test-est-svc', status: 'new_from_sales' })
@@ -380,7 +391,29 @@ describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
     await user.click(screen.getByRole('button', { name: /submit/i }))
     await waitFor(() => expect(created).toHaveLength(1))
     expect(created[0].serviceLine).toBe('Maintenance: Contract')
-    expect(created[0].propertyId).toBeNull()
+    expect(created[0].propertyId).toBeTruthy()
+  })
+
+  it('blocks submit and shows a message when no property has been selected or created', async () => {
+    const user = userEvent.setup()
+    const postCalls: unknown[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        postCalls.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+    renderModal()
+    await user.type(screen.getByLabelText(/contact name/i), 'Jane Smith')
+    await user.type(screen.getByLabelText(/company/i), 'Dobson Ranch HOA')
+    await user.type(screen.getByLabelText(/phone/i), '602-555-1234')
+    await user.type(screen.getByLabelText(/email/i), 'jane@example.com')
+    await user.type(screen.getByLabelText(/scope of work/i), 'Full grounds maintenance')
+    await screen.findByRole('option', { name: 'Bradenton, FL' })
+    await user.selectOptions(screen.getByLabelText(/^branch/i), 'Bradenton, FL')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+    expect(await screen.findByText(/select or create a property/i)).toBeInTheDocument()
+    expect(postCalls).toHaveLength(0)
   })
 
   it('sets dueBackDate on the estimate (SLA clock starts on create)', async () => {
@@ -540,7 +573,8 @@ describe('MaintenanceIntakeModal — incoming property ("Request estimate")', ()
       initialProperty: {
         id: 'prop-1', name: 'Sunny HOA', address1: '123 Palm St', address2: null,
         city: 'Orlando', state: 'FL', zip: '32807', branchCity: 'Orlando, FL',
-        customerType: 'hoa', managementCompanyId: null, aspirePropertyId: null,
+        customerType: 'hoa', managementCompanyId: null, acreage: null, units: null,
+        aspirePropertyId: null,
         aspireSyncStatus: 'unsynced', propertyType: 'hoa', sourceType: 'hoa',
         sourceId: 'hoa-1', createdAt: null, updatedAt: null,
       },
@@ -618,6 +652,8 @@ const h23Property: import('@/types/estimating').Property = {
   branchCity: 'Naples',
   customerType: 'hoa',
   managementCompanyId: 'pm1',
+  acreage: null,
+  units: null,
   aspirePropertyId: null,
   aspireSyncStatus: 'unsynced',
   createdAt: null,

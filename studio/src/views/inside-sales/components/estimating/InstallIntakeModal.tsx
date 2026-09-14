@@ -45,7 +45,6 @@ import {
   RequestorSection,
   DatesProbabilitySection,
   OpportunitySection,
-  PropertySection,
   ClientSection,
   LandscapeScopeSection,
   IrrigationScopeSection,
@@ -102,14 +101,6 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       gradingDrainage: false,
       lighting: false,
     },
-
-    propertyName: '',
-    acreage: '',
-    address: '',
-    city: '',
-    county: '',
-    state: '',
-    zip: '',
 
     company: '',
     contactPerson: '',
@@ -171,6 +162,10 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
   const [draftId, setDraftId] = useState<string | null>(null)
   // Aspire-derived install branch options.
   const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
+  // Resolved city for the top-of-form branch selection — passed through to
+  // PropertySelector so a newly created property reuses it instead of asking again.
+  const selectedBranchCity =
+    branchOptions.find((b) => String(b.aspire_branch_id) === form.installBranch)?.city ?? null
 
   // Resume the latest saved draft from the BACKEND when the modal opens —
   // drafts are per-user and device-independent (they replaced localStorage).
@@ -283,13 +278,6 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       estimatedValue: form.estimatedValue || null,
       industry: form.industry,
       serviceTypes: form.serviceTypes,
-      propertyName: form.propertyName,
-      acreage: form.acreage || null,
-      address: form.address,
-      city: form.city,
-      county: form.county || null,
-      state: form.state,
-      zip: form.zip,
       company: form.company,
       contactPerson: form.contactPerson,
       clientEmail: form.clientEmail || null,
@@ -356,6 +344,10 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       show('Select a branch before submitting.')
       return
     }
+    if (!selectedProperty) {
+      show('Select or create a property before submitting.')
+      return
+    }
     setSubmitting(true)
 
     try {
@@ -369,15 +361,15 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       // Branch identity rides on the Aspire BranchID (int); the city label is
       // resolved from the loaded options for the display column.
       const aspireBranchId = Number(form.installBranch)
-      const branchCity = branchOptions.find((b) => b.aspire_branch_id === aspireBranchId)?.city ?? null
+      const branchCity = selectedBranchCity
 
       const intakePayload = buildIntakePayload(branchCity)
       const created = await estimatingApi.create({
         estimateType: 'install',
-        name: form.opportunityName || form.propertyName || 'Install Intake',
+        name: form.opportunityName || selectedProperty.name || 'Install Intake',
         aspireNumber: null,
         // Property link + service line drive the Aspire opportunity push.
-        propertyId: selectedProperty?.id ?? null,
+        propertyId: selectedProperty.id,
         // Pipeline kanban redesign — moves the linked lead Qualifying→Estimating.
         leadId: form.leadId || null,
         serviceLine,
@@ -385,7 +377,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
         aspireBranchId,
         branchCity,
         customerType: form.industry as InstallCustomerType,
-        acreage: form.acreage ? parseFloat(form.acreage) : null,
+        acreage: selectedProperty.acreage ?? null,
         contractValueCents: form.estimatedValue ? Math.round(parseFloat(form.estimatedValue) * 100) : 0,
         targetMargin: 0.22,
         status: 'new_from_sales',
@@ -478,6 +470,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
             onSelectProperty={setSelectedProperty}
             serviceLine={serviceLine}
             onChangeServiceLine={setServiceLine}
+            branchCity={selectedBranchCity}
           />
 
           <RequestorSection form={form} setStr={setStr} setBool={setBool} branchOptions={branchOptions} />
@@ -485,8 +478,6 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
           <DatesProbabilitySection form={form} setStr={setStr} />
 
           <OpportunitySection form={form} setStr={setStr} setServiceType={setServiceType} />
-
-          <PropertySection form={form} setStr={setStr} />
 
           <ClientSection form={form} setStr={setStr} />
 

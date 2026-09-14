@@ -11,7 +11,6 @@
 import { useEffect, useState } from 'react'
 import { propertiesApi } from '@/api/estimating'
 import type { AspireOpportunitySummary, CreatePropertyPayload, Property } from '@/types/estimating'
-import { BranchPicker } from './AspirePickers'
 
 /**
  * Canonical-origin fields for a newly created property. When the
@@ -29,21 +28,29 @@ interface Props {
   value: Property | null
   onSelect: (property: Property | null) => void
   origin?: PropertyOrigin
+  /**
+   * The branch already chosen at the top of the intake form (its resolved
+   * city). Passed straight through to a newly created property — branch is
+   * selected once, not asked again here.
+   */
+  branchCity?: string | null
 }
 
-export function PropertySelector({ value, onSelect, origin }: Props) {
+export function PropertySelector({ value, onSelect, origin, branchCity }: Props) {
   if (value) {
     return <SelectedProperty property={value} onChange={() => onSelect(null)} />
   }
-  return <PropertySearch onSelect={onSelect} origin={origin} />
+  return <PropertySearch onSelect={onSelect} origin={origin} branchCity={branchCity ?? null} />
 }
 
 function PropertySearch({
   onSelect,
   origin,
+  branchCity,
 }: {
   onSelect: (p: Property) => void
   origin?: PropertyOrigin
+  branchCity: string | null
 }) {
   const [term, setTerm] = useState('')
   const [results, setResults] = useState<Property[] | null>(null)
@@ -130,7 +137,9 @@ function PropertySearch({
         </div>
       )}
 
-      {creating && <CreatePropertyForm defaultName={term} onCreated={onSelect} origin={origin} />}
+      {creating && (
+        <CreatePropertyForm defaultName={term} onCreated={onSelect} origin={origin} branchCity={branchCity} />
+      )}
     </div>
   )
 }
@@ -139,10 +148,12 @@ function CreatePropertyForm({
   defaultName,
   onCreated,
   origin,
+  branchCity,
 }: {
   defaultName: string
   onCreated: (p: Property) => void
   origin?: PropertyOrigin
+  branchCity: string | null
 }) {
   const sourceType = origin?.sourceType ?? 'manual'
   const [form, setForm] = useState<CreatePropertyPayload>({
@@ -156,7 +167,8 @@ function CreatePropertyForm({
     city: '',
     state: '',
     zip: '',
-    branchCity: '',
+    acreage: null,
+    units: null,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -173,7 +185,8 @@ function CreatePropertyForm({
     setSaving(true)
     setError(null)
     try {
-      const created = await propertiesApi.create(form)
+      // Branch rides on the top-of-form selection — no second picker here.
+      const created = await propertiesApi.create({ ...form, branchCity })
       onCreated(created)
     } catch {
       setError('Could not create the property. Please try again.')
@@ -212,7 +225,31 @@ function CreatePropertyForm({
         <input aria-label="State" className={field} placeholder="State" value={form.state ?? ''} onChange={(e) => set('state', e.target.value)} />
         <input aria-label="Zip" className={field} placeholder="Zip" value={form.zip ?? ''} onChange={(e) => set('zip', e.target.value)} />
       </div>
-      <BranchPicker label="Branch" value={form.branchCity ?? ''} onChange={(v) => set('branchCity', v)} />
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          aria-label="Acreage"
+          type="number"
+          min={0}
+          step={0.01}
+          className={field}
+          placeholder="Acreage"
+          value={form.acreage ?? ''}
+          onChange={(e) => set('acreage', e.target.value === '' ? null : Number(e.target.value))}
+        />
+        <input
+          aria-label="Units"
+          type="number"
+          min={0}
+          step={1}
+          className={field}
+          placeholder="Units"
+          value={form.units ?? ''}
+          onChange={(e) => set('units', e.target.value === '' ? null : Number(e.target.value))}
+        />
+      </div>
+      <p className="text-xs text-gray-500">
+        Branch: {branchCity ?? 'select a branch above first'}
+      </p>
       {error && (
         <p role="alert" className="text-sm text-red-600">
           {error}

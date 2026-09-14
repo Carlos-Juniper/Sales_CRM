@@ -68,6 +68,8 @@ interface MockProperty {
   branchCity: string | null
   customerType: string | null
   managementCompanyId: string | null
+  acreage: number | null
+  units: number | null
   aspirePropertyId: number | null
   aspireSyncStatus: 'unsynced' | 'pending' | 'synced' | 'failed'
   createdAt: string | null
@@ -219,6 +221,10 @@ const allHandlers = [
     // Property engagement: leads queryable by canonical property_id
     const propertyId = url.searchParams.get('property_id')
     if (propertyId) filtered = filtered.filter(l => l.property_id === propertyId)
+    // Public Leads queue: hide leads once assigned (never deleted)
+    if (url.searchParams.get('unassigned_only') === 'true') {
+      filtered = filtered.filter(l => l.assigned_to == null)
+    }
 
     filtered.sort((a, b) => {
       const av = a[sortBy as keyof Lead] as number | string
@@ -1124,6 +1130,8 @@ const allHandlers = [
       branchCity: body.branchCity ?? null,
       customerType: body.customerType ?? null,
       managementCompanyId: body.managementCompanyId ?? null,
+      acreage: body.acreage ?? null,
+      units: body.units ?? null,
       aspirePropertyId: null,
       aspireSyncStatus: 'unsynced',
       createdAt: now,
@@ -1153,13 +1161,16 @@ allHandlers.push(
     }
     const kind = body.kind ?? 'other'
 
-    // Takeoff scans are estimate-scoped (no intake submission
-    // needed) and may be images; intake kinds stay submission-linked + PDF-only.
+    // Estimate-scoped kinds (takeoff scans + the three proposal kinds) need no
+    // intake submission; measurements/other/takeoff_scan may be images, while
+    // the contract and intake kinds stay PDF-only (Handoff 47 §3.2).
     const scanTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp']
-    if (kind === 'takeoff_scan') {
+    const estimateScoped = ['takeoff_scan', 'proposal_contract', 'proposal_measurements', 'proposal_other']
+    const imageOrPdf = ['takeoff_scan', 'proposal_measurements', 'proposal_other']
+    if (imageOrPdf.includes(kind)) {
       if (!scanTypes.includes(body.contentType)) {
         return HttpResponse.json(
-          { error: 'Takeoff scans must be PNG, JPEG, WebP, or PDF' },
+          { error: 'This attachment must be PNG, JPEG, WebP, or PDF' },
           { status: 400 },
         )
       }
@@ -1171,7 +1182,7 @@ allHandlers.push(
     }
 
     const sub = intakeSubmissions.find((s) => s.estimateId === estimateId)
-    if (kind !== 'takeoff_scan' && !sub) {
+    if (!estimateScoped.includes(kind) && !sub) {
       return HttpResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
@@ -1185,7 +1196,7 @@ allHandlers.push(
 
     const att: IntakeAttachment = {
       id: attachmentId,
-      intakeSubmissionId: kind === 'takeoff_scan' ? null : (sub?.id ?? null),
+      intakeSubmissionId: estimateScoped.includes(kind) ? null : (sub?.id ?? null),
       estimateId,
       fileName: body.fileName,
       contentType: body.contentType,
@@ -1195,6 +1206,8 @@ allHandlers.push(
       status: 'pending',
       objectKey,
       downloadable: false,
+      sortOrder: 0,
+      pageCount: null,
       createdAt: new Date().toISOString(),
     }
     attachments.push(att)
@@ -1262,6 +1275,44 @@ allHandlers.push(
         url: `http://localhost/__mock_gcs_download/${att.objectKey}`,
         expiresIn: 600,
       })
+    },
+  ),
+)
+
+// PATCH /api/estimating/estimates/:estimateId/attachments/:attachmentId
+// Handoff 47: reorder an 'other' proposal attachment (sortOrder only).
+allHandlers.push(
+  http.patch(
+    `${API}/estimating/estimates/:estimateId/attachments/:attachmentId`,
+    async ({ params, request }) => {
+      const { estimateId, attachmentId } = params as { estimateId: string; attachmentId: string }
+      const att = attachments.find(
+        (a) => a.id === attachmentId && attachmentBelongsTo(a, estimateId),
+      )
+      if (!att) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+      const body = (await request.json()) as { sortOrder?: number }
+      if (body.sortOrder == null) {
+        return HttpResponse.json({ error: 'sortOrder is required' }, { status: 400 })
+      }
+      att.sortOrder = body.sortOrder
+      return HttpResponse.json(att)
+    },
+  ),
+)
+
+// DELETE /api/estimating/estimates/:estimateId/attachments/:attachmentId
+// Handoff 47: soft-delete an attachment (status='deleted') and remove the object.
+allHandlers.push(
+  http.delete(
+    `${API}/estimating/estimates/:estimateId/attachments/:attachmentId`,
+    ({ params }) => {
+      const { estimateId, attachmentId } = params as { estimateId: string; attachmentId: string }
+      const att = attachments.find(
+        (a) => a.id === attachmentId && attachmentBelongsTo(a, estimateId),
+      )
+      if (!att) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+      att.status = 'deleted'
+      return new HttpResponse(null, { status: 204 })
     },
   ),
 )

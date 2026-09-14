@@ -3,46 +3,13 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@/test/utils'
 import { AddHOAPanel } from '@/views/inside-sales/components/accounts/AddHOAPanel'
-import type { HOAProperty, ManagementCompany } from '@/types/accounts'
+import type { HOAProperty } from '@/types/accounts'
 
-// ── Fixtures ──────────────────────────────────────────────────────
-
-const sampleCompanies: ManagementCompany[] = [
-  {
-    id: 'pm1',
-    company_name: 'Alliant Property Management',
-    website: 'www.alliantproperty.com',
-    phone: '(239) 454-1101',
-    street: '13831 Vector Ave',
-    city: 'Fort Myers',
-    state: 'FL',
-    zip: '33907',
-    primary_email: 'service@alliantproperty.com',
-    branch_id: 'b1',
-    assigned_to: 'Trent Boyd',
-    status: 'Partner',
-    contact_status: 'contacted',
-    last_contacted: '2026-05-30',
-    contacts: [],
-  },
-  {
-    id: 'pm2',
-    company_name: 'Resort Management',
-    website: 'www.resortgroupinc.com',
-    phone: '(239) 649-5526',
-    street: '2685 Horseshoe Dr S',
-    city: 'Naples',
-    state: 'FL',
-    zip: '34104',
-    primary_email: 'info@resortgroupinc.com',
-    branch_id: 'b2',
-    assigned_to: 'Marisol Vega',
-    status: 'Partner',
-    contact_status: 'contacted',
-    last_contacted: '2026-05-12',
-    contacts: [],
-  },
-]
+// ManagementCompanySearch uses useManagementCompanySearch — stub it out so
+// AddHOAPanel tests don't need to mock the network layer
+vi.mock('@/hooks/useManagementCompanies', () => ({
+  useManagementCompanySearch: () => ({ data: [], isLoading: false, isError: false }),
+}))
 
 function renderPanel(
   onSave = vi.fn().mockResolvedValue(undefined),
@@ -53,7 +20,6 @@ function renderPanel(
       isOpen={true}
       onClose={onClose}
       onSave={onSave}
-      managementCompanies={sampleCompanies}
     />,
   )
   return { onSave, onClose }
@@ -96,50 +62,19 @@ describe('AddHOAPanel — create button state', () => {
   })
 })
 
-describe('AddHOAPanel — management company dropdown', () => {
-  it('renders all management company options in the dropdown', async () => {
+describe('AddHOAPanel — management company search field', () => {
+  it('renders the Management Company search input', () => {
     renderPanel()
-
-    const select = screen.getByRole('combobox', { name: /management company/i })
-    expect(select).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Alliant Property Management' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Resort Management' })).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/search by company name/i)).toBeInTheDocument()
   })
 
-  it('renders a "Self-managed / none" option in the dropdown', () => {
-    renderPanel()
-    expect(screen.getByRole('option', { name: /self-managed/i })).toBeInTheDocument()
-  })
-
-  it('selecting a management company includes its id in onSave payload', async () => {
+  it('onSave payload has management_company_id=null when no company is selected', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     renderPanel(onSave)
 
     const nameInput = screen.getByTestId('property-name-input')
     await user.type(nameInput, 'Shadow Wood')
-
-    const select = screen.getByRole('combobox', { name: /management company/i })
-    await user.selectOptions(select, 'pm1')
-
-    const createBtn = screen.getByRole('button', { name: /create property/i })
-    await user.click(createBtn)
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
-    const payload = onSave.mock.calls[0][0] as Record<string, unknown>
-    expect(payload.management_company_id).toBe('pm1')
-  })
-
-  it('onSave payload has management_company_id=null when self-managed is selected', async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined)
-    const user = userEvent.setup()
-    renderPanel(onSave)
-
-    const nameInput = screen.getByTestId('property-name-input')
-    await user.type(nameInput, 'Shadow Wood')
-
-    const select = screen.getByRole('combobox', { name: /management company/i })
-    await user.selectOptions(select, '')
 
     const createBtn = screen.getByRole('button', { name: /create property/i })
     await user.click(createBtn)
@@ -226,7 +161,6 @@ function renderEditPanel(
       isOpen={true}
       onClose={onClose}
       onSave={vi.fn()}
-      managementCompanies={sampleCompanies}
       initialValues={initialValues}
       onUpdate={onUpdate}
     />,
@@ -298,7 +232,6 @@ describe('AddHOAPanel — edit mode', () => {
         isOpen={true}
         onClose={vi.fn()}
         onSave={onSave}
-        managementCompanies={sampleCompanies}
         initialValues={sampleHOAProperty}
         onUpdate={onUpdate}
       />,

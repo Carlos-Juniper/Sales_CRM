@@ -231,7 +231,6 @@ export default function AccountsPage() {
             await createHOAProperty.mutateAsync(body)
             setAddPanel(null)
           }}
-          managementCompanies={pmCompanies}
         />
       )}
 
@@ -285,7 +284,6 @@ export default function AccountsPage() {
           isOpen
           property={selectedHOA}
           company={pmCompanies.find((c) => c.id === selectedHOA.management_company_id) ?? null}
-          managementCompanies={pmCompanies}
           onClose={() => setSelectedHOA(null)}
           onCreateBid={handleCreateBid}
           onCreateLead={handleCreateLead}

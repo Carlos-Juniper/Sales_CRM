@@ -5,6 +5,25 @@
 Migrations are now applied automatically by the runner — not by hand.
 See [handoffs/34-migration-runner-and-state-reconciliation.md](../../handoffs/34-migration-runner-and-state-reconciliation.md) (tool) and [handoffs/35-migration-deploy-wiring-and-live-apply.md](../../handoffs/35-migration-deploy-wiring-and-live-apply.md) (CI wiring).
 
+## The detector rule (read before adding a migration)
+
+**A detector must test the effect of its own migration, and a multi-statement
+migration needs a detector per effect or guarded statements throughout.** This is
+not optional — it is the rule Handoff 49 was written to recover from.
+
+Migration `001` violated both halves: `detect_001` keyed on a *sibling* artifact
+(the `properties` table) rather than on the `leads.property_id` column its own
+later steps add, **and** its `ALTER TABLE` steps were bare and unguarded. On the
+live `crm` DB the `properties` table already existed, so the runner recorded 001
+as `detected=1` while its two `ALTER` steps never ran — silently, for months.
+`detected=1` means "the runner guessed this was applied", not "applied". Verify
+column state in `information_schema` directly, never from `schema_migrations`.
+
+The repair (migration `031`) is a NEW forward migration whose detector keys on
+`leads.property_id` — its own effect — and whose every `ADD` is guarded on
+`information_schema` with the dynamic PREPARE/EXECUTE pattern (see `027`/`028`).
+See Handoff 49 §5 for why tightening `detect_001` instead would break the runner.
+
 ## Running migrations
 
 ```bash

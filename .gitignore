@@ -49,3 +49,28 @@ business docs/
 estimating-tab-redesign-handoff/
 handoffs/
 /docs/
+scripts/scratch_proposal_screenshots/
+
+# Rasterized Coral Bay reference pages for the DEV-only /dev/proposal-fidelity
+# overlay. Derived from "business docs/Coral Bay HOA.pdf" — regenerate with
+# ./venv/bin/python scripts/rasterize_coral_bay_reference.py
+studio/dev-reference/
+
+# ── Local scratch / junk — never commit ─────────────────────────────────────
+*.docx
+~$*
+extracted_images/
+tmp/
+proposal_preview.pdf
+test_present.txt
+juniper_leaf_watermark.png
+juniper_palm_background.png
+palm-watermark.png
+Proposify Replacement - Meeting Summary.md
+
+# ── Proposal photography → GCS, never in git ─────────────────────────────────
+# ~57 MB of portfolio/headshots/service photography is served from GCS via the
+# Cloud Run proxy route (PR 9). Retained brand marks live in proposal/marks/.
+studio/public/proposal/photos/
+studio/public/proposal/headshots/
+studio/public/proposal/portfolio/

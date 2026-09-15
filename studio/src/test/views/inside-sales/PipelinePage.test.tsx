@@ -7,6 +7,7 @@ import { render, makeUser } from '@/test/utils'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
 import PipelinePage from '@/views/inside-sales/PipelinePage'
+import type { Property } from '@/types/estimating'
 
 // DndKit requires PointerEvent in jsdom — provide a minimal polyfill
 class MockPointerEvent extends Event {
@@ -15,6 +16,38 @@ class MockPointerEvent extends Event {
   }
 }
 vi.stubGlobal('PointerEvent', MockPointerEvent)
+
+// WS1: AddLeadModal now uses PropertySelector + useBranchList. Mock both so
+// the PipelinePage integration tests don't need a real search backend.
+const _mockProperty: Property = {
+  id: 'prop-pipeline-test',
+  name: 'Test Property',
+  address1: null, address2: null,
+  city: 'Phoenix', state: 'AZ', zip: null,
+  branchCity: null, customerType: null,
+  managementCompanyId: null, aspirePropertyId: null,
+  aspireSyncStatus: 'pending', createdAt: null, updatedAt: null,
+}
+vi.mock('@/views/inside-sales/components/estimating/PropertySelector', () => ({
+  PropertySelector: ({ value, onSelect }: { value: Property | null; onSelect: (p: Property | null) => void }) => (
+    <div>
+      {value ? (
+        <span data-testid="pipeline-property-selected">{value.name}</span>
+      ) : (
+        <button type="button" data-testid="pipeline-select-property" onClick={() => onSelect(_mockProperty)}>
+          Select property
+        </button>
+      )}
+    </div>
+  ),
+}))
+vi.mock('@/hooks/useBranchList', () => ({
+  useBranchList: () => ({
+    data: [{ aspireBranchId: 1, branchName: 'Phoenix', city: 'Phoenix' }],
+    isLoading: false,
+    isError: false,
+  }),
+}))
 
 function seedUser() {
   useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'inside_sales' }) })
@@ -173,14 +206,14 @@ describe('PipelinePage', () => {
     await user.click(addLeadButtons[0])
     const dialog = await screen.findByRole('dialog')
 
-    // Fill required fields within the dialog by directly setting values
-    const propertyInput = screen.getByPlaceholderText('Silverleaf HOA') as HTMLInputElement
-    // Use fireEvent to bypass pointer-events:none on body set by Radix Dialog
+    // WS1: property_name/city inputs are replaced by PropertySelector + branch picker.
+    // Click the mock "Select property" button, then pick a branch.
     const { fireEvent } = await import('@testing-library/react')
-    fireEvent.change(propertyInput, { target: { value: 'Test Property' } })
+    const selectPropBtn = screen.getByTestId('pipeline-select-property')
+    fireEvent.click(selectPropBtn)
 
-    const cityInput = screen.getByPlaceholderText('Phoenix') as HTMLInputElement
-    fireEvent.change(cityInput, { target: { value: 'Phoenix' } })
+    const branchSelect = screen.getByRole('combobox', { name: /branch/i }) as HTMLSelectElement
+    fireEvent.change(branchSelect, { target: { value: '1' } })
 
     // Submit the form directly (bypass pointer-events: none set by Radix)
     const form = dialog.querySelector('form')
@@ -192,8 +225,8 @@ describe('PipelinePage', () => {
     }, { timeout: 3000 })
 
     expect(postedBody).toMatchObject({
+      property_id: 'prop-pipeline-test',
       property_name: 'Test Property',
-      city: 'Phoenix',
     })
   })
 

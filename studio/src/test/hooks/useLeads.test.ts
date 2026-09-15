@@ -11,6 +11,7 @@ import {
 } from '@/hooks/useLeads'
 import { useLeadsStore } from '@/store/leadsStore'
 import { useAuthStore } from '@/store/authStore'
+import { useUIStore } from '@/store/uiStore'
 import { createWrapper, makeUser } from '../utils'
 import type { Lead } from '@/types'
 
@@ -44,6 +45,7 @@ const defaultResetState = {
 beforeEach(() => {
   useLeadsStore.setState(defaultResetState)
   useAuthStore.setState({ user: makeUser(), isLoading: false })
+  useUIStore.setState({ toasts: [] })
 })
 
 describe('useLeads', () => {
@@ -251,6 +253,28 @@ describe('useCreateLead', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect((capturedBody as Record<string, unknown>)?.property_name).toBe('New Property')
   })
+
+  it('surfaces the server error detail in the toast description on failure', async () => {
+    server.use(
+      http.post('/api/leads', () =>
+        HttpResponse.json({ detail: "Unknown column 'property_id'" }, { status: 500 })
+      )
+    )
+
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useCreateLead(), { wrapper })
+
+    result.current.mutate({
+      property_name: 'New Property', city: 'Fort Myers', state: 'FL',
+      lead_type: 'HOA', estimated_contract_value: 0, estimated_acreage: 0, status: 'new',
+    })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    const toasts = useUIStore.getState().toasts
+    const errorToast = toasts.find((t) => t.variant === 'error')
+    expect(errorToast?.title).toBe('Failed to add lead')
+    expect(errorToast?.description).toBe("Unknown column 'property_id'")
+  })
 })
 
 describe('useUpdateLead', () => {
@@ -271,6 +295,23 @@ describe('useUpdateLead', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect((capturedBody as Record<string, unknown>)?.status).toBe('contacted')
+  })
+
+  it('surfaces the server error detail in the toast description on failure', async () => {
+    server.use(
+      http.patch('/api/leads/l1', () =>
+        HttpResponse.json({ detail: 'state exceeds 2 characters' }, { status: 500 })
+      )
+    )
+
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useUpdateLead(), { wrapper })
+
+    result.current.mutate({ id: 'l1', body: { status: 'contacted' } })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    const errorToast = useUIStore.getState().toasts.find((t) => t.variant === 'error')
+    expect(errorToast?.description).toBe('state exceeds 2 characters')
   })
 })
 
@@ -307,5 +348,22 @@ describe('useDeleteLead', () => {
     result.current.mutate('l1')
 
     await waitFor(() => expect(result.current.isError).toBe(true))
+  })
+
+  it('surfaces the server error detail in the toast description on failure', async () => {
+    server.use(
+      http.delete('/api/leads/:id', () =>
+        HttpResponse.json({ detail: 'lead is referenced by an estimate' }, { status: 409 })
+      )
+    )
+
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useDeleteLead(), { wrapper })
+
+    result.current.mutate('l1')
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    const errorToast = useUIStore.getState().toasts.find((t) => t.variant === 'error')
+    expect(errorToast?.description).toBe('lead is referenced by an estimate')
   })
 })

@@ -25,6 +25,8 @@ export interface LeadScope {
   sources?: string
   /** Leads assigned to or created by the caller; the id is resolved server-side. */
   mine?: boolean
+  /** Public Leads queue: hide leads once assigned_to is set (never deleted). */
+  unassigned_only?: boolean
 }
 
 export function useLeads(scope: LeadScope = {}) {
@@ -67,7 +69,15 @@ export function useCreateLead() {
       qc.invalidateQueries({ queryKey: [LEADS_KEY] })
       toast('Lead added', { variant: 'success' })
     },
-    onError: () => toast('Failed to add lead', { variant: 'error' }),
+    // Surface the server's `detail` (carried on error.message by client.ts's
+    // ApiError) instead of swallowing it — the whole demo failure was invisible
+    // because this description was blank. `instanceof Error` not `ApiError`:
+    // ApiError is not exported from client.ts, and `.message` carries the detail
+    // either way.
+    onError: (e) => toast('Failed to add lead', {
+      variant: 'error',
+      description: e instanceof Error ? e.message : 'Try again.',
+    }),
   })
 }
 
@@ -81,7 +91,10 @@ export function useUpdateLead() {
       qc.setQueryData([LEAD_KEY, updated.id], updated)
       qc.invalidateQueries({ queryKey: [LEADS_KEY] })
     },
-    onError: () => toast('Update failed', { variant: 'error', description: 'Could not update lead. Try again.' }),
+    onError: (e) => toast('Update failed', {
+      variant: 'error',
+      description: e instanceof Error ? e.message : 'Could not update lead. Try again.',
+    }),
   })
 }
 
@@ -104,10 +117,10 @@ export function useDeleteLead() {
       queryClient.invalidateQueries({ queryKey: [LEADS_KEY] })
       toast('Lead deleted', { variant: 'success' })
     },
-    onError: () =>
+    onError: (e) =>
       toast('Failed to delete lead', {
         variant: 'error',
-        description: 'Try again.',
+        description: e instanceof Error ? e.message : 'Try again.',
       }),
   })
 }

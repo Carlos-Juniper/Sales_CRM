@@ -547,6 +547,7 @@ class TestDetectFunctions:
         (M.detect_012, "estimates",    "turf_area_acres"),
         (M.detect_019, "estimates",    "aspire_branch_id"),
         (M.detect_020, "estimates",    "crew_rate_cents_per_hour"),
+        (M.detect_040, "proposal_requests", "chapter_order"),
     ])
     def test_column_based_detection_true(self, monkeypatch, fn, table, column):
         monkeypatch.setattr(
@@ -556,7 +557,7 @@ class TestDetectFunctions:
 
     @pytest.mark.parametrize("fn", [
         M.detect_005, M.detect_006, M.detect_008, M.detect_010, M.detect_012,
-        M.detect_019, M.detect_020,
+        M.detect_019, M.detect_020, M.detect_040,
     ])
     def test_column_based_detection_false(self, monkeypatch, fn):
         monkeypatch.setattr(M, "column_exists", lambda conn, t, c: False)
@@ -638,6 +639,85 @@ class TestMigration022File:
     def test_022_is_registered_in_detect_dispatch(self):
         """detect_022 must be wired into the _DETECT dispatch table."""
         assert "022_contract_drop_branch_columns" in M._DETECT
+
+
+class TestMigration031File:
+    """Handoff 49 §3 — the migration that adds the columns 001's steps 2 & 3 never ran.
+
+    leads.property_id + idx_property_id, and hoa_properties.assigned_to /
+    contact_status / last_contacted. Every column and the index guarded on
+    information_schema; no AFTER clauses; keyed on its own effect.
+    """
+
+    PATH = REPO / "sql" / "migrations" / "031_add_leads_property_id.sql"
+
+    def test_031_file_exists(self):
+        assert self.PATH.exists(), "031_add_leads_property_id.sql must exist"
+
+    def test_031_adds_leads_property_id_and_index(self):
+        sql = self.PATH.read_text(encoding="utf-8")
+        assert "property_id" in sql
+        assert "idx_property_id" in sql
+
+    def test_031_adds_three_hoa_columns(self):
+        sql = self.PATH.read_text(encoding="utf-8")
+        for col in ("assigned_to", "contact_status", "last_contacted"):
+            assert col in sql, f"031 must add hoa_properties.{col}"
+
+    def test_031_has_no_after_clauses(self):
+        """§3: drop the AFTER clauses — no positional dependency on 001's anchors."""
+        # Scan only executable statements (split_statements strips -- comments),
+        # so prose mentioning "after" in a header comment cannot trip this.
+        for stmt in M.split_statements(self.PATH.read_text(encoding="utf-8")):
+            assert " AFTER " not in stmt.upper(), f"unexpected AFTER clause: {stmt[:80]}"
+
+    def test_031_guards_every_add_with_information_schema(self):
+        """Each ADD COLUMN / ADD INDEX must be behind a PREPARE/EXECUTE guard that
+        checks information_schema — an unguarded ALTER is the mistake that
+        produced this handoff."""
+        sql = self.PATH.read_text(encoding="utf-8")
+        upper = sql.upper()
+        # 4 columns + 1 index = 5 guarded ALTERs.
+        assert upper.count("PREPARE") >= 5
+        assert upper.count("EXECUTE") >= 5
+        assert upper.count("INFORMATION_SCHEMA") >= 5
+
+    def test_031_splits_to_prepare_execute_deallocate_only(self):
+        """Every executable statement is a SET/PREPARE/EXECUTE/DEALLOCATE — no bare
+        ALTER TABLE that would fail on a re-run or a correctly-migrated DB."""
+        stmts = M.split_statements(self.PATH.read_text(encoding="utf-8"))
+        assert stmts, "031 must contain executable statements"
+        for stmt in stmts:
+            first = stmt.strip().split()[0].upper()
+            assert first in ("SET", "PREPARE", "EXECUTE", "DEALLOCATE"), (
+                f"031 must be all guarded dynamic SQL — found bare: {stmt[:60]}"
+            )
+
+    def test_031_registered_in_detect_dispatch(self):
+        assert "031_add_leads_property_id" in M._DETECT
+
+
+class TestDetect031:
+    """detect_031 must key on its OWN effect (leads.property_id), not a sibling
+    artifact like the `properties` table — that is the lesson of §2.1."""
+
+    def test_detect_031_true_when_leads_property_id_present(self, monkeypatch):
+        monkeypatch.setattr(
+            M, "column_exists",
+            lambda conn, t, c: t == "leads" and c == "property_id",
+        )
+        assert M.detect_031(None) is True
+
+    def test_detect_031_false_when_leads_property_id_absent(self, monkeypatch):
+        monkeypatch.setattr(M, "column_exists", lambda conn, t, c: False)
+        assert M.detect_031(None) is False
+
+    def test_detect_031_false_even_when_properties_table_exists(self, monkeypatch):
+        """The exact live-DB state: `properties` exists but leads.property_id does
+        not. detect_031 must report NOT applied."""
+        monkeypatch.setattr(M, "table_exists", lambda conn, t: t == "properties")
+        monkeypatch.setattr(M, "column_exists", lambda conn, t, c: False)
+        assert M.detect_031(None) is False
 
 
 class TestHardGate003:
@@ -1149,6 +1229,72 @@ class TestDryRun:
             after = cur.fetchone()["cnt"]
 
         assert after == before
+
+
+@requires_mysql
+class TestMigration031Integration:
+    """Handoff 49 §3 acceptance criteria, against a real MySQL test DB."""
+
+    PATH = REPO / "sql" / "migrations" / "031_add_leads_property_id.sql"
+
+    def _has_index(self, conn, table, index) -> bool:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM information_schema.statistics "
+                "WHERE table_schema = DATABASE() AND table_name = %s AND index_name = %s",
+                (table, index),
+            )
+            return cur.fetchone()["c"] > 0
+
+    def _prop_id_columns(self, conn) -> int:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM information_schema.columns "
+                "WHERE table_schema = DATABASE() AND table_name = 'leads' "
+                "AND column_name = 'property_id'"
+            )
+            return cur.fetchone()["c"]
+
+    def test_running_twice_is_idempotent(self, db_conn):
+        """Running the migration twice leaves exactly one property_id column, one
+        idx_property_id index, and three hoa_properties columns."""
+        M.exec_file(db_conn, self.PATH)
+        M.exec_file(db_conn, self.PATH)  # must not raise
+
+        assert self._prop_id_columns(db_conn) == 1
+        assert self._has_index(db_conn, "leads", "idx_property_id")
+        for col in ("assigned_to", "contact_status", "last_contacted"):
+            assert M.column_exists(db_conn, "hoa_properties", col)
+
+    def test_select_property_id_succeeds_after_apply(self, db_conn):
+        M.exec_file(db_conn, self.PATH)
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT property_id FROM leads LIMIT 1")  # must not raise
+
+    def test_noop_when_001_already_applied_correctly(self, db_conn):
+        """A DB where 001's ALTERs DID land: 031 must be a no-op that does not error."""
+        # Simulate 001 having applied its steps 2 & 3.
+        with db_conn.cursor() as cur:
+            cur.execute("ALTER TABLE leads ADD COLUMN property_id VARCHAR(36) DEFAULT NULL")
+            cur.execute("ALTER TABLE leads ADD INDEX idx_property_id (property_id)")
+            cur.execute("ALTER TABLE hoa_properties ADD COLUMN assigned_to VARCHAR(255) DEFAULT NULL")
+            cur.execute("ALTER TABLE hoa_properties ADD COLUMN contact_status VARCHAR(50) DEFAULT NULL")
+            cur.execute("ALTER TABLE hoa_properties ADD COLUMN last_contacted DATE DEFAULT NULL")
+
+        M.exec_file(db_conn, self.PATH)  # must not raise
+
+        assert self._prop_id_columns(db_conn) == 1
+        assert self._has_index(db_conn, "leads", "idx_property_id")
+
+    def test_detector_reports_not_applied_when_only_properties_table_exists(self, db_conn):
+        """The live-DB scenario: `properties` exists (from 001 step 1) but
+        leads.property_id does not. detect_031 must say NOT applied."""
+        # _BASE_SCHEMA has no properties table; create it to mirror the live DB.
+        with db_conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS properties (id VARCHAR(36) PRIMARY KEY)")
+        assert M.table_exists(db_conn, "properties")
+        assert not M.column_exists(db_conn, "leads", "property_id")
+        assert M.detect_031(db_conn) is False
 
 
 @requires_mysql

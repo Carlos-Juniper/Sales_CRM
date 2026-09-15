@@ -159,6 +159,7 @@ class CreateLeadBody(BaseModel):
     city: str
     state: str
     lead_type: str
+    address: Optional[str] = None
     estimated_contract_value: Optional[float] = None
     estimated_acreage: Optional[float] = None
     units: Optional[int] = None
@@ -167,6 +168,8 @@ class CreateLeadBody(BaseModel):
     contact_email: Optional[str] = None
     # Canonical properties.id — optional: manual leads may have none.
     property_id: Optional[str] = None
+    # WS1: branch the lead belongs to (from the branch picker in AddLeadModal).
+    branch_id: Optional[str] = None
 
 
 class PatchLeadBody(BaseModel):
@@ -413,6 +416,7 @@ async def list_leads(
     property_id: Optional[str] = None,
     sources: Optional[str] = None,
     mine: bool = False,
+    unassigned_only: bool = False,
     sort_by: str = "score",
     sort_dir: str = "desc",
     page: int = 1,
@@ -465,6 +469,12 @@ async def list_leads(
         conditions.append("(assigned_to = %s OR created_by = %s)")
         params.extend([_user["id"], _user["id"]])
 
+    # Public Leads review queue: once a rep assigns a lead to a CRM it moves to
+    # that CRM's "My Leads" (mine=true) and should drop out of the shared queue.
+    # Never deleted — assigned_to alone gates queue membership.
+    if unassigned_only:
+        conditions.append("assigned_to IS NULL")
+
     if min_score is not None:
         conditions.append("score >= %s")
         params.append(min_score)
@@ -504,23 +514,53 @@ async def get_lead(lead_id: str, _user: dict = Depends(require_auth)) -> dict:
 @app.post("/api/leads", status_code=201)
 async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth)) -> dict:
     new_id = str(uuid.uuid4())
+
+    # WS1 auto-property safety net: if no property_id was supplied, create a
+    # canonical 'manual' property row so the lead always has a linked property.
+    # Uses INSERT ... ON DUPLICATE KEY UPDATE (unique key uq_prop_source on
+    # source_type+source_id) so re-submits are idempotent.
+    property_id = body.property_id
+    if property_id is None:
+        property_id = str(uuid.uuid4())
+        await execute(
+            """
+            INSERT INTO properties
+                (id, name, source_type, source_id, address1, city, state,
+                 aspire_sync_status, created_at, updated_at)
+            VALUES
+                (%s, %s, 'manual', %s, %s, %s, %s,
+                 'pending', CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE
+                updated_at = CURRENT_TIMESTAMP()
+            """,
+            [
+                property_id,
+                body.property_name,
+                new_id,           # source_id = lead_id so re-submits hit the unique key
+                body.address or '',
+                body.city,
+                body.state,
+            ],
+        )
+
     await execute(
         """
         INSERT INTO leads
-            (id, source, lead_type, property_name, city, state,
+            (id, source, lead_type, property_name, address, city, state,
              estimated_contract_value, estimated_acreage, units, status,
-             contact_name, contact_email, property_id, created_by,
+             contact_name, contact_email, property_id, branch_id, created_by,
              created_at, updated_at)
         VALUES
-            (%s, 'manual', %s, %s, %s, %s,
+            (%s, 'manual', %s, %s, %s, %s, %s,
              %s, %s, %s, %s,
-             %s, %s, %s, %s,
+             %s, %s, %s, %s, %s,
              CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
             new_id,
             body.lead_type,
             body.property_name,
+            body.address,
             body.city,
             body.state,
             body.estimated_contract_value,
@@ -529,7 +569,8 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
             body.status,
             body.contact_name,
             body.contact_email,
-            body.property_id,
+            property_id,
+            body.branch_id,
             _user["id"],
         ],
     )

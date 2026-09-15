@@ -22,6 +22,8 @@ export interface LeadQueryParams {
   sources?: string
   /** Scope to the caller's own leads. The id comes from the JWT server-side. */
   mine?: boolean
+  /** Public Leads queue: hide leads once assigned_to is set (never deleted). */
+  unassigned_only?: boolean
   page?: number
   page_size?: number
   sort_by?: string
@@ -42,6 +44,8 @@ export interface CreateLeadPayload {
   contact_email?: string
   /** Canonical properties.id — optional create-lead-from-property link. */
   property_id?: string | null
+  /** WS1: branch the lead belongs to (from the branch picker in AddLeadModal). */
+  branch_id?: string
 }
 
 export const leadsApi = {

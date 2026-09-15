@@ -16,7 +16,7 @@
 // capture a hidden placeholder and ship a blank one-page PDF.
 // ---------------------------------------------------------------------------
 
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   useProposal,
   useProposalSigner,
@@ -28,6 +28,7 @@ import { useLead } from './useLeads'
 import { useEstimate } from './useEstimate'
 import { estimatingApi } from '@/api/estimating'
 import { COMPANY_INFO } from '@/lib/constants'
+import type { IntakeAttachment } from '@/types/estimating'
 import type { Lead } from '@/types'
 import type { Estimate } from '@/types/estimating'
 import type {
@@ -77,6 +78,46 @@ function resolveSigner(facts: ProposalSignerFacts | undefined): ProposalSigner {
     email: facts?.email ?? COMPANY_INFO.email,
     branchAddress: facts?.branchAddress ?? COMPANY_INFO.address,
   }
+}
+
+const PROPOSAL_DOC_KINDS = ['proposal_measurements', 'proposal_contract', 'proposal_other'] as const
+type ProposalDocKind = (typeof PROPOSAL_DOC_KINDS)[number]
+const PROPOSAL_DOC_APPEND_ORDER: ProposalDocKind[] = [
+  'proposal_measurements',
+  'proposal_contract',
+  'proposal_other',
+]
+
+/**
+ * Fetch and sort the appended proposal documents for the preview summary panel.
+ * Uses TanStack Query rather than raw useEffect (CLAUDE.md §2).
+ */
+export function useProposalAppendedDocuments(
+  estimateId: string | null,
+  leadId?: string | null,
+) {
+  return useQuery({
+    queryKey: ['proposal-appended-docs', estimateId ?? null, leadId ?? null],
+    queryFn: async () => {
+      if (estimateId) return estimatingApi.listAttachments(estimateId)
+      if (leadId) return estimatingApi.listLeadAttachments(leadId)
+      return [] as IntakeAttachment[]
+    },
+    enabled: !!(estimateId || leadId),
+    select: (data: IntakeAttachment[]) => {
+      const proposalDocs = data.filter(
+        (a): a is IntakeAttachment =>
+          (PROPOSAL_DOC_KINDS as readonly string[]).includes(a.kind) && a.status === 'stored',
+      )
+      proposalDocs.sort((a, b) => {
+        const ga = PROPOSAL_DOC_APPEND_ORDER.indexOf(a.kind as ProposalDocKind)
+        const gb = PROPOSAL_DOC_APPEND_ORDER.indexOf(b.kind as ProposalDocKind)
+        if (ga !== gb) return ga - gb
+        return a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt)
+      })
+      return proposalDocs
+    },
+  })
 }
 
 /**

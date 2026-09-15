@@ -25,7 +25,9 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     // Override VITE_API_URL so apiClient uses a relative base URL (/api),
     // keeping MSW handler paths like http.get('/api/...') correct in jsdom.
-    env: { VITE_API_URL: '' },
+    // Clear VITE_COMPANY_WEBSITE so page-footer tests see the empty-website branch
+    // (B4: "Website is empty in the test env, so the meta is just the number").
+    env: { VITE_API_URL: '', VITE_COMPANY_WEBSITE: '' },
     coverage: {
       provider: 'v8',
       include: ['src/**'],

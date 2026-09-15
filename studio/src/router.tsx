@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom'
+import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { RequireAuth } from '@/views/auth/RoleGate'
 import LoginPage from '@/views/auth/LoginPage'
@@ -11,8 +11,31 @@ import AccountsPage from '@/views/inside-sales/AccountsPage'
 import { SettingsPage } from '@/views/settings/SettingsPage'
 import { InsideSalesGuard } from '@/guards'
 import ProposalPrintRoute from '@/views/inside-sales/components/estimating/ProposalPrintRoute'
+import ProposalPreviewRoute from '@/views/inside-sales/components/estimating/ProposalPreviewRoute'
+
+// DEV-only routes. `import.meta.env.DEV` is replaced with a literal `false` in a
+// production build, so this ternary collapses to `[]` and the dynamic import
+// inside it becomes unreachable — Rollup drops the module, its chunk, and the
+// fixture data it pulls in. Same gating convention as main.tsx's mock worker and
+// mocks/handlers.ts. Keep the import dynamic: a static one would tie the dev
+// page's module (and its CSS side effects) into the main graph.
+const devRoutes: RouteObject[] = import.meta.env.DEV
+  ? [
+      {
+        // Live visual diff of <ProposalPreview> against the rasterized Coral Bay
+        // reference pages. Fixture-driven — no API, no auth, no DB row — so it
+        // mounts outside RequireAuth and outside AppShell (a .print-page is a
+        // fixed 816px and any narrower ancestor clips it).
+        path: '/dev/proposal-fidelity',
+        lazy: async () => ({
+          Component: (await import('@/views/dev/ProposalFidelityPage')).default,
+        }),
+      },
+    ]
+  : []
 
 export const router = createBrowserRouter([
+  ...devRoutes,
   {
     path: '/login',
     element: <LoginPage />,
@@ -21,9 +44,21 @@ export const router = createBrowserRouter([
     path: '/auth/callback',
     element: <AuthCallbackPage />,
   },
+  // Both proposal document surfaces mount outside AppShell: a .print-page is a
+  // fixed 8.5in (816px), and any ancestor narrower than that clips it instead
+  // of scaling it. AppShell's sidebar plus the lead panel left ~624px, which
+  // cut the right quarter off every page.
+  //
+  // The print route carries no auth guard by design — api/proposals.py gates it
+  // by session cookie or render-scoped token, which is how headless Chromium
+  // reaches it. The preview route is for humans, so it requires a real session.
   {
     path: '/proposals/:id/print',
     element: <ProposalPrintRoute />,
+  },
+  {
+    path: '/proposals/:id/preview',
+    element: <RequireAuth><ProposalPreviewRoute /></RequireAuth>,
   },
   {
     path: '/',

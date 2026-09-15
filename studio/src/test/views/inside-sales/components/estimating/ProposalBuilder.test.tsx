@@ -238,9 +238,9 @@ const mockSavedProposal: ProposalRequest = {
   orgChart: {
     included: true,
     accountManagerIds: ['tm-am-001'],
-    agronomyManagerId: null,
-    irrigationManagerId: null,
-    productionManagerId: null,
+    agronomyManagerName: null,
+    irrigationManagerName: null,
+    productionManagerName: null,
     crewCounts: {
       mow: { foremen: 1, members: 4 },
       prune: { foremen: 0, members: 0 },
@@ -432,7 +432,7 @@ describe('ProposalBuilder — org chart', () => {
     expect(screen.getByTestId('crew-mow-foremen')).toBeInTheDocument()
   })
 
-  it('omitting Agronomy Manager leaves agronomyManagerId as null (not empty string)', async () => {
+  it('omitting Agronomy Manager leaves agronomyManagerName as null (not empty string)', async () => {
     const user = userEvent.setup()
     const mutateAsync = vi.fn().mockResolvedValue({ ...mockSavedProposal })
     mockUseCreateProposal.mockReturnValue(makeMutation({ mutateAsync }))
@@ -449,12 +449,12 @@ describe('ProposalBuilder — org chart', () => {
 
     const payload = mutateAsync.mock.calls[0][0]
     // null, not '' or undefined
-    expect(payload.orgChart.agronomyManagerId).toBeNull()
-    expect(payload.orgChart.irrigationManagerId).toBeNull()
-    expect(payload.orgChart.productionManagerId).toBeNull()
+    expect(payload.orgChart.agronomyManagerName).toBeNull()
+    expect(payload.orgChart.irrigationManagerName).toBeNull()
+    expect(payload.orgChart.productionManagerName).toBeNull()
   })
 
-  it('omitting Irrigation Manager leaves irrigationManagerId as null (drives Slice 8 node omission)', async () => {
+  it('omitting Irrigation Manager leaves irrigationManagerName as null (drives Slice 8 node omission)', async () => {
     const user = userEvent.setup()
     const mutateAsync = vi.fn().mockResolvedValue({ ...mockSavedProposal })
     mockUseCreateProposal.mockReturnValue(makeMutation({ mutateAsync }))
@@ -468,7 +468,7 @@ describe('ProposalBuilder — org chart', () => {
     await waitFor(() => expect(mutateAsync).toHaveBeenCalled())
 
     const payload = mutateAsync.mock.calls[0][0]
-    expect(payload.orgChart.irrigationManagerId).toBeNull()
+    expect(payload.orgChart.irrigationManagerName).toBeNull()
   })
 
   it('typing an agronomy manager name sets a non-null value', async () => {
@@ -487,7 +487,7 @@ describe('ProposalBuilder — org chart', () => {
     await waitFor(() => expect(mutateAsync).toHaveBeenCalled())
 
     const payload = mutateAsync.mock.calls[0][0]
-    expect(payload.orgChart.agronomyManagerId).toBe('Bob Green')
+    expect(payload.orgChart.agronomyManagerName).toBe('Bob Green')
   })
 
   it('crew count inputs accept numeric values', async () => {

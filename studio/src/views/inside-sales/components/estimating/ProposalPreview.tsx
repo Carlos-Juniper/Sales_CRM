@@ -80,6 +80,7 @@ import { LicensesCertificationsPage } from './proposal-pages/licenses-certificat
 import { PortfolioPropertyPage } from './proposal-pages/portfolio-property-page'
 import { ThankYouPage } from './proposal-pages/thank-you-page'
 import { TableOfContentsPage, type TocEntry } from './proposal-pages/table-of-contents-page'
+import { ContractPage } from './proposal-pages/contract-page'
 
 // ---------------------------------------------------------------------------
 // ProposalPreview — main exported component
@@ -206,6 +207,13 @@ export function ProposalPreview({
     // Juniper Cares is its own section (§6), rendered after the service detail
     // pages and before Start Up Communication.
     'juniper-cares': [{ key: 'juniper-cares', node: <JuniperCaresPage /> }],
+    // Contract chapter (Landscape Maintenance Agreement): only for maintenance
+    // estimates with lifecycle approved or won.
+    'contract':
+      estimate && estimate.estimateType === 'maintenance' &&
+      (estimate.lifecycle === 'approved' || estimate.lifecycle === 'won')
+        ? [{ key: 'contract', node: <ContractPage estimate={estimate} /> }]
+        : [],
     'startup-communication': [{ key: 'startup-comm', node: <StartupCommunication /> }],
     'customer-care': [{ key: 'customer-care', node: <CustomerCare /> }],
     'startup-plan': sections.has('startup_plan_30_60_90')

@@ -272,6 +272,10 @@ export function ProposalPreview({
     hasOrgChart: formState.orgChart.included,
     hasExecutiveTeam: executiveTeamMembers.length > 0,
     hasPortfolio: photographedProperties.length > 0,
+    hasContract:
+      estimate != null &&
+      estimate.estimateType === 'maintenance' &&
+      (estimate.lifecycle === 'approved' || estimate.lifecycle === 'won'),
   })
   const orderedChapterKeys = resolveChapterOrder(naturalChapterKeys, chapterOrder)
 

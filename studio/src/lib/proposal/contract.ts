@@ -109,8 +109,9 @@ export function buildPaymentSchedule(
   const per = Math.floor(base / 12)
   const rem = base - per * 12
 
-  // Start month: serviceStartDate's month, or January if null
-  const startMonth = serviceStartDate ? serviceStartDate.getMonth() : 0
+  // Use getUTCMonth() — service dates are ISO date strings (YYYY-MM-DD), which
+  // JS parses as UTC midnight. getMonth() would shift one day back in US timezones.
+  const startMonth = serviceStartDate ? serviceStartDate.getUTCMonth() : 0
 
   const monthNames = [
     'January',

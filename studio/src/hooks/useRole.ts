@@ -23,6 +23,11 @@ export function useRole() {
     // `admin` is the super-role; `manager` narrows to its approval tier.
     isAdmin: role === 'admin',
     isManager: role === 'manager',
+    // Handoff 50 §3: cross-branch owner of company-wide proposal assets.
+    isMarketing: role === 'marketing',
+    // May manage company-wide proposal assets (portfolio, references, bios).
+    // Mirrors api/authz.py MARKETING_ROLES (marketing + admin super-role).
+    canManageMarketingAssets: role === 'marketing' || role === 'admin',
     isEstimator: role !== null && ESTIMATOR_ROLES.includes(role),
     isApprover: role !== null && APPROVER_ROLES.includes(role),
     seesAllBranches: role !== null && CROSS_BRANCH_ROLES.includes(role),

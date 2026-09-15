@@ -5,7 +5,11 @@ import {
   useCreateTeamMember,
   useUpdateTeamMember,
   useDeactivateTeamMember,
+  useUploadTeamMemberHeadshot,
+  useDeleteTeamMemberHeadshot,
 } from '@/hooks/useProposals'
+import { teamMemberTitleLabel } from '@/lib/proposal/titleLabels'
+import { ImageUploadField } from '@/components/settings/ImageUploadField'
 import type { TeamMember } from '@/types/proposal'
 import type {
   TeamMemberCreateBody,
@@ -23,12 +27,31 @@ import { SettingsFormShell, FormStatus } from '../company/formStatus'
  *   - Branch-owned rows (aspireBranchId === current branch): BM can create/edit/deactivate.
  *   - Company-wide rows (aspireBranchId === null): read-only for BM, editable only by admin.
  *
- * Photo/headshot uploads (GCS) are a Slice 15 concern — this form accepts an
- * optional URL/object-key text field with a "managed elsewhere" note.
+ * Headshots upload here (Handoff 43 §2). The picker only appears on an existing
+ * row: the object key is derived from the row id, so there is nothing to attach
+ * a photo to until the member has been created.
  */
-export function TeamRosterSection({ aspireBranchId }: { aspireBranchId: number }) {
-  const { data, isLoading, isError } = useTeamMembers({ aspireBranchId })
+/**
+ * @param aspireBranchId  a branch id, or `null` for the company-wide roster
+ *        (Handoff 50 §3 Marketing group). In company-wide mode the list shows
+ *        only company-wide rows and `canEditCompanyWide` (marketing/admin)
+ *        governs edit rights.
+ */
+export function TeamRosterSection({
+  aspireBranchId,
+  canEditCompanyWide = false,
+}: {
+  aspireBranchId: number | null
+  canEditCompanyWide?: boolean
+}) {
+  const companyWide = aspireBranchId === null
+  const { data, isLoading, isError } = useTeamMembers(
+    companyWide ? undefined : { aspireBranchId },
+  )
   const { isAdmin } = useRole()
+  // In company-wide mode, marketing (or admin) may edit; the branch view keeps
+  // its original rule (company-wide rows admin-only, branch rows BM-editable).
+  const canEditCompany = isAdmin || canEditCompanyWide
   const [showCreate, setShowCreate] = useState(false)
 
   if (isLoading) {
@@ -48,17 +71,25 @@ export function TeamRosterSection({ aspireBranchId }: { aspireBranchId: number }
     )
   }
 
-  const members = data ?? []
+  // Company-wide mode shows only the company-wide (null-branch) rows; the
+  // branch view keeps the API's null-inclusion behaviour.
+  const members = (data ?? []).filter((m) =>
+    companyWide ? m.aspireBranchId === null : true,
+  )
 
   return (
     <SettingsFormShell
       slug="team-roster"
       title="Team roster"
-      description="Branch team members included in proposal packages. Company-wide rows are read-only here — edit them as admin."
+      description={
+        companyWide
+          ? 'Company-wide team members (leadership / executive) included in every proposal package.'
+          : 'Branch team members included in proposal packages. Company-wide rows are read-only here — edit them as admin.'
+      }
     >
       {members.length === 0 && !showCreate && (
         <p className="text-xs text-[var(--fg)] opacity-60 mb-3">
-          No team members yet for this branch.
+          {companyWide ? 'No company-wide team members yet.' : 'No team members yet for this branch.'}
         </p>
       )}
 
@@ -68,7 +99,7 @@ export function TeamRosterSection({ aspireBranchId }: { aspireBranchId: number }
             key={member.id}
             member={member}
             branchId={aspireBranchId}
-            isAdmin={isAdmin}
+            isAdmin={canEditCompany}
           />
         ))}
       </ul>
@@ -99,13 +130,19 @@ function TeamMemberRow({
   isAdmin,
 }: {
   member: TeamMember
-  branchId: number
+  branchId: number | null
   isAdmin: boolean
 }) {
   const [editing, setEditing] = useState(false)
-  const deactivate = useDeactivateTeamMember(branchId)
+  // The branch id is only a cache-key hint (unused by the hook); 0 is a safe
+  // company-wide sentinel since invalidation is by query-key prefix.
+  const deactivate = useDeactivateTeamMember(branchId ?? 0)
+  const upload = useUploadTeamMemberHeadshot()
+  const removeHeadshot = useDeleteTeamMemberHeadshot()
 
-  // Company-wide rows (aspireBranchId === null): admin edits freely; BM sees read-only.
+  // Company-wide rows (aspireBranchId === null): admin/marketing edit freely; a
+  // branch manager sees them read-only. The `isAdmin` prop already carries the
+  // company-wide edit capability from the parent (canEditCompany).
   const isCompanyWide = member.aspireBranchId === null
   const canEdit = isAdmin || !isCompanyWide
 
@@ -122,39 +159,56 @@ function TeamMemberRow({
   }
 
   return (
-    <li className="flex items-start justify-between rounded-md border border-[var(--border)] px-3 py-2 text-xs">
-      <div>
-        <span className="font-medium text-[var(--fg)]">{member.name}</span>
-        <span className="ml-2 text-[var(--fg)] opacity-60">{member.title}</span>
-        {member.location && (
-          <span className="ml-2 text-[var(--fg)] opacity-50">— {member.location}</span>
-        )}
-        {isCompanyWide && (
-          <span
-            data-testid={`team-member-${member.id}-readonly`}
-            className="ml-2 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800"
-          >
-            Company-wide (read-only)
-          </span>
+    <li className="rounded-md border border-[var(--border)] px-3 py-2 text-xs">
+      <div className="flex items-start justify-between">
+        <div>
+          <span className="font-medium text-[var(--fg)]">{member.name}</span>
+          <span className="ml-2 text-[var(--fg)] opacity-60">{teamMemberTitleLabel(member.title)}</span>
+          {member.location && (
+            <span className="ml-2 text-[var(--fg)] opacity-50">— {member.location}</span>
+          )}
+          {isCompanyWide && (
+            <span
+              data-testid={`team-member-${member.id}-readonly`}
+              className="ml-2 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800"
+            >
+              Company-wide (read-only)
+            </span>
+          )}
+        </div>
+        {canEdit && (
+          <div className="flex gap-2 ml-3 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="text-[var(--fg)] opacity-60 hover:opacity-100 text-[10px]"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => deactivate.mutate(member.id)}
+              disabled={deactivate.isPending}
+              className="text-red-600 opacity-70 hover:opacity-100 text-[10px] disabled:opacity-30"
+            >
+              Deactivate
+            </button>
+          </div>
         )}
       </div>
       {canEdit && (
-        <div className="flex gap-2 ml-3 flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="text-[var(--fg)] opacity-60 hover:opacity-100 text-[10px]"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            onClick={() => deactivate.mutate(member.id)}
-            disabled={deactivate.isPending}
-            className="text-red-600 opacity-70 hover:opacity-100 text-[10px] disabled:opacity-30"
-          >
-            Deactivate
-          </button>
+        <div className="mt-2">
+          <ImageUploadField
+            id={`tm-headshot-${member.id}`}
+            label="Headshot"
+            objectKey={member.headshotObjectKey}
+            alt={`${member.name} headshot`}
+            aspect="portrait"
+            hint="3:4 portrait crop — it prints at 1.45 × 1.93in."
+            isPending={upload.isPending || removeHeadshot.isPending}
+            onUpload={(file) => upload.mutate({ memberId: member.id, file })}
+            onRemove={() => removeHeadshot.mutate(member.id)}
+          />
         </div>
       )}
     </li>
@@ -168,7 +222,7 @@ function TeamMemberForm({
   existing,
   onDone,
 }: {
-  aspireBranchId: number
+  aspireBranchId: number | null
   existing?: TeamMember
   onDone: () => void
 }) {
@@ -177,8 +231,8 @@ function TeamMemberForm({
   const [bio, setBio] = useState(existing?.bio ?? '')
   const [location, setLocation] = useState(existing?.location ?? '')
 
-  const create = useCreateTeamMember(aspireBranchId)
-  const update = useUpdateTeamMember(aspireBranchId)
+  const create = useCreateTeamMember(aspireBranchId ?? 0)
+  const update = useUpdateTeamMember(aspireBranchId ?? 0)
 
   const isPending = create.isPending || update.isPending
   const isSuccess = create.isSuccess || update.isSuccess
@@ -203,7 +257,9 @@ function TeamMemberForm({
       const body: TeamMemberCreateBody = {
         name,
         title,
-        teamType: 'branch',
+        // A company-wide row (null branch) is a leadership/executive entry;
+        // a branch row keeps the branch teamType.
+        teamType: aspireBranchId === null ? 'leadership' : 'branch',
         aspireBranchId,
         bio,
         location: location || null,
@@ -221,10 +277,11 @@ function TeamMemberForm({
       <Field id="tm-title" label="Title" value={title} onChange={setTitle} required />
       <Field id="tm-location" label="Location" value={location} onChange={setLocation} />
       <TextareaField id="tm-bio" label="Bio" value={bio} onChange={setBio} />
-      <p className="text-[10px] text-[var(--fg)] opacity-50">
-        Headshot photos are managed via GCS upload — a direct upload path is not
-        available here yet (Slice 15). Record the object key manually if needed.
-      </p>
+      {!existing && (
+        <p className="text-[10px] text-[var(--fg)] opacity-50">
+          Add the headshot after saving — the photo attaches to the created row.
+        </p>
+      )}
       <div className="flex gap-2">
         <button
           type="submit"

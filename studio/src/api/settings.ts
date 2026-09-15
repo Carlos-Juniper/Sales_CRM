@@ -322,6 +322,58 @@ export const settingsApi = {
     )
   },
 
+  // ── Handoff 43 §3.1: the caller's own profile ───────────────────────────────
+  // users.phone / users.title feed the signer block on a client-facing proposal.
+  // Self-service: no user id in the path, so these can only ever touch own row.
+
+  /** GET /api/settings/me — the caller's own row, read live (not from the JWT). */
+  getMyProfile: () => apiClient.get<MyProfile>('/settings/me'),
+
+  /** PATCH /api/settings/me — set/clear own phone and title. '' clears to null. */
+  updateMyProfile: (body: MyProfilePatchBody) =>
+    apiClient.patch<MyProfile>('/settings/me', body),
+
+  // ── Handoff 43 §2: proposal imagery upload ──────────────────────────────────
+  // Multipart through the API, the same path uploadLicenseScan uses. The server
+  // derives every object key from the row id — a client-supplied key would be a
+  // path traversal into the renderer's own proposal/generated/ prefix.
+
+  /** POST /api/settings/team-members/:id/headshot — replaces any existing headshot. */
+  uploadTeamMemberHeadshot: (memberId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.postForm<{ id: string; headshotObjectKey: string }>(
+      `/settings/team-members/${memberId}/headshot`,
+      form,
+    )
+  },
+
+  /** DELETE /api/settings/team-members/:id/headshot — clears the column and the object. */
+  deleteTeamMemberHeadshot: (memberId: string) =>
+    apiClient.delete<{ id: string; headshotObjectKey: null }>(
+      `/settings/team-members/${memberId}/headshot`,
+    ),
+
+  /** POST /api/settings/portfolio/:id/photos — appends; returns the full new array. */
+  uploadPortfolioPhoto: (propertyId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.postForm<{ id: string; photoObjectKeys: string[] }>(
+      `/settings/portfolio/${propertyId}/photos`,
+      form,
+    )
+  },
+
+  /**
+   * DELETE /api/settings/portfolio/:id/photos?key= — drops one photo.
+   * The key must already belong to this property; the server 404s otherwise,
+   * which is what stops this from deleting arbitrary objects by name.
+   */
+  deletePortfolioPhoto: (propertyId: string, objectKey: string) =>
+    apiClient.delete<{ id: string; photoObjectKeys: string[] }>(
+      `/settings/portfolio/${propertyId}/photos?key=${encodeURIComponent(objectKey)}`,
+    ),
+
 }
 
 // ── H37 request/response shapes ──────────────────────────────────────────────
@@ -333,6 +385,23 @@ import type { TeamMember, ClientReference, PortfolioProperty } from '@/types/pro
 export type TeamMemberRow = TeamMember
 export type ClientReferenceRow = ClientReference
 export type PortfolioPropertyRow = PortfolioProperty
+
+export interface MyProfile {
+  id: string
+  name: string
+  email: string
+  role: UserRole
+  /** null until the rep sets it — the signer block falls back to the company line. */
+  phone: string | null
+  /** null until the rep sets it — the signer block defaults to 'Account Manager'. */
+  title: string | null
+}
+
+/** Omit a field to leave it untouched; send '' to clear it back to null. */
+export interface MyProfilePatchBody {
+  phone?: string
+  title?: string
+}
 
 export interface TeamMemberCreateBody {
   name: string
@@ -367,7 +436,6 @@ export interface PortfolioPropertyCreateBody {
   cityState: string
   regionId: string
   photoObjectKeys?: string[]
-  beforeAfterObjectKeys?: { before: string; after: string } | null
   sortOrder?: number
 }
 

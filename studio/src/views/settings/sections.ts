@@ -8,7 +8,7 @@ import type { UserRole } from '@/types'
  * nav, the URL segment (`/settings/:section`), and the placeholder testid
  * (`settings-section-<slug>`) those later slices target.
  */
-export type SettingsGroupId = 'company' | 'branch' | 'mine'
+export type SettingsGroupId = 'company' | 'marketing' | 'branch' | 'mine'
 
 export interface SettingsSection {
   /** URL segment + testid suffix. Stable — later slices key off it. */
@@ -34,9 +34,19 @@ export interface SettingsGroup {
 }
 
 /**
- * Company: admin-only, company-wide config.
- * Branch:  branch-scoped; a BM/RD sees its branches, admin sees all.
- * Mine:    any authed user's personal preferences.
+ * Company:   admin-only, company-wide config.
+ * Marketing: company-wide proposal assets — the `marketing` role (admin passes
+ *            via the super-role). NOT branch-scoped: Handoff 50 §3's scope
+ *            decision (Carlos, 2026-09-08) makes portfolio, client references
+ *            and the team roster company-wide, role-gated resources. Sole
+ *            owner of Portfolio, Client references and Team roster — these no
+ *            longer duplicate into Company or Branch (2026-09-14). Licenses
+ *            stays a Branch-only, per-branch tab (2026-09-14) — it isn't a
+ *            company-wide proposal asset like the rest of this group.
+ * Branch:    branch-scoped; a BM/RD sees its branches, admin sees all. Owns
+ *            branch-specific config (crew rate, material factors, production
+ *            rates, branch profile) plus Licenses, scoped per branch.
+ * Mine:      any authed user's personal preferences.
  */
 export const SETTINGS_GROUPS: SettingsGroup[] = [
   {
@@ -52,8 +62,18 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       { slug: 'sla', label: 'SLA' },
       { slug: 'discrepancy-threshold', label: 'Discrepancy threshold' },
       { slug: 'intake-defaults', label: 'Intake defaults' },
+    ],
+  },
+  {
+    id: 'marketing',
+    label: 'Sales',
+    roles: ['marketing'],
+    adminOnly: false,
+    branchScoped: false,
+    sections: [
       { slug: 'portfolio', label: 'Portfolio' },
-      { slug: 'credentials', label: 'Documents' },
+      { slug: 'client-references', label: 'Client references' },
+      { slug: 'team-roster', label: 'Team roster' },
     ],
   },
   {
@@ -67,18 +87,17 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       { slug: 'material-factors', label: 'Material factors' },
       { slug: 'production-rates', label: 'Production rates' },
       { slug: 'branch-profile', label: 'Branch profile' },
-      { slug: 'team-roster', label: 'Team roster' },
-      { slug: 'client-references', label: 'Client references' },
-      { slug: 'branch-credentials', label: 'Credentials (branch)' },
+      { slug: 'branch-credentials', label: 'Licenses' },
     ],
   },
   {
     id: 'mine',
-    label: 'Mine',
+    label: 'User',
     roles: [],
     adminOnly: false,
     branchScoped: false,
     sections: [
+      { slug: 'profile', label: 'Profile' },
       { slug: 'theme', label: 'Theme' },
       { slug: 'connections', label: 'Connections' },
     ],

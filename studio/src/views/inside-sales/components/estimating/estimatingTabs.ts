@@ -26,6 +26,7 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import type { EstimateType } from '@/types/estimating'
+import type { UserRole } from '@/types'
 
 export type EstimatingTabKey =
   | 'queue' // Estimate Queue
@@ -46,27 +47,66 @@ export interface EstimatingTabConfig {
   icon: React.ElementType
   /** Which open-estimate types this tab applies to. */
   visibleForTypes: EstimateType[]
+  /**
+   * Which roles may see this tab (Handoff 50 §2). Stays config-driven: the
+   * role gate is a data field on the row, NOT an `if (role === …)` branch in
+   * visibleTabs(). `sales` sees only the estimate queue (plus the intake-form
+   * modals, which are launched FROM the queue and are not tabs); every
+   * estimating persona — the two estimator roles and the manager-tier
+   * approvers, plus `admin` — sees every tab. Server-side authz is the real
+   * boundary (api/authz.py require_estimate_viewer / require_estimator); this
+   * only shapes the tab bar.
+   */
+  visibleForRoles: UserRole[]
 }
 
 const BOTH: EstimateType[] = ['maintenance', 'install']
 
+// The estimating personas: both estimator disciplines plus the manager-tier
+// approvers who may also edit (Handoff 28), and admin. Mirrors the backend
+// LINE_ITEM_EDIT_ROLES set that gates the estimate-detail surface.
+const ESTIMATING_ROLES: UserRole[] = [
+  'maintenance_estimating',
+  'install_estimating',
+  'manager',
+  'regional_director',
+  'vice_president',
+  'ceo',
+  'admin',
+]
+
+// The queue is the ONLY estimating tab a sales user reaches; intake forms are
+// modals launched from it, so sales needs no other tab.
+const QUEUE_ROLES: UserRole[] = [...ESTIMATING_ROLES, 'sales']
+
 export const ESTIMATING_TABS: EstimatingTabConfig[] = [
-  { key: 'queue', label: 'Estimate Queue', shortLabel: 'Queue', icon: ClipboardList, visibleForTypes: BOTH },
-  { key: 'editor', label: 'Line-Item Editor', shortLabel: 'Editor', icon: Calculator, visibleForTypes: BOTH },
-  { key: 'takeoff', label: 'Takeoff Insert', shortLabel: 'Takeoff', icon: Image, visibleForTypes: ['maintenance'] },
-  { key: 'materials', label: 'Materials Calculator', shortLabel: 'Materials', icon: Ruler, visibleForTypes: ['install'] },
-  { key: 'margins', label: 'Margin Analysis', shortLabel: 'Margins', icon: BarChart2, visibleForTypes: BOTH },
-  { key: 'discrepancy', label: 'Discrepancy Review', shortLabel: 'Discrepancy', icon: TriangleAlert, visibleForTypes: ['install'] },
-  { key: 'approval', label: 'Approval & Handoff', shortLabel: 'Approval', icon: ShieldCheck, visibleForTypes: BOTH },
-  { key: 'approvalQueue', label: 'Approval Queue', shortLabel: 'Appr. Queue', icon: ListChecks, visibleForTypes: BOTH },
-  { key: 'itb', label: 'ITB Tracker', shortLabel: 'ITB', icon: Table2, visibleForTypes: BOTH },
+  { key: 'queue', label: 'Estimate Queue', shortLabel: 'Queue', icon: ClipboardList, visibleForTypes: BOTH, visibleForRoles: QUEUE_ROLES },
+  { key: 'editor', label: 'Line-Item Editor', shortLabel: 'Editor', icon: Calculator, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
+  { key: 'takeoff', label: 'Takeoff Insert', shortLabel: 'Takeoff', icon: Image, visibleForTypes: ['maintenance'], visibleForRoles: ESTIMATING_ROLES },
+  { key: 'materials', label: 'Materials Calculator', shortLabel: 'Materials', icon: Ruler, visibleForTypes: ['install'], visibleForRoles: ESTIMATING_ROLES },
+  { key: 'margins', label: 'Margin Analysis', shortLabel: 'Margins', icon: BarChart2, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
+  { key: 'discrepancy', label: 'Discrepancy Review', shortLabel: 'Discrepancy', icon: TriangleAlert, visibleForTypes: ['install'], visibleForRoles: ESTIMATING_ROLES },
+  { key: 'approval', label: 'Approval & Handoff', shortLabel: 'Approval', icon: ShieldCheck, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
+  { key: 'approvalQueue', label: 'Approval Queue', shortLabel: 'Appr. Queue', icon: ListChecks, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
+  { key: 'itb', label: 'ITB Tracker', shortLabel: 'ITB', icon: Table2, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
 ]
 
 /**
- * The tab set for the current shell state. `null` means no estimate is open —
- * every tab renders. With an open estimate, only type-appropriate tabs render.
+ * The tab set for the current shell state, filtered by BOTH the open estimate's
+ * type and the current user's role (Handoff 50 §2). `null` type means no
+ * estimate is open — every type-appropriate tab is a candidate; the role gate
+ * still applies (a sales user with no estimate open still sees only the queue).
+ *
+ * PURE function over config: it reads `visibleForTypes` and `visibleForRoles`
+ * off each row and never special-cases a role by name.
  */
-export function visibleTabs(openType: EstimateType | null): EstimatingTabConfig[] {
-  if (openType === null) return ESTIMATING_TABS
-  return ESTIMATING_TABS.filter((t) => t.visibleForTypes.includes(openType))
+export function visibleTabs(
+  openType: EstimateType | null,
+  role: UserRole | null,
+): EstimatingTabConfig[] {
+  return ESTIMATING_TABS.filter((t) => {
+    const typeOk = openType === null || t.visibleForTypes.includes(openType)
+    const roleOk = role !== null && t.visibleForRoles.includes(role)
+    return typeOk && roleOk
+  })
 }

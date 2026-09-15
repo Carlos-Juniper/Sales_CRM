@@ -91,6 +91,35 @@ describe('SettingsPage shell', () => {
     expect(await screen.findByTestId('settings-group-mine')).toBeInTheDocument()
     expect(screen.queryByTestId('settings-group-company')).not.toBeInTheDocument()
     expect(screen.queryByTestId('settings-group-branch')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('settings-group-marketing')).not.toBeInTheDocument()
+  })
+
+  // Handoff 50 §3: the Marketing role manages portfolio + proposal assets.
+  it('a marketing user sees the Marketing group with portfolio + references', async () => {
+    renderSettings('marketing', ['/settings'])
+    expect(await screen.findByTestId('settings-group-marketing')).toBeInTheDocument()
+    // The marketing group carries the company-wide proposal-asset sections.
+    expect(screen.getByTestId('settings-group-marketing')).toHaveTextContent('Portfolio')
+    expect(screen.getByTestId('settings-group-marketing')).toHaveTextContent('Client references')
+    expect(screen.getByTestId('settings-group-marketing')).toHaveTextContent('Team roster')
+  })
+
+  it('a marketing user does NOT see estimating Company/Branch settings', async () => {
+    renderSettings('marketing', ['/settings'])
+    await screen.findByTestId('settings-group-marketing')
+    expect(screen.queryByTestId('settings-group-company')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('settings-group-branch')).not.toBeInTheDocument()
+  })
+
+  it('an admin also sees the Marketing group (admin passes every gate)', async () => {
+    renderSettings('admin', ['/settings'])
+    expect(await screen.findByTestId('settings-group-marketing')).toBeInTheDocument()
+  })
+
+  it('a manager does NOT see the Marketing group', async () => {
+    renderSettings('manager', ['/settings'])
+    await screen.findByTestId('settings-group-branch')
+    expect(screen.queryByTestId('settings-group-marketing')).not.toBeInTheDocument()
   })
 
   it('bare /settings renders the first section placeholder (Users, for admin)', async () => {

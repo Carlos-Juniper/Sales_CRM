@@ -4,8 +4,9 @@
 // team-roster:        renders branch members; create fires POST with aspireBranchId;
 //                     deactivate fires DELETE; company-wide row is read-only to a manager.
 // client-references:  same shape (create/deactivate for the branch; read-only for company-wide).
-// portfolio:          admin sees the section; create/edit fire the right calls;
-//                     non-admin cannot reach it (CompanySection admin gate).
+// portfolio:          admin sees the section; create/edit fire the right calls.
+//                     (Portfolio lives only under Sales now — the Company admin
+//                     gate that used to guard it was removed with that slug.)
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach } from 'vitest'
@@ -26,7 +27,6 @@ import type { TeamMember, ClientReference } from '@/types/proposal'
 import { TeamRosterSection } from '@/views/settings/branch/TeamRosterSection'
 import { ClientReferencesSection } from '@/views/settings/branch/ClientReferencesSection'
 import { PortfolioSection } from '@/views/settings/company/PortfolioSection'
-import { CompanySection } from '@/views/settings/company/CompanySection'
 
 const BRANCH_ID = 42
 
@@ -94,7 +94,6 @@ const PORTFOLIO_PROPERTY = {
   cityState: 'Naples, FL',
   regionId: 'southeast',
   photoObjectKeys: [],
-  beforeAfterObjectKeys: null,
   sortOrder: 0,
 }
 
@@ -393,19 +392,5 @@ describe('PortfolioSection', () => {
 
     await waitFor(() => expect(patchBody).not.toBeNull())
     expect(patchBody).toMatchObject({ name: 'Updated Villa' })
-  })
-
-  it('non-admin cannot reach portfolio (CompanySection admin gate)', async () => {
-    mockPortfolio([PORTFOLIO_PROPERTY])
-    // CompanySection renders admin-only note for non-admin reaching a company slug
-    renderComp(
-      <CompanySection slug="portfolio" label="Portfolio" />,
-      'manager',
-    )
-    // Should show the admin-only note, not the actual form
-    expect(
-      await screen.findByText(/admin only/i),
-    ).toBeInTheDocument()
-    expect(screen.queryByText('Oceanfront Villa')).not.toBeInTheDocument()
   })
 })

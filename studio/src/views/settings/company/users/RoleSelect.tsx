@@ -12,6 +12,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   install_estimating: 'Install Estimating',
   vice_president: 'Vice President',
   ceo: 'CEO',
+  marketing: 'Marketing',
 }
 
 /** Role picker backed by the canonical role vocabulary (mirrors api/authz). */

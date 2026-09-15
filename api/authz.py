@@ -31,6 +31,11 @@ CANONICAL_ROLES = frozenset({
     "install_estimating",
     "vice_president",
     "ceo",
+    # Handoff 50 §3: cross-branch owner of the company-wide proposal assets
+    # (portfolio pages, client references, team bios/headshots, org chart).
+    # Deliberately NOT an estimator or approver — see ESTIMATOR_ROLES /
+    # APPROVER_ROLES below, which it is absent from.
+    "marketing",
 })
 
 # `inside_sales` qualifies raw public/government leads and assigns them on to a
@@ -54,7 +59,16 @@ LINE_ITEM_EDIT_ROLES = ESTIMATOR_ROLES | APPROVER_ROLES
 # Roles that see every branch. Default per §5.3: admin/VP/CEO see
 # all; everyone else (incl. regional_director, procurement) is scoped to their
 # own branch until Carlos confirms the cross-branch matrix (§7 open item).
+# NOTE: `marketing` is intentionally absent — its cross-branch reach is limited
+# to the marketing-asset tables (MARKETING_ROLES), NOT to estimate branch scope.
 CROSS_BRANCH_ROLES = frozenset({"admin", "vice_president", "ceo"})
+
+# Handoff 50 §3: roles that may manage the company-wide proposal assets —
+# portfolio_properties, client_references, team_members, org-chart config.
+# Marketing owns these cross-branch; admin retains its super-role access.
+# This is a resource-scoped role gate, deliberately NOT a new branch-scoping
+# mechanism (Carlos's §5.1 call: company-wide, role-gated).
+MARKETING_ROLES = frozenset({"marketing", "admin"})
 
 def normalize_role(role: Optional[str]) -> str:
     """Map a stored/JWT role onto the canonical vocabulary (legacy → sales)."""
@@ -72,6 +86,11 @@ def is_approver(role: Optional[str]) -> bool:
 
 def sees_all_branches(role: Optional[str]) -> bool:
     return normalize_role(role) in CROSS_BRANCH_ROLES
+
+
+def is_marketing_manager(role: Optional[str]) -> bool:
+    """True if the role may manage company-wide proposal assets (§3)."""
+    return normalize_role(role) in MARKETING_ROLES
 
 
 async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
@@ -112,6 +131,44 @@ def require_estimator(user: dict) -> None:
         raise HTTPException(
             status_code=403,
             detail="Estimator or manager-tier role required: line items, sections, and takeoff.",
+        )
+
+
+_UNSET = object()  # sentinel: caller did not supply estimate_id at all
+
+
+def require_estimate_viewer(user: dict, estimate_id: object = _UNSET) -> None:
+    """403 unless the JWT role may OPEN an individual estimate (Handoff 50 §2).
+
+    The estimate-detail surface — line-item editor, sections, takeoff, margins —
+    is estimator/approver-owned. `sales` sees only the estimate QUEUE
+    (list_estimates) plus the intake forms; it must not reach a single
+    estimate's detail by typing its URL. Reuses the existing edit role set
+    (estimators + manager-tier approvers) rather than a parallel list; every
+    role that may read a detail may also edit it, and vice-versa. procurement,
+    inside_sales, and marketing are likewise refused — none work estimates.
+
+    Exception: a proposal-render token (scope="proposal_render") is admitted
+    regardless of role. The server-level guard (api/server.py) has already
+    pinned it to exactly this one estimate id, and the headless-Chromium render
+    must read the estimate to build the proposal even when the requesting rep
+    is `sales`. The token still cannot read any other estimate.
+
+    WS2 null-guard: when the caller passes ``estimate_id=None`` explicitly
+    (estimate-optional proposal — no estimate exists yet), there is no estimate
+    to gate on and the check is a no-op. Callers that omit estimate_id entirely
+    (existing estimate-detail routes) receive the sentinel ``_UNSET`` and are
+    NOT no-op'd — the full role check applies as before.
+    """
+    # estimate_id=None means "no estimate on this proposal" — skip the gate.
+    if estimate_id is None:
+        return
+    if user.get("scope") == "proposal_render":
+        return
+    if normalize_role(user.get("role")) not in LINE_ITEM_EDIT_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Estimator or manager-tier role required to open an estimate.",
         )
 
 

@@ -46,7 +46,8 @@ describe('roles.ts — canonical role constants (mirrors api/authz.py)', () => {
 })
 
 describe('canonical role set', () => {
-  it('has exactly the ten business roles', () => {
+  it('has exactly the canonical business roles', () => {
+    // Handoff 50 §3 adds `marketing` (cross-branch proposal-asset owner).
     expect([...CANONICAL_ROLES].sort()).toEqual(
       [
         'admin',
@@ -55,6 +56,7 @@ describe('canonical role set', () => {
         'inside_sales',
         'maintenance_estimating',
         'manager',
+        'marketing',
         'procurement',
         'regional_director',
         'sales',

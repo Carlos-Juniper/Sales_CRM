@@ -1,4 +1,3 @@
-
 // ---------------------------------------------------------------------------
 // Proposal hooks — query keys under ['proposals', ...], mutations invalidate
 // on success. No hand-rolled optimistic-state merging (CLAUDE.md §2).
@@ -398,3 +397,66 @@ export function useDeletePortfolioProperty() {
     },
   })
 }
+
+// ── Proposal imagery (Handoff 43 §2) ──────────────────────────────────────────
+//
+// Uploads are multipart POSTs, so there is no optimistic path worth having: the
+// cache key would need the object key the server is about to mint. Each hook
+// invalidates its list instead, and the field shows its own pending state while
+// the request is in flight.
+
+/** Upload (replace) one team member's headshot. */
+export function useUploadTeamMemberHeadshot() {
+  const qc = useQueryClient()
+  const toast = useUIStore((s) => s.toast)
+  return useMutation({
+    mutationFn: ({ memberId, file }: { memberId: string; file: File }) =>
+      settingsApi.uploadTeamMemberHeadshot(memberId, file),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'team-members'] })
+    },
+    onError: (err: Error) => toast(err.message || 'Headshot upload failed', { variant: 'error' }),
+  })
+}
+
+/** Remove a team member's headshot (clears the column and deletes the object). */
+export function useDeleteTeamMemberHeadshot() {
+  const qc = useQueryClient()
+  const toast = useUIStore((s) => s.toast)
+  return useMutation({
+    mutationFn: (memberId: string) => settingsApi.deleteTeamMemberHeadshot(memberId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'team-members'] })
+    },
+    onError: (err: Error) => toast(err.message || 'Could not remove headshot', { variant: 'error' }),
+  })
+}
+
+/** Append one photo to a portfolio property. */
+export function useUploadPortfolioPhoto() {
+  const qc = useQueryClient()
+  const toast = useUIStore((s) => s.toast)
+  return useMutation({
+    mutationFn: ({ propertyId, file }: { propertyId: string; file: File }) =>
+      settingsApi.uploadPortfolioPhoto(propertyId, file),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'portfolio'] })
+    },
+    onError: (err: Error) => toast(err.message || 'Photo upload failed', { variant: 'error' }),
+  })
+}
+
+/** Remove one photo from a portfolio property. */
+export function useDeletePortfolioPhoto() {
+  const qc = useQueryClient()
+  const toast = useUIStore((s) => s.toast)
+  return useMutation({
+    mutationFn: ({ propertyId, objectKey }: { propertyId: string; objectKey: string }) =>
+      settingsApi.deletePortfolioPhoto(propertyId, objectKey),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['proposals', 'config', 'portfolio'] })
+    },
+    onError: (err: Error) => toast(err.message || 'Could not remove photo', { variant: 'error' }),
+  })
+}
+

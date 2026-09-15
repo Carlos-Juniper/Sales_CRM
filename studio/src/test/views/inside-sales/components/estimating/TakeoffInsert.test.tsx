@@ -30,7 +30,7 @@ import type { MaintenanceEstimate } from '@/types/estimating'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 
 function seedUser() {
-  useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'inside_sales' }) })
+  useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'maintenance_estimating' }) })
 }
 
 // jsdom implements neither createObjectURL nor revokeObjectURL.

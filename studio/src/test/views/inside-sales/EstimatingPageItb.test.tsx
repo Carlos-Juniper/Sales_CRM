@@ -17,7 +17,7 @@ import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 
 describe('EstimatingPage — ITB Tracker tab (wiring)', () => {
   beforeEach(() => {
-    useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'inside_sales' }) })
+    useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'maintenance_estimating' }) })
   })
 
   it('renders real ITB projects fetched from the API', async () => {

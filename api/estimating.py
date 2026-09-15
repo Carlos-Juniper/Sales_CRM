@@ -258,6 +258,7 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         "estimateType": r["estimate_type"],
         "name": r["name"],
         "aspireNumber": r["aspire_number"],
+        "estimateNumber": r.get("estimate_number"),
         "clientName": r["client_name"],
         # Branch identity rides on the Aspire BranchID (int).
         # Slice 14: branchCity now comes from the LEFT JOIN to branches on
@@ -367,10 +368,22 @@ async def _load_estimate(estimate_id: str) -> Optional[dict]:
     for c in component_rows:
         comps_by_service.setdefault(c["section_service_id"], []).append(_component_out(c))
 
+    # Fetch catalog_items data for contract generator fields (scope_text, billing_type, service_type)
+    catalog_data_by_id: dict[str, dict] = {}
+    catalog_item_ids = {sv["catalog_item_id"] for sv in service_rows if sv.get("catalog_item_id")}
+    if catalog_item_ids:
+        placeholders = ", ".join(["%s"] * len(catalog_item_ids))
+        catalog_rows = await query(
+            f"SELECT id, service_type, scope_text, billing_type FROM catalog_items WHERE id IN ({placeholders})",
+            list(catalog_item_ids),
+        )
+        catalog_data_by_id = {r["id"]: r for r in catalog_rows}
+
     services_by_section: dict[str, list[dict]] = {}
     for sv in service_rows:
+        catalog_data = catalog_data_by_id.get(sv.get("catalog_item_id"))
         services_by_section.setdefault(sv["section_id"], []).append(
-            _service_out(sv, comps_by_service.get(sv["id"], []))
+            _service_out(sv, comps_by_service.get(sv["id"], []), catalog_data)
         )
 
     sections = [_section_out(s, services_by_section.get(s["id"], [])) for s in section_rows]
@@ -1446,15 +1459,18 @@ def register(app, require_auth) -> None:
                 for svc in (section.get("services") or [])
             ])
         estimate_id = _new_id("est")
+        # Auto-assign the next sequential estimate number (contract generator).
+        next_num_row = await query("SELECT COALESCE(MAX(estimate_number), 0) + 1 AS next_num FROM estimates")
+        estimate_number = int(next_num_row[0]["next_num"]) if next_num_row else 1
         await execute(
             """INSERT INTO estimates
-                 (id, estimate_type, name, aspire_number, client_name, branch, aspire_branch_id,
+                 (id, estimate_type, name, aspire_number, estimate_number, client_name, branch, aspire_branch_id,
                   customer_type,
                   acreage, contract_value_cents, target_margin, status, lifecycle, aspire_owner,
                   priority, win_probability, site_walk_date, due_back_date, anticipated_close_date,
                   service_start_date, assigned_ls_estimator, assigned_irr_estimator, crm_rep,
                   notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 estimate_id,
                 est_type,

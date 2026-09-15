@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- Migration 027 — Contract generator schema (Contract Generator, Slice 1)
+-- Migration 044 — Contract generator schema (Contract Generator, Slice 1)
 --
 -- Adds the fields needed to generate Landscape Maintenance Agreement pages
 -- inline in proposals:
@@ -7,7 +7,7 @@
 -- - catalog_items.billing_type: recurring vs one-time (payment schedule base)
 -- - estimates.estimate_number: sequential JN-{n} fallback when not synced
 --
--- Applied by scripts/migrate.py (detect_027 keys on catalog_items.scope_text).
+-- Applied by scripts/migrate.py (detect_044 keys on catalog_items.scope_text).
 -- ---------------------------------------------------------------------------
 
 -- ── 1. Scope text ───────────────────────────────────────────────────────────

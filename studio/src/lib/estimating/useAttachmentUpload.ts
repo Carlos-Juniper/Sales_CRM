@@ -14,9 +14,17 @@ import type { AttachmentKind, IntakeAttachment } from '@/types/estimating'
 const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024 // 2 GiB — mirrors GCS_MAX_UPLOAD_BYTES
 
 // Per-kind content-type allowlist (mirrors the backend presign validation).
-// Intake docs stay PDF-only; the takeoff scan is a scanned map
-// image, so it also accepts common image types.
+// Intake docs and the proposal contract stay PDF-only; the takeoff scan and the
+// proposal measurements/other kinds are scanned images, so they also accept
+// common image types.
 const SCAN_CONTENT_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp']
+
+// Kinds that accept images as well as PDF (mirrors _IMAGE_OR_PDF_KINDS backend).
+const IMAGE_OR_PDF_KINDS: readonly AttachmentKind[] = [
+  'takeoff_scan',
+  'proposal_measurements',
+  'proposal_other',
+]
 
 export type UploadStatus = 'idle' | 'presigning' | 'uploading' | 'confirming' | 'done' | 'error'
 
@@ -42,9 +50,9 @@ const INITIAL: UploadState = {
 }
 
 function clientValidate(file: File, kind: AttachmentKind): string | null {
-  if (kind === 'takeoff_scan') {
+  if (IMAGE_OR_PDF_KINDS.includes(kind)) {
     if (!SCAN_CONTENT_TYPES.includes(file.type)) {
-      return 'Takeoff scans must be PNG, JPEG, WebP, or PDF'
+      return 'This file must be a PNG, JPEG, WebP, or PDF'
     }
   } else if (file.type !== 'application/pdf') {
     return 'Only PDF files are supported'
@@ -113,6 +121,65 @@ export function useAttachmentUpload(): UseAttachmentUpload {
       }
     },
     [],
+  )
+
+  return { upload, state, reset }
+}
+
+// ── Lead-scoped variant (WS2: estimate-optional proposals) ────────────────────
+//
+// Identical upload orchestration to useAttachmentUpload but targets the
+// lead-scoped presign / confirm endpoints (/api/leads/{leadId}/attachments/...).
+// Used by ProposalDocumentsSection when no estimate is present yet.
+
+export interface UseLeadAttachmentUpload {
+  upload: (file: File, kind: AttachmentKind) => Promise<IntakeAttachment | null>
+  state: UploadState
+  reset: () => void
+}
+
+export function useLeadAttachmentUpload(leadId: string): UseLeadAttachmentUpload {
+  const [state, setState] = useState<UploadState>(INITIAL)
+
+  const reset = useCallback(() => setState(INITIAL), [])
+
+  const upload = useCallback(
+    async (file: File, kind: AttachmentKind): Promise<IntakeAttachment | null> => {
+      const validationError = clientValidate(file, kind)
+      if (validationError) {
+        setState({ ...INITIAL, status: 'error', error: validationError })
+        return null
+      }
+
+      try {
+        setState({ ...INITIAL, status: 'presigning' })
+
+        const { attachmentId, uploadUrl } = await estimatingApi.presignLeadAttachment(leadId, {
+          kind,
+          fileName: file.name,
+          contentType: file.type,
+          sizeBytes: file.size,
+        })
+
+        setState((prev) => ({ ...prev, status: 'uploading' }))
+
+        await xhrPut(uploadUrl, file, (pct) =>
+          setState((prev) => ({ ...prev, progress: pct })),
+        )
+
+        setState((prev) => ({ ...prev, status: 'confirming', progress: 100 }))
+
+        const attachment = await estimatingApi.confirmLeadAttachment(leadId, attachmentId)
+
+        setState({ status: 'done', progress: 100, error: null, attachment })
+        return attachment
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Upload failed'
+        setState({ ...INITIAL, status: 'error', error: message })
+        return null
+      }
+    },
+    [leadId],
   )
 
   return { upload, state, reset }

@@ -1,36 +1,39 @@
 import { useState } from 'react'
 import { Send } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { useBidByLeadId, useCreateBid, useUpdateBid } from '@/hooks/useBids'
 import { useUpdateLead } from '@/hooks/useLeads'
+import { useApprovedEstimate } from '@/hooks/useApprovedEstimate'
 import { formatCurrency, formatDate, daysUntil, cn } from '@/lib/utils'
-import { estimatingApi } from '@/api/estimating'
 import { ProposalBuilder } from '@/views/inside-sales/components/estimating/ProposalBuilder'
 import type { Lead } from '@/types'
 
 interface BidTabProps {
   lead: Lead
+  /**
+   * Controlled builder visibility. LeadDetailPanel's action bar owns this so
+   * its Generate Proposal button can switch to this tab and expand the builder
+   * in one click; left uncontrolled the tab manages its own state.
+   */
+  builderOpen?: boolean
+  onBuilderOpenChange?: (open: boolean) => void
 }
 
-export function BidTab({ lead }: BidTabProps) {
+export function BidTab({ lead, builderOpen, onBuilderOpenChange }: BidTabProps) {
   const [bidAmountDraft, setBidAmountDraft] = useState<string | null>(null)
-  const [showProposalBuilder, setShowProposalBuilder] = useState(false)
+  const [localBuilderOpen, setLocalBuilderOpen] = useState(false)
+
+  const showProposalBuilder = builderOpen ?? localBuilderOpen
+  const setShowProposalBuilder = onBuilderOpenChange ?? setLocalBuilderOpen
 
   const { data: existingBid } = useBidByLeadId(lead.id)
   const createBid = useCreateBid()
   const updateBid = useUpdateBid()
   const updateLead = useUpdateLead()
 
-  // Fetch the approved estimate linked to this lead — needed to gate the
-  // Generate Proposal button. Only queried when lead.status === 'approved'.
-  const { data: approvedEstimates, isLoading: loadingApprovedEstimate } = useQuery({
-    queryKey: ['estimates', 'approved', lead.id],
-    queryFn: () => estimatingApi.list({ leadId: lead.id, status: 'approved' }),
-    enabled: lead.status === 'approved',
-    staleTime: 30_000,
-  })
-  const approvedEstimate = approvedEstimates?.[0] ?? null
+  // Shared with LeadDetailPanel's action-bar button — same query key, one fetch.
+  const { estimate: approvedEstimate, isLoading: loadingApprovedEstimate } =
+    useApprovedEstimate(lead)
 
   const effectiveBidAmount = bidAmountDraft ?? (existingBid ? existingBid.estimated_value.toString() : '')
 
@@ -151,16 +154,17 @@ export function BidTab({ lead }: BidTabProps) {
         )}
       </div>
 
-      {/* Proposal section — only rendered when lead is approved AND an approved
-          estimate exists for this lead. Absent (not disabled) otherwise. */}
-      {lead.status === 'approved' && !loadingApprovedEstimate && approvedEstimate && (
+      {/* Proposal section — WS2: always rendered when a lead exists (no estimate
+          required). approvedEstimate is passed when present so ProposalBuilder
+          can display estimate-derived pricing; it is null otherwise. */}
+      {!loadingApprovedEstimate && (
         <div>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Proposal</p>
 
           {showProposalBuilder ? (
             <ProposalBuilder
               lead={lead}
-              estimate={approvedEstimate}
+              estimate={approvedEstimate ?? null}
               onClose={() => setShowProposalBuilder(false)}
             />
           ) : (

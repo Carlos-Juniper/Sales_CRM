@@ -22,6 +22,7 @@ export type ProposalSectionKey =
   | 'portfolio' | 'thank_you'
   // optional
   | 'startup_plan_30_60_90' | 'juniper_sync' | 'juniper_mapping' | 'meet_our_team_executive'
+  | 'irrigation_reporting_sample' | 'table_of_contents'
 
 export type TeamMemberType = 'branch' | 'executive'
 
@@ -151,6 +152,40 @@ export interface StartupPlanInput {
   ongoing: string[]
 }
 
+/**
+ * The signature block printed on the intro letter and thank-you page.
+ *
+ * Not a persisted row — it is assembled at render time from the signer's `users`
+ * record plus company-level fallbacks (see resolveSigner in
+ * hooks/useProposalDocument.ts). `users` carries no phone or title column, so
+ * those two are still derived rather than looked up.
+ */
+export interface ProposalSigner {
+  name: string
+  title: string
+  phone: string
+  email: string
+  branchAddress: string
+}
+
+/**
+ * GET /api/proposals/:id/signer — the per-user facts only.
+ *
+ * Every field is nullable and null means "the DB does not know": the signer has
+ * not set a title, or their office could not be determined (§3.2 returns null
+ * rather than guessing between a regional director's eight branches). Filling
+ * those nulls with the company line is the frontend's job, because
+ * COMPANY_INFO is a frontend constant — see resolveSigner in
+ * hooks/useProposalDocument.ts.
+ */
+export interface ProposalSignerFacts {
+  name: string | null
+  title: string | null
+  phone: string | null
+  email: string | null
+  branchAddress: string | null
+}
+
 /** Server-side PDF render result — one row per render attempt stored in proposal_renders. */
 export interface ProposalRender {
   id: string
@@ -165,13 +200,28 @@ export interface ProposalRender {
   renderedBy: string
   durationMs: number | null
   renderedAt: string
+  /**
+   * Pages whose content overflowed the fixed 11in sheet and was clipped out of
+   * the PDF. Persisted on the render row by migration 028, so it is present
+   * both on a fresh render response and on rows read back from
+   * proposal_renders.
+   *
+   * Three distinct states, and they must not be collapsed:
+   *   undefined / null — the render predates overflow detection (migration 028)
+   *   []               — measured, nothing was clipped
+   *   [{...}]          — these pages lost content
+   *
+   * A non-empty list does NOT mean the render failed — the PDF is a usable
+   * document. It means a rep should look before sending.
+   */
+  overflowingPages?: { page: number; testId: string | null; overflowPx: number }[] | null
 }
 
 /** Persisted row — every generated proposal is saved so it can be reopened/edited (no ephemeral-only state, per CLAUDE.md). */
 export interface ProposalRequest {
   id: string
   leadId: string
-  estimateId: string
+  estimateId: string | null
   createdBy: string          // user id
   sections: ProposalSectionKey[]           // which optional sections are included (required ones are implicit)
   orgChart: OrgChartInput
@@ -180,6 +230,9 @@ export interface ProposalRequest {
   executiveTeamMemberIds: string[]         // optional Meet Our Team — Executive
   clientReferenceIds: string[]
   portfolioPropertyIds: string[]
+  /** Custom chapter order (body chapters only — excludes cover/intro/closing).
+   *  null = no custom order saved yet; use the natural default order. */
+  chapterOrder: string[] | null
   signerUserId: string                     // who signs the letter/thank-you pages
   createdAt: string
   updatedAt: string

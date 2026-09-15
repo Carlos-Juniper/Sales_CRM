@@ -3,6 +3,7 @@ import './LeadDetailPanel.css'
 import { useNavigate } from 'react-router-dom'
 import {
   X, MapPin, ChevronUp, ChevronDown, ArrowRight, Pencil, Trash2, CheckCircle2,
+  FileText,
 } from 'lucide-react'
 import { LeadTypeBadge } from '@/components/shared/LeadTypeBadge'
 import { Button } from '@/components/ui/button'
@@ -36,6 +37,16 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // Tabs are controlled and the builder's visibility is lifted here so the
+  // action-bar button can jump to the Bid tab and expand the builder at once.
+  const [activeTab, setActiveTab] = useState('overview')
+  const [proposalBuilderOpen, setProposalBuilderOpen] = useState(false)
+
+  function handleGenerateProposal() {
+    setActiveTab('bid')
+    setProposalBuilderOpen(true)
+  }
 
   useLeadPanelKeyboard(leadId, onClose, onPrev, onNext)
 
@@ -175,7 +186,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                 <LeadMetricsGrid lead={lead} />
 
                 {/* Tabs */}
-                <Tabs defaultValue="overview" className="flex flex-col">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col">
                   <div className="px-6 border-b border-gray-100 flex-shrink-0">
                     <TabsList className="w-auto bg-transparent p-0 gap-0 h-auto rounded-none">
                       {[
@@ -203,7 +214,11 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                   </TabsContent>
 
                   <TabsContent value="bid" className="mt-0">
-                    <BidTab lead={lead} />
+                    <BidTab
+                      lead={lead}
+                      builderOpen={proposalBuilderOpen}
+                      onBuilderOpenChange={setProposalBuilderOpen}
+                    />
                   </TabsContent>
                 </Tabs>
 
@@ -220,6 +235,21 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                 >
                   Open in Estimating
                 </Button>
+                {/* WS2: Generate Proposal is always available once a lead exists.
+                    No estimate required — the API accepts estimate-optional
+                    proposals (estimate_id is now nullable). */}
+                {lead && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center gap-1.5 text-gray-700"
+                    onClick={handleGenerateProposal}
+                    data-testid="generate-proposal-action"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    Generate Proposal
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   className="flex items-center gap-1.5 bg-[#2E7D52] hover:bg-[#256644] text-white"

@@ -306,6 +306,50 @@ export const estimatingApi = {
       `/estimating/estimates/${estimateId}/attachments/${attachmentId}/download-url`,
     ),
 
+  /** Reorder an 'other' proposal attachment (Handoff 47) — sortOrder only. */
+  patchAttachmentSortOrder: (estimateId: string, attachmentId: string, sortOrder: number) =>
+    apiClient.patch<import('@/types/estimating').IntakeAttachment>(
+      `/estimating/estimates/${estimateId}/attachments/${attachmentId}`,
+      { sortOrder },
+    ),
+
+  /** Soft-delete an attachment and remove its GCS object (Handoff 47). */
+  deleteAttachment: (estimateId: string, attachmentId: string) =>
+    apiClient.delete<void>(
+      `/estimating/estimates/${estimateId}/attachments/${attachmentId}`,
+    ),
+
+  // ── Lead-scoped proposal attachment routes (WS2) ─────────────────────────
+  // Used when generating a proposal before an estimate exists. Mirrors the
+  // estimate-scoped presign/confirm/list routes but targets /api/leads/{leadId}.
+
+  /** Presign a GCS resumable upload session for a lead-scoped proposal document. */
+  presignLeadAttachment: (
+    leadId: string,
+    body: { kind: import('@/types/estimating').AttachmentKind; fileName: string; contentType: string; sizeBytes: number },
+  ) =>
+    apiClient.post<{ attachmentId: string; objectKey: string; uploadUrl: string }>(
+      `/leads/${leadId}/attachments/presign`,
+      body,
+    ),
+
+  /** Confirm a lead-scoped proposal document upload (flips status to 'stored'). */
+  confirmLeadAttachment: (leadId: string, attachmentId: string) =>
+    apiClient.post<import('@/types/estimating').IntakeAttachment>(
+      `/leads/${leadId}/attachments/${attachmentId}/confirm`,
+      {},
+    ),
+
+  /** List lead-scoped proposal document attachments (proposal kinds only). */
+  listLeadAttachments: (leadId: string) =>
+    apiClient.get<import('@/types/estimating').IntakeAttachment[]>(
+      `/leads/${leadId}/attachments`,
+    ),
+
+  /** Soft-delete a lead-scoped proposal document attachment (C1-1). */
+  deleteLeadAttachment: (leadId: string, attachmentId: string) =>
+    apiClient.delete<void>(`/leads/${leadId}/attachments/${attachmentId}`),
+
   createSection: (estimateId: string, body: CreateSectionPayload) =>
     apiClient.post<EstimateSection>(`/estimating/estimates/${estimateId}/sections`, body),
   updateSection: (estimateId: string, sectionId: string, body: UpdateSectionPayload) =>

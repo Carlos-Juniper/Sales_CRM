@@ -7,6 +7,7 @@ import type {
   PortfolioProperty,
   ProposalRender,
   ProposalRequest,
+  ProposalSignerFacts,
   TeamMember,
   TeamMemberType,
 } from '@/types/proposal'
@@ -139,6 +140,15 @@ export const proposalsApi = {
    */
   update: (id: string, patch: Partial<CreateProposalPayload>) =>
     apiClient.patch<ProposalRequest>(`/proposals/${id}`, patch),
+
+  /**
+   * GET /api/proposals/:id/signer
+   * The signer's per-user facts (name, title, phone, email, office address),
+   * resolved server-side because the office needs a users -> user_branches ->
+   * branches join. Nulls mean "unknown" — the caller applies the company-level
+   * fallback. Reachable with a render-scoped token, unlike GET /api/users.
+   */
+  signer: (id: string) => apiClient.get<ProposalSignerFacts>(`/proposals/${id}/signer`),
 
   /**
    * GET /api/proposals?leadId=

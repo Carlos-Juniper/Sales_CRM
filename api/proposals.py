@@ -60,6 +60,9 @@ _NON_OFFICE_BRANCHES = (
     "Golden Palms on Orange River",
 )
 
+# Sorts the no-region bucket last, after every real region's sort_order.
+_UNGROUPED_REGION_SORT = 10_000
+
 _BRANCH_ROSTER_FILTER = (
     "active = 1 AND branch_name NOT LIKE '%DO NOT USE%' AND branch_name NOT IN ("
     + ", ".join("'" + n.replace("'", "''") + "'" for n in _NON_OFFICE_BRANCHES)
@@ -195,15 +198,6 @@ def _portfolio_property_out(r: dict) -> dict:
     else:
         photo_keys = []
 
-    # before_after_object_keys is TEXT NULL; NULL rows return as None after coerce_row.
-    before_after_raw = r.get("before_after_object_keys")
-    before_after = None
-    if isinstance(before_after_raw, str):
-        try:
-            before_after = json.loads(before_after_raw)
-        except (json.JSONDecodeError, TypeError):
-            before_after = None
-
     return {
         "id": r["id"],
         "name": r["name"],
@@ -211,7 +205,6 @@ def _portfolio_property_out(r: dict) -> dict:
         # Amendment A.3: regionId (not a union type)
         "regionId": r["region_id"],
         "photoObjectKeys": photo_keys if isinstance(photo_keys, list) else [],
-        "beforeAfterObjectKeys": before_after,
         "sortOrder": r["sort_order"],
     }
 
@@ -222,7 +215,7 @@ def _insurance_cert_out(r: dict) -> dict:
     Handoff 42: insurance data now lives in licenses_certifications. The output
     shape is intentionally stable so proposal consumers are unaffected. The
     'label' field is sourced from 'name' (insurance rows store their label in
-    name per the migration 027 COALESCE). 'uploadedAt' is mapped from
+    name per the migration 033 COALESCE). 'uploadedAt' is mapped from
     updated_at (the closest equivalent after the table merge).
     """
     return {
@@ -253,6 +246,68 @@ def _license_out(r: dict) -> dict:
 
 
 # ── ProposalRequest helpers ───────────────────────────────────────────────────
+
+# ── Signer resolution (Handoff 43 §3.1 / §3.2) ───────────────────────────────
+
+# Returned when the proposal names no signer, or names a user row that no longer
+# exists. Every field null so the frontend applies its company-level fallback —
+# a client-facing letter must never print an id or an empty line where a name
+# belongs.
+_EMPTY_SIGNER: dict = {
+    "name": None,
+    "title": None,
+    "phone": None,
+    "email": None,
+    "branchAddress": None,
+}
+
+
+async def _resolve_signer_office(user_id: str, estimate_id: Optional[str]) -> Optional[str]:
+    """The office address to print under the signer's name, or None.
+
+    Two rules, in order:
+
+      1. The estimate's branch, when the signer is assigned to it. For a job in
+         Fort Myers signed by someone who covers Fort Myers, that is the office
+         the client should call — and it is the only answer that stays right for
+         a regional director covering eight branches.
+
+      2. Their sole branch, when they hold exactly one.
+
+    Anything else returns None. A signer holding several branches on an estimate
+    outside all of them has no determinable office, and printing an arbitrary
+    one of the eight on a client document is worse than printing the company
+    address. Guessing here was the reason §3.2 was left open.
+    """
+    branch_rows = await query(
+        "SELECT aspire_branch_id FROM user_branches WHERE user_id = %s",
+        [user_id],
+    )
+    held = [int(r["aspire_branch_id"]) for r in branch_rows]
+    if not held:
+        return None
+
+    target: Optional[int] = None
+    if estimate_id:
+        est_rows = await query(
+            "SELECT aspire_branch_id FROM estimates WHERE id = %s", [estimate_id]
+        )
+        est_branch = est_rows[0].get("aspire_branch_id") if est_rows else None
+        if est_branch is not None and int(est_branch) in held:
+            target = int(est_branch)
+    if target is None and len(held) == 1:
+        target = held[0]
+    if target is None:
+        return None
+
+    rows = await query(
+        "SELECT address1, city, state, zip FROM branches WHERE aspire_branch_id = %s",
+        [target],
+    )
+    if not rows:
+        return None
+    return _build_address(rows[0]) or None
+
 
 def _new_proposal_id() -> str:
     """Generate a proposal-prefixed id matching the _new_id() pattern in estimating.py."""
@@ -288,6 +343,9 @@ def _render_out(row: dict) -> dict:
         "renderedBy": row["rendered_by"],
         "durationMs": row.get("duration_ms"),
         "renderedAt": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
+        # null for renders that predate overflow detection; [] means measured
+        # and nothing was clipped. The client must not conflate the two.
+        "overflowingPages": _json_col_out(row.get("overflowing_pages")),
     }
 
 
@@ -310,6 +368,10 @@ def _proposal_request_out(r: dict) -> dict:
         "executiveTeamMemberIds": _json_col_out(r.get("executive_team_member_ids") or "[]"),
         "clientReferenceIds": _json_col_out(r.get("client_reference_ids") or "[]"),
         "portfolioPropertyIds": _json_col_out(r.get("portfolio_property_ids") or "[]"),
+        # NULL means "no custom chapter order saved — use the natural default",
+        # distinct from a populated array. Do not coerce a missing value to "[]"
+        # the way the id-list fields above do.
+        "chapterOrder": _json_col_out(r.get("chapter_order")),
         "signerUserId": r["signer_user_id"],
         "createdAt": _iso(r["created_at"]),
         "updatedAt": _iso(r["updated_at"]),
@@ -372,8 +434,10 @@ def register(app, require_auth) -> None:
     ) -> list:
         rows = await query(
             f"""
-            SELECT b.branch_name, b.address1, b.city, b.state
+            SELECT b.branch_name, b.address1, b.city, b.state,
+                   b.region_id, r.name AS region_name, r.sort_order AS region_sort
             FROM branches b
+            LEFT JOIN regions r ON r.id = b.region_id
             WHERE {_BRANCH_ROSTER_FILTER}
               AND b.address1 IS NOT NULL AND b.address1 <> ''
               AND b.state IS NOT NULL AND b.state <> ''
@@ -381,28 +445,56 @@ def register(app, require_auth) -> None:
             """,
         )
 
-        by_address: dict[tuple, tuple[str, set[str]]] = {}
+        # Region key for an office. Branches with no region_id fall into the
+        # unnamed bucket, which the page renders under its generic heading —
+        # an unassigned office must still appear, not silently vanish.
+        def region_of(r: dict) -> tuple[int, str, str]:
+            rid = (r["region_id"] or "").strip()
+            if not rid:
+                return (_UNGROUPED_REGION_SORT, "", "")
+            return (r["region_sort"] or 0, rid, (r["region_name"] or rid).strip())
+
+        by_address: dict[tuple, tuple[str, tuple[int, str, str], set[str]]] = {}
         for r in rows:
             key = (r["address1"].strip().lower(), (r["city"] or "").strip().lower())
             state = r["state"].strip().upper()
             name = _BRANCH_SERVICE_LINE_SUFFIX.sub("", r["branch_name"].strip())
-            by_address.setdefault(key, (state, set()))[1].add(name)
+            entry = by_address.setdefault(key, (state, region_of(r), set()))
+            entry[2].add(name)
 
-        by_state: dict[str, set[str]] = {}
-        for state, names in by_address.values():
+        by_state: dict[str, dict[tuple[int, str, str], set[str]]] = {}
+        for state, region, names in by_address.values():
             # Rows sharing an address are one building, but not necessarily one
             # name: Panama City Beach and Tyndall share a yard and both belong on
             # the page. Only the division rows collapse into their host.
             hosts = {n for n in names if not _BRANCH_DIVISION.search(n)}
-            by_state.setdefault(state, set()).update(hosts or names)
+            by_state.setdefault(state, {}).setdefault(region, set()).update(hosts or names)
+
+        def office_count(state: str) -> int:
+            return sum(len(names) for names in by_state[state].values())
+
+        def regions_of(state: str) -> list[dict]:
+            # Keys sort by (sort_order, id), so real regions come out in their
+            # configured order and the unnamed bucket lands last.
+            out: list[dict] = []
+            for key in sorted(by_state[state]):
+                _sort, region_id, region_name = key
+                out.append(
+                    {
+                        "regionId": region_id,
+                        "regionName": region_name,
+                        "branches": sorted(by_state[state][key]),
+                    }
+                )
+            return out
 
         return [
             {
                 "state": state,
                 "stateName": _STATE_NAMES.get(state, state),
-                "branches": sorted(by_state[state]),
+                "regions": regions_of(state),
             }
-            for state in sorted(by_state, key=lambda s: (-len(by_state[s]), s))
+            for state in sorted(by_state, key=lambda s: (-office_count(s), s))
         ]
 
     # ── GET /api/proposals/config/team-members ─────────────────────────────
@@ -554,13 +646,19 @@ def register(app, require_auth) -> None:
     # ── POST /api/proposals ────────────────────────────────────────────────
     # Body: Omit<ProposalRequest, 'id'|'createdAt'|'updatedAt'>
     #
-    # Validation (in order):
-    #   1. estimateId exists in estimates table.
-    #   2. estimate.lead_id == leadId (the estimate belongs to this lead).
-    #   3. estimate.status == 'approved'.
+    # WS2: estimate_id is now optional. A proposal can be generated as soon as a
+    # lead exists. When estimate_id is supplied, we still validate that the
+    # estimate belongs to this lead (lead_id mismatch → 422). The status=approved
+    # gate is intentionally removed — the rep may generate a draft proposal at any
+    # point in the estimating lifecycle.
     #
     # On success: inserts into proposal_requests and returns the full
     # ProposalRequest (camelCase) with generated id/timestamps.
+    #
+    # Re-anchor uploads (Option C, WS2 §3): when estimate_id is supplied, any
+    # intake_attachments rows that were uploaded lead-scoped (lead_id = lead_id,
+    # estimate_id IS NULL) for the three proposal kinds are re-anchored to the
+    # estimate.
 
     @app.post("/api/proposals", status_code=201)
     async def create_proposal(
@@ -568,14 +666,15 @@ def register(app, require_auth) -> None:
         _user: dict = Depends(require_auth),
     ) -> dict:
         lead_id = body.get("leadId")
-        estimate_id = body.get("estimateId")
+        estimate_id = body.get("estimateId") or None  # treat empty string as None
         created_by = body.get("createdBy")
         signer_user_id = body.get("signerUserId")
 
-        # ── Validate required scalar fields ──────────────────────────────
+        # ── Validate required scalar fields (estimate_id is optional) ────
         missing = [f for f, v in [
-            ("leadId", lead_id), ("estimateId", estimate_id),
-            ("createdBy", created_by), ("signerUserId", signer_user_id),
+            ("leadId", lead_id),
+            ("createdBy", created_by),
+            ("signerUserId", signer_user_id),
         ] if not v]
         if missing:
             raise HTTPException(
@@ -583,35 +682,20 @@ def register(app, require_auth) -> None:
                 detail=f"Missing required fields: {', '.join(missing)}",
             )
 
-        # ── Validate estimate exists, belongs to leadId, and is approved ─
-        est_rows = await query(
-            "SELECT id, lead_id, status FROM estimates WHERE id = %s",
-            [estimate_id],
-        )
-        if not est_rows:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Estimate '{estimate_id}' not found.",
+        # ── When estimate_id is supplied, validate it belongs to leadId ──
+        if estimate_id:
+            est_rows = await query(
+                "SELECT id, lead_id FROM estimates WHERE id = %s",
+                [estimate_id],
             )
-        est = est_rows[0]
-
-        if est.get("lead_id") != lead_id:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Estimate '{estimate_id}' does not belong to lead '{lead_id}'. "
-                    "Proposal can only be generated for an estimate linked to this lead."
-                ),
-            )
-
-        if est.get("status") != "approved":
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Estimate '{estimate_id}' has status '{est.get('status')}'; "
-                    "only 'approved' estimates can be used to generate a proposal."
-                ),
-            )
+            if est_rows and est_rows[0].get("lead_id") != lead_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Estimate '{estimate_id}' does not belong to lead '{lead_id}'. "
+                        "Proposal can only be generated for an estimate linked to this lead."
+                    ),
+                )
 
         # ── Persist the new proposal request ─────────────────────────────
         proposal_id = _new_proposal_id()
@@ -642,6 +726,23 @@ def register(app, require_auth) -> None:
             ],
         )
 
+        # ── Re-anchor lead-scoped uploads to the estimate (Option C) ─────
+        # Re-anchors lead docs to estimate — two separate statements, not transactional.
+        # Any proposal documents uploaded while there was no estimate (anchored
+        # to lead_id) are linked to the now-known estimate so that
+        # append_proposal_documents and the render pipeline find them via
+        # estimate_id, not lead_id.
+        if estimate_id:
+            await execute(
+                """UPDATE intake_attachments
+                      SET estimate_id = %s
+                    WHERE lead_id = %s
+                      AND kind IN ('proposal_contract', 'proposal_measurements', 'proposal_other')
+                      AND estimate_id IS NULL
+                      AND status <> 'deleted'""",
+                [estimate_id, lead_id],
+            )
+
         rows = await query(
             "SELECT * FROM proposal_requests WHERE id = %s", [proposal_id]
         )
@@ -665,6 +766,65 @@ def register(app, require_auth) -> None:
             )
         return _proposal_request_out(rows[0])
 
+    # ── GET /api/proposals/:id/signer ──────────────────────────────────────
+    # The signer block printed on the intro letter and the thank-you page.
+    #
+    # This is a route rather than a frontend derivation for two reasons.
+    #
+    # First, correctness: the office address needs users -> user_branches ->
+    # branches, and the frontend cannot make that join. It previously printed
+    # COMPANY_INFO.address for every rep because User.branch_id is a legacy
+    # string that does not match branches.aspire_branch_id (Handoff 43 §3.2 —
+    # user_branches is the mapping, and it already exists).
+    #
+    # Second, reachability: the headless renderer carries a render-scoped token
+    # that is admitted on /api/proposals/{its id}/* and nothing else. The print
+    # route used to resolve the signer from GET /api/users, which that token is
+    # correctly refused — so every rendered PDF was signed "Your Juniper
+    # Representative" regardless of who sent it. Hanging the signer off the
+    # proposal fixes that without handing a render token the whole user
+    # directory.
+    #
+    # Fields the DB does not know are returned null, NOT as a company fallback:
+    # the company-level default belongs to the frontend, which is where
+    # COMPANY_INFO lives.
+
+    @app.get("/api/proposals/{proposal_id}/signer")
+    async def get_proposal_signer(
+        proposal_id: str,
+        _user: dict = Depends(require_auth),
+    ) -> dict:
+        rows = await query(
+            "SELECT signer_user_id, estimate_id FROM proposal_requests WHERE id = %s",
+            [proposal_id],
+        )
+        if not rows:
+            raise HTTPException(
+                status_code=404, detail=f"Proposal '{proposal_id}' not found."
+            )
+        signer_user_id = rows[0].get("signer_user_id")
+        estimate_id = rows[0].get("estimate_id")
+
+        user_rows = await query(
+            "SELECT id, name, email, phone, title FROM users WHERE id = %s",
+            [signer_user_id],
+        ) if signer_user_id else []
+        if not user_rows:
+            # A deleted signer must not take the whole document down — the
+            # letter renders with the company block instead.
+            return _EMPTY_SIGNER
+
+        u = user_rows[0]
+        branch_address = await _resolve_signer_office(signer_user_id, estimate_id)
+
+        return {
+            "name": u.get("name") or None,
+            "title": (u.get("title") or "").strip() or None,
+            "phone": (u.get("phone") or "").strip() or None,
+            "email": u.get("email") or None,
+            "branchAddress": branch_address,
+        }
+
     # ── PATCH /api/proposals/:id ───────────────────────────────────────────
     # Partial update — any subset of the mutable ProposalRequest fields.
     # Always bumps updated_at.
@@ -679,6 +839,7 @@ def register(app, require_auth) -> None:
         "executiveTeamMemberIds": "executive_team_member_ids",
         "clientReferenceIds":     "client_reference_ids",
         "portfolioPropertyIds":   "portfolio_property_ids",
+        "chapterOrder":           "chapter_order",
         "signerUserId":           "signer_user_id",
     }
     # JSON columns that must be serialised before persisting.
@@ -687,6 +848,10 @@ def register(app, require_auth) -> None:
         "teamMemberIds", "executiveTeamMemberIds",
         "clientReferenceIds", "portfolioPropertyIds",
     })
+    # JSON columns that are nullable — None means "clear it back to SQL NULL",
+    # not the literal JSON string "null". chapterOrder is not in
+    # _PROPOSAL_JSON_COLS: a rep clearing their custom order must write NULL.
+    _PROPOSAL_NULLABLE_JSON_COLS = frozenset({"chapterOrder"})
 
     @app.patch("/api/proposals/{proposal_id}")
     async def patch_proposal(
@@ -711,8 +876,12 @@ def register(app, require_auth) -> None:
             if camel in body:
                 set_parts.append(f"{col} = %s")
                 value = body[camel]
-                # Serialise JSON-typed columns before writing.
-                if camel in _PROPOSAL_JSON_COLS:
+                # Serialise JSON-typed columns before writing. Nullable JSON
+                # columns skip serialisation when the value is None so the
+                # column is written as SQL NULL, not the string "null".
+                if camel in _PROPOSAL_NULLABLE_JSON_COLS:
+                    value = json.dumps(value) if value is not None else None
+                elif camel in _PROPOSAL_JSON_COLS:
                     value = json.dumps(value)
                 params.append(value)
 
@@ -779,14 +948,16 @@ def register(app, require_auth) -> None:
             )
         return [_proposal_request_out(r) for r in rows]
 
-    # ── POST /api/proposals/:id/render ────────────────────────────────────────
-    # Trigger a server-side headless Chromium PDF render for a proposal.
-    # Returns the render result with download URL on success.
+    # ── GET /api/proposals/:id/validate ───────────────────────────────────────
+    # Standalone pre-render data guard (Handoff 46 §5 Slice C2).
+    # Returns 200 {"valid": true} when clean, or 422 with a list of blocking
+    # issues when the resolved proposal data contains placeholder values.
+    # The render endpoint calls the same guard before launching Chromium.
 
-    @app.post("/api/proposals/{proposal_id}/render")
-    async def render_proposal(
+    @app.get("/api/proposals/{proposal_id}/validate")
+    async def validate_proposal(
         proposal_id: str,
-        user: dict = Depends(require_auth),
+        _user: dict = Depends(require_auth),
     ):
         rows = await query(
             "SELECT id FROM proposal_requests WHERE id = %s",
@@ -795,9 +966,97 @@ def register(app, require_auth) -> None:
         if not rows:
             raise HTTPException(status_code=404, detail="Proposal not found")
 
+        from api.proposal_validation import validate_proposal_for_render
+
+        issues = await validate_proposal_for_render(proposal_id)
+        if issues:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "proposal_data_guard",
+                    "message": "Proposal contains placeholder data that must be replaced before rendering",
+                    "issues": [
+                        {"field": i.field, "value": i.value, "reason": i.reason}
+                        for i in issues
+                    ],
+                },
+            )
+        return {"valid": True}
+
+    # ── POST /api/proposals/:id/render ────────────────────────────────────────
+    # Trigger a server-side headless Chromium PDF render for a proposal.
+    # Guard runs before Chromium fires — a 422 aborts before any browser
+    # context is created, so there is no cost to an early rejection.
+    # Returns the render result with download URL on success.
+
+    @app.post("/api/proposals/{proposal_id}/render")
+    async def render_proposal(
+        proposal_id: str,
+        user: dict = Depends(require_auth),
+    ):
+        rows = await query(
+            "SELECT id, lead_id, estimate_id FROM proposal_requests WHERE id = %s",
+            (proposal_id,),
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+
+        # Pre-send data guard (Handoff 46 §5 Slice C2): block renders that
+        # contain placeholder names, fictional 555-01xx phones, or empty
+        # company identity env vars. Runs before Chromium is allocated.
+        from api.proposal_validation import (
+            validate_proposal_for_render,
+            proposal_document_warnings,
+        )
+
+        guard_issues = await validate_proposal_for_render(proposal_id)
+        if guard_issues:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "proposal_data_guard",
+                    "message": "Render blocked: proposal contains placeholder data",
+                    "issues": [
+                        {"field": i.field, "value": i.value, "reason": i.reason}
+                        for i in guard_issues
+                    ],
+                },
+            )
+
+        # Non-blocking pre-send warnings (Handoff 47 §7): a missing contract is
+        # usually a mistake but a legitimate early-draft case, so it warns rather
+        # than blocks. Collected before the render so it can ride the response.
+        # WS2: when estimate_id is None, fall back to lead_id for the contract check.
+        warnings: list[str] = []
+        estimate_id = rows[0].get("estimate_id")
+        _lead_id_for_warn = rows[0].get("lead_id")
+        if estimate_id:
+            warnings = await proposal_document_warnings(estimate_id=estimate_id)
+        elif _lead_id_for_warn:
+            warnings = await proposal_document_warnings(lead_id=_lead_id_for_warn)
+
         try:
             from api.proposal_render import render_proposal_pdf
+            from api.proposal_documents import (
+                ProposalDocumentDataError,
+                ProposalDocumentInfraError,
+            )
             result = await render_proposal_pdf(proposal_id, user)
+        except ProposalDocumentDataError as exc:
+            # A pending/failed attachment row (Handoff 47 §7) — a data problem,
+            # named so the rep can fix it. 422, not 503: retrying won't help.
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "proposal_document_guard",
+                    "message": str(exc),
+                    "issues": [{"field": "documents", "value": "", "reason": str(exc)}],
+                },
+            )
+        except ProposalDocumentInfraError as exc:
+            # A GCS read failure appending a document (Handoff 47 §7) — infra,
+            # retryable.
+            raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "30"})
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "30"})
         except Exception as exc:
@@ -812,6 +1071,16 @@ def register(app, require_auth) -> None:
             "pageCount": result.page_count,
             "version": result.version,
             "renderedAt": result.rendered_at,
+            # Pages whose content was clipped by the fixed 11in sheet. The
+            # render still succeeded — the client toasts this so a rep can fix
+            # the proposal before sending it, rather than discovering it after.
+            "overflowingPages": result.overflowing_pages,
+            # One entry per appended proposal document (Handoff 47 §5): the rep
+            # can see what landed at the tail without opening the PDF.
+            "documentManifest": result.document_manifest,
+            # Non-blocking pre-send warnings (Handoff 47 §7), e.g. no contract
+            # attached. The render still succeeded.
+            "warnings": warnings,
         }
 
     # ── GET /api/proposals/:id/renders ────────────────────────────────────────
@@ -825,7 +1094,8 @@ def register(app, require_auth) -> None:
         rows = await query(
             """
             SELECT id, proposal_id, version, object_key, page_count, status,
-                   error_message, rendered_by, duration_ms, created_at
+                   error_message, rendered_by, duration_ms, overflowing_pages,
+                   created_at
             FROM proposal_renders
             WHERE proposal_id = %s
             ORDER BY version DESC

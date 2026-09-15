@@ -762,6 +762,35 @@ _SCAN_CONTENT_TYPES = frozenset(
     {"application/pdf", "image/png", "image/jpeg", "image/webp"}
 )
 
+# Kinds that hang directly off intake_attachments.estimate_id with a NULL
+# intake_submission_id — no intake submission required (Handoff 27 for
+# takeoff_scan, Handoff 47 for the three proposal kinds). Everything NOT in this
+# set is intake-submission-scoped and 404s without a submission. A membership
+# test, not a growing `!= takeoff_scan` chain.
+_ESTIMATE_SCOPED_KINDS = frozenset(
+    {"takeoff_scan", "proposal_contract", "proposal_measurements", "proposal_other"}
+)
+
+# All valid attachment kinds. Unknown kinds coerce to 'other' (legacy behaviour);
+# the three proposal kinds must NOT coerce, or a proposal document uploads as an
+# intake 'other' row and the render silently finds nothing to append (§3.2).
+_VALID_ATTACHMENT_KINDS = frozenset(
+    {"property_map", "rfp", "other", "takeoff_scan",
+     "proposal_contract", "proposal_measurements", "proposal_other"}
+)
+
+# The three proposal-document kinds (validated at confirm; appended at render).
+_PROPOSAL_DOC_KINDS = frozenset(
+    {"proposal_contract", "proposal_measurements", "proposal_other"}
+)
+
+# Proposal-document kinds accept images as well as PDF, EXCEPT the contract,
+# which stays PDF-only (an Aspire printout; an image there is a screenshotted
+# contract). measurements/other accept scans via _SCAN_CONTENT_TYPES (§3.2).
+_IMAGE_OR_PDF_KINDS = frozenset(
+    {"takeoff_scan", "proposal_measurements", "proposal_other"}
+)
+
 # Attachment-by-id lookup, authorized against the estimate. Rows are linked
 # either directly (ia.estimate_id — takeoff scans) or through
 # their intake submission (legacy intake docs), hence the LEFT JOIN + OR.
@@ -792,6 +821,12 @@ def _attachment_out(r: dict) -> dict:
         "status": r.get("status", "pending"),
         "objectKey": r.get("object_key"),
         "downloadable": downloadable,
+        # Stable ordering for "other" proposal attachments (§3.1); 0 for every
+        # kind that does not use it. .get keeps pre-032 rows working.
+        "sortOrder": r.get("sort_order", 0),
+        # Server-side page count recorded at confirm for proposal documents
+        # (§6/§7); None for images before confirm and for pre-032 rows.
+        "pageCount": r.get("page_count"),
         "createdAt": _iso(r["created_at"]),
     }
 
@@ -2262,18 +2297,23 @@ def register(app, require_auth) -> None:
         if not est_rows:
             raise HTTPException(status_code=404, detail="Estimate not found")
 
-        # 2. Validate content type per kind. Intake docs stay PDF-only; the
-        # Takeoff Insert scan is a scanned map image, so the takeoff_scan kind
-        # also accepts common image types.
+        # 2. Validate content type per kind. Intake docs and the contract stay
+        # PDF-only; the Takeoff Insert scan and the measurements/other proposal
+        # kinds are scanned images, so they also accept common image types.
+        #
+        # Unknown kinds coerce to 'other' (legacy behaviour). The three proposal
+        # kinds are in the allowlist, so they never coerce — a proposal document
+        # uploading as an intake 'other' row would leave the render nothing to
+        # append with no error anywhere (§3.2).
         kind = body.get("kind", "other")
-        if kind not in ("property_map", "rfp", "other", "takeoff_scan"):
+        if kind not in _VALID_ATTACHMENT_KINDS:
             kind = "other"
         content_type = body.get("contentType", "")
-        if kind == "takeoff_scan":
+        if kind in _IMAGE_OR_PDF_KINDS:
             if content_type not in _SCAN_CONTENT_TYPES:
                 raise HTTPException(
                     status_code=400,
-                    detail="Takeoff scans must be PNG, JPEG, WebP, or PDF",
+                    detail="This attachment must be PNG, JPEG, WebP, or PDF",
                 )
         elif content_type != "application/pdf":
             raise HTTPException(status_code=400, detail="Only PDF attachments are supported")
@@ -2289,11 +2329,12 @@ def register(app, require_auth) -> None:
         if size_bytes > _att_mod.GCS_MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=400, detail="File exceeds the 2 GiB limit")
 
-        # 4. Resolve intake submission for the FK. Takeoff scans are
-        # ESTIMATE-scoped, not intake-submission-scoped: they hang directly
-        # off intake_attachments.estimate_id and need no submission.
+        # 4. Resolve intake submission for the FK. Estimate-scoped kinds (takeoff
+        # scans and the three proposal kinds) hang directly off
+        # intake_attachments.estimate_id and need no submission; everything else
+        # requires one. Membership test, not a `!= takeoff_scan` chain (§3.2).
         submission_id: Optional[str] = None
-        if kind != "takeoff_scan":
+        if kind not in _ESTIMATE_SCOPED_KINDS:
             sub_rows = await query(
                 "SELECT id FROM intake_submissions WHERE estimate_id = %s ORDER BY created_at DESC LIMIT 1",
                 [estimate_id],
@@ -2367,17 +2408,36 @@ def register(app, require_auth) -> None:
             )
             raise HTTPException(status_code=400, detail="Upload validation failed")
 
+        # Proposal documents are appended into a client-facing PDF, so their
+        # bytes are validated HERE, at confirm — the rep learns a file is
+        # unusable while still in the form, not at render (§7). This also records
+        # the page count the preview panel and render manifest report (§6). An
+        # encrypted/corrupt PDF or an undecodable image → status='failed', 400.
+        page_count: Optional[int] = None
+        if row.get("kind") in _PROPOSAL_DOC_KINDS:
+            import api.proposal_documents as _pdoc
+            try:
+                data = _pdoc.download_bytes(object_key)
+                page_count = _pdoc.validate_document_bytes(blob.content_type, data)
+            except _pdoc.DocumentValidationError as exc:
+                await execute(
+                    "UPDATE intake_attachments SET status = %s WHERE id = %s",
+                    ["failed", attachment_id],
+                )
+                raise HTTPException(status_code=400, detail=str(exc))
+
         await execute(
             """UPDATE intake_attachments
-               SET status = %s, content_type = %s, size_bytes = %s
+               SET status = %s, content_type = %s, size_bytes = %s, page_count = %s
                WHERE id = %s""",
-            ["stored", blob.content_type, blob.size, attachment_id],
+            ["stored", blob.content_type, blob.size, page_count, attachment_id],
         )
 
         updated = dict(row)
         updated["status"] = "stored"
         updated["content_type"] = blob.content_type
         updated["size_bytes"] = blob.size
+        updated["page_count"] = page_count
         return _attachment_out(updated)
 
     @app.get("/api/estimating/estimates/{estimate_id}/attachments")
@@ -2393,8 +2453,9 @@ def register(app, require_auth) -> None:
         rows = await query(
             """SELECT ia.* FROM intake_attachments ia
                LEFT JOIN intake_submissions ins ON ins.id = ia.intake_submission_id
-               WHERE ia.estimate_id = %s OR ins.estimate_id = %s
-               ORDER BY ia.created_at ASC""",
+               WHERE (ia.estimate_id = %s OR ins.estimate_id = %s)
+                 AND ia.status <> 'deleted'
+               ORDER BY ia.sort_order ASC, ia.created_at ASC""",
             [estimate_id, estimate_id],
         )
         return [_attachment_out(r) for r in rows]
@@ -2421,6 +2482,296 @@ def register(app, require_auth) -> None:
 
         url = _att_mod.signed_get_url(row["object_key"], row["file_name"])
         return {"url": url, "expiresIn": _att_mod.GCS_SIGNED_URL_TTL_MIN * 60}
+
+    @app.patch(
+        "/api/estimating/estimates/{estimate_id}/attachments/{attachment_id}",
+    )
+    async def patch_attachment(
+        estimate_id: str,
+        attachment_id: str,
+        body: dict,
+        _user: dict = Depends(require_auth),
+    ) -> dict:
+        """Update an attachment's sort_order (reordering 'other' proposal docs, §4).
+
+        Accepts sortOrder only — the render orders 'other' attachments by this
+        column, so writing it reorders them in the output PDF.
+        """
+        raw = body.get("sortOrder")
+        if raw is None:
+            raise HTTPException(status_code=400, detail="sortOrder is required")
+        try:
+            sort_order = int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="sortOrder must be an integer")
+
+        rows = await query(
+            _ATTACHMENT_BY_ID_SQL,
+            [attachment_id, estimate_id, estimate_id],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+
+        await execute(
+            "UPDATE intake_attachments SET sort_order = %s WHERE id = %s",
+            [sort_order, attachment_id],
+        )
+        updated = dict(rows[0])
+        updated["sort_order"] = sort_order
+        return _attachment_out(updated)
+
+    @app.delete(
+        "/api/estimating/estimates/{estimate_id}/attachments/{attachment_id}",
+        status_code=204,
+    )
+    async def delete_attachment(
+        estimate_id: str,
+        attachment_id: str,
+        _user: dict = Depends(require_auth),
+    ):
+        """Soft-delete an attachment and remove its GCS object (§4).
+
+        Per api/attachments.py::delete's docstring, the row is soft-deleted
+        (status='deleted') to preserve the corpus, and the stored object is
+        deleted from GCS. A GCS failure (object already gone) does not fail the
+        soft-delete — the row must still be retired.
+        """
+        rows = await query(
+            _ATTACHMENT_BY_ID_SQL,
+            [attachment_id, estimate_id, estimate_id],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+
+        row = rows[0]
+        object_key = row.get("object_key")
+        if object_key:
+            try:
+                _att_mod.delete(object_key)
+            except Exception:
+                # Best-effort: an already-absent object must not block the
+                # soft-delete of the row.
+                logger.warning("GCS delete failed for %s; soft-deleting row anyway", object_key)
+
+        await execute(
+            "UPDATE intake_attachments SET status = %s WHERE id = %s",
+            ["deleted", attachment_id],
+        )
+
+    # ── Lead-scoped proposal attachment routes (WS2) ───────────────────────
+    #
+    # When there is no estimate yet (estimate-optional proposals, Handoff 50
+    # WS2), proposal documents (contract / measurements / other) are uploaded
+    # against the LEAD instead of the estimate. These three endpoints mirror the
+    # estimate-scoped presign / confirm / list routes but write lead_id instead
+    # of estimate_id. Only the three proposal kinds are accepted — rejecting
+    # intake kinds (takeoff_scan, property_map, rfp, other) keeps them firmly
+    # estimate-scoped.
+    #
+    # When POST /api/proposals later supplies an estimate_id, the handler
+    # re-anchors lead-scoped rows to the estimate (two separate statements,
+    # not transactional) so the render pipeline finds them via estimate_id as usual.
+
+    # Lead-only attachment presign
+    @app.post("/api/leads/{lead_id}/attachments/presign", status_code=201)
+    async def presign_lead_attachment(
+        lead_id: str,
+        body: dict,
+        request: Request,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Mint a pending lead-scoped proposal attachment and return the GCS session URI.
+
+        Only the three proposal document kinds are accepted; intake/takeoff kinds
+        must be uploaded against an estimate (estimate-scoped presign endpoint).
+        """
+        # 1. Lead must exist.
+        lead_rows = await query("SELECT id FROM leads WHERE id = %s", [lead_id])
+        if not lead_rows:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        # 2. Only proposal kinds are accepted at the lead level.
+        kind = body.get("kind", "")
+        if kind not in _PROPOSAL_DOC_KINDS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"kind '{kind}' is not valid for lead-scoped uploads. "
+                    "Accepted: proposal_contract, proposal_measurements, proposal_other"
+                ),
+            )
+
+        # 3. Validate content type (same rules as estimate presign).
+        content_type = body.get("contentType", "")
+        if kind in _IMAGE_OR_PDF_KINDS:
+            if content_type not in _SCAN_CONTENT_TYPES:
+                raise HTTPException(
+                    status_code=400,
+                    detail="This attachment must be PNG, JPEG, WebP, or PDF",
+                )
+        elif content_type != "application/pdf":
+            raise HTTPException(status_code=400, detail="Only PDF attachments are supported")
+
+        # 4. Validate size.
+        raw_size = body.get("sizeBytes", 0)
+        try:
+            size_bytes = int(raw_size)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="sizeBytes must be an integer")
+        if size_bytes <= 0:
+            raise HTTPException(status_code=400, detail="sizeBytes must be positive")
+        if size_bytes > _att_mod.GCS_MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=400, detail="File exceeds the 2 GiB limit")
+
+        # 5. Mint IDs and persist a pending row (lead_id set, estimate_id NULL).
+        attachment_id = _new_id("att")
+        # Use lead_id in the object key path so GCS objects are namespaced per lead.
+        object_key = _att_mod.object_key_for(f"lead-{lead_id}", attachment_id, content_type)
+
+        await execute(
+            """INSERT INTO intake_attachments
+                 (id, intake_submission_id, estimate_id, lead_id, file_name,
+                  content_type, size_bytes, url, kind, uploaded_by, status, object_key)
+               VALUES (%s, NULL, NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            [
+                attachment_id, lead_id,
+                body.get("fileName", ""), content_type, size_bytes, "",
+                kind, user.get("id"), "pending", object_key,
+            ],
+        )
+
+        # 6. Begin GCS resumable session.
+        raw_origin = request.headers.get("origin", "")
+        origin = raw_origin if raw_origin in _att_mod.ALLOWED_ORIGINS else ""
+        upload_url = _att_mod.begin_resumable_session(object_key, content_type, origin)
+        return {"attachmentId": attachment_id, "objectKey": object_key, "uploadUrl": upload_url}
+
+    # Lead-only attachment confirm
+    @app.post("/api/leads/{lead_id}/attachments/{attachment_id}/confirm")
+    async def confirm_lead_attachment(
+        lead_id: str,
+        attachment_id: str,
+        _user: dict = Depends(require_auth),
+    ) -> dict:
+        """Verify the blob landed in GCS and flip status to 'stored' (or 'failed').
+
+        Looks up the attachment by both id AND lead_id so a rep cannot confirm
+        an attachment belonging to a different lead.
+        """
+        rows = await query(
+            "SELECT ia.* FROM intake_attachments ia WHERE ia.id = %s AND ia.lead_id = %s",
+            [attachment_id, lead_id],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+
+        row = rows[0]
+        object_key = row.get("object_key")
+        if not object_key:
+            raise HTTPException(status_code=409, detail="No GCS object associated with this attachment")
+
+        try:
+            blob = _att_mod.head(object_key)
+        except Exception:
+            await execute(
+                "UPDATE intake_attachments SET status = %s WHERE id = %s",
+                ["failed", attachment_id],
+            )
+            raise HTTPException(status_code=400, detail="Object not found in GCS")
+
+        expected_type = row.get("content_type") or "application/pdf"
+        if blob.content_type != expected_type or not blob.size:
+            await execute(
+                "UPDATE intake_attachments SET status = %s WHERE id = %s",
+                ["failed", attachment_id],
+            )
+            raise HTTPException(status_code=400, detail="Upload validation failed")
+
+        # Validate proposal document bytes at confirm time (same as estimate confirm).
+        page_count: Optional[int] = None
+        if row.get("kind") in _PROPOSAL_DOC_KINDS:
+            import api.proposal_documents as _pdoc
+            try:
+                data = _pdoc.download_bytes(object_key)
+                page_count = _pdoc.validate_document_bytes(blob.content_type, data)
+            except _pdoc.DocumentValidationError as exc:
+                await execute(
+                    "UPDATE intake_attachments SET status = %s WHERE id = %s",
+                    ["failed", attachment_id],
+                )
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        await execute(
+            """UPDATE intake_attachments
+               SET status = %s, content_type = %s, size_bytes = %s, page_count = %s
+               WHERE id = %s""",
+            ["stored", blob.content_type, blob.size, page_count, attachment_id],
+        )
+
+        updated = dict(row)
+        updated["status"] = "stored"
+        updated["content_type"] = blob.content_type
+        updated["size_bytes"] = blob.size
+        updated["page_count"] = page_count
+        return _attachment_out(updated)
+
+    # Lead-only attachment list
+    @app.get("/api/leads/{lead_id}/attachments")
+    async def list_lead_attachments(
+        lead_id: str,
+        _user: dict = Depends(require_auth),
+    ) -> list:
+        """List proposal document attachments anchored to a lead (no estimate yet).
+
+        Returns only the three proposal kinds; intake/takeoff attachments are
+        always estimate-scoped and will not appear here.
+        """
+        lead_rows = await query("SELECT id FROM leads WHERE id = %s", [lead_id])
+        if not lead_rows:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        rows = await query(
+            """SELECT ia.* FROM intake_attachments ia
+               WHERE ia.lead_id = %s
+                 AND ia.kind IN ('proposal_contract', 'proposal_measurements', 'proposal_other')
+                 AND ia.status <> 'deleted'
+               ORDER BY ia.sort_order ASC, ia.created_at ASC""",
+            [lead_id],
+        )
+        return [_attachment_out(r) for r in rows]
+
+    # Lead-only attachment delete
+    @app.delete("/api/leads/{lead_id}/attachments/{attachment_id}", status_code=204)
+    async def delete_lead_attachment(
+        lead_id: str,
+        attachment_id: str,
+        _user: dict = Depends(require_auth),
+    ):
+        """Soft-delete a lead-scoped attachment and remove its GCS object.
+
+        Scopes the lookup to both id AND lead_id so a rep cannot delete an
+        attachment belonging to a different lead. GCS delete is best-effort —
+        an already-absent object must not block the soft-delete of the row.
+        """
+        rows = await query(
+            "SELECT * FROM intake_attachments WHERE id = %s AND lead_id = %s",
+            [attachment_id, lead_id],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+
+        row = rows[0]
+        object_key = row.get("object_key")
+        if object_key:
+            try:
+                _att_mod.delete(object_key)
+            except Exception:
+                logger.warning("GCS delete failed for %s; soft-deleting row anyway", object_key)
+
+        await execute(
+            "DELETE FROM intake_attachments WHERE id = %s AND lead_id = %s",
+            [attachment_id, lead_id],
+        )
 
     # ── Config-table read APIs (READ-ONLY by locked decision) ──────────────
     #

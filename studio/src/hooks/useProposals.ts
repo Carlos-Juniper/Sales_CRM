@@ -31,6 +31,7 @@ import type {
   PortfolioProperty,
   ProposalRender,
   ProposalRequest,
+  ProposalSignerFacts,
   TeamMember,
   TeamMemberType,
 } from '@/types/proposal'
@@ -176,6 +177,22 @@ export function useProposal(id: string | null) {
 }
 
 /**
+ * The signer's resolved per-user facts for one proposal.
+ * Query key: ['proposals', id, 'signer']
+ *
+ * Part of the print route's readiness gate: the signer's name is printed on the
+ * letter, so a PDF captured before this resolves goes out unsigned.
+ */
+export function useProposalSigner(id: string | null) {
+  return useQuery<ProposalSignerFacts>({
+    queryKey: ['proposals', id, 'signer'],
+    queryFn: () => proposalsApi.signer(id!),
+    enabled: !!id,
+    staleTime: 30_000,
+  })
+}
+
+/**
  * All saved proposals for a lead, ordered createdAt DESC.
  * Query key: ['proposals', 'list', leadId]
  */
@@ -258,7 +275,19 @@ export function useRenderProposal() {
     mutationFn: (proposalId: string) => proposalsApi.render(proposalId),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['proposals', result.proposalId, 'renders'] })
-      toast('PDF generated successfully', { variant: 'success' })
+      // The render succeeded either way — a clipped page still produces a valid
+      // PDF. But "success" is the wrong thing to tell a rep who is about to send
+      // a proposal with a paragraph missing, so the clipped case gets a warning
+      // that names the count.
+      const clipped = result.overflowingPages?.length ?? 0
+      if (clipped > 0) {
+        toast(
+          `PDF generated, but content is clipped on ${clipped} ${clipped === 1 ? 'page' : 'pages'} — review before sending`,
+          { variant: 'error' },
+        )
+      } else {
+        toast('PDF generated successfully', { variant: 'success' })
+      }
     },
     onError: () => toast('Failed to generate PDF — please try again', { variant: 'error' }),
   })

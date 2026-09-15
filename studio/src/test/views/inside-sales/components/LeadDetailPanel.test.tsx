@@ -313,3 +313,32 @@ describe('LeadDetailPanel — In Aspire badge', () => {
     expect(await screen.findByText('In Aspire')).toBeInTheDocument()
   })
 })
+
+// ── WS2: Generate Proposal button renders without approved estimate ────────────
+
+describe('LeadDetailPanel — WS2: estimate-optional proposal button', () => {
+  it('test_generate_proposal_button_renders_without_estimate: shows button for any lead status', async () => {
+    // Lead is "new" — not approved, no estimate. WS2 removes the gate.
+    setupHandlers(makeLead({ status: 'new' }))
+    server.use(
+      // The approved-estimate query returns empty — no estimate exists.
+      http.get('/api/estimating/estimates', () => HttpResponse.json([])),
+    )
+    render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
+    await screen.findByText('Silverleaf HOA')
+    // Generate Proposal button must be present even with no estimate.
+    expect(
+      await screen.findByTestId('generate-proposal-action'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows Generate Proposal button for an approved lead with no estimate', async () => {
+    setupHandlers(makeLead({ status: 'approved' }))
+    server.use(
+      http.get('/api/estimating/estimates', () => HttpResponse.json([])),
+    )
+    render(<LeadDetailPanel leadId="l1" onClose={onClose} />)
+    await screen.findByText('Silverleaf HOA')
+    expect(await screen.findByTestId('generate-proposal-action')).toBeInTheDocument()
+  })
+})

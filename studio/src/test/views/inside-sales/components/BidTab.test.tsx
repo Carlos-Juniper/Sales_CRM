@@ -1,14 +1,13 @@
 // ---------------------------------------------------------------------------
-// BidTab — Proposal section gating tests (Slice 9, Handoff 37)
+// BidTab — Proposal section tests (updated for WS2)
 //
-// Conventions follow ProposalBuilder.test.tsx: vi.mock for hooks that would
-// require MSW proposal endpoints; MSW for the estimating list query (which
-// already has a handler in handlers.ts, augmented with leadId filter in Slice 9).
+// WS2: Generate Proposal is always rendered when a lead exists — no estimate
+// required, no lead status gate. Groups 1 and 2 (button absent) are retired;
+// the approved-estimate query always fires (query is now unconditional).
 //
-// Test groups:
-//  1. button ABSENT when lead.status !== 'approved'
-//  2. button ABSENT when lead is approved but no approved estimate exists for it
-//  3. button PRESENT when both conditions met; clicking opens ProposalBuilder
+// Test groups (WS2):
+//  1. Proposal section renders for any lead (no gate on status or estimate)
+//  2. Clicking Generate Proposal opens ProposalBuilder
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest'
@@ -133,61 +132,34 @@ beforeEach(() => {
 })
 
 // ---------------------------------------------------------------------------
-// Group 1: button absent when lead.status !== 'approved'
+// Group 1 (WS2): Proposal section always renders when lead exists
 // ---------------------------------------------------------------------------
 
-describe('BidTab — Proposal section absent when lead not approved', () => {
-  const nonApprovedStatuses: LeadStatus[] = [
-    'new', 'reviewed', 'contacted', 'qualified', 'estimating', 'op_review', 'proposal_sent',
+describe('BidTab — WS2: Proposal section always renders for any lead', () => {
+  const allStatuses: LeadStatus[] = [
+    'new', 'reviewed', 'contacted', 'qualified', 'estimating', 'op_review', 'proposal_sent', 'approved',
   ]
 
-  it.each(nonApprovedStatuses)(
-    'does not render Generate Proposal when lead.status = %s',
+  it.each(allStatuses)(
+    'renders Generate Proposal button when lead.status = %s (no estimate required)',
     async (status) => {
-      vi.spyOn(estimatingApi, 'list').mockResolvedValue([approvedEstimate])
+      vi.spyOn(estimatingApi, 'list').mockResolvedValue([])
       render(<BidTab lead={makeLead({ status })} />)
 
-      // Give any async queries time to settle
+      // WS2: button always renders once the loading state resolves
       await waitFor(() => {
-        expect(screen.queryByRole('button', { name: /generate proposal/i })).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /generate proposal/i })).toBeInTheDocument()
       })
     },
   )
 
-  it('does not call the estimating list API when lead is not approved', async () => {
+  it('always calls the estimating list API regardless of lead status', async () => {
     const listSpy = vi.spyOn(estimatingApi, 'list').mockResolvedValue([])
     render(<BidTab lead={makeLead({ status: 'estimating' })} />)
 
-    // Allow any pending microtasks to flush
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /generate proposal/i })).not.toBeInTheDocument()
-    })
-    // The query is disabled when lead is not approved — no API call should fire
-    expect(listSpy).not.toHaveBeenCalledWith(expect.objectContaining({ leadId: expect.anything() }))
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Group 2: button absent when approved lead has no approved estimate
-// ---------------------------------------------------------------------------
-
-describe('BidTab — Proposal section absent when no approved estimate', () => {
-  it('does not render Generate Proposal when the estimate list returns empty', async () => {
-    vi.spyOn(estimatingApi, 'list').mockResolvedValue([])
-    render(<BidTab lead={makeLead({ status: 'approved' })} />)
-
-    await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /generate proposal/i })).not.toBeInTheDocument()
-    })
-  })
-
-  it('does not render Generate Proposal when estimate exists but is not approved', async () => {
-    const inProgressEstimate = { ...approvedEstimate, status: 'in_progress' } as Estimate
-    vi.spyOn(estimatingApi, 'list').mockResolvedValue([inProgressEstimate])
-    render(<BidTab lead={makeLead({ status: 'approved' })} />)
-
-    await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /generate proposal/i })).not.toBeInTheDocument()
+      // The query is now unconditional (WS2 removed the `enabled: lead.status === 'approved'` gate)
+      expect(listSpy).toHaveBeenCalled()
     })
   })
 })

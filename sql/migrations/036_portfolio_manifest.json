@@ -1,0 +1,194 @@
+[
+  {
+    "slug": "pembroke-isles",
+    "property_name": "Pembroke Isles",
+    "city_state": "Penbroke Pines, FL",
+    "photo_object_key": "proposal/portfolio/pembroke-isles.jpg",
+    "region_id": "east-coast",
+    "source_pdf": "Portfolio - Pembroke Isles - Penbroke Pines.pdf"
+  },
+  {
+    "slug": "the-fort",
+    "property_name": "The Fort",
+    "city_state": "Fort Lauderdale, FL",
+    "photo_object_key": "proposal/portfolio/the-fort.jpg",
+    "region_id": "east-coast",
+    "source_pdf": "Portfolio - The Fort - Fort Lauderdale.pdf"
+  },
+  {
+    "slug": "sandoval",
+    "property_name": "Sandoval",
+    "city_state": "Cape Coral, FL",
+    "photo_object_key": "proposal/portfolio/sandoval.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - Sandoval - Cape Coral.pdf"
+  },
+  {
+    "slug": "shell-point",
+    "property_name": "Shell Point",
+    "city_state": "Fort Myers, FL",
+    "photo_object_key": "proposal/portfolio/shell-point.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - Shell Point - Fort Myers.pdf"
+  },
+  {
+    "slug": "heritage-isles",
+    "property_name": "Heritage Isles",
+    "city_state": "Melbourne, FL",
+    "photo_object_key": "proposal/portfolio/heritage-isles.jpg",
+    "region_id": "east-coast",
+    "source_pdf": "Portfolio - Heritage Isles - Melbourne.pdf"
+  },
+  {
+    "slug": "arboretum",
+    "property_name": "Arboretum",
+    "city_state": "Naples, FL",
+    "photo_object_key": "proposal/portfolio/arboretum.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - Arboretum - Naples.pdf"
+  },
+  {
+    "slug": "island-walk",
+    "property_name": "Island Walk",
+    "city_state": "Naples, FL",
+    "photo_object_key": "proposal/portfolio/island-walk.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - Island Walk - Naples.pdf"
+  },
+  {
+    "slug": "the-isles-of-collier-preserve",
+    "property_name": "The Isles of Collier Preserve",
+    "city_state": "Naples, FL",
+    "photo_object_key": "proposal/portfolio/the-isles-of-collier-preserve.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - The Isles of Collier Preserve - Naples.pdf"
+  },
+  {
+    "slug": "enclave-at-village-walk",
+    "property_name": "Enclave at Village Walk",
+    "city_state": "Orlando, FL",
+    "photo_object_key": "proposal/portfolio/enclave-at-village-walk.jpg",
+    "region_id": "central",
+    "source_pdf": "Portfolio - Enclave at Village Walk - Orlando.pdf"
+  },
+  {
+    "slug": "oaks-of-timacuan",
+    "property_name": "Oaks of Timacuan",
+    "city_state": "Lake Mary, FL",
+    "photo_object_key": "proposal/portfolio/oaks-of-timacuan.jpg",
+    "region_id": "central",
+    "source_pdf": "Portfolio - Oaks of Timacuan - Lake Mary.pdf"
+  },
+  {
+    "slug": "village-walk",
+    "property_name": "Village Walk",
+    "city_state": "Orlando, FL",
+    "photo_object_key": "proposal/portfolio/village-walk.jpg",
+    "region_id": "central",
+    "source_pdf": "Portfolio - Village Walk - Orlando.pdf"
+  },
+  {
+    "slug": "watermark",
+    "property_name": "Watermark",
+    "city_state": "Winter Garden, FL",
+    "photo_object_key": "proposal/portfolio/watermark.jpg",
+    "region_id": "central",
+    "source_pdf": "Portfolio - Watermark - Winter Garden.pdf"
+  },
+  {
+    "slug": "alys-beach",
+    "property_name": "Alys Beach",
+    "city_state": "Panama City, FL",
+    "photo_object_key": "proposal/portfolio/alys-beach.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - Alys Beach - Panama City.pdf"
+  },
+  {
+    "slug": "sanibel-inn",
+    "property_name": "Sanibel Inn",
+    "city_state": "Sanibel, FL",
+    "photo_object_key": "proposal/portfolio/sanibel-inn.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - Sanibel Inn - Sanibel.pdf"
+  },
+  {
+    "slug": "south-seas-resort",
+    "property_name": "South Seas Resort",
+    "city_state": "Sanibel, FL",
+    "photo_object_key": "proposal/portfolio/south-seas-resort.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - South Seas Resort - Sanibel.pdf"
+  },
+  {
+    "slug": "sunseeker-resort",
+    "property_name": "Sunseeker Resort",
+    "city_state": "Port Charlotte, FL",
+    "photo_object_key": "proposal/portfolio/sunseeker-resort.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - Sunseeker Resort - Port Charlotte.pdf"
+  },
+  {
+    "slug": "cory-lakes-isles",
+    "property_name": "Cory Lakes Isles",
+    "city_state": "Tampa, FL",
+    "photo_object_key": "proposal/portfolio/cory-lakes-isles.jpg",
+    "region_id": "central",
+    "source_pdf": "Portfolio - Cory Lakes Isles - Tampa.pdf"
+  },
+  {
+    "slug": "estencia-at-wiregrass",
+    "property_name": "Estencia at Wiregrass",
+    "city_state": "Wesley Chapel, FL",
+    "photo_object_key": "proposal/portfolio/estencia-at-wiregrass.jpg",
+    "region_id": "central",
+    "source_pdf": "Portfolio - Estencia at Wiregrass - Wesley Chapel.pdf"
+  },
+  {
+    "slug": "heritages-isles",
+    "property_name": "Heritages Isles",
+    "city_state": "Tampa, FL",
+    "photo_object_key": "proposal/portfolio/heritages-isles.jpg",
+    "region_id": "central",
+    "source_pdf": "Portfolio - Heritages Isles - Tampa.pdf"
+  },
+  {
+    "slug": "hunter-s-green",
+    "property_name": "Hunter's Green",
+    "city_state": "Wesley Chapel, FL",
+    "photo_object_key": "proposal/portfolio/hunter-s-green.jpg",
+    "region_id": "central",
+    "source_pdf": "Portfolio - Hunter's Green - Wesley Chapel.pdf"
+  },
+  {
+    "slug": "starkey-ranch",
+    "property_name": "Starkey Ranch",
+    "city_state": "Tampa, FL",
+    "photo_object_key": "proposal/portfolio/starkey-ranch.jpg",
+    "region_id": "central",
+    "source_pdf": "Portfolio - Starkey Ranch - Tampa.pdf"
+  },
+  {
+    "slug": "villa-rosa",
+    "property_name": "Villa Rosa",
+    "city_state": "Tampa, FL",
+    "photo_object_key": "proposal/portfolio/villa-rosa.jpg",
+    "region_id": "central",
+    "source_pdf": "Portfolio - Villa Rosa - Tampa.pdf"
+  },
+  {
+    "slug": "island-walk-at-west-villages",
+    "property_name": "Island Walk at West Villages",
+    "city_state": "Venice, FL",
+    "photo_object_key": "proposal/portfolio/island-walk-at-west-villages.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - Island Walk at West Villages - Venice.pdf"
+  },
+  {
+    "slug": "sunstone-at-wellen-park",
+    "property_name": "Sunstone at Wellen Park",
+    "city_state": "Venice, FL",
+    "photo_object_key": "proposal/portfolio/sunstone-at-wellen-park.jpg",
+    "region_id": "west-coast",
+    "source_pdf": "Portfolio - Sunstone at Wellen Park - Venice.pdf"
+  }
+]

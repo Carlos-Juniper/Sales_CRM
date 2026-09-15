@@ -4,7 +4,10 @@ import {
   useCreatePortfolioProperty,
   useUpdatePortfolioProperty,
   useDeletePortfolioProperty,
+  useUploadPortfolioPhoto,
+  useDeletePortfolioPhoto,
 } from '@/hooks/useProposals'
+import { ImageUploadField } from '@/components/settings/ImageUploadField'
 import type { PortfolioProperty } from '@/types/proposal'
 import type {
   PortfolioPropertyCreateBody,
@@ -23,7 +26,10 @@ import { SettingsFormShell, FormStatus } from './formStatus'
  * DELETE is a hard delete until a backend migration adds an `active` column
  * (follow-up task #18). This is documented but not blocked here.
  *
- * Photo uploads (GCS) are a Slice 15 concern — not available here yet.
+ * Photos upload here (Handoff 43 §2). photoObjectKeys is an ORDERED array —
+ * the Portfolio page lays photos out in array order — so uploads append and the
+ * row carries reorder controls. The before/after pair renders only when both
+ * halves are present; a lone "after" shot is not a comparison.
  */
 export function PortfolioSection() {
   const { data, isLoading, isError } = usePortfolio()
@@ -52,7 +58,7 @@ export function PortfolioSection() {
     <SettingsFormShell
       slug="portfolio"
       title="Portfolio"
-      description="Portfolio properties featured in proposal packages. Photo uploads are managed separately (Slice 15)."
+      description="Portfolio properties featured in proposal packages. Photos appear in the order listed."
     >
       {properties.length === 0 && !showCreate && (
         <p className="text-xs text-[var(--fg)] opacity-60 mb-3">
@@ -86,7 +92,9 @@ export function PortfolioSection() {
 function PortfolioPropertyRow({ property }: { property: PortfolioProperty }) {
   const [editing, setEditing] = useState(false)
   const del = useDeletePortfolioProperty()
-
+  const update = useUpdatePortfolioProperty()
+  const uploadPhoto = useUploadPortfolioPhoto()
+  const removePhoto = useDeletePortfolioPhoto()
   if (editing) {
     return (
       <li>
@@ -98,30 +106,99 @@ function PortfolioPropertyRow({ property }: { property: PortfolioProperty }) {
     )
   }
 
+  const photos = property.photoObjectKeys ?? []
+  const photoPending = uploadPhoto.isPending || removePhoto.isPending || update.isPending
+
+  // Reordering is a PATCH of the whole array — the endpoint that appends does
+  // not need to know about position, and the array IS the order.
+  function movePhoto(index: number, delta: number) {
+    const next = [...photos]
+    const target = index + delta
+    if (target < 0 || target >= next.length) return
+    ;[next[index], next[target]] = [next[target], next[index]]
+    update.mutate({ propertyId: property.id, body: { photoObjectKeys: next } })
+  }
+
   return (
-    <li className="flex items-start justify-between rounded-md border border-[var(--border)] px-3 py-2 text-xs">
-      <div>
-        <span className="font-medium text-[var(--fg)]">{property.name}</span>
-        <span className="ml-2 text-[var(--fg)] opacity-60">{property.cityState}</span>
-        <span className="ml-2 text-[var(--fg)] opacity-50">· {property.regionId}</span>
+    <li className="rounded-md border border-[var(--border)] px-3 py-2 text-xs">
+      <div className="flex items-start justify-between">
+        <div>
+          <span className="font-medium text-[var(--fg)]">{property.name}</span>
+          <span className="ml-2 text-[var(--fg)] opacity-60">{property.cityState}</span>
+          <span className="ml-2 text-[var(--fg)] opacity-50">· {property.regionId}</span>
+        </div>
+        <div className="flex gap-2 ml-3 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="text-[var(--fg)] opacity-60 hover:opacity-100 text-[10px]"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => del.mutate(property.id)}
+            disabled={del.isPending}
+            className="text-red-600 opacity-70 hover:opacity-100 text-[10px] disabled:opacity-30"
+          >
+            Delete
+          </button>
+        </div>
       </div>
-      <div className="flex gap-2 ml-3 flex-shrink-0">
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="text-[var(--fg)] opacity-60 hover:opacity-100 text-[10px]"
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          onClick={() => del.mutate(property.id)}
-          disabled={del.isPending}
-          className="text-red-600 opacity-70 hover:opacity-100 text-[10px] disabled:opacity-30"
-        >
-          Delete
-        </button>
+
+      <div className="mt-2 space-y-2">
+        <p className="text-[10px] font-medium text-[var(--fg)] opacity-70">
+          Photos{photos.length > 0 && ` (${photos.length})`}
+        </p>
+        {photos.length === 0 && (
+          <p className="text-[10px] text-[var(--fg)] opacity-50">
+            No photos yet — the Portfolio page omits properties with none.
+          </p>
+        )}
+        {photos.map((key, i) => (
+          <div key={key} className="flex items-center gap-2">
+            <ImageUploadField
+              id={`pp-photo-${property.id}-${i}`}
+              label={`Photo ${i + 1}`}
+              objectKey={key}
+              alt={`${property.name} photo ${i + 1}`}
+              isPending={photoPending}
+              onRemove={() =>
+                removePhoto.mutate({ propertyId: property.id, objectKey: key })
+              }
+            />
+            <div className="flex flex-col">
+              <button
+                type="button"
+                onClick={() => movePhoto(i, -1)}
+                disabled={i === 0 || photoPending}
+                aria-label={`Move photo ${i + 1} earlier`}
+                className="text-[var(--fg)] opacity-60 hover:opacity-100 text-[10px] disabled:opacity-20"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => movePhoto(i, 1)}
+                disabled={i === photos.length - 1 || photoPending}
+                aria-label={`Move photo ${i + 1} later`}
+                className="text-[var(--fg)] opacity-60 hover:opacity-100 text-[10px] disabled:opacity-20"
+              >
+                ↓
+              </button>
+            </div>
+          </div>
+        ))}
+        <ImageUploadField
+          id={`pp-photo-add-${property.id}`}
+          label="Add a photo"
+          objectKey={null}
+          alt=""
+          isPending={photoPending}
+          onUpload={(file) => uploadPhoto.mutate({ propertyId: property.id, file })}
+        />
       </div>
+
     </li>
   )
 }
@@ -171,9 +248,11 @@ function PortfolioPropertyForm({
       <Field id="pp-name" label="Name" value={name} onChange={setName} required />
       <Field id="pp-city-state" label="City / State" value={cityState} onChange={setCityState} required />
       <Field id="pp-region" label="Region ID" value={regionId} onChange={setRegionId} required />
-      <p className="text-[10px] text-[var(--fg)] opacity-50">
-        Photo uploads are managed separately via GCS (Slice 15).
-      </p>
+      {!existing && (
+        <p className="text-[10px] text-[var(--fg)] opacity-50">
+          Add photos after saving — they attach to the created property.
+        </p>
+      )}
       <div className="flex gap-2">
         <button
           type="submit"

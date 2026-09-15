@@ -17,7 +17,8 @@ export type ProposalSectionKey =
   | 'intro_letter' | 'rooted_in_florida' | 'local_landscape_experts' | 'org_chart'
   | 'services_design' | 'services_maintenance' | 'services_installation' | 'services_turf'
   | 'services_irrigation' | 'services_arboriculture' | 'services_storm_response'
-  | 'services_enhancements' | 'services_aquatics' | 'services_safety_training' | 'services_juniper_cares'
+  | 'services_enhancements' | 'services_aquatics' | 'services_safety_training'
+  | 'juniper_cares'
   | 'startup_communication' | 'customer_care' | 'meet_our_team' | 'client_references' | 'insurance'
   | 'portfolio' | 'thank_you'
   // optional
@@ -71,11 +72,22 @@ export interface BranchProfile {
   lng: number
 }
 
+/**
+ * One region's offices within a state. regionId/regionName are '' for offices
+ * whose branch has no region_id — that bucket sorts last and the page renders
+ * it under a generic heading rather than dropping the offices.
+ */
+export interface BranchRegionGroup {
+  regionId: string
+  regionName: string
+  branches: string[]
+}
+
 /** Coverage table read-model — office names grouped by state, deduped on address. */
 export interface BranchCoverageGroup {
   state: string
   stateName: string
-  branches: string[]
+  regions: BranchRegionGroup[]
 }
 
 /**
@@ -137,9 +149,9 @@ export interface OrgChartCrewCounts {
 export interface OrgChartInput {
   included: boolean
   accountManagerIds: string[]
-  agronomyManagerId?: string | null
-  irrigationManagerId?: string | null
-  productionManagerId?: string | null
+  agronomyManagerName?: string | null
+  irrigationManagerName?: string | null
+  productionManagerName?: string | null
   crewCounts: OrgChartCrewCounts
 }
 

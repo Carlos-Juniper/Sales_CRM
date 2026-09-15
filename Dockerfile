@@ -6,6 +6,19 @@ RUN npm ci
 COPY studio/ ./
 ARG VITE_ENTRA_CLIENT_ID
 ARG VITE_ENTRA_TENANT_ID
+# Optional. Unset (the default) bundles the proposal photography out of
+# studio/public and serves it same-origin; set to a bucket or CDN origin to
+# serve it from there instead. See studio/src/lib/proposal/photos.ts and
+# scripts/upload_proposal_photos.py. Passing it also needs a matching
+# --build-arg in cloudbuild.yaml / cloudbuild.staging.yaml.
+ARG VITE_PROPOSAL_ASSET_BASE
+# Company info baked into the frontend bundle (VITE_) and read by the backend
+# renderer (proposal_validation.py) at runtime via os.environ.
+ARG VITE_COMPANY_NAME
+ARG VITE_COMPANY_PHONE
+ARG VITE_COMPANY_EMAIL
+ARG VITE_COMPANY_WEBSITE
+ARG VITE_COMPANY_ADDRESS
 RUN npm run build
 
 # ── Stage 2: Python API ───────────────────────────────────────────────────
@@ -22,6 +35,13 @@ RUN apt-get update \
 COPY db.py .
 COPY api/ ./api/
 COPY --from=frontend /app/studio/dist ./dist
+
+# Re-declare the company ARGs from Stage 1 so they are in scope in Stage 2.
+# These become runtime env vars consumed by proposal_validation.py (os.environ).
+ARG VITE_COMPANY_NAME
+ARG VITE_COMPANY_ADDRESS
+ENV VITE_COMPANY_NAME=$VITE_COMPANY_NAME
+ENV VITE_COMPANY_ADDRESS=$VITE_COMPANY_ADDRESS
 
 ENV PORT=8080
 EXPOSE 8080

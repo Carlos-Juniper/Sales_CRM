@@ -1,12 +1,14 @@
 // ---------------------------------------------------------------------------
-// Proposal static content module (Handoff 37 — Slice 2)
+// Proposal static content module (Handoff 37 — Slice 2; copy from Handoff 45)
 //
 // All business-editable copy lives here as typed constants. A copy edit is a
 // data change, not a component change. Components import these constants and
 // render them — they never embed literal proposal text.
 //
-// Placeholder copy is marked with a TODO comment below. Final marketing text
-// is pending Caitlyn's content-inventory email (see §9 of the handoff).
+// Copy is the approved verbatim text extracted from Coral Bay HOA.pdf (Handoff
+// 45 §4). Merge fields are left as `{field_name}` placeholders. Four source
+// spellings were corrected per §7.2 (Erosion, Stabilization, Recognition, and
+// Sq Ft); the intro letter's ungrammatical sentence is preserved deliberately.
 // ---------------------------------------------------------------------------
 
 import type { ProposalSectionKey } from '@/types/proposal'
@@ -15,13 +17,54 @@ import type { ProposalSectionKey } from '@/types/proposal'
 // Local interfaces
 // ---------------------------------------------------------------------------
 
+/** A labelled bullet list. `label` prints as the orange list opener. */
+export interface CopyList {
+  label?: string
+  /** Optional lede line printed between the label and the list — Start Up
+   *  Communication's "Who is typically included in these meetings?" under
+   *  Attendees. */
+  intro?: string
+  /**
+   * Override the label's color; omit for the default orange on a plain label,
+   * or green on a "?"-ending one. 'orange' only has an effect on a "?"-ending
+   * label (a plain label is already orange by default) — Juniper Cares only.
+   */
+  labelColor?: 'green' | 'orange'
+  /** Size a "?"-ending label to match the page's .lede.quote subhead. Arboriculture and Juniper Cares. */
+  labelLarge?: boolean
+  /** Render items as prose paragraphs instead of a leaf-bulleted list. */
+  unbulleted?: boolean
+  /**
+   * Bullet glyph for the list: the brand leaf mark (default), a plain orange
+   * dot, or an orange checkmark on a white disc. `check` is Juniper Sync's
+   * "Highlights" sidebar list only, matching the reference page.
+   */
+  bulletStyle?: 'leaf' | 'dot' | 'check'
+  items: CopyListItem[]
+}
+
+/** `lead` prints bold before a colon; the reference uses it on Design's bullets. */
+export interface CopyListItem {
+  lead?: string
+  text: string
+}
+
 /** A single "Our Services" page blurb. `body` is one paragraph per element. */
 export interface ServiceBlurb {
   title: string
+  /** Short claim printed above the body in green or orange. Reference: "Certified Arborists". */
+  subhead?: string
+  /** Second green subtitle printed directly under `subhead`. Irrigation only. */
+  subhead2?: string
   body: string[]
+  lists?: CopyList[]
 }
 
-/** Map of all 11 service section keys to their blurb content. */
+/**
+ * Map of the 10 service section keys to their blurb content.
+ * Juniper Cares is NOT a service — it renders as its own standalone section
+ * (see JUNIPER_CARES_PAGE_CONTENT / §6), so it is absent from this map.
+ */
 export type ServicesContentMap = {
   [K in Extract<
     ProposalSectionKey,
@@ -35,7 +78,6 @@ export type ServicesContentMap = {
     | 'services_enhancements'
     | 'services_aquatics'
     | 'services_safety_training'
-    | 'services_juniper_cares'
   >]: ServiceBlurb
 }
 
@@ -44,6 +86,15 @@ export interface StaticPageCopy {
   heading: string
   subheading?: string
   body: string[]
+  /** Labelled bullet lists — Juniper Cares and Customer Care both use them. */
+  lists?: CopyList[]
+  /**
+   * Small caption printed at the foot of a page's sidebar, under the QR code
+   * image (PAGE_PHOTOS.juniperSyncQr). Juniper Sync only — "Scan QR Code for
+   * full tour of Juniper Sync" sits below the Highlights list in the
+   * reference, not as another bullet.
+   */
+  sidebarNote?: string
 }
 
 /** A single bullet item in the 30-60-90 startup plan. */
@@ -63,166 +114,440 @@ export interface JuniperMappingContent {
   pageTwo: StaticPageCopy
 }
 
-/** Surrounding copy for the insurance page (certificate itself is served by the backend). */
+/** Heading for the insurance page (the page itself is just the title + certificate image). */
 export interface InsurancePageCopy {
   heading: string
-  intro: string[]
-  footer: string[]
 }
 
 // ---------------------------------------------------------------------------
-// Our Services — 11 blurbs keyed by ProposalSectionKey
+// Intro letter (§4.1)
+//
+// The rendered intro-letter component currently embeds this text literally.
+// It is captured here as typed copy so the salutation, body, and signer merge
+// fields become a data edit. Salutation is a named individual with a colon.
+// The "…best practices drives us forward" sentence is ungrammatical in the
+// source and is preserved verbatim per §7.2 (a copy decision, not a fix).
 // ---------------------------------------------------------------------------
 
-// TODO: real copy from Caitlyn's content inventory
+export interface IntroLetterCopy {
+  salutation: string
+  body: string[]
+  closing: string
+  signature: string[]
+}
+
+export const INTRO_LETTER_CONTENT: IntroLetterCopy = {
+  salutation: 'Dear {contact first and last name}:',
+  body: [
+    'Thank you for considering Juniper to be a part of your landscape maintenance contract bidding process for {property}. At Juniper, our team of professionals understands that each project is unique because no two clients are identical. We bring a straightforward, focused analysis to each property’s individual needs. We take pride in our commitment to quality, dependability, and industry best practices drives us forward. This commitment empowers us to meet our clients’ requirements and to serve their expanding needs as our relationship continues to grow.',
+    'With over 25 years of experience in servicing communities throughout Florida, Juniper has been providing excellent landscaping services and has skilled team members dedicated to your landscaping initiatives. We understand the importance of maintaining a beautiful and well-maintained landscape, and we take pride in our attention to detail and commitment to delivering exceptional results.',
+    'We look forward to having the opportunity to work with you and to discuss the enclosed information. If you have any questions, please contact me at {rep phone} or {rep email}.',
+  ],
+  closing: 'Thank you,',
+  signature: ['{rep name}'],
+}
+
+// ---------------------------------------------------------------------------
+// Our Services — 10 blurbs keyed by ProposalSectionKey (§4.4).
+// Juniper Cares is not here; it is a standalone section (JUNIPER_CARES_PAGE_CONTENT).
+// ---------------------------------------------------------------------------
+
 export const SERVICES_CONTENT: ServicesContentMap = {
   services_design: {
     title: 'Design',
     body: [
-      // TODO: real copy from Caitlyn's content inventory
-      "Juniper Landscaping's design team transforms outdoor spaces through thoughtful planning, creative vision, and deep horticultural expertise. From initial concept sketches to detailed construction documents, our designers work closely with property managers and stakeholders to deliver landscapes that are both beautiful and functional.",
-      'Every design project begins with a thorough site analysis — assessing soil, drainage, sun exposure, and the existing plant palette — so that our recommendations are grounded in the specific conditions of your property.',
+      'Our expert design team offers full-service landscape architecture to help bring your project to life — from the earliest planning stages to a clear, buildable plan you can rely on.',
+    ],
+    lists: [
+      {
+        label: 'What We Offer:',
+        labelColor: 'green',
+        items: [
+          { lead: 'Land Planning:', text: 'zoning, site design, yield analysis, permitting & budgeting' },
+          { lead: 'Plan Generation:', text: 'sustainable landscapes, hardscape, irrigation, lighting & water conservation' },
+          { lead: 'Visualization:', text: 'conceptual layouts, 3D rendering, plant palettes & high-impact concepts' },
+        ],
+      },
     ],
   },
 
   services_maintenance: {
     title: 'Landscape Maintenance',
+    subhead:
+      'Juniper has been exceeding industry standards in the area of quality and dependability in Florida since 2001.',
     body: [
-      // TODO: real copy from Caitlyn's content inventory
-      'Our landscape maintenance programs are built around the principle that a well-maintained property is a safe, inviting, and professionally presented environment for residents, guests, and the community at large.',
-      'Juniper crews follow a structured, seasonal maintenance calendar that covers mowing, edging, pruning, fertilization, and annual color rotations — all coordinated through our Aspire service-management platform for full accountability and real-time reporting.',
+      'Our landscape maintenance teams work closely with the irrigation and horticultural teams. This combined with regular inspections from our dedicated account managers, helps ensure the quality of work our clients expect.',
     ],
   },
 
   services_installation: {
     title: 'Landscape Installation',
+    subhead: 'Our design and installation teams make an award-winning combination.',
     body: [
-      // TODO: real copy from Caitlyn's content inventory
-      "From large-scale commercial installations to precision enhancement projects, Juniper's installation crews bring the same attention to detail that earned us a reputation for quality throughout Florida.",
-      'We handle every phase of installation in-house — site preparation, grading, hardscape, irrigation rough-in, planting, and final mulch and clean-up — so there is a single point of accountability from groundbreaking to final walk-through.',
+      'Juniper’s landscape installation services are built on quality craftsmanship, attention to detail, and a deep understanding of how outdoor environments thrive. From thoughtful design execution to precise installation, we ensure every element enhances both beauty and functionality. Our teams work hard to deliver a quality project on time and on budget, creating durable, long-lasting landscapes that reflect Juniper’s standard of excellence.',
     ],
   },
 
   services_turf: {
     title: 'Turf Management',
     body: [
-      // TODO: real copy from Caitlyn's content inventory
-      "Florida's climate is both an opportunity and a challenge for turf health. Juniper's licensed agronomists develop site-specific turf programs that address weed pressure, disease, insect activity, and nutrient deficiencies through an integrated approach that minimizes inputs while maximizing stand quality.",
-      'Our turf management programs include soil testing, fertility planning, selective herbicide applications, and regular scouting reports so that property managers always know what is happening beneath the surface.',
+      'Our turf management services are designed to keep your lawns healthy, resilient, and consistently attractive throughout the growing season. We provide a proactive program that can include mowing, edging, trimming, seasonal fertilization, soil health and pH management, weed control, integrated pest and disease monitoring, and irrigation checks to support strong root growth. Each site is evaluated and serviced based on turf type, sun/shade conditions, traffic patterns, and seasonal needs helping improve color and density while reducing weeds, bare spots, and preventable stress.',
     ],
   },
 
   services_irrigation: {
     title: 'Landscape Irrigation',
+    subhead: 'State Licensed Irrigation Contractor',
+    subhead2: 'What is a certified irrigation specialty contractor’s license?',
     body: [
-      // TODO: real copy from Caitlyn's content inventory
-      "Water is a precious resource in Florida. Juniper's irrigation division designs, installs, and maintains efficient irrigation systems that deliver the right amount of water to the right zones at the right time — reducing waste, controlling costs, and keeping landscapes healthy through dry seasons.",
-      'Our irrigation technicians are licensed and trained on the full range of commercial controller platforms, from traditional timer-based systems to weather-responsive smart controllers that integrate with local ET data.',
+      'An irrigation specialty contractor’s license is a certified (state-wide) specialty license developed by the Construction Industry Licensing Board to permit contractors to install, maintain, repair, alter, extend, manage, monitor, audit, or, if not prohibited by law, design irrigation systems.',
+    ],
+    lists: [
+      {
+        label: 'Water Management',
+        items: [
+          { text: 'Central control management' },
+          { text: 'Converting beds to drip irrigation' },
+          { text: 'E/T weather-based controllers' },
+          { text: 'Soil moisture sensors' },
+          { text: 'Pressure regulated components' },
+          { text: 'High efficiency sprinklers' },
+        ],
+      },
+      {
+        label: 'Maintenance',
+        items: [
+          { text: 'Water Management' },
+          { text: 'Repairs' },
+          { text: 'Water Monitoring' },
+          { text: 'Reporting' },
+          { text: 'Wet Checks' },
+        ],
+      },
+      {
+        label: 'Installation',
+        items: [
+          { text: 'Infrastructure' },
+          { text: 'Pump Stations' },
+          { text: 'Central Control' },
+          { text: 'Residential' },
+          { text: 'Wet Checks' },
+          { text: 'Commercial' },
+        ],
+      },
     ],
   },
 
   services_arboriculture: {
     title: 'Arboriculture',
+    subhead: 'Certified Arborists',
     body: [
-      // TODO: real copy from Caitlyn's content inventory
-      "Trees are a property's most valuable long-term landscape assets. Juniper's arboriculture team — including ISA Certified Arborists — provides comprehensive tree care: structural pruning, crown reduction, hazard assessment, cabling and bracing, deep root fertilization, and, when necessary, safe and efficient removal.",
-      'We approach every tree with a preservation mindset, working to protect and extend the health and structural integrity of the canopy while eliminating risk to people and property.',
+      'Juniper has multiple ISA certified Arborists that are available for everything you may need for your tree health care. Preventive maintenance helps keep trees in good health while reducing any insect, disease, or site problems.',
+    ],
+    lists: [
+      {
+        label: 'Why hire an Arborist?',
+        labelLarge: true,
+        unbulleted: true,
+        items: [
+          {
+            text: 'Arborists specialize in the care of individual trees. They are knowledgeable about the needs of trees and are trained and equipped to provide proper care. Hiring an arborist is a decision that should not be taken lightly. Proper tree care is an investment that can lead to substantial returns. Well cared-for trees are attractive and can add considerable value to your property.',
+          },
+        ],
+      },
     ],
   },
 
   services_storm_response: {
     title: 'Storm Response',
     body: [
-      // TODO: real copy from Caitlyn's content inventory
-      "When a named storm or severe weather event affects your property, Juniper's storm-response crews mobilize quickly to assess damage, clear debris, and restore safe conditions — often before regular business hours resume.",
-      'Our storm protocols include pre-event preparation (securing loose plant material, staking vulnerable trees) and a post-event triage system that prioritizes safety hazards, then moves methodically through clean-up and recovery so normal maintenance can resume as quickly as possible.',
+      'In preparation for and after a storm, Juniper has additional team members who are critical resources during storm events. They provide not only added manpower but also bring with them the trucks and heavy equipment needed to handle storm cleanup.',
+    ],
+    lists: [
+      {
+        label: 'COMPANY RESOURCES',
+        items: [
+          { text: '3,200+ team members statewide' },
+          { text: '35 locations throughout Florida' },
+          { text: '25,000 gallons of onsite fuel' },
+          { text: '1,300 trucks in our fleet' },
+          { text: 'Landscape Designers & Architects' },
+          { text: 'Teams throughout Florida' },
+          { text: 'Extensive supply of heavy equipment' },
+        ],
+      },
     ],
   },
 
   services_enhancements: {
     title: 'Enhancements',
+    subhead: 'Enhance Your Community Landscape',
     body: [
-      // TODO: real copy from Caitlyn's content inventory
-      'Beyond routine maintenance, Juniper offers a comprehensive menu of enhancement services to keep your property looking its best year-round: seasonal color rotations, holiday décor installation and removal, mulch refreshes, bed reedging, pond and water-feature maintenance, and pressure washing of hardscape surfaces.',
-      'Enhancement work is quoted per project and can be scheduled ad hoc or built into an annual enhancement budget — whichever approach best fits your operational planning cycle.',
+      'Whether you’re updating key areas or planning long-term improvements, new plantings and enhancements help keep your community beautiful and maintain property value. Our team identifies priority areas, creates a multi-year enhancement plan, and provides a customized budget estimate with 1, 2, 3, or even 5-year options to fit your goals.',
+    ],
+    lists: [
+      {
+        label: 'Services Include:',
+        items: [
+          { text: 'Landscape Design / Installation' },
+          { text: 'Sod Installation' },
+          { text: 'Lighting' },
+          { text: 'Hardscapes' },
+          { text: 'Irrigation' },
+          { text: 'Seasonal Installation' },
+        ],
+      },
+      {
+        label: 'Plan Smarter, Stress Less:',
+        items: [
+          { text: 'Tailored designs and budgets' },
+          { text: 'Cost-effective solutions' },
+          { text: 'Long-term value for your property' },
+        ],
+      },
     ],
   },
 
   services_aquatics: {
     title: 'Aquatics',
+    subhead: 'For All You Waterfront Needs!',
     body: [
-      // TODO: real copy from Caitlyn's content inventory
-      "Lakes, retention ponds, and ornamental water features require specialized care to remain healthy, compliant, and visually appealing. Juniper's aquatics team provides licensed aquatic herbicide treatment, aeration system installation and maintenance, fountains, fish stocking programs, and mowing of lake-bank vegetation.",
-      "Our aquatics managers maintain required state licensing and carry the liability coverage needed to work on Florida's regulated water bodies, ensuring your property stays in compliance with FDEP and water management district requirements.",
+      'Aquatic Weeds restores Florida lakes, ponds, and waterways with fast, chemical-free vegetation removal using specialized equipment. We also offer routine maintenance, EPA-approved herbicide treatments, and install fountain and aeration systems to keep your water clear, healthy, and PH balanced year-round.',
+    ],
+    lists: [
+      {
+        label: 'Aquatic Weeds Services Include:',
+        items: [
+          { text: 'Aquatic Weed Removal - Chemical Free' },
+          { text: 'Algae & Aquatic Weed Maintenance Program' },
+          // Source spellings "Eroision"/"Stabalization" corrected per §7.2.
+          { text: 'Erosion Control & Prevention - Docks, Seawall and Bank Stabilization' },
+          { text: 'Excavation, Dredging and Brush Clearing' },
+          { text: 'Fountains and Aeration' },
+          { text: 'Disaster Cleanup and Restoration' },
+          { text: 'Docks and Boat Ramps' },
+          { text: 'Land Clearing' },
+          { text: 'Mulching' },
+        ],
+      },
     ],
   },
 
   services_safety_training: {
+    // No "OUR SERVICES" eyebrow on this page; the headline stands alone (§4.4).
+    // The eyebrow suppression is a rendering concern for A3 — see handback.
     title: 'Safety & Training',
     body: [
-      // TODO: real copy from Caitlyn's content inventory
-      "Safety is embedded in everything we do at Juniper. Our crews participate in regular safety training covering equipment operation, chemical handling, traffic control, and emergency response — and every Juniper employee is covered by our comprehensive workers' compensation and general liability policies.",
-      'We maintain an active safety committee that reviews incident data, updates field procedures, and ensures that our safety culture keeps pace with our growth.',
+      'We prioritize the safety of our clients and our team members in the highest regard. We have implemented a company-wide safety program that is administered through our safety coordinator and local branch managers.',
+    ],
+    lists: [
+      {
+        label: 'Initial Hire Program',
+        items: [
+          { text: 'Safety rules' },
+          { text: 'New hire safety orientation' },
+          { text: 'Required and use of PPE' },
+          { text: 'Equipment certifications' },
+          { text: 'Weekly safety meetings' },
+          { text: 'Daily job site reviews' },
+          { text: 'Traffic control systems' },
+          { text: 'Best practices training' },
+          { text: 'Safety rewards/swag based on safety performance' },
+          { text: 'Online training tools' },
+        ],
+      },
     ],
   },
 
-  services_juniper_cares: {
-    title: 'Juniper Cares',
-    body: [
-      // TODO: real copy from Caitlyn's content inventory
-      'Juniper Cares is our community-giving and environmental-stewardship program. Through Juniper Cares, we partner with local schools, parks, and nonprofit organizations to beautify shared spaces, fund horticultural scholarships, and support the communities where our employees live and work.',
-      'When you choose Juniper, you are choosing a company that invests not only in your property, but in the broader landscape of Florida.',
-    ],
-  },
 }
 
 // ---------------------------------------------------------------------------
-// Start Up Communication — static page
+// Service Overview — six capability groups (§4.4 overview page).
+//
+// Distinct from SERVICES_CONTENT above: that map is the 10 per-service DETAIL
+// pages, while this is the single OVERVIEW page that groups Juniper's offerings
+// into six capability categories. Each entry carries a stable `key` so a
+// component can map over the list and wire a photo per category.
 // ---------------------------------------------------------------------------
 
-// TODO: real copy from Caitlyn's content inventory
+/** One capability group on the service overview page. `key` is a stable id for photo/render wiring. */
+export interface ServiceOverviewCategory {
+  key: string
+  title: string
+  bullets: string[]
+}
+
+export const SERVICE_OVERVIEW_CATEGORIES: ServiceOverviewCategory[] = [
+  {
+    key: 'design',
+    title: 'Design',
+    bullets: ['Land Planning', 'Plan Generation', 'Visualization'],
+  },
+  {
+    key: 'build',
+    title: 'Build',
+    bullets: ['Landscape', 'Irrigation', 'Lighting', 'All sod varieties', 'Nursery & Tree Farm'],
+  },
+  {
+    key: 'maintain',
+    title: 'Maintain',
+    bullets: ['Landscape', 'Irrigation', 'Pest Control', 'Fertilization'],
+  },
+  {
+    key: 'technology',
+    title: 'Technology',
+    bullets: ['Juniper Sync', 'Juniper Mapping', 'GoCanvas'],
+  },
+  {
+    key: 'storm_response',
+    title: 'Storm Response',
+    bullets: [
+      '3,200+ team members statewide',
+      '26 locations throughout Florida',
+      '20,000 gallons of onsite fuel',
+      'Extensive supply of heavy equipment',
+    ],
+  },
+  {
+    key: 'aquatics',
+    title: 'Aquatics',
+    bullets: [
+      'Weed Maintenance',
+      'Excavation & Brush Clearing',
+      'Fountains, Aeration, Docks, & Seawalls',
+    ],
+  },
+]
+
+// ---------------------------------------------------------------------------
+// Start Up Communication — static page (§4.5)
+// ---------------------------------------------------------------------------
+
 export const STARTUP_COMMUNICATION_CONTENT: StaticPageCopy = {
-  heading: 'Start Up Communication',
+  // Eyebrows are stored in natural case; the `.eyebrow` class uppercases them via
+  // CSS (matches the LOCAL_EXPERTS_CONTENT precedent). §4.5 renders this "START UP".
+  heading: 'Communication',
+  subheading: 'Start Up',
   body: [
-    'A smooth start is the foundation of a great long-term partnership. Before your first service visit, your dedicated Account Manager will schedule a property walk-through to confirm scope, identify any immediate concerns, and introduce you to the crew that will be maintaining your property.',
-    "You will receive a direct point of contact for day-to-day questions, a schedule of recurring service visits, and access to Juniper's client portal where you can submit service requests, review completed work orders, and track your service history in real time.",
-    'Clear, proactive communication is one of the things our clients consistently call out in their feedback. We want you to feel informed and confident from day one.',
+    'At Juniper, we understand that a well-planned communication strategy is essential for a successful start-up and to delivering superior customer service.',
+    'Juniper schedules and hosts recurring 30-minute Virtual Meetings (prior to startup and ongoing).',
+  ],
+  lists: [
+    {
+      label: 'Purpose',
+      unbulleted: true,
+      items: [
+        {
+          text: 'The intent of the Virtual Meeting is to create and maintain a convenient way for Juniper to provide quick updates, get quality feedback, identify issues, generate ideas, create strong communication and set us all up for success.',
+        },
+        {
+          text: 'These meetings are in addition to any regularly scheduled walk-thrus or onsite meetings between Manager/BOD and Juniper.',
+        },
+      ],
+    },
+    {
+      label: 'Attendees',
+      intro: 'Who is typically included in these meetings?',
+      bulletStyle: 'dot',
+      items: [
+        { text: 'Juniper' },
+        { text: 'Account Manager' },
+        { text: 'Branch Manager' },
+        { text: 'Other Juniper staff depending on current issues' },
+        { text: 'Your Association (You Choose)' },
+        { text: 'Property Management' },
+        { text: 'Interested Key Landscape Committee Members' },
+        { text: 'Interested Board Members' },
+      ],
+    },
+    {
+      label: 'Agenda',
+      bulletStyle: 'dot',
+      items: [
+        { text: 'Juniper Account Manager & Branch Manager: Operations Update' },
+        { text: 'Manager/BOD: Feedback, requests, suggestions, immediate issues/concerns' },
+        { text: 'Identify clear next steps' },
+      ],
+    },
+    {
+      label: 'Schedule',
+      items: [
+        { lead: '30 days prior to start date:', text: 'Virtual meeting every other week (20-30 min)' },
+        { lead: 'First 90 days after start date:', text: 'Virtual meeting every other week (20-30 min)' },
+        { lead: '4th month thru to 6th month:', text: 'Virtual meeting once per month (20-30 min)' },
+      ],
+    },
   ],
 }
 
 // ---------------------------------------------------------------------------
-// Customer Care — static page
+// Customer Care — static page (§4.6)
 // ---------------------------------------------------------------------------
 
-// TODO: real copy from Caitlyn's content inventory
 export const CUSTOMER_CARE_CONTENT: StaticPageCopy = {
-  heading: 'Customer Care',
+  heading: 'People Make the Difference',
+  subheading: 'Customer Care',
   body: [
-    "Our commitment to you does not end once the contract is signed. Juniper's customer care program ensures that every service visit is followed up with a digital work order report, that concerns are acknowledged within one business day, and that your account is reviewed quarterly by your Account Manager and Branch Manager.",
-    'We measure our performance against the standards you set — not an internal benchmark. If something is not right, tell us and we will make it right, every time.',
-    'Juniper has built its reputation over decades on the relationships we maintain with our clients. Your satisfaction is not a metric to us; it is the measure of our work.',
+    'We understand that for many residents, speaking in person with a manager is preferable. For this reason, a manager always accompanies Juniper crews and is available on-site for communication & problem-solving.',
+  ],
+  lists: [
+    {
+      label: 'In-House Customer Care Team',
+      labelColor: 'green',
+      unbulleted: true,
+      items: [
+        {
+          text: 'We believe that providing great customer service is key to providing the best landscape services. To that end, we have created a department dedicated to supporting residents, account managers & field teams.',
+        },
+        {
+          text: 'To assist owners with maintenance and irrigation concerns, Juniper offers homeowners multiple options to connect:',
+        },
+      ],
+    },
   ],
 }
 
+/** Contact methods rendered as icon rows beside the In-House Customer Care Team copy. */
+export const CUSTOMER_CARE_CONTACT_METHODS: { icon: 'visit' | 'email' | 'call'; lead: string; text: string }[] = [
+  { icon: 'visit', lead: 'Visit', text: 'junipercares.com and click on "Community Service Request". Create a ticket by following the simple prompts.' },
+  { icon: 'email', lead: 'Email', text: 'the comment or concern to: customercare@juniperlandscaping.com' },
+  { icon: 'call', lead: 'Call', text: 'Customer Care at (239) 561-5980 to speak with a representative.' },
+]
+
 // ---------------------------------------------------------------------------
-// Rooted in Florida (About Us) — static page
+// Rooted in Florida (About Us) — static page (§4.2)
 // ---------------------------------------------------------------------------
 
-// TODO: real copy from Caitlyn's content inventory
 export const ROOTED_IN_FLORIDA_CONTENT: StaticPageCopy = {
   heading: 'Rooted in Florida',
   subheading: 'About Us',
   body: [
-    "Juniper Landscaping was founded on a simple belief: that Florida's outdoor spaces deserve the same care and expertise that go into the buildings they surround. What began as a single-branch operation has grown into one of the state's most trusted commercial landscape companies — still headquartered in Florida, and now serving clients from offices across five states.",
-    'We are a company of horticulturalists, arborists, irrigation engineers, and project managers who take pride in the craft of landscape management. Our team holds dozens of professional certifications and licenses, and we invest continuously in training, equipment, and technology so that our work reflects the latest standards in sustainable and safe landscape practice.',
-    'Through every hurricane season, drought, and freeze event, we have stood beside our clients — adapting, responding, and rebuilding. That resilience is in our DNA, and it is the foundation of every proposal we present.',
+    'From the very beginning, we started with the commitment to deliver the best value and on-time projects. This commitment has helped Juniper grow from a small custom landscape operation with just a few employees to multiple locations throughout Florida. Over the last 20 years, a lot has changed, and we take pride in the technology, service, and quality we continue to provide.',
+  ],
+  lists: [
+    {
+      label: 'Where we started',
+      items: [
+        {
+          text: 'Juniper was established in 2001 on a small farmhouse in Fort Myers, Florida. This location now serves as our corporate headquarters, although we have expanded by constructing additional buildings throughout the state of Florida.',
+        },
+      ],
+    },
+    {
+      // "Where we are today" labels the statistics block below (COMPANY_STATS
+      // plus the live branch-coverage count appended by the renderer).
+      label: 'Where we are today',
+      items: [],
+    },
   ],
 }
 
 /**
  * Company-scale figures shown beside the About Us copy. The office count is not
  * here — it is computed from the same branch-coverage endpoint that drives the
- * table on the next page, so the two can never contradict each other.
+ * table on the next page, so the two can never contradict each other. §4.2's
+ * third statistic (26 operating locations throughout Florida) is deliberately
+ * NOT hard-coded for the same reason.
  */
 export const COMPANY_STATS: { num: string; label: string }[] = [
   { num: '3,200+', label: 'Horticulturally trained employees' },
@@ -242,58 +567,185 @@ export const LOCAL_EXPERTS_CONTENT: StaticPageCopy = {
 }
 
 // ---------------------------------------------------------------------------
-// Juniper Sync — static page (optional)
+// Juniper Sync — static page (§4.8)
 // ---------------------------------------------------------------------------
 
-// TODO: real copy from Caitlyn's content inventory
 export const JUNIPER_SYNC_CONTENT: StaticPageCopy = {
-  heading: 'Juniper Sync',
-  subheading: 'Real-Time Service Visibility',
+  // The reference breaks this title after "Service", not wherever the well's
+  // width happens to wrap it — the embedded newline plus .page-title's
+  // white-space: pre-line renders that exact break.
+  heading: 'Support Service\nBuilt for Associations',
+  subheading: 'Juniper Sync',
   body: [
-    "Juniper Sync is our proprietary client-portal experience, built on top of Aspire's service management platform, giving you a single place to see everything that is happening on your property — service visits completed, upcoming schedules, open work orders, and invoice history.",
-    'With Juniper Sync you can submit enhancement requests, attach photos of issues you want us to address, approve quotes, and download completed work-order reports — all from a desktop browser or mobile device.',
-    'Transparency builds trust. Juniper Sync is how we deliver that transparency at scale, across every property in your portfolio.',
+    'We take great pride in Juniper Sync, our proprietary customer service software. We created this system with the goal to make it easy for residents to communicate with our team. Juniper Sync is designed for large, full-service communities to enable residents to easily report any issues that need to be addressed.',
+    'Utilize our online work order system to create & track work orders for your property. Managers & residents can easily create an account to use immediately.',
+  ],
+  lists: [
+    {
+      label: 'Highlights',
+      bulletStyle: 'check',
+      items: [
+        { text: 'Live Dashboard/ Ticket Summary' },
+        { text: 'Ticket Aging' },
+        { text: 'Custom Filters' },
+        { text: 'Detailed Reporting' },
+        { text: 'Community Maps' },
+        { text: 'Knowledge Base' },
+        // Source spelling "Recogition" corrected per §7.2.
+        { text: 'Employee Recognition' },
+      ],
+    },
+    {
+      label: 'Juniper Sync Work Order System',
+      bulletStyle: 'dot',
+      items: [
+        { text: 'Residents can view the status and act on all their tickets.' },
+        { text: 'Designed to provide the information needed to handle requests quickly.' },
+        { text: 'We provide in person training along with videos that can be easily shared with residents.' },
+        { text: 'Status updates sent to directly via email & text message.' },
+      ],
+    },
+  ],
+  sidebarNote: 'Scan QR Code for full tour of Juniper Sync',
+}
+
+// ---------------------------------------------------------------------------
+// Juniper Mapping — two static pages (§4.9)
+// ---------------------------------------------------------------------------
+
+export const JUNIPER_MAPPING_CONTENT: JuniperMappingContent = {
+  pageOne: {
+    heading: 'Technology That Makes a Difference',
+    subheading: 'Juniper Mapping',
+    body: [
+      'Juniper Mapping utilizes drone imaging software to create an Orthomosaic image from hundreds and sometimes thousands of high-resolution images. This process allows us to proactively identify potential issues, document improvements, and provide property specific reporting including; plant health, elevation, annotation and any issues.',
+    ],
+    lists: [
+      {
+        label: 'Plant Health Assessment',
+        items: [
+          {
+            text: 'Healthy vegetation reflects more of certain types of light than unhealthy vegetation. Juniper Mapping creates a map that highlights differences within your area of interest. This tool allows us to quickly identify areas of concern at start-up to begin treatments and track progress.',
+          },
+        ],
+      },
+    ],
+  },
+  pageTwo: {
+    heading: 'Valuable Tools',
+    subheading: 'Juniper Mapping',
+    body: [],
+    lists: [
+      {
+        label: 'Image Quality Comparison',
+        items: [
+          {
+            text: 'Juniper Mapping provides the community with high resolution photos that provide more detail than Google Earth.',
+          },
+        ],
+      },
+      {
+        label: 'Ground Elevation',
+        items: [
+          {
+            text: 'Juniper Mapping provides a complete elevation map, allowing us to make better decisions when it comes to the draining and movement of water.',
+          },
+        ],
+      },
+      {
+        label: 'Area & Line Tool',
+        items: [
+          {
+            text: 'The Area & Line Tools provide the community with accurate information on demand. Line Tool provides the elevation profile of any area flown.',
+          },
+        ],
+      },
+      {
+        label: 'Location Tool',
+        items: [
+          {
+            text: 'GPS locate/document anything in the community. This is great for irrigation controllers, flus points, filters, valves, & shut off.',
+          },
+        ],
+      },
+      {
+        label: 'Count Tool',
+        items: [{ text: 'Makes creating an inventory of anything easy.' }],
+      },
+      {
+        label: 'Track Improvements Side-By-Side',
+        items: [
+          {
+            text: 'With Juniper Mapping, you can see the quality improvements to the community landscape side-by-side.',
+          },
+        ],
+      },
+    ],
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Irrigation Reporting Sample — optional static page appended after the
+// Landscape Irrigation service page. Copy is verbatim from a real (redacted)
+// Beach Life Community proposal, "Weekly updates and irrigation.pdf" p2.
+// ---------------------------------------------------------------------------
+
+export const IRRIGATION_REPORTING_CONTENT: StaticPageCopy = {
+  heading: 'Weekly Updates & Irrigation Inspection Schedule Sample Map',
+  body: [
+    'You never have to wonder what was done, what’s next, or what we found. Real examples of the reporting your community receives:',
+  ],
+  lists: [
+    {
+      unbulleted: true,
+      items: [
+        {
+          lead: 'Zone by zone, with photos',
+          text: 'each month’s wet-check report documents every zone separately: controller details, repairs needed, parts, faults, and photo evidence of each assessment.',
+        },
+        {
+          lead: 'Every week, in your inbox',
+          text: 'management comments, service-by-service progress against your annual agreement, what’s scheduled next, and a live count of open and completed resident tickets.',
+        },
+      ],
+    },
   ],
 }
 
 // ---------------------------------------------------------------------------
-// Juniper Mapping — two static pages (optional)
-// ---------------------------------------------------------------------------
-
-// TODO: real copy from Caitlyn's content inventory
-export const JUNIPER_MAPPING_CONTENT: JuniperMappingContent = {
-  pageOne: {
-    heading: 'Juniper Mapping',
-    subheading: 'Precision Starts with the Right Picture',
-    body: [
-      'Accurate measurements are the foundation of an accurate estimate — and an accurate estimate is the foundation of a fair contract. Juniper uses drone-based aerial mapping to capture high-resolution imagery and precise square footage measurements for every property we service.',
-      'Our mapping process eliminates the guesswork that leads to disputes at year-end. What you were quoted is what you have — documented, verifiable, and available to you at any time through Juniper Sync.',
-    ],
-  },
-  pageTwo: {
-    heading: 'Juniper Mapping',
-    subheading: 'Your Property, Mapped',
-    body: [
-      // TODO: real copy from Caitlyn's content inventory
-      'Each mapped property in our portfolio receives a layered aerial view that separates turf areas, bed areas, hardscape, water features, and tree canopy — the same breakdown that drives our service scopes and pricing.',
-      'Property maps are updated whenever a significant change occurs — a new building pad, a hardscape expansion, a bed conversion — so that your contract always reflects current conditions. No surprises. No disputes. Just a clear shared picture of your property.',
-    ],
-  },
-}
-
-// ---------------------------------------------------------------------------
 // Juniper Cares — standalone static page (separate from the services blurb)
-// Used as a standalone proposal page entry distinct from the services section.
+// Mirrors §4.4's JUNIPER CARES entry; used as a standalone proposal page entry.
 // ---------------------------------------------------------------------------
 
-// TODO: real copy from Caitlyn's content inventory
 export const JUNIPER_CARES_PAGE_CONTENT: StaticPageCopy = {
   heading: 'Juniper Cares',
-  subheading: 'Giving Back to the Communities We Serve',
   body: [
-    'At Juniper, we believe that a great landscape company does more than maintain beautiful properties — it helps sustain the communities that give those properties their context and character.',
-    'Through the Juniper Cares program, we fund horticultural scholarships at Florida community colleges, partner with Habitat for Humanity on landscaping new-build homes, and organize volunteer days where our crews dedicate time to public parks and schoolyards.',
-    'A portion of every Juniper service contract goes directly to Juniper Cares initiatives in the region where that contract is active. When you invest in Juniper, your community benefits too.',
+    'At Juniper, we believe our people are our greatest strength. Juniper Cares was created to support employees when life brings unexpected challenges—because no one should have to face hardship alone.',
+  ],
+  lists: [
+    {
+      label: 'What Is Juniper Cares?',
+      labelColor: 'orange',
+      labelLarge: true,
+      unbulleted: true,
+      items: [
+        {
+          text: 'Juniper Cares is an employee assistance fund supported by the generosity of our team and company. The program raises and distributes funds to help qualified employees and Business Partner Associates who are experiencing financial hardship due to circumstances beyond their control.',
+        },
+        {
+          text: 'The Juniper Cares fund is designed to provide temporary assistance during difficult times, including but not limited to:',
+        },
+      ],
+    },
+    {
+      items: [
+        { text: 'Serious medical situations or unexpected medical expenses' },
+        { text: 'Financial hardship caused by illness or injury' },
+        { text: 'Natural disasters such as floods, fires, or severe storms' },
+        { text: 'The unexpected death of an immediate family member' },
+        { text: 'Other unforeseen emergencies that create significant financial strain.' },
+      ],
+    },
   ],
 }
 
@@ -302,14 +754,16 @@ export const JUNIPER_CARES_PAGE_CONTENT: StaticPageCopy = {
 // Day 60 / Day 90 / 120+ / Ongoing are free-text per proposal (StartupPlanInput).
 // ---------------------------------------------------------------------------
 
-// TODO: verify Day Zero / Day 30 bullets against live 30-60-90 example PDF (page 2)
+// NOTE: Day Zero / Day 30 bullets are not part of Handoff 45 §4's approved copy
+// deck; they remain the Slice-2 seed pending verification against the live
+// 30-60-90 example PDF (page 2). No §4 source exists to replace them here.
 export const STARTUP_PLAN_SEED: StartupPlanSeed = {
   dayZero: [
     { text: 'Conduct property walk-through with Account Manager and key client contacts' },
     { text: 'Identify and document any existing damage, deferred maintenance, or safety concerns' },
     { text: 'Confirm service schedule and point-of-contact information' },
     { text: 'Review scope of services and establish communication cadence' },
-    { text: 'Set up client account in Juniper Sync / Aspire portal' },
+    { text: 'Set up client account in Juniper Sync portal' },
     { text: 'Orient crew lead to property layout, gate codes, and access requirements' },
     { text: 'Photograph property baseline conditions for shared documentation' },
   ],
@@ -323,45 +777,43 @@ export const STARTUP_PLAN_SEED: StartupPlanSeed = {
   ],
 }
 
+/**
+ * Intro paragraph printed over the page's hero photo, above the phase cards.
+ * Verbatim from the reference ("business docs/30-60-90 plan example.pdf").
+ */
+export const STARTUP_PLAN_INTRO =
+  'This list will give you an overall guide to the initial services Juniper will ' +
+  'undertake as we start work with the community. We’ll provide status updates ' +
+  'throughout the first 30, 60, and 90 days of service during our Communication ' +
+  'Plan meetings.'
+
 // ---------------------------------------------------------------------------
 // Insurance page — surrounding copy (certificate metadata served by backend)
 // ---------------------------------------------------------------------------
 
-// TODO: real copy from Caitlyn's content inventory
 /**
  * Surrounding copy for the licenses & certifications page. The table itself comes
  * from crm.licenses_certifications; `empty` renders in its place while that is bare.
  */
 export const LICENSES_PAGE_COPY = {
   heading: 'Licenses & Certifications',
-  intro: [
-    'Juniper Landscaping maintains the state licensing and industry certifications required to perform every service in this proposal, and our teams hold credentials well beyond the statutory minimum.',
-  ],
   empty:
     'Current licensing and certification documentation is available on request.',
 }
 
 export const INSURANCE_PAGE_COPY: InsurancePageCopy = {
   heading: 'Insurance',
-  intro: [
-    "Juniper Landscaping carries comprehensive insurance coverage to protect your property, your residents, and our employees. Our active policies include general liability, workers' compensation, commercial auto, and umbrella coverage.",
-    'Current certificates of insurance are available on request and are provided to all clients as part of the onboarding process. Our certificates are renewed annually and your account team will notify you proactively whenever a certificate is updated.',
-  ],
-  footer: [
-    'If your property management company or HOA board requires additional insured status or a specific certificate holder language, please provide those details to your Account Manager at contract signing.',
-  ],
 }
 
 // ---------------------------------------------------------------------------
 // Dev-only placeholder tripwire
 //
-// While the copy above is placeholder text pending Caitlyn's content inventory,
-// it is easy to ship a literal "TODO" inside a *rendered string value* by
-// accident. `findTodoStrings` walks any content structure and returns every
-// string value matching /TODO/i so we can catch those before they reach a
-// client-facing page. It is pure and fully unit-testable; the `console.warn`
-// side effect below is gated on `import.meta.env.DEV` so it never runs in a
-// production build and never emits a visible/client-facing marker.
+// `findTodoStrings` walks any content structure and returns every string value
+// matching /TODO/i so we can catch an accidental literal "TODO" in a rendered
+// string value before it reaches a client-facing page. It is pure and fully
+// unit-testable; the `console.warn` side effect below is gated on
+// `import.meta.env.DEV` so it never runs in a production build and never emits a
+// visible/client-facing marker.
 // ---------------------------------------------------------------------------
 
 const TODO_PATTERN = /TODO/i
@@ -408,6 +860,7 @@ export function warnOnTodoStrings(content: unknown, label = 'staticContent'): vo
 if (import.meta.env.DEV) {
   warnOnTodoStrings(
     {
+      INTRO_LETTER_CONTENT,
       SERVICES_CONTENT,
       STARTUP_COMMUNICATION_CONTENT,
       CUSTOMER_CARE_CONTENT,
@@ -416,8 +869,10 @@ if (import.meta.env.DEV) {
       LOCAL_EXPERTS_CONTENT,
       JUNIPER_SYNC_CONTENT,
       JUNIPER_MAPPING_CONTENT,
+      IRRIGATION_REPORTING_CONTENT,
       JUNIPER_CARES_PAGE_CONTENT,
       STARTUP_PLAN_SEED,
+      STARTUP_PLAN_INTRO,
       LICENSES_PAGE_COPY,
       INSURANCE_PAGE_COPY,
     },

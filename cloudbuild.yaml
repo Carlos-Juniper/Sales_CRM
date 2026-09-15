@@ -20,6 +20,11 @@ steps:
         DOCKER_BUILDKIT=1 docker build \
           --build-arg VITE_ENTRA_CLIENT_ID=$(cat /workspace/entra_client_id) \
           --build-arg VITE_ENTRA_TENANT_ID=$(cat /workspace/entra_tenant_id) \
+          "--build-arg=VITE_COMPANY_NAME=Juniper Landscaping" \
+          "--build-arg=VITE_COMPANY_PHONE=(239) 561-5980" \
+          "--build-arg=VITE_COMPANY_EMAIL=customercare@juniperlandscaping.com" \
+          "--build-arg=VITE_COMPANY_WEBSITE=https://junipercares.com/" \
+          "--build-arg=VITE_COMPANY_ADDRESS=4415 Metro Parkway, Suite 300, Fort Myers, FL 33916" \
           -t us-central1-docker.pkg.dev/juniper-crm-498215-p5/juniper-crm/crm-app \
           .
 
@@ -50,6 +55,6 @@ steps:
       # URL (legacy -<hash>-uc.a.run.app form for this project, NOT the
       # -<project-number>.<region>.run.app form); append any custom domain here
       # AND in the bucket CORS config.
-      - --set-env-vars=MYSQL_SOCKET_PATH=/cloudsql/juniper-crm-498215-p5:us-central1:juniper-prod,KMS_GRAPH_TOKEN_KEY=projects/juniper-crm-498215-p5/locations/us-central1/keyRings/juniper-crm/cryptoKeys/graph-tokens,ASPIRE_ENV=prod,ASPIRE_BASE_URL=https://cloud-api.youraspire.com,ASPIRE_SYNC_ENABLED=false,GCS_ATTACHMENTS_BUCKET=juniper-crm-attachments-prod,GCS_SIGNER_SA_EMAIL=${PROJECT_NUMBER}-compute@developer.gserviceaccount.com,GCS_MAX_UPLOAD_BYTES=2147483648,GCS_SIGNED_URL_TTL_MIN=10,CORS_EXTRA_ORIGINS=https://juniper-crm-app-3776pu4ezq-uc.a.run.app,PDF_RENDER_ENABLED=true,PDF_MAX_CONCURRENCY=2,PDF_RENDER_TIMEOUT_MS=60000
+      - --set-env-vars=MYSQL_SOCKET_PATH=/cloudsql/juniper-crm-498215-p5:us-central1:juniper-prod,KMS_GRAPH_TOKEN_KEY=projects/juniper-crm-498215-p5/locations/us-central1/keyRings/juniper-crm/cryptoKeys/graph-tokens,ASPIRE_ENV=prod,ASPIRE_BASE_URL=https://cloud-api.youraspire.com,ASPIRE_SYNC_ENABLED=false,GCS_ATTACHMENTS_BUCKET=juniper-crm-attachments-prod,GCS_SIGNER_SA_EMAIL=${PROJECT_NUMBER}-compute@developer.gserviceaccount.com,GCS_MAX_UPLOAD_BYTES=2147483648,GCS_SIGNED_URL_TTL_MIN=10,CORS_EXTRA_ORIGINS=https://juniper-crm-app-3776pu4ezq-uc.a.run.app,PDF_RENDER_ENABLED=true,PDF_MAX_CONCURRENCY=2,PDF_RENDER_TIMEOUT_MS=60000,VITE_COMPANY_NAME=Juniper Landscaping,VITE_COMPANY_ADDRESS=4415 Metro Parkway\, Suite 300\, Fort Myers\, FL 33916
       - --set-secrets=JWT_SECRET=JWT_SECRET:latest,ENTRA_CLIENT_ID=ENTRA_CLIENT_ID:latest,ENTRA_TENANT_ID=ENTRA_TENANT_ID:latest,ENTRA_CLIENT_SECRET=ENTRA_CLIENT_SECRET:latest,MYSQL_USER=MYSQL_USER:latest,MYSQL_PASSWORD=MYSQL_PASSWORD:latest,MYSQL_DB=MYSQL_DB:latest,ASPIRE_CLIENT_ID=ASPIRE_CLIENT_ID:latest,ASPIRE_SECRET=ASPIRE_SECRET:latest
       - --project=juniper-crm-498215-p5

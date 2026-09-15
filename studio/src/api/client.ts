@@ -26,7 +26,12 @@ async function request<T>(path: string, options: RequestInit = {}, skipContentTy
   if (res.status === 401) {
     useAuthStore.getState().logout()
     const { pathname } = window.location
-    if (pathname !== '/login' && pathname !== '/auth/callback') {
+    // DEV-only routes under /dev/ are fixture-driven and deliberately have no
+    // session (see router.tsx). Without this exemption AuthBootstrap's me()
+    // 401 bounces them to /login before they can ever mount. `import.meta.env.DEV`
+    // is a literal false in a production build, so this collapses away there.
+    const onDevRoute = import.meta.env.DEV && pathname.startsWith('/dev/')
+    if (pathname !== '/login' && pathname !== '/auth/callback' && !onDevRoute) {
       window.location.href = '/login'
     }
     throw new ApiError(401, 'Session expired')

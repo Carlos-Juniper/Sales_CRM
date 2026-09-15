@@ -132,9 +132,9 @@ function makeDefaultFormState(signerUserId: string): ProposalFormState {
       // team_members row, so the AM node is always populated from the proposal
       // creator without requiring a seeded roster entry.
       accountManagerIds: signerUserId ? [signerUserId] : [],
-      agronomyManagerId: null,
-      irrigationManagerId: null,
-      productionManagerId: null,
+      agronomyManagerName: null,
+      irrigationManagerName: null,
+      productionManagerName: null,
       crewCounts: makeDefaultCrewCounts(),
     },
     startupPlan: {
@@ -585,20 +585,20 @@ function ProposalFormStep({
             {/* Optional free-text roles — no roster requirement */}
             <NameTextInput
               label="Agronomy Manager (optional)"
-              value={formState.orgChart.agronomyManagerId}
-              onChange={(name) => patchOrgChart({ agronomyManagerId: name })}
+              value={formState.orgChart.agronomyManagerName}
+              onChange={(name) => patchOrgChart({ agronomyManagerName: name })}
               data-testid="agronomy-manager-input"
             />
             <NameTextInput
               label="Irrigation Manager (optional)"
-              value={formState.orgChart.irrigationManagerId}
-              onChange={(name) => patchOrgChart({ irrigationManagerId: name })}
+              value={formState.orgChart.irrigationManagerName}
+              onChange={(name) => patchOrgChart({ irrigationManagerName: name })}
               data-testid="irrigation-manager-input"
             />
             <NameTextInput
               label="Production Manager (optional)"
-              value={formState.orgChart.productionManagerId}
-              onChange={(name) => patchOrgChart({ productionManagerId: name })}
+              value={formState.orgChart.productionManagerName}
+              onChange={(name) => patchOrgChart({ productionManagerName: name })}
               data-testid="production-manager-input"
             />
 

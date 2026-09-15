@@ -74,18 +74,22 @@
   --jn-script: 'Mrs Saint Delafield', cursive;
 
   --jn-green: #038442;
-  --jn-green-dark: #026634;
   --jn-orange: #e87825;
-  --jn-ink: #2a2a2a;
-  --jn-ink-soft: #4a4a4a;
+  /* Second orange, used for branch names, service pull-quotes and the Client
+     References page title. Distinct from --jn-orange in the real exports. */
+  --jn-orange-alt: #f47320;
+  --jn-ink: #000000;
   --jn-band: #f0f0f0;
-  --jn-hairline: #d8d8d8;
+  --jn-hairline: #cccccc;
+  /* Row rule under the branch-coverage table cells. Lighter and bluer than
+     --jn-hairline; sampled from the reference (0.84 0.87 0.88). */
+  --jn-table-rule: #d6dee0;
 
   --jn-page-w: 8.5in;
   --jn-page-h: 11in;
   --jn-gutter: 0.58in;
-  --jn-top: 0.52in;
-  --jn-footer-h: 0.34in;
+  --jn-top: 0.63in;
+  --jn-footer-h: 0.667in;
 
   font-family: var(--jn-body);
   color: var(--jn-ink);
@@ -169,65 +173,127 @@
   z-index: 5;
 }
 
+/* Reference logo artwork is 53.25 x 33.25pt — aspect 1.60, matching
+   JuniperLogoFull's viewBox aspect of 1.588. The old 0.62 x 0.2in box was
+   aspect 3.1, so preserveAspectRatio letterboxed the mark down to 0.318in wide
+   — 43% of reference size in both axes. */
 .proposal-root .footer .mark {
-  width: 0.62in;
-  height: 0.2in;
+  width: 0.74in;
+  height: 0.462in;
 }
 
 .proposal-root .footer .meta {
   font-family: var(--jn-display);
   color: #fff;
-  font-size: 7pt;
-  font-weight: 600;
-  letter-spacing: 0.07em;
+  font-size: 9pt;
+  font-weight: 400;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
+/* The footer URL links to the full address but prints bare — see
+   formatWebsiteLabel() in lib/constants.ts. color:inherit keeps it white
+   against the green bar instead of taking the UA's link colour. */
+.proposal-root .footer-website {
+  color: inherit;
+  text-decoration: underline;
+}
+
 /* --- Palm-frond watermark --------------------------------------------------
-   A very low-contrast frond texture sits behind most pages in the real
-   proposals. Inline SVG data-URL, not a file: the render captures as soon as
-   __PROPOSAL_READY__ flips and a background-image fetch is not something the
-   readiness gate can await.
+   Painted on every laid-out page by default: PrintPage passes `frond` on every
+   sheet it renders, matching the reference (Coral Bay HOA.pdf), which carries
+   the frond on every page its design team laid out (~30/41 — the balance are
+   full-bleed photo sheets with no text block to sit behind). The .frond
+   positioning below applies unchanged to all of those pages.
+
+   Escape hatch — .no-frond: add it alongside .frond on any sheet that needs the
+   watermark off (e.g. a full-bleed photo divider, or a page whose artwork would
+   fight the frond). The companion rule below removes the ::before there. This
+   replaces the previous opt-in-on-three-pages scoping; default is now on, and
+   pages subtract rather than add.
+
+   The asset is the reference's own artwork: image xref 51 extracted from
+   Coral Bay HOA.pdf — a 1039x1344 DeviceGray full-sheet field of overlapping
+   sabal fronds. The reference places it at full bleed with a /ca 0.4 ExtGState,
+   so opacity: 0.4 here matches that density rather than shipping a
+   pre-lightened file.
+
+   The trade-off of a file over a data-URL: a background-image fetch is NOT
+   awaited by document.fonts.ready, so ProposalPrintRoute preloads and decodes
+   every entry in PROPOSAL_BACKGROUND_IMAGES (lib/proposal/assets.ts) before it
+   flips __PROPOSAL_READY__. Adding a background image here means adding it
+   there too, or the capture can race the fetch and emit a blank-backed page.
    --------------------------------------------------------------------------- */
 
-.proposal-root .print-page::before {
+.proposal-root .print-page.frond::before {
   content: '';
   position: absolute;
   inset: 0;
   z-index: 0;
-  opacity: 0.5;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='420' height='420' viewBox='0 0 420 420'><g fill='none' stroke='%23000' stroke-opacity='.035' stroke-width='1.1'><path d='M210 420 C 210 300 210 190 210 40'/><path d='M210 330 C 150 300 110 250 90 190'/><path d='M210 330 C 270 300 310 250 330 190'/><path d='M210 280 C 160 250 130 205 115 155'/><path d='M210 280 C 260 250 290 205 305 155'/><path d='M210 230 C 172 205 148 168 138 128'/><path d='M210 230 C 248 205 272 168 282 128'/><path d='M210 180 C 182 160 165 130 158 100'/><path d='M210 180 C 238 160 255 130 262 100'/><path d='M210 130 C 192 116 182 96 178 76'/><path d='M210 130 C 228 116 238 96 242 76'/></g></svg>");
-  background-size: 420px 420px;
+  opacity: 0.4;
+  /* --proposal-watermark is set on :root by applyProposalAssetCssVars()
+     (lib/proposal/assets.ts) before the readiness gate fires. This lets the
+     same-origin fallback and any GCS base URL share a single CSS rule without
+     duplicating the path. */
+  background-image: var(--proposal-watermark);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
-.proposal-root .print-page.no-frond::before {
+/* Escape hatch: turn the frond off on a page that opts out. */
+.proposal-root .print-page.frond.no-frond::before {
   display: none;
 }
 
-/* --- Type scale ------------------------------------------------------------ */
+/* --- Type scale ------------------------------------------------------------
+   Every size below is READ from the content streams of "business docs/Coral Bay
+   HOA.pdf" (Tf operators), not estimated.
+
+   The previous scale came from docs/handoffs/assets/40-proposal-layout-reference.html,
+   which states it was derived from "Claude Sample.pdf" and the 30-60-90 example
+   — a different document. That is why everything here was systematically
+   undersized: body copy 8.8pt against a real 9.75pt, eyebrows 7.6pt against a
+   real 12.75pt.
+
+   Tracking is 0 throughout. Measured against the embedded Lato-Bold, "ABOUT US"
+   has an implied tracking of -0.0015em and "OUR SERVICES" -0.0067em — kerning
+   only. The old 0.14em on .eyebrow rendered a tracked caption where the
+   reference has a confident label.
+   --------------------------------------------------------------------------- */
 
 .proposal-root .eyebrow {
   font-family: var(--jn-display);
   color: var(--jn-orange);
-  font-size: 7.6pt;
+  font-size: 12.75pt;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  line-height: 1.2;
+  letter-spacing: 0;
   text-transform: uppercase;
-  margin: 0 0 0.04in;
+  margin: 0 0 0.065in;
 }
 
 .proposal-root .eyebrow.green {
   color: var(--jn-green);
 }
 
+/* 30pt confirmed exact — 26 occurrences in the reference, all 30.00pt. The
+   title box is 36pt tall for a 30pt font, and the two-line closing title has a
+   36pt baseline pitch, so line-height is exactly 1.2 (was 1.02, which collapsed
+   two-line titles). */
 .proposal-root .page-title {
   font-family: var(--jn-display);
   color: var(--jn-green);
   font-size: 30pt;
   font-weight: 700;
-  line-height: 1.02;
-  letter-spacing: -0.005em;
-  margin: 0 0 0.14in;
+  line-height: 1.2;
+  letter-spacing: -0.022em;
+  margin: 0 0 0.22in;
+  /* Honors a literal "\n" in heading copy as a forced line break (Juniper
+     Sync's "Support Service / Built for Associations" split) while still
+     collapsing normal runs of whitespace like plain text. No other heading
+     carries a real newline, so this is a no-op everywhere else. */
+  white-space: pre-line;
 }
 
 .proposal-root .page-title.caps {
@@ -238,35 +304,67 @@
   font-size: 24pt;
 }
 
+/* Client References is the one page whose title is orange and regular-weight. */
+.proposal-root .page-title.alt {
+  color: var(--jn-orange-alt);
+  font-weight: 400;
+}
+
+/* Lato REGULAR in the reference, not bold — all 14 occurrences. Covers section
+   sub-headings, the letter salutation and "Local Branches". */
 .proposal-root .sub {
   font-family: var(--jn-display);
   color: var(--jn-green);
-  font-size: 14pt;
-  font-weight: 700;
-  line-height: 1.15;
+  font-size: 15.75pt;
+  font-weight: 400;
+  line-height: 1.2;
   margin: 0.18in 0 0.06in;
 }
 
 .proposal-root .kicker {
   font-family: var(--jn-display);
   color: var(--jn-orange);
-  font-size: 9.5pt;
+  font-size: 9.75pt;
   font-weight: 700;
   margin: 0.14in 0 0.05in;
 }
 
+/* The document's most common style — 205 occurrences at 9.75pt/#000 with a
+   14.25pt baseline pitch. The old 8.8pt/#4a4a4a made every page read softer and
+   lower-contrast than the real export. */
 .proposal-root p,
 .proposal-root li {
-  font-size: 8.8pt;
-  line-height: 1.52;
-  color: var(--jn-ink-soft);
-  margin: 0 0 0.08in;
+  font-size: 9.75pt;
+  line-height: 1.46;
+  color: var(--jn-ink);
+  margin: 0 0 0.125in;
 }
 
+/* Lato, not the inherited Open Sans, and full content width — the reference
+   measure is 7.30in, i.e. gutter to gutter. */
 .proposal-root .lede {
-  font-size: 9.4pt;
+  font-family: var(--jn-display);
+  font-size: 12.75pt;
+  font-weight: 400;
+  line-height: 1.294;
   color: var(--jn-ink);
-  max-width: 6.6in;
+  max-width: none;
+}
+
+/* Service-page pull-quote variant. */
+.proposal-root .lede.quote {
+  font-weight: 700;
+  color: var(--jn-orange-alt);
+}
+
+/* Arboriculture only — the ISA badge sits in the page-head row opposite the
+   eyebrow/title block (reference: top-right, level with "ARBORICULTURE"),
+   not stacked below it — stacking it below pushed the badge past the title
+   and left a gap before "Certified Arborists". */
+.proposal-root .service-arborist-badge {
+  width: 0.85in;
+  height: auto;
+  flex-shrink: 0;
 }
 
 /* --- Lists ----------------------------------------------------------------- */
@@ -277,24 +375,23 @@
   padding: 0;
 }
 
+/* Rendered by CopyLists for service bullets and ServiceOverviewPage category bullets.
+   Reference bullet is 18 x 10.5pt on a 24pt indent — a wide mark, not the
+   square one this used to draw. Expects a <span class="leaf-bullet"> holding
+   the real two-tone brand artwork (orange leaves, green accents); the old
+   masked ::before could only produce a single-colour silhouette. */
 .proposal-root ul.leaf > li {
   position: relative;
-  padding-left: 0.24in;
-  margin-bottom: 0.055in;
+  padding-left: 0.333in;
+  margin-bottom: 0.09in;
 }
 
-.proposal-root ul.leaf > li::before {
-  content: '';
+.proposal-root ul.leaf > li > .leaf-bullet {
   position: absolute;
   left: 0;
-  top: 0.045in;
-  width: 0.13in;
-  height: 0.13in;
-  background: var(--jn-orange);
-  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M22 3C12 3 4 8 4 16v5h3v-4c0-6 6-10 15-10-5 1-9 4-11 8 6 1 11-3 11-12z'/></svg>")
-    center / contain no-repeat;
-  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M22 3C12 3 4 8 4 16v5h3v-4c0-6 6-10 15-10-5 1-9 4-11 8 6 1 11-3 11-12z'/></svg>")
-    center / contain no-repeat;
+  top: 0.05in;
+  width: 0.25in;
+  height: 0.146in;
 }
 
 .proposal-root ul.dot {
@@ -303,21 +400,70 @@
   padding: 0;
 }
 
+/* Inherits body type on purpose. The only consumer is the 30-60-90 page, whose
+   source document ("business docs/30-60-90 plan example.pdf") was NOT audited —
+   Coral Bay HOA.pdf contains no 30-60-90 layout. Applying the page-7 service-card
+   values here would be styling one document's page to another's measurements. */
 .proposal-root ul.dot > li {
   position: relative;
-  padding-left: 0.2in;
+  padding-left: 0.19in;
   margin-bottom: 0.06in;
 }
 
 .proposal-root ul.dot > li::before {
   content: '';
   position: absolute;
-  left: 0.04in;
-  top: 0.075in;
-  width: 0.05in;
-  height: 0.05in;
+  left: 0.03in;
+  top: 0.07in;
+  width: 0.055in;
+  height: 0.055in;
   border-radius: 50%;
   background: var(--jn-orange);
+}
+
+/* The measured page-7 variant — Lato 12pt, line-height 1.13 — scoped to the
+   service grid, which is where the reference actually uses it. */
+.proposal-root .service-cell ul.dot > li {
+  font-family: var(--jn-display);
+  font-size: 12pt;
+  line-height: 1.13;
+  color: var(--jn-ink);
+}
+
+/* Orange checkmark on a white disc — Juniper Sync's "Highlights" sidebar list
+   only. Drawn in CSS rather than the reference's embedded checkmark glyph so
+   no extra image asset is needed. */
+.proposal-root ul.check {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.proposal-root ul.check > li {
+  position: relative;
+  padding-left: 0.3in;
+  margin-bottom: 0.14in;
+}
+
+.proposal-root ul.check > li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.01in;
+  width: 0.19in;
+  height: 0.19in;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.proposal-root ul.check > li::after {
+  content: '\2713';
+  position: absolute;
+  left: 0.05in;
+  top: -0.015in;
+  font-size: 10.5pt;
+  font-weight: 700;
+  color: var(--jn-orange);
 }
 
 /* --- Layout helpers -------------------------------------------------------- */
@@ -338,10 +484,25 @@
   margin-top: 0.24in;
 }
 
-.proposal-root .cols-2.branch-cols {
-  grid-template-columns: 1.15fr 1fr;
-  align-items: start;
+/* Communication: the right column has no eyebrow/title of its own, so it
+   starts flush with the top of the grid — well above the left column's title.
+   Drop it to roughly the title's vertical band instead. */
+.proposal-root .comm-col-right {
+  margin-top: 0.42in;
 }
+
+/* Communication's Purpose/Attendees/Agenda/Schedule labels print larger and
+   green rather than the shared orange .copy-list-label — scoped to this
+   page's containers so every other page's labels are unaffected. A touch
+   more bottom margin than the shared label separates the heading from its
+   content below. */
+.proposal-root .comm-cols .copy-list-label,
+.proposal-root .comm-sched .copy-list-label {
+  color: var(--jn-green);
+  font-size: 13pt;
+  margin-bottom: 6pt;
+}
+
 
 /* Page header with the leaf mark set opposite the title. */
 .proposal-root .page-head {
@@ -350,10 +511,14 @@
   align-items: flex-start;
 }
 
+/* 1.747 x 1.028in in the reference (aspect 1.699, matching JuniperLeaves'
+   viewBox aspect of 1.673). The negative right margin is deliberate: the mark
+   overhangs the 0.58in gutter by ~0.12in, sitting 0.462in off the paper edge. */
 .proposal-root .head-leaves {
-  width: 1.15in;
-  height: 0.62in;
-  margin-top: 0.05in;
+  width: 1.75in;
+  height: 1.03in;
+  margin-top: -0.08in;
+  margin-right: -0.12in;
   flex: none;
 }
 
@@ -367,7 +532,13 @@
   padding: 0.34in var(--jn-gutter) 0.38in;
 }
 
-/* --- Photos ---------------------------------------------------------------- */
+/* --- Photos ----------------------------------------------------------------
+   The hatch is both the stand-in for a slot with no image yet (portfolio
+   photos, which are still per-config uploads) and the backdrop an <img>.photo
+   paints over. Service-grid photos ship in the build, but leaving the hatch
+   underneath means a fetch that fails degrades to the tonal block rather than
+   a broken-image glyph on a page the rep cannot edit.
+   --------------------------------------------------------------------------- */
 
 .proposal-root .photo {
   background: repeating-linear-gradient(135deg, #dde5dd 0 10px, #d5ded5 10px 20px);
@@ -381,24 +552,494 @@
   overflow: hidden;
 }
 
+/* 19.5pt (0.27in) in the reference, not a 3px hairline gap. */
 .proposal-root .collage {
   display: grid;
-  gap: 3px;
+  gap: 0.27in;
 }
 
-.proposal-root .capbar {
+/* Portfolio: one flattened image per property, sized to whatever the title
+   leaves. Flex rather than a computed max-height so a two-line property name
+   shrinks the image instead of pushing it under the footer bar (Handoff 48 §4).
+   Do NOT widen .photo — four other layouts depend on it; this is its own class. */
+.proposal-root .print-page.portfolio > .well {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Service detail pages — flex column so the collage absorbs leftover height */
+.proposal-root .print-page.service > .well {
+  display: flex;
+  flex-direction: column;
+}
+.proposal-root .print-page.service > .well > * {
+  flex: 0 0 auto;
+}
+/* Higher specificity than the reset above (5 class selectors vs. 4) is
+   deliberate: that reset's universal selector unintentionally caught
+   .service-collage too, pinning it to flex: 0 0 auto and silently disabling
+   the grow-into-leftover-space behavior described below — every collage
+   height was actually just its own auto content size, so no min-height or
+   flex-basis edit on .service-collage ever did anything (verified against
+   the real print route: identical computed layout before and after several
+   rounds of tuning those values). This override is what actually lets it
+   grow/shrink. */
+.proposal-root .print-page.service > .well > .service-collage {
+  flex: 1 1 0;
+}
+
+/* Service photo collage — full bleed, flex-grows into leftover well height.
+   flex-basis MUST be 0, not auto: with auto, this item's hypothetical size is
+   content-based, which forces its own grid's height indefinite at track-sizing
+   time — per the grid spec, an `fr` row inside a grid with an indefinite block
+   size is sized like `auto` (content/aspect-ratio driven) instead of dividing
+   available space. That silently ignored min-height entirely and sized the
+   hero photo to its own natural aspect ratio, overflowing the footer on any
+   page with more copy above it than Turf's. flex-basis: 0 gives the flex
+   algorithm a definite size to grow from, so the collage's height is resolved
+   from leftover space BEFORE its grid rows are sized — only then does
+   min-height act as a real floor. */
+.proposal-root .service-collage {
+  flex: 1 1 0;
+  display: grid;
+  gap: 0.16in;
+  margin: 0.20in calc(-1 * var(--jn-gutter)) 0.12in;
+  width: calc(100% + 2 * var(--jn-gutter));
+  min-height: 3.00in;
+}
+.proposal-root .service-collage > img {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  object-fit: cover;
+  display: block;
+}
+
+/* 1-photo pages */
+.proposal-root .service-collage.solo {
+  grid-template-rows: 1fr;
+}
+
+/* 1-photo pages with a subhead + long bullet list above (Aquatics) — same
+   single-frame shape as .solo, just a lower floor so the photo can shrink
+   instead of clipping under the footer bar. */
+.proposal-root .service-collage.solo-compact {
+  grid-template-rows: 1fr;
+  min-height: 1.90in;
+}
+
+/* 2-photo pages: hero top, second bottom at fixed height */
+.proposal-root .service-collage.stack2 {
+  grid-template-rows: 1fr 2.10in;
+  min-height: 4.20in;
+}
+
+/* 3-photo default: hero spans top row full-width, two below.
+   Kept smaller than stack2's floor — this shape carries a subhead/list
+   above it (Design, Landscape Maintenance) that stack2's pages don't, so
+   the same 4.20in floor pushed the bottom row under the footer bar. */
+.proposal-root .service-collage.hero-row2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1.85in;
+  column-gap: 0.30in;
+  row-gap: 0.16in;
+  min-height: 3.30in;
+}
+.proposal-root .service-collage.hero-row2 > img:first-child {
+  grid-column: 1 / -1;
+}
+
+/* Installation: 2 stacked left + 1 tall right */
+.proposal-root .service-collage.split-tall {
+  margin-inline: -0.24in;
+  width: calc(100% + 0.48in);
+  grid-template-columns: 3.95in 1fr;
+  grid-template-rows: 1fr 1fr;
+  column-gap: 0.12in;
+  row-gap: 0.08in;
+  min-height: 4.40in;
+}
+.proposal-root .service-collage.split-tall > img:last-child {
+  grid-column: 2;
+  grid-row: 1 / -1;
+}
+
+/* Enhancements: big left spanning full height + 2 stacked right.
+   Floor trimmed down from 3.40in — this page carries a subhead plus two
+   bullet lists (9 items) above the collage, more copy than any other
+   service page, and the old floor pushed the bottom of the collage under
+   the footer bar. */
+.proposal-root .service-collage.l-left {
+  grid-template-columns: 4.32in 1fr;
+  grid-template-rows: 1fr 1fr;
+  column-gap: 0.08in;
+  row-gap: 0.13in;
+  min-height: 2.15in;
+}
+.proposal-root .service-collage.l-left > img:first-child {
+  grid-row: 1 / -1;
+}
+
+/* Irrigation split layout: full-width header, then copy-left / photos-right */
+.proposal-root .service-split {
+  display: grid;
+  grid-template-columns: 2.80in 1fr;
+  gap: 0.19in;
+  margin: 0.20in 0 0.12in 0;
+  min-height: 5.00in;
+  flex: 1 1 auto;
+}
+.proposal-root .service-split-copy {
+  min-width: 0;
+  /* no overflow: hidden — the old heavy-left had this and it clipped the title */
+}
+.proposal-root .service-photo-col {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 0.19in;
+  min-height: 0;
+}
+.proposal-root .service-photo-col > img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: cover;
+  display: block;
+}
+
+.proposal-root .portfolio-photo {
+  flex: 1;
+  min-height: 0;          /* without this a flex child refuses to shrink below content size */
+  width: 100%;
+  object-fit: contain;     /* letterbox rather than crop — Caitlyn's export is the composed artwork */
+  margin-inline: auto;
+}
+
+/* --- Full-bleed photography ------------------------------------------------
+   Photography is the reference's dominant visual device and it always runs to
+   the paper edge: 17 of its 41 pages are a single edge-to-edge photo carrying
+   nothing but the footer bar, and service pages pair a bleeding hero with two
+   half-width photos butted against the footer.
+
+   These are the primitives for that treatment. Nothing uses them yet, but the
+   blocker has moved: brand photography now ships in the build (see
+   lib/proposal/photos.ts), so a divider or service hero can be fed today. What
+   is still missing is the curation — which frame belongs on which page — not
+   the bytes. Pair .photo-full with PrintPage's
+   noFooter where the reference drops the bar; no watermark interaction to worry
+   about, since only the cover carries one.
+   --------------------------------------------------------------------------- */
+
+/* One photo covering the whole sheet, under the footer bar's z-index of 5. */
+.proposal-root .print-page > .photo-full {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* A hero band that bleeds horizontally while staying in the well's flow.
+   Wraps a single <img>. The container carries the horizontal bleed and the
+   vertical rhythm; the img fills it. Default height ~3.2in reads well between a
+   page title and body copy on a service detail page — override inline for the
+   reference's taller ~4.43in treatment. */
+.proposal-root .photo-hero {
+  margin: 0.2in calc(-1 * var(--jn-gutter)) 0.24in;
+  width: calc(100% + 2 * var(--jn-gutter));
+  height: 3.6in;
+  display: block;
+  overflow: hidden;
+}
+
+.proposal-root .photo-hero > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Two half-width photos bleeding to both edges with the reference's gutter. */
+.proposal-root .photo-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.27in;
+  margin-left: calc(-1 * var(--jn-gutter));
+  margin-right: calc(-1 * var(--jn-gutter));
+}
+
+.proposal-root .photo-pair > img {
+  width: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* --- Juniper Cares ----------------------------------------------------------
+   Reference sets the two closing photos low on the sheet — a large gap under
+   the bullet list, a much smaller one above the footer — not stacked flush
+   under the copy. Flex column .well lets margin-top:auto on .photo-pair do
+   that push; a fixed height (instead of each <img>'s own aspect ratio) is what
+   keeps the pair the same size — the source frames are two different aspect
+   ratios and, sized off .photo-pair's width alone, rendered visibly uneven. */
+.proposal-root .print-page.cares-page > .well {
+  display: flex;
+  flex-direction: column;
+}
+.proposal-root .print-page.cares-page > .well > * {
+  flex: 0 0 auto;
+}
+
+.proposal-root .cares-page .photo-pair {
+  margin-top: auto;
+  margin-bottom: 0.3in;
+  height: 3.5in;
+  gap: 0.12in;
+}
+
+.proposal-root .cares-page .photo-pair > img {
+  height: 100%;
+}
+
+/* --- Rooted in Florida ------------------------------------------------------
+   Reference geometry: photos stacked at x38-320 (282pt wide, 184pt tall each,
+   17pt apart) with the grey panel at x328-570 spanning their full height. */
+
+.proposal-root .rooted-body {
+  display: grid;
+  grid-template-columns: 1.165fr 1fr;
+  gap: 0.11in;
+  margin-top: 0.24in;
+  align-items: stretch;
+}
+
+/* On this page the pair is the left column, not a bleeding half-width row. */
+.proposal-root .rooted-page .photo-pair {
+  grid-template-columns: 1fr;
+  gap: 0.236in;
+  margin-left: 0;
+  margin-right: 0;
+  align-content: start;
+}
+
+.proposal-root .rooted-page .photo-pair > img {
+  aspect-ratio: 282 / 184;
+  height: auto;
+}
+
+.proposal-root .rooted-panel {
+  background: var(--jn-band);
+  padding: 0.36in 0.3in;
+}
+
+.proposal-root .rooted-panel > p:first-child {
+  margin-top: 0;
+}
+
+/* Small gap below the title/logo row before the lede paragraph starts. */
+.proposal-root .rooted-page .page-head {
+  margin-bottom: 0.15in;
+}
+
+/* "Where we started" / "Where we are today" — larger and regular-weight,
+   unlike the bold orange .copy-list-label used for in-copy list headers
+   elsewhere in the document. */
+.proposal-root .rooted-page .rooted-label {
+  font-family: var(--jn-display);
+  color: var(--jn-orange);
+  font-size: 13pt;
+  font-weight: 400;
+  margin: 0.1in 0 0.05in;
+}
+
+/* The stat rows sit below the panel's prose, not in a column of their own. */
+.proposal-root .rooted-panel .stats {
+  margin-top: 0.3in;
+}
+
+/* The panel column is too narrow for the default side-by-side stat; the
+   reference stacks the figure over its label here. */
+.proposal-root .rooted-panel .stat {
+  display: block;
+}
+
+.proposal-root .rooted-panel .stat .lbl {
+  margin-top: 0.04in;
+}
+
+.proposal-root .rooted-panel .stat:last-child {
+  margin-bottom: 0;
+}
+
+/* The leaf mark clears the well's top padding so it sits level with the
+   eyebrow/title block: reference puts its top at 30pt, the well starts at
+   45pt (--jn-top). */
+.proposal-root .rooted-page .head-leaves {
+  margin-top: -0.208in;
+}
+
+/* --- Juniper Sync -------------------------------------------------------
+   Reference geometry: a hairline under the lede separates the title block
+   from a two-column body — a green sidebar (Highlights + the QR caption)
+   on the left, the Work Order System copy and its two-column bullet list
+   plus the two app-screenshot phones on the right. */
+
+.proposal-root .sync-page .sync-logo {
+  width: 2in;
+  height: auto;
+  margin-top: 0;
+  margin-right: 0;
+}
+
+.proposal-root .sync-body {
+  display: grid;
+  grid-template-columns: 2.3in 1fr;
+  gap: 0.4in;
+  margin-top: 0.2in;
+  padding-top: 0.22in;
+  border-top: 1px solid var(--jn-hairline);
+  align-items: stretch;
+  /* Stretches the sidebar's green fill down the sheet regardless of how much
+     room the Highlights/QR copy alone would need — sized off the well's own
+     content budget (11in page - 0.63in top - ~0.85in footer clearance, minus
+     the title/lede block above), not guessed. */
+  min-height: 6.4in;
+}
+
+.proposal-root .sync-sidebar {
   background: var(--jn-green);
-  color: #fff;
-  font-size: 8pt;
-  text-align: center;
-  padding: 0.05in 0;
+  color: #ffffff;
+  padding: 0.3in 0.26in;
 }
 
-.proposal-root .capbar.orange {
-  background: var(--jn-orange);
+/* Overrides the shared orange list label — the reference prints "Highlights"
+   in white on the sidebar's green fill. */
+.proposal-root .sync-sidebar .copy-list-label {
+  color: #ffffff;
+}
+
+.proposal-root .sync-sidebar ul.check > li {
+  color: #ffffff;
+}
+
+.proposal-root .sync-qr-block {
+  margin-top: 0.35in;
+}
+
+/* White quiet zone matters for scannability — the sidebar behind it is solid
+   green, so the QR's own opaque white background can't be trusted to show
+   through a transparent PNG the way it can on a white page. */
+.proposal-root .sync-qr {
+  display: block;
+  width: 1.3in;
+  height: 1.3in;
+  background: #fff;
+  padding: 0.08in;
+  border-radius: 4px;
+}
+
+/* .proposal-root p already sets color: var(--jn-ink); a single class loses
+   that specificity fight, which silently rendered this caption black on the
+   green fill instead of inheriting .sync-sidebar's white. */
+.proposal-root .sync-sidebar-note {
+  margin-top: 0.14in;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.proposal-root .sync-main .sub {
+  margin-top: 0;
+}
+
+.proposal-root .sync-worklist {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 0.3in;
+  margin-top: 0.06in;
+}
+
+.proposal-root .sync-app-photos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.24in;
+  margin-top: 0.24in;
+  align-items: start;
+}
+
+.proposal-root .sync-app-photos > img {
+  width: 100%;
+  /* ~42% larger than the original 3.6in — the reference's phones read much
+     bigger relative to the sidebar/worklist copy above them. */
+  height: 5.1in;
+  object-fit: contain;
+  display: block;
+}
+
+/* --- Irrigation Reporting Sample --------------------------------------------
+   Two real report screenshots side by side. The source pair (an irrigation
+   inspection form and a weekly services table) are two different aspect
+   ratios, so — unlike the Juniper Sync app photos above — a shared fixed
+   height would letterbox one of them inside a lot of dead space. Each column
+   instead sizes to its own image's natural ratio and top-aligns, matching the
+   reference page exactly. */
+.proposal-root .reporting-sample-photos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3in;
+  margin: 0.24in 0;
+  align-items: start;
+}
+
+.proposal-root .reporting-sample-photos > img {
+  width: 100%;
+  height: auto;
+  display: block;
 }
 
 /* --- 30-60-90 schedule cards ----------------------------------------------- */
+
+/* Start Up Communication's Schedule section sits below the two-column body.
+   Match the gap the .well's own bottom padding already reserves below the
+   last content (--jn-footer-h + 0.18in = 0.847in) so the space above the
+   "Schedule" label balances the space below the green boxes and the footer. */
+.proposal-root .comm-sched {
+  margin-top: 0.85in;
+}
+
+/* Communication's cards read bigger/squarer than the 30-60-90 page's six-card
+   grid, which has to fit six cards on one sheet — scoped to .comm-sched so
+   that page is untouched. Narrower max-width plus the wider gap keeps the row
+   from stretching edge-to-edge, framing it like the reference's 3-card strip. */
+.proposal-root .comm-sched .sched {
+  max-width: 6.7in;
+  margin: 0 auto;
+  gap: 0.34in;
+}
+
+.proposal-root .comm-sched .sched-head {
+  font-size: 10.5pt;
+  line-height: 1.35;
+  padding: 0.13in 0.1in;
+  border-radius: 0.07in;
+}
+
+.proposal-root .comm-sched .sched-body {
+  font-size: 10.25pt;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 0.32in 0.16in;
+  min-height: 1.35in;
+  border-radius: 0.07in;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.proposal-root .comm-sched .sched-rule {
+  top: 0.33in;
+}
 
 .proposal-root .sched {
   display: grid;
@@ -443,11 +1084,32 @@
 /* --- Org chart ------------------------------------------------------------- */
 
 .proposal-root .org-node {
-  border: 1.5px solid var(--jn-green);
-  border-radius: 3px;
-  padding: 0.12in 0.1in;
   text-align: center;
-  background: #fff;
+}
+
+/* The org-icon PNGs are already flattened circular badges (colored fill +
+   white glyph, transparent outside the circle), so the icon fills the whole
+   avatar box. The background colors below are a fallback if an icon fails
+   to load, mirroring the badge colors baked into the PNGs. */
+.proposal-root .org-avatar {
+  width: 0.6in;
+  height: 0.6in;
+  border-radius: 50%;
+  background: var(--jn-green);
+  margin: 0 auto 0.08in;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.proposal-root .org-avatar.org-avatar-team {
+  background: var(--jn-orange);
+}
+
+.proposal-root .org-node .org-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .proposal-root .org-node .t {
@@ -466,22 +1128,77 @@
   color: var(--jn-green);
 }
 
-.proposal-root .org-node.filled {
-  background: var(--jn-green);
-  border-color: var(--jn-green);
-}
-
-.proposal-root .org-node.filled .t {
-  color: #ffd9bc;
+/* Filled marks the client's day-to-day owner (Branch Manager) — a ring around
+   the avatar and an orange name, rather than a solid box, now that nodes are
+   circular badges instead of bordered cards. */
+.proposal-root .org-node.filled .org-avatar {
+  box-shadow: 0 0 0 3px var(--jn-orange);
 }
 
 .proposal-root .org-node.filled .n {
-  color: #fff;
+  color: var(--jn-orange);
 }
 
 .proposal-root .org-row {
   display: grid;
   gap: 0.12in;
+  position: relative;
+}
+
+/* Each node in a row draws its own half of the branch: a horizontal segment
+   toward its neighbor (::before, left half) and a corner — horizontal +
+   vertical drop into the node itself (::after, right half). Stitched across
+   a row this produces a single bar spanning first-child-center to
+   last-child-center with a drop line into every node, instead of one bar
+   guessed at a fixed margin. The half-gap extension keeps the bar continuous
+   across the grid `gap`. First/last child trim the outward overhang; the
+   last child borrows its ::before to gain the drop its suppressed ::after
+   would have made.
+
+   The branch itself lives in the node's own padding-top, not a negative
+   offset above it — the pseudo-elements are positioned relative to the node
+   (top:0 is the node's padding-box top), so anchoring them above the node's
+   border-box would need a negative top and still land inside the avatar. */
+.proposal-root .org-row > .org-node {
+  position: relative;
+  padding-top: 0.22in;
+}
+
+.proposal-root .org-row > .org-node::before,
+.proposal-root .org-row > .org-node::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  height: 0.22in;
+  width: calc(50% + 0.06in);
+}
+
+.proposal-root .org-row > .org-node::before {
+  left: -0.06in;
+  border-top: 1.5px solid var(--jn-green);
+}
+
+.proposal-root .org-row > .org-node::after {
+  left: 50%;
+  border-top: 1.5px solid var(--jn-green);
+  border-left: 1.5px solid var(--jn-green);
+}
+
+.proposal-root .org-row > .org-node:only-child::before,
+.proposal-root .org-row > .org-node:only-child::after {
+  display: none;
+}
+
+.proposal-root .org-row > .org-node:first-child::before {
+  display: none;
+}
+
+.proposal-root .org-row > .org-node:last-child::after {
+  display: none;
+}
+
+.proposal-root .org-row > .org-node:last-child::before {
+  border-right: 1.5px solid var(--jn-green);
 }
 
 .proposal-root .org-stem {
@@ -491,14 +1208,81 @@
   margin: 0 auto;
 }
 
-.proposal-root .org-bar {
+/* Regional Director + Branch Manager sit side by side as peers, joined by a
+   single line at icon-center height — not stacked as parent/child like every
+   other tier. */
+.proposal-root .org-peers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  position: relative;
+}
+
+.proposal-root .org-peers::before {
+  content: '';
+  position: absolute;
+  left: 25%;
+  right: 25%;
+  /* Half the avatar height (.org-avatar is 0.6in), so the line crosses both
+     icons at their vertical center instead of floating above/below them. */
+  top: 0.3in;
   height: 1.5px;
   background: var(--jn-green);
-  margin: 0 16%;
+}
+
+.proposal-root .org-peers > .org-node {
+  position: relative;
+  z-index: 1;
+}
+
+/* Branch Manager (the right-hand peer) is the one whose line continues
+   downward — but it sits at 75% of the peers row, off-center from the
+   single spine every tier below is centered on. This elbow carries the line
+   from BM's column down, then left to the spine, then down again, instead of
+   a plain vertical bar that would float disconnected from BM's icon. */
+.proposal-root .org-elbow {
+  position: relative;
+  height: 0.3in;
+}
+
+.proposal-root .org-elbow::before {
+  content: '';
+  position: absolute;
+  left: 75%;
+  top: 0;
+  width: 1.5px;
+  height: 50%;
+  background: var(--jn-green);
+}
+
+.proposal-root .org-elbow::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 25%;
+  top: 50%;
+  height: 50%;
+  border-top: 1.5px solid var(--jn-green);
+  border-left: 1.5px solid var(--jn-green);
 }
 
 .proposal-root .org-chart {
   margin-top: 0.3in;
+}
+
+/* Independent per-branch continuation below the Account Manager / Agronomy
+   Manager / Irrigation Manager peer row — each column stacks its own chain
+   (or stays empty) instead of every branch sharing one uniform next tier.
+   Same column template as the `.org-row` above it (via the `columns()`
+   inline style) so a branch's stem lands centered under its own peer node. */
+.proposal-root .org-branches {
+  display: grid;
+  gap: 0.12in;
+}
+
+.proposal-root .org-branch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 /* A single node centred under the tier above it. */
@@ -509,36 +1293,56 @@
 
 .proposal-root .org-crew .crew-count {
   font-size: 7.6pt;
-  color: var(--jn-ink-soft);
+  color: var(--jn-ink);
   line-height: 1.3;
 }
 
 /* --- Team cards ------------------------------------------------------------ */
 
+/* Stacked full-width rows, three per page — NOT a 2-up grid. Each row is a
+   3:4 portrait photo with a green-outlined bio panel beside it, and a second
+   outlined box carrying name/title/location sitting under the photo. Border
+   width, and the fact that both boxes are unfilled (the watermark shows
+   through), were pixel-verified at 288dpi against the reference. */
 .proposal-root .team-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5in 0.38in;
-}
-
-.proposal-root .team-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.3in 0.34in;
+  grid-template-columns: 1fr;
+  gap: 0.15in;
   margin-top: 0.34in;
 }
 
 .proposal-root .team-card {
   display: grid;
-  grid-template-columns: 1.35in 1fr;
-  gap: 0.17in;
+  grid-template-columns: 1.45in 1fr;
+  gap: 0.14in;
   break-inside: avoid;
 }
 
 .proposal-root .team-photo {
-  width: 1.35in;
-  height: 1.65in;
+  width: 1.45in;
+  height: 1.93in;
   object-fit: cover;
+}
+
+/* Name/title/location, in its own outlined box below the photo.
+   Wider than the 1.45in photo column on purpose — the reference sets this box
+   at 1.594in and shifts it ~7pt LEFT of the photo's left edge, so the overhang
+   falls outside the sheet's text block rather than into the bio panel's gutter.
+   Without the negative margin the box aligns left and overhangs right instead,
+   crowding the bio box. */
+.proposal-root .team-card .id-box {
+  border: 1.5pt solid var(--jn-green);
+  width: 1.594in;
+  height: 0.688in;
+  padding: 0.05in;
+  margin-top: 0.115in;
+  margin-left: -0.097in;
+  box-sizing: border-box;
+}
+
+.proposal-root .team-card .bio-box {
+  border: 1.5pt solid var(--jn-green);
+  padding: 0.0625in;
 }
 
 .proposal-root .headshot-initials {
@@ -553,115 +1357,220 @@
   letter-spacing: 0.03em;
 }
 
+/* Open Sans throughout, not Lato — and the title is plain black body text, not
+   an orange tracked caption. */
 .proposal-root .team-card .nm {
-  font-family: var(--jn-display);
-  font-size: 11.5pt;
-  font-weight: 700;
-  color: var(--jn-green);
-  line-height: 1.15;
-}
-
-.proposal-root .team-card .ti {
-  font-family: var(--jn-display);
-  font-size: 7.6pt;
-  font-weight: 700;
-  color: var(--jn-orange);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 0.04in;
-}
-
-.proposal-root .team-card .lo {
-  font-size: 7.4pt;
-  color: #7a7a7a;
-  margin-bottom: 0.05in;
-}
-
-.proposal-root .team-card .bi {
-  font-size: 7.8pt;
-  line-height: 1.45;
-  color: var(--jn-ink-soft);
-}
-
-/* --- Client references ------------------------------------------------------ */
-
-.proposal-root .ref-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.3in 0.34in;
-  margin-top: 0.34in;
-}
-
-.proposal-root .ref-card {
-  border-left: 2.5px solid var(--jn-orange);
-  padding-left: 0.16in;
-  break-inside: avoid;
-}
-
-.proposal-root .ref-card .nm {
-  font-family: var(--jn-display);
-  font-size: 11pt;
+  font-family: var(--jn-body);
+  font-size: 12pt;
   font-weight: 700;
   color: var(--jn-green);
   line-height: 1.2;
+  margin: 0;
 }
 
-.proposal-root .ref-card .ti {
-  font-size: 8pt;
-  color: var(--jn-ink-soft);
-  margin-top: 0.03in;
+.proposal-root .team-card .ti {
+  font-family: var(--jn-body);
+  font-size: 9pt;
+  font-weight: 400;
+  color: var(--jn-ink);
+  text-transform: none;
+  letter-spacing: 0;
+  margin: 0;
 }
 
-.proposal-root .ref-card .since {
+.proposal-root .team-card .lo {
+  font-size: 9pt;
+  color: var(--jn-ink);
+  margin: 0;
+}
+
+.proposal-root .team-card .bi {
+  font-size: 9.75pt;
+  line-height: 1.46;
+  color: var(--jn-ink);
+  margin: 0;
+}
+
+/* --- Service overview grid (icon badges) -----------------------------------
+   The reference's most distinctive layout: three columns of photos, each with
+   an orange square badge holding a white line-art icon, offset so it overlaps
+   and hangs outside the photo's top-left corner.
+
+   Measured: photos 153.75pt wide on a 187.5pt column pitch (33.75pt / 0.469in
+   gap); badge 37.5pt (0.52in) square, offset -8.25pt horizontally and -11.25pt
+   vertically.
+   --------------------------------------------------------------------------- */
+
+.proposal-root .service-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.469in;
+  margin-top: 0.3in;
+}
+
+.proposal-root .service-cell {
+  break-inside: avoid;
+}
+
+/* Establishes the containing block the badge is offset against. The padding
+   reserves the room the badge overhangs into, so a -0.115in offset does not
+   clip against .well's edge on the first column. */
+.proposal-root .service-cell .shot {
+  position: relative;
+  margin-left: 0.115in;
+}
+
+.proposal-root .service-cell .shot > .photo,
+.proposal-root .service-cell .shot > img {
+  width: 100%;
+  height: 1.42in;
+  object-fit: cover;
+  display: block;
+}
+
+.proposal-root .service-cell .badge {
+  position: absolute;
+  top: -0.156in;
+  left: -0.115in;
+  width: 0.52in;
+  height: 0.52in;
+  background: var(--jn-orange);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+}
+
+/* Icons are line-art, so they are stroked white rather than filled. */
+.proposal-root .service-cell .badge svg {
+  width: 0.3in;
+  height: 0.3in;
+  stroke: #fff;
+  fill: none;
+  stroke-width: 1.75;
+}
+
+.proposal-root .service-cell .service-name {
   font-family: var(--jn-display);
-  font-size: 7.4pt;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--jn-orange);
-  margin-top: 0.05in;
+  color: var(--jn-green);
+  font-size: 15.75pt;
+  font-weight: 400;
+  line-height: 1.2;
+  margin: 0.14in 0 0.06in;
 }
 
-.proposal-root .ref-card .ct {
-  font-size: 7.8pt;
-  line-height: 1.5;
-  color: var(--jn-ink-soft);
-  margin-top: 0.08in;
+/* --- Client references -------------------------------------------------------
+   Single column, no photo — the reference (Coral Bay HOA, Pointe Jupiter Yacht
+   Club) sets each entry as plain label: value lines over the page background,
+   separated by a horizontal orange rule. Not a card grid. */
+
+.proposal-root .ref-list {
+  margin-top: 0.44in;
+}
+
+.proposal-root .ref-entry {
+  break-inside: avoid;
+}
+
+.proposal-root .ref-divider {
+  border: none;
+  border-top: 2.5px solid var(--jn-orange);
+  margin: 0.42in 0;
+}
+
+.proposal-root .ref-sub {
+  list-style-type: circle;
+  padding-left: 0.3in;
+  margin: -0.03in 0 0.125in;
+}
+
+/* --- Table of Contents -------------------------------------------------------
+   One row per body chapter: title, a leader-dot rule, then the page number —
+   the standard TOC convention. No reference PDF page to match (new feature),
+   so this follows the same single-column rhythm as .ref-list above. */
+
+.proposal-root .toc-list {
+  margin-top: 0.44in;
+  list-style: none;
+  padding: 0;
+}
+
+.proposal-root .toc-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 0.12in;
+  break-inside: avoid;
+  padding: 0.1in 0;
+  font-size: 12pt;
+}
+
+.proposal-root .toc-entry-title {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.proposal-root .toc-entry-dots {
+  flex: 1 1 auto;
+  border-bottom: 1.5px dotted var(--jn-green);
+  margin-bottom: 0.05in;
+}
+
+.proposal-root .toc-entry-page {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--jn-green);
+  font-weight: 700;
 }
 
 /* --- Insurance -------------------------------------------------------------- */
 
-.proposal-root .cert-card {
-  background: var(--jn-band);
-  border-left: 2.5px solid var(--jn-green);
-  padding: 0.16in 0.2in;
-  margin: 0.26in 0;
-}
-
-.proposal-root .cert-card .nm {
-  font-family: var(--jn-display);
-  font-size: 10.5pt;
-  font-weight: 700;
-  color: var(--jn-green);
-}
-
-.proposal-root .cert-card .ct {
-  font-size: 8.4pt;
-  color: var(--jn-ink-soft);
-  margin-top: 0.04in;
+.proposal-root .insurance-cert-img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0.26in auto 0;
+  object-fit: contain;
 }
 
 .proposal-root .footnote {
   font-size: 8pt;
   font-style: italic;
-  color: var(--jn-ink-soft);
+  color: var(--jn-ink);
+}
+
+/* --- Licenses & certifications ---------------------------------------------- */
+
+.proposal-root .license-grid {
+  grid-template-columns: 1fr 1fr;
+  margin-top: 0.26in;
+}
+
+.proposal-root .license-cert-img {
+  display: block;
+  width: 100%;
+  object-fit: contain;
 }
 
 /* --- Portfolio -------------------------------------------------------------- */
 
-.proposal-root .portfolio-item {
-  margin-top: 0.3in;
-  break-inside: avoid;
+/* W5g: full-bleed portfolio pages — rasterized PDFs already carry all chrome.
+   Zero out the well padding and hide overflow so the image bleeds to all four
+   paper edges with no doubled title, footer, or frond watermark.
+   .no-frond suppresses the ::before watermark (see the frond rules above).
+   noFooter on PrintPage suppresses the green footer bar.
+   The <img> is sized to cover the full sheet; object-fit:cover handles any
+   slight aspect-ratio mismatch between the raster and 8.5x11in. */
+.proposal-root .print-page.portfolio-full-bleed > .well {
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+.proposal-root .portfolio-full-bleed-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 /* --- Stat rows -------------------------------------------------------------- */
@@ -675,7 +1584,7 @@
 
 .proposal-root .stat .num {
   font-family: var(--jn-display);
-  font-size: 19pt;
+  font-size: 21pt;
   font-weight: 700;
   color: var(--jn-green);
   line-height: 1;
@@ -683,11 +1592,11 @@
 
 .proposal-root .stat .lbl {
   font-family: var(--jn-display);
-  font-size: 7.2pt;
+  font-size: 9.75pt;
   font-weight: 700;
   color: var(--jn-orange);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   line-height: 1.3;
 }
 
@@ -702,29 +1611,92 @@
   background: var(--jn-green);
   color: #fff;
   font-family: var(--jn-display);
-  font-size: 7.4pt;
+  font-size: 9.75pt;
   text-align: left;
-  padding: 0.045in 0.08in;
+  padding: 0.05in 0.0625in;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
+  /* Region names are stored title-case ("East Coast"); the reference sets
+     them in caps. */
+  text-transform: uppercase;
 }
 
+/* White fill and a light rule per row. The reference draws both — the cells are
+   opaque so the coverage map reads cleanly behind the table rather than through
+   it. */
 .proposal-root .branch-tbl td {
-  font-size: 7.6pt;
-  padding: 0.032in 0.08in;
-  border-bottom: 0.5px solid #e6e6e6;
-  color: var(--jn-ink-soft);
+  font-family: var(--jn-display);
+  font-size: 9.75pt;
+  padding: 0.045in 0.0625in;
+  background: #fff;
+  border-bottom: 0.75pt solid var(--jn-table-rule);
+  color: var(--jn-ink);
+}
+
+/* --- Local Landscape Experts page ------------------------------------------
+   The map is a transparent PNG anchored to the sheet (reference bbox
+   x34-559, y150-590 of 612x792) with the region tables stacked over its left
+   flank, which is open water on the artwork. */
+
+/* Positioning context for the map and the tables over it. Reference places the
+   map at x34 y150 of the 612x792 sheet; the negative margin backs the block out
+   of the well's gutter to reach that x.
+
+   The tables stay IN FLOW inside this block (offset by its padding) rather than
+   being absolutely placed: the block then grows if a region gains offices, which
+   pushes Local Branches down and lets measureProposalOverflow() see it. Absolute
+   tables would silently slide under the section below. min-height holds the
+   reference composition at today's office count. */
+.proposal-root .experts-map {
+  position: relative;
+  width: 7.292in;
+  margin-top: 0.06in;
+  margin-left: calc(0.472in - var(--jn-gutter));
+  /* Reference puts the first table header at y272 — 122pt below the map top. */
+  padding-top: 1.694in;
+  min-height: 4.417in;
+}
+
+/* Fixed height so the artwork keeps its aspect if the block grows past it. */
+.proposal-root .experts-page .florida-map {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 7.292in;
+  height: 6.111in;
+  object-fit: contain;
+  z-index: 0;
+}
+
+.proposal-root .branch-tables {
+  position: relative;
+  z-index: 1;
+  margin-left: 0.056in;
+  display: grid;
+  grid-template-columns: max-content max-content;
+  justify-content: start;
+  align-items: start;
+  column-gap: 0.28in;
+}
+
+.proposal-root .branch-col {
+  display: grid;
+  align-content: start;
+  row-gap: 0.22in;
+}
+
+.proposal-root .branch-col .branch-tbl {
+  min-width: 1.33in;
 }
 
 .proposal-root .local-branches {
-  border-top: 1px solid var(--jn-hairline);
+  border-top: 0.75pt solid var(--jn-hairline);
   padding-top: 0.12in;
   margin-top: 0.42in;
 }
 
 .proposal-root .local-branches-title {
   margin: 0 0 0.1in;
-  font-size: 11pt;
 }
 
 .proposal-root .local-branches-grid {
@@ -733,33 +1705,27 @@
   gap: 0.3in;
 }
 
-/* Stand-in for the Florida branch map. Artwork is pending from Proposify; a
-   flat tonal block is the treatment that reads as intentional in a document a
-   rep sends to a client. */
-.proposal-root .map-pending {
-  height: 4.35in;
-  background: var(--jn-band);
-}
 
+/* Open Sans Bold in the SECONDARY orange (#f47320), not --jn-orange. */
 .proposal-root .local-branches .bname {
-  font-family: var(--jn-display);
-  color: var(--jn-orange);
-  font-size: 8pt;
+  font-family: var(--jn-body);
+  color: var(--jn-orange-alt);
+  font-size: 10.5pt;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
 }
 
 .proposal-root .local-branches .baddr {
-  font-size: 7.6pt;
-  color: var(--jn-ink-soft);
-  line-height: 1.4;
+  font-size: 9.75pt;
+  color: var(--jn-ink);
+  line-height: 1.46;
 }
 
 /* Signature block — the real proposals sign in a script face. */
 .proposal-root .signature {
   font-family: var(--jn-script);
-  font-size: 26pt;
+  font-size: 22.5pt;
   line-height: 1;
   color: var(--jn-ink);
   margin: 0.1in 0 0.02in;
@@ -767,8 +1733,8 @@
 
 .proposal-root .signer-lines {
   margin: 0;
-  font-size: 8.4pt;
-  line-height: 1.45;
+  font-size: 9.75pt;
+  line-height: 1.46;
 }
 
 .proposal-root .signer-lines strong {
@@ -777,51 +1743,691 @@
 
 /* --- Cover ---------------------------------------------------------------- */
 
+/* Everything centred on the page's horizontal midpoint. The well's own top
+   padding is overridden here because the reference sets the logo 0.448in from
+   the paper edge, above the 0.63in body inset. */
 .proposal-root .cover {
-  padding-top: 1.5in;
+  padding-top: 0.448in;
   text-align: center;
+  height: 100%;
+  position: relative;
 }
 
 .proposal-root .cover-mark {
-  width: 2.5in;
-  height: 2.2in;
+  /* Tailwind preflight sets `svg { display: block }`, so `text-align: center`
+     on `.cover` cannot centre this SVG. `margin-inline: auto` centres the
+     block-level box. Width matches the reference artwork (190.8pt = 2.65in). */
+  width: 2.65in;
+  height: 1.75in;
+  margin-inline: auto;
 }
 
+/* Open Sans Bold 18pt, NOT tracked Lato — measured tracking is +0.009em, i.e.
+   none. This was an 11pt Lato caption at 0.16em. */
 .proposal-root .cover-eyebrow {
-  font-family: var(--jn-display);
-  margin: 0.9in 0 0.1in;
-  font-size: 11pt;
+  font-family: var(--jn-body);
+  margin: 1.16in 0 0.1in;
+  font-size: 18pt;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0;
   color: var(--jn-ink);
   text-transform: uppercase;
 }
 
 .proposal-root .cover .page-title {
-  font-size: 38pt;
+  font-size: 48.75pt;
   margin-bottom: 0.06in;
 }
 
-.proposal-root .cover .page-title:last-child {
+.proposal-root .cover .page-title:last-of-type {
   margin-bottom: 0;
+}
+
+/* The reference title is always one line. Long property names must shrink, not
+   wrap to a second line (which pushes the prepared-by block and pill out of
+   place). Two discrete steps, not fluid autofit:
+     1. nowrap + ellipsis guarantees a single line no matter the name length;
+     2. a data-long modifier drops the type one step (48.75pt -> 33pt) so names
+        past the one-line budget shrink to fit before they would ever truncate.
+   The JSX sets data-long from the property name length. */
+.proposal-root .cover .cover-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.proposal-root .cover .cover-title[data-long='true'] {
+  font-size: 33pt;
+}
+
+/* "PREPARED BY" + signer name, sitting at ~78% of page height. */
+.proposal-root .cover-prepared {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 7.75in;
+}
+
+.proposal-root .cover-prepared .lbl {
+  font-family: var(--jn-body);
+  font-size: 9.75pt;
+  font-weight: 700;
+  color: var(--jn-ink);
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.proposal-root .cover-prepared .nm {
+  font-family: var(--jn-body);
+  font-size: 9.75pt;
+  font-weight: 400;
+  color: var(--jn-ink);
+  margin: 0.02in 0 0;
+}
+
+/* Orange date pill — 129.75 x 18.75pt, centred, bottom edge 0.5in off the
+   paper. This is where the reference puts the date; the letter page carries
+   none, which is why .letter-date is gone from IntroLetter.
+
+   Anchored to .print-page (the sheet), NOT .cover: .cover is height:100% of the
+   padded .well, whose ~61pt bottom padding would otherwise add to `bottom` and
+   float the pill 60.75pt too high. Rendered via PrintPage's `overlay` prop so
+   it is a direct child of .print-page. Horizontal centring is unchanged. */
+.proposal-root .print-page .cover-date {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 0.5in;
+  z-index: 3;
+  width: 1.803in;
+  height: 0.26in;
+  background: var(--jn-orange);
+  color: #fff;
+  font-family: var(--jn-body);
+  font-size: 9.75pt;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- Closing --------------------------------------------------------------
+
+   Mirrors the cover's centred-mark layout rather than the letter pages: the
+   reference closing sheet carries no headline photo or body copy, just the
+   mark (its artwork already bakes in the "Design | Build | Maintain" tagline),
+   the goodwill headline, the rep's contact block and the junipercares.com
+   CTA, all vertically distributed with flex so it holds up regardless of how
+   many contact lines a given signer has (some carry no phone/email). */
+
+.proposal-root .closing {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding-top: 0.2in;
+}
+
+.proposal-root .closing-mark {
+  width: 2.3in;
+  height: 1.52in;
+  margin-inline: auto;
+}
+
+.proposal-root .closing .closing-title {
+  margin: 0.9in auto 0;
+  max-width: 5.6in;
+}
+
+/* Pushes the contact block + CTA down to the foot of the sheet regardless of
+   how tall the title above ends up, the same trick .cover-prepared achieves
+   with absolute positioning — flex auto-margin instead since this container
+   has no fixed-height siblings to anchor against. */
+.proposal-root .closing-contact {
+  margin-top: auto;
+}
+
+.proposal-root .closing-contact .signer-lines {
+  font-size: 10.5pt;
+}
+
+.proposal-root .closing-cta {
+  display: inline-block;
+  margin-top: 0.3in;
+  margin-bottom: 0.6in;
+  padding: 0.09in 0.3in;
+  background: var(--jn-orange);
+  color: #fff;
+  font-family: var(--jn-body);
+  font-size: 9.75pt;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 /* --- Letter pages --------------------------------------------------------- */
 
-.proposal-root .letter-date {
-  font-size: 8.4pt;
-  color: var(--jn-ink-soft);
-  margin: 0 0 0.3in;
-}
-
+/* Reference measure is 7.35-7.48in — essentially gutter to gutter, so the well's
+   padding already provides it and an explicit max-width only narrows it. */
 .proposal-root .letter {
-  max-width: 6.6in;
+  max-width: none;
 }
 
 .proposal-root .letter p {
-  margin: 0 0 0.14in;
+  margin: 0 0 0.126in;
 }
 
 .proposal-root .letter-closing {
   margin-top: 0.2in;
 }
+
+/* The reference sets the salutation off from the body with a clear blank
+   line (~38pt) rather than indenting the first line. */
+.proposal-root .letter .salutation {
+  margin-bottom: 0.3in;
+}
+
+/* Full-bleed photo band across the foot of the letter, its bottom edge flush
+   with the top of the footer bar (reference bbox y 425->746 of 792). It is an
+   overlay, so the well must reserve the same height or the letter would run
+   underneath it. */
+.proposal-root .letter-page .well {
+  padding-bottom: calc(var(--jn-footer-h) + 4.46in + 0.18in);
+}
+
+.proposal-root .letter-photo {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--jn-footer-h);
+  height: 4.46in;
+  overflow: hidden;
+  z-index: 3;
+}
+
+.proposal-root .letter-photo > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* --- Full-screen viewer affordance ----------------------------------------
+   Scoped to .proposal-viewer, which ONLY ProposalPreviewRoute sets. Separating
+   the sheets makes a 24-page stack legible on screen as discrete pages.
+
+   Deliberately outside @media print and absent from the print route, and it
+   adjusts margin rather than page geometry: .print-page's width/height are what
+   page.pdf() paginates against, so nothing here can reach the PDF. The @media
+   print reset below is belt-and-braces for a Cmd+P from this route.
+   --------------------------------------------------------------------------- */
+
+.proposal-viewer .proposal-root .print-page + .print-page {
+  margin-top: 0.28in;
+}
+
+@media print {
+  .proposal-viewer .proposal-root .print-page + .print-page {
+    margin-top: 0;
+  }
+}
+
+/* --- Overflow warning -----------------------------------------------------
+   .print-page is a fixed 11in with overflow:hidden, so content past the bottom
+   of .well is silently dropped from the PDF. useProposalOverflow measures each
+   page and sets data-proposal-overflow="<px>" on the offenders.
+
+   Screen-only, and only ever inside .proposal-viewer — the print route calls
+   measureProposalOverflow with annotate=false, so this can never reach a
+   captured page. The @media print reset covers a Cmd+P from the viewer.
+   -------------------------------------------------------------------------- */
+
+.proposal-viewer .proposal-root .print-page[data-proposal-overflow] {
+  outline: 2px solid #c0392b;
+  outline-offset: -2px;
+}
+
+.proposal-viewer .proposal-root .print-page[data-proposal-overflow]::after {
+  content: 'Content clipped — ' attr(data-proposal-overflow) 'px does not fit on this page';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--jn-footer-h);
+  z-index: 10;
+  background: #c0392b;
+  color: #fff;
+  font-family: var(--jn-body);
+  font-size: 8pt;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+  padding: 0.05in 0;
+}
+
+@media print {
+  .proposal-viewer .proposal-root .print-page[data-proposal-overflow] {
+    outline: none;
+  }
+  .proposal-viewer .proposal-root .print-page[data-proposal-overflow]::after {
+    display: none;
+  }
+}
+
+/* ---- A1: subhead, list label, leaf bullets, bold lead-in ---- */
+/* .proposal-root prefix is load-bearing here, not decorative: a bare
+   .copy-list-label loses to .proposal-root p on specificity (one class vs.
+   one class + one element) and silently renders black. Applies to all three
+   label variants below. */
+.proposal-root .copy-list-label {
+  color: var(--jn-orange);
+  font-weight: 700;
+  margin-top: 8pt;
+  margin-bottom: 2pt;
+}
+/* Design's "What We Offer:" only — see CopyList.labelColor. */
+.proposal-root .copy-list-label-green {
+  color: var(--jn-green);
+  font-weight: 700;
+  margin-top: 8pt;
+  margin-bottom: 2pt;
+}
+.proposal-root .copy-list-label-q {
+  font-family: var(--jn-display);
+  font-size: 9.0pt;
+  font-weight: 700;
+  color: var(--jn-green);
+  margin-top: 8pt;
+  margin-bottom: 2pt;
+}
+/* Matches .lede.quote's size — Arboriculture's "Why hire an Arborist?" sits
+   at the same visual weight as the page's "Certified Arborists" subhead. */
+.proposal-root .copy-list-label-q-large {
+  font-size: 12.75pt;
+}
+/* Juniper Cares only — the reference sets "What Is Juniper Cares?" in orange,
+   not the green every other "?"-ending label uses. */
+.proposal-root .copy-list-label-q-orange {
+  color: var(--jn-orange);
+}
+
+.copy-list-item-lead {
+  font-weight: 700;
+}
+
+/* Customer Care: In-House Customer Care Team copy (left) beside the
+   Visit/Email/Call contact methods (right). The team label prints larger
+   than the shared .copy-list-label-green here only — scoped to this page's
+   container so every other green label is unaffected. */
+.proposal-root .customer-care-team {
+  display: grid;
+  grid-template-columns: 1.75fr 1.25fr;
+  gap: 0.34in;
+  align-items: start;
+  margin-top: 0.1in;
+}
+
+.proposal-root .customer-care-team .copy-list-label-green {
+  font-size: 15.75pt;
+  margin-top: 0;
+  margin-bottom: 0.16in;
+}
+
+.proposal-root .customer-care-team .copy-list-prose p {
+  margin-bottom: 0.2in;
+}
+
+.proposal-root .contact-methods {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22in;
+  margin-top: 0;
+}
+
+.proposal-root .contact-method {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.18in;
+}
+
+.proposal-root .contact-method-icon {
+  flex: none;
+  width: 0.46in;
+  height: 0.46in;
+  border-radius: 0.06in;
+  background: var(--jn-orange);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.proposal-root .contact-method-icon svg {
+  width: 0.26in;
+  height: 0.26in;
+  stroke: #fff;
+  fill: none;
+  stroke-width: 1.75;
+}
+
+.proposal-root .contact-method p {
+  margin: 0;
+}
+
+/* --- Juniper Mapping (Technology That Makes a Difference / Valuable Tools) - */
+
+/* Wordmark sits opposite the eyebrow/title, riding slightly above the well's
+   top padding exactly as in the reference. Wider than .sync-logo because this
+   lockup is a two-line mark (leaf + "Juniper" over "MAPPING"), not a single
+   wordmark. */
+.proposal-root .jmap-page .jmap-logo {
+  width: 3.3in;
+  height: auto;
+  flex: none;
+  margin-top: -0.42in;
+  margin-right: -0.2in;
+  /* The extracted PNG has no alpha channel (RGB, opaque white), so it paints a
+     white card over the frond watermark. Multiply drops the white to nothing
+     while leaving the green/orange marks untouched — the reference shows the
+     watermark running behind the lockup. */
+  mix-blend-mode: multiply;
+}
+/* mix-blend-mode only reaches the backdrop inside the element's own stacking
+   context, and `.well`'s `z-index: 2` opens one — which would leave the logo
+   multiplying against nothing and staying white. Dropping to `z-index: auto`
+   closes that context so the blend sees the sheet and its frond. The well is
+   still painted above the `z-index: 0` watermark pseudo-element because it
+   comes later in DOM order at the same level. */
+.proposal-root .jmap-page .well {
+  z-index: auto;
+}
+/* Constrains the title so "Technology That / Makes a Difference" wraps to two
+   lines on its own without a forced break in the copy. */
+.proposal-root .jmap-page .jmap-head-copy {
+  max-width: 3.9in;
+  padding-top: 0.14in;
+}
+.proposal-root .jmap-page .jmap-head-copy .page-title {
+  margin-bottom: 0.1in;
+}
+.proposal-root .jmap-page p {
+  font-family: var(--jn-body);
+  font-size: 9.5pt;
+  line-height: 1.42;
+  margin: 0 0 0.09in;
+}
+.proposal-root .jmap-page .lede {
+  font-family: var(--jn-display);
+  font-size: 12.75pt;
+  line-height: 1.294;
+  margin: 0;
+}
+
+/* --- pageOne --------------------------------------------------------------- */
+
+/* Column flex so the NDVI image below can absorb whatever the copy leaves. */
+.proposal-root .jmap-one .well {
+  display: flex;
+  flex-direction: column;
+}
+/* Reference pulls this row slightly wider than the well on both sides. */
+.proposal-root .jmap-plant-health {
+  display: grid;
+  grid-template-columns: 1.55fr 2.9fr;
+  gap: 0.16in;
+  align-items: start;
+  margin: 0.3in -0.18in 0 -0.36in;
+  flex: none;
+}
+.proposal-root .jmap-plant-health .sub {
+  margin-top: 0;
+}
+.proposal-root .jmap-ph-photo {
+  height: 2.35in;
+  overflow: hidden;
+}
+.proposal-root .jmap-ph-photo > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* Edge-to-edge and down to the footer bar: flex:1 eats the remaining column
+   space, and the negative bottom margin cancels the well's footer clearance so
+   the image meets the green bar with no white gap (same bleed technique as
+   .photo-hero, plus the vertical fill). */
+.proposal-root .jmap-ndvi-bleed {
+  flex: 1 1 auto;
+  min-height: 3.2in;
+  margin: 0.18in calc(-1 * var(--jn-gutter)) -0.16in;
+  width: calc(100% + 2 * var(--jn-gutter));
+  overflow: hidden;
+}
+.proposal-root .jmap-ndvi-bleed > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Anchor left: the "Turf Areas of Concern" label and arrow are baked into the
+     image's left edge and a centred crop shears them off. */
+  object-position: left center;
+  display: block;
+}
+
+/* --- pageTwo --------------------------------------------------------------- */
+
+/* "Image Quality Comparison" sits well clear of the single-line page title. */
+.proposal-root .jmap-two .well > .sub {
+  margin-top: 0.3in;
+}
+.proposal-root .jmap-tools-row .sub {
+  margin-top: 0;
+}
+.proposal-root .jmap-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.18in;
+  margin-top: 0.12in;
+}
+.proposal-root .jmap-comparison > img {
+  width: 100%;
+  height: 1.93in;
+  object-fit: cover;
+  display: block;
+}
+/* Hairline divider between the comparison pair and the tools row. */
+.proposal-root .jmap-tools-row {
+  display: grid;
+  grid-template-columns: 1fr 1.06fr;
+  gap: 0.42in;
+  margin-top: 0.16in;
+  padding-top: 0.26in;
+  border-top: 1px solid var(--jn-hairline);
+  align-items: start;
+}
+/* Four plain heading+paragraph blocks, stacked — not a bulleted list. */
+.proposal-root .jmap-tool + .jmap-tool {
+  margin-top: 0.36in;
+}
+.proposal-root .jmap-tool p:last-child {
+  margin-bottom: 0;
+}
+.proposal-root .jmap-track-photos {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15in;
+  margin-top: 0.14in;
+}
+.proposal-root .jmap-track-photos > img {
+  width: 100%;
+  height: 1.7in;
+  object-fit: cover;
+  display: block;
+}
+
+/* --- Start Up Plan (30-60-90 Day) redesign ----------------------------------
+   Reference layout ("business docs/30-60-90 plan example.pdf"): a full-bleed
+   hero photo with the title block reversed out over it, then a green band
+   running to the footer carrying white phase cards under orange chevron
+   banners. Deliberately shares NOTHING with `.sched*` / `.comm-sched`, which
+   own Start Up Communication's pill-and-connector treatment.
+
+   The well becomes a column flex container so the band can flex-grow into
+   whatever the hero leaves, and a negative bottom margin lets it run under the
+   footer bar rather than stopping short of it with a white seam.
+   --------------------------------------------------------------------------- */
+
+.proposal-root .print-page.startup-plan-page > .well {
+  display: flex;
+  flex-direction: column;
+  padding-top: 0.34in;
+}
+
+/* Horizontal bleed is the same calc pair .photo-hero uses. */
+.proposal-root .startup-plan-hero {
+  position: relative;
+  flex: 0 0 auto;
+  margin: 0 calc(-1 * var(--jn-gutter));
+  width: calc(100% + 2 * var(--jn-gutter));
+  height: 2.42in;
+  overflow: hidden;
+}
+
+.proposal-root .startup-plan-hero > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Darkest where the copy sits, easing off to the right so the photo still
+   reads as a photo rather than a flat grey panel. */
+.proposal-root .startup-plan-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.66) 0%,
+    rgba(0, 0, 0, 0.52) 48%,
+    rgba(0, 0, 0, 0.22) 100%
+  );
+}
+
+.proposal-root .startup-plan-hero-copy {
+  position: absolute;
+  top: 0.3in;
+  left: var(--jn-gutter);
+  right: var(--jn-gutter);
+  max-width: 5.15in;
+}
+
+/* .eyebrow / .page-title values, recoloured for the photo. Not a modifier on
+   those classes: both are colour-only overrides and a `.white` modifier on
+   .page-title would invite use on pages with no dark backdrop behind it. */
+.proposal-root .startup-plan-eyebrow {
+  margin: 0 0 0.06in;
+  font-family: var(--jn-display);
+  font-size: 12.75pt;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.proposal-root .startup-plan-title {
+  margin: 0 0 0.11in;
+  font-family: var(--jn-display);
+  font-size: 30pt;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.022em;
+  color: #fff;
+}
+
+.proposal-root .startup-plan-intro {
+  margin: 0;
+  font-size: 9.5pt;
+  line-height: 1.45;
+  color: #fff;
+}
+
+/* Bleeds horizontally like the hero and vertically past the well's footer
+   padding, so the green meets the footer bar with no white seam. The footer is
+   z-index 5 and the well 2, so the bar still paints over the band's tail. */
+.proposal-root .startup-plan-band {
+  flex: 1 1 auto;
+  margin: 0 calc(-1 * var(--jn-gutter))
+    calc(-1 * (var(--jn-footer-h) + 0.18in));
+  width: calc(100% + 2 * var(--jn-gutter));
+  padding: 0.3in 0.42in calc(var(--jn-footer-h) + 0.24in);
+  background: var(--jn-green);
+  display: flex;
+}
+
+/* Flexbox rather than grid so a partial last row (5 phases, or 4) centres
+   instead of pinning left or stretching its cards wider than the full rows. */
+.proposal-root .startup-plan-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  /* Rows pack under the hero rather than centring in the band. Centring was
+     tried and reads worse: with short later phases it opens a dead green gap
+     between the photo and the first row, and it detaches the cards from the
+     title block they belong to. Packing top also keeps any overflow at the
+     bottom edge, where the page's overflow guard sees it. */
+  align-content: flex-start;
+  /* Cards hug their own bullets rather than stretching to the row's tallest —
+     a short phase (Day 60 is often two lines) beside the seven-bullet Day Zero
+     otherwise renders as a mostly-empty white rectangle. */
+  align-items: flex-start;
+  gap: 0.2in 0.2in;
+  width: 100%;
+}
+
+.proposal-root .startup-plan-card {
+  flex: 0 0 2.38in;
+  max-width: 2.38in;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Chevron banner. The clip-path eats the right edge, so the right padding is
+   heavier than the left to keep the label optically centred in what remains. */
+.proposal-root .startup-plan-card-head {
+  padding: 0.075in 0.24in 0.075in 0.1in;
+  background: var(--jn-orange);
+  color: #fff;
+  font-family: var(--jn-display);
+  font-size: 9.5pt;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-align: center;
+  clip-path: polygon(0 0, 88% 0, 100% 50%, 88% 100%, 0 100%);
+}
+
+.proposal-root .startup-plan-card-body {
+  flex: 1 1 auto;
+  padding: 0.14in 0.13in;
+  background: #fff;
+  box-shadow: 0 0.02in 0.05in rgba(0, 0, 0, 0.16);
+}
+
+/* Tighter than the base .dot: six cards of seed copy have to share one sheet. */
+.proposal-root .startup-plan-card-body ul.dot > li {
+  padding-left: 0.155in;
+  margin-bottom: 0.055in;
+  font-size: 7.8pt;
+  line-height: 1.32;
+}
+
+.proposal-root .startup-plan-card-body ul.dot > li:last-child {
+  margin-bottom: 0;
+}
+
+.proposal-root .startup-plan-card-body ul.dot > li::before {
+  left: 0.02in;
+  top: 0.043in;
+  width: 0.045in;
+  height: 0.045in;
+}
+

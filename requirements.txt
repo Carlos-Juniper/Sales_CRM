@@ -13,3 +13,10 @@ google-cloud-storage>=2.14
 aiomysql>=0.2.0
 playwright>=1.47,<2.0
 python-multipart>=0.0.9
+# Handoff 47: append the estimate's proposal documents (contract, measurements,
+# other) to the tail of the rendered PDF. pypdf merges + counts pages; Pillow
+# wraps uploaded images in a Letter page. Both are pure wheels (no system
+# packages). Already installed in venv/ but were absent here, so the Docker
+# image shipped without them.
+pypdf>=6.0,<7
+Pillow>=11,<13

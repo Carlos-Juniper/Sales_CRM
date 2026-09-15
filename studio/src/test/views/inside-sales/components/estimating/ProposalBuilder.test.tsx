@@ -39,11 +39,31 @@ vi.mock('@/hooks/useProposals', () => ({
   useProposal: vi.fn(),
   useCreateProposal: vi.fn(),
   useUpdateProposal: vi.fn(),
-  // ProposalPreview also calls these hooks; provide stubs so the preview step
-  // renders without errors when the form transitions to preview.
+  // Still stubbed because the module is mocked wholesale — the builder itself no
+  // longer renders ProposalPreview (that moved to /proposals/:id/preview), so
+  // nothing here calls them.
   useProposalConfig: vi.fn(),
   useProposalMediaUrl: vi.fn(),
 }))
+
+// Submitting hands off to the full-screen preview route, so navigation is the
+// observable outcome. Everything else in react-router-dom stays real — the test
+// wrapper's MemoryRouter still has to work.
+const mockNavigate = vi.fn()
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
+  return { ...actual, useNavigate: () => mockNavigate }
+})
+
+// ProposalDocumentsSection (rendered unconditionally by the form) hits
+// estimatingApi.listAttachments directly rather than through a mocked hook —
+// stub it so it resolves cleanly instead of 404ing against the mock estimate
+// id and rendering its own "Failed to load attachments" alert, which would
+// otherwise collide with this file's bare getByRole('alert') assertions.
+vi.mock('@/api/estimating', async () => {
+  const actual = await vi.importActual<typeof import('@/api/estimating')>('@/api/estimating')
+  return { ...actual, estimatingApi: { ...actual.estimatingApi, listAttachments: vi.fn().mockResolvedValue([]) } }
+})
 
 import {
   useTeamMembers,
@@ -302,6 +322,7 @@ beforeEach(() => {
   useAuthStore.setState({
     user: makeUser({ id: 'user-001', name: 'Test Rep', role: 'inside_sales' }),
   })
+  mockNavigate.mockClear()
   setupDefaultMocks()
 })
 
@@ -310,12 +331,12 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('ProposalBuilder — optional sections', () => {
-  it('all four optional sections default OFF', () => {
+  it('all six optional sections default OFF', () => {
     render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} />)
 
     const optionalSections = screen.getByTestId('optional-sections')
     const checkboxes = within(optionalSections).getAllByRole('checkbox')
-    expect(checkboxes).toHaveLength(4)
+    expect(checkboxes).toHaveLength(6)
     for (const cb of checkboxes) {
       expect(cb).not.toBeChecked()
     }
@@ -404,10 +425,10 @@ describe('ProposalBuilder — org chart', () => {
 
     await user.click(screen.getByTestId('org-chart-toggle'))
     expect(screen.getByTestId('org-chart-inputs')).toBeInTheDocument()
-    // Account manager list, optional pickers, crew counts
+    // Account manager list, optional free-text roles, crew counts
     expect(screen.getByTestId('account-manager-list')).toBeInTheDocument()
-    expect(screen.getByTestId('agronomy-manager-picker')).toBeInTheDocument()
-    expect(screen.getByTestId('irrigation-manager-picker')).toBeInTheDocument()
+    expect(screen.getByTestId('agronomy-manager-input')).toBeInTheDocument()
+    expect(screen.getByTestId('irrigation-manager-input')).toBeInTheDocument()
     expect(screen.getByTestId('crew-mow-foremen')).toBeInTheDocument()
   })
 
@@ -418,7 +439,7 @@ describe('ProposalBuilder — org chart', () => {
 
     render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} />)
 
-    // Enable org chart but do NOT pick an agronomy manager
+    // Enable org chart but do NOT type an agronomy manager name
     await user.click(screen.getByTestId('org-chart-toggle'))
     // Pick one account manager so the form is populated
     await user.click(screen.getByTestId('am-checkbox-tm-am-001'))
@@ -441,7 +462,7 @@ describe('ProposalBuilder — org chart', () => {
     render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} />)
 
     await user.click(screen.getByTestId('org-chart-toggle'))
-    // Leave irrigation manager unpicked
+    // Leave irrigation manager name blank
 
     await user.click(screen.getByTestId('submit-proposal'))
     await waitFor(() => expect(mutateAsync).toHaveBeenCalled())
@@ -450,7 +471,7 @@ describe('ProposalBuilder — org chart', () => {
     expect(payload.orgChart.irrigationManagerId).toBeNull()
   })
 
-  it('selecting an agronomy manager sets a non-null id', async () => {
+  it('typing an agronomy manager name sets a non-null value', async () => {
     const user = userEvent.setup()
     const mutateAsync = vi.fn().mockResolvedValue({ ...mockSavedProposal })
     mockUseCreateProposal.mockReturnValue(makeMutation({ mutateAsync }))
@@ -458,15 +479,15 @@ describe('ProposalBuilder — org chart', () => {
     render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} />)
 
     await user.click(screen.getByTestId('org-chart-toggle'))
-    // Select an agronomy manager via its select element
-    const agroPicker = screen.getByTestId('agronomy-manager-picker')
-    await user.selectOptions(agroPicker, 'tm-agro-001')
+    // Type an agronomy manager name into the free-text field
+    const agroInput = screen.getByTestId('agronomy-manager-input')
+    await user.type(agroInput, 'Bob Green')
 
     await user.click(screen.getByTestId('submit-proposal'))
     await waitFor(() => expect(mutateAsync).toHaveBeenCalled())
 
     const payload = mutateAsync.mock.calls[0][0]
-    expect(payload.orgChart.agronomyManagerId).toBe('tm-agro-001')
+    expect(payload.orgChart.agronomyManagerId).toBe('Bob Green')
   })
 
   it('crew count inputs accept numeric values', async () => {
@@ -555,7 +576,7 @@ describe('ProposalBuilder — submit builds payload', () => {
     expect(payload.startupPlan.day60).toEqual(['Audit current schedule'])
   })
 
-  it('transitions to preview step after a successful submit', async () => {
+  it('navigates to the full-screen preview route after a successful submit', async () => {
     const user = userEvent.setup()
     mockUseCreateProposal.mockReturnValue(
       makeMutation({ mutateAsync: vi.fn().mockResolvedValue({ ...mockSavedProposal }) }),
@@ -564,8 +585,25 @@ describe('ProposalBuilder — submit builds payload', () => {
     render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} />)
 
     await user.click(screen.getByTestId('submit-proposal'))
-    // ProposalPreview replaces PreviewPlaceholder — check for the real preview wrapper
-    await waitFor(() => expect(screen.getByTestId('proposal-preview')).toBeInTheDocument())
+    // The preview is no longer a second step inside this panel: a .print-page is
+    // a fixed 8.5in and the builder renders in a 672px drawer, which clipped the
+    // right quarter of every page. Submitting hands off to /proposals/:id/preview.
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith(`/proposals/${mockSavedProposal.id}/preview`),
+    )
+  })
+
+  it('does not navigate when the create mutation returns no id', async () => {
+    const user = userEvent.setup()
+    mockUseCreateProposal.mockReturnValue(
+      makeMutation({ mutateAsync: vi.fn().mockResolvedValue({}) }),
+    )
+
+    render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} />)
+
+    await user.click(screen.getByTestId('submit-proposal'))
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 
   it('shows an error message when the mutation rejects', async () => {

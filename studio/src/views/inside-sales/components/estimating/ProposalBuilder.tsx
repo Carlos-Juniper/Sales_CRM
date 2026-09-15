@@ -1,12 +1,23 @@
 // ---------------------------------------------------------------------------
-// ProposalBuilder — two-step container (Form → Preview) for generating a
-// Juniper sales proposal from an approved Lead + approved Estimate.
+// ProposalBuilder — the configure form for a Juniper sales proposal.
 //
-// Step 1 (Form):  optional-section toggles, org chart inputs, team/reference/
-//                 portfolio multi-pickers, 30-60-90 free-text rows, signer
-//                 picker → calls useCreateProposal / useUpdateProposal.
-// Step 2 (Preview): Slice 8 drops its page sub-components into <PreviewSlot />.
-//                   Until Slice 8 ships, a placeholder is rendered.
+// WS2: estimate is now optional. A proposal can be generated as soon as a lead
+// exists; estimate-derived fields (pricing, contract value) render blank/TBD
+// when no approved estimate is present. The Documents section uses lead-scoped
+// upload endpoints when estimate is absent and switches to estimate-scoped once
+// one is available (re-anchor happens server-side at POST /api/proposals).
+//
+// Collects optional-section toggles, org chart inputs, team/reference/portfolio
+// multi-pickers, 30-60-90 free-text rows and the signer, then calls
+// useCreateProposal / useUpdateProposal.
+//
+// The preview is NOT a second step here. It lives at /proposals/:id/preview
+// (ProposalPreviewRoute) and this component navigates there on a successful
+// submit. Reason: a .print-page is a fixed 8.5in — 816px at 96dpi — and this
+// form renders inside LeadDetailPanel's sm:max-w-2xl drawer, which left ~624px
+// of usable width. The document did not scale down to fit, it was clipped, so
+// the right quarter of every page (second columns, the stats block, the footer
+// page number) was silently cut off.
 //
 // Branch-scoping: the Estimate carries aspireBranchId (Slice 8), captured at
 // intake from the selected branch. The team/client-reference pickers scope by
@@ -14,9 +25,11 @@
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ChevronRight, Loader2, X } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
+import { teamMemberTitleLabel } from '@/lib/proposal/titleLabels'
+import { ProposalDocumentsSection } from './ProposalDocumentsSection'
 import {
   useTeamMembers,
   useClientReferences,
@@ -25,7 +38,6 @@ import {
   useCreateProposal,
   useUpdateProposal,
 } from '@/hooks/useProposals'
-import { ProposalPreview } from './ProposalPreview'
 import type { Lead } from '@/types'
 import type { Estimate } from '@/types/estimating'
 import type {
@@ -42,12 +54,14 @@ import type {
 // Exported form-state shape (Slice 8 Preview consumes the same object)
 // ---------------------------------------------------------------------------
 
-/** The four optional ProposalSectionKeys the rep can toggle on the form. */
+/** The six optional ProposalSectionKeys the rep can toggle on the form. */
 export type OptionalSection =
   | 'startup_plan_30_60_90'
   | 'juniper_sync'
   | 'juniper_mapping'
   | 'meet_our_team_executive'
+  | 'irrigation_reporting_sample'
+  | 'table_of_contents'
 
 /** Mirrors ProposalRequest's mutable fields. Slice 8 receives this as a prop. */
 export interface ProposalFormState {
@@ -70,10 +84,13 @@ export interface ProposalFormState {
 // ---------------------------------------------------------------------------
 
 export interface ProposalBuilderProps {
-  /** The approved Lead. Caller guarantees lead.status === 'approved'. */
+  /** The Lead to generate a proposal for. */
   lead: Lead
-  /** The approved Estimate for this lead. Caller guarantees estimate.status === 'approved'. */
-  estimate: Estimate
+  /**
+   * The approved Estimate for this lead (WS2: optional).
+   * When absent, estimate-derived fields render blank/TBD.
+   */
+  estimate?: Estimate | null
   /**
    * When provided, reopens an existing proposal for editing.
    * The form hydrates from the saved ProposalRequest via useProposal(proposalId).
@@ -88,10 +105,12 @@ export interface ProposalBuilderProps {
 // ---------------------------------------------------------------------------
 
 const OPTIONAL_SECTIONS: { key: OptionalSection; label: string }[] = [
+  { key: 'table_of_contents', label: 'Table of Contents' },
   { key: 'startup_plan_30_60_90', label: 'Start Up Plan (30-60-90 Day)' },
   { key: 'juniper_sync', label: 'Juniper Sync' },
   { key: 'juniper_mapping', label: 'Juniper Mapping (2 pages)' },
   { key: 'meet_our_team_executive', label: 'Meet Our Team — Executive' },
+  { key: 'irrigation_reporting_sample', label: 'Irrigation Reporting Sample' },
 ]
 
 function makeDefaultCrewCounts(): OrgChartCrewCounts {
@@ -108,7 +127,11 @@ function makeDefaultFormState(signerUserId: string): ProposalFormState {
     sections: [],
     orgChart: {
       included: false,
-      accountManagerIds: [],
+      // W3b: pre-fill with the creating user's ID as a sentinel. OrgChartPage
+      // resolves this against the signer facts (name/title) when the user has no
+      // team_members row, so the AM node is always populated from the proposal
+      // creator without requiring a seeded roster entry.
+      accountManagerIds: signerUserId ? [signerUserId] : [],
       agronomyManagerId: null,
       irrigationManagerId: null,
       productionManagerId: null,
@@ -174,36 +197,29 @@ function MultiSelect<T extends { id: string }>({
   )
 }
 
-/** Single-select dropdown from a list of team members. */
-function SingleTeamPicker({
+/** Free-text name field for an org-chart role with no roster requirement. */
+function NameTextInput({
   label,
-  members,
   value,
   onChange,
   'data-testid': testId,
 }: {
   label: string
-  members: TeamMember[]
   value: string | null | undefined
-  onChange: (id: string | null) => void
+  onChange: (name: string | null) => void
   'data-testid'?: string
 }) {
   return (
     <div className="space-y-1">
       <label className="text-xs text-[hsl(var(--muted-fg))]">{label}</label>
-      <select
+      <input
+        type="text"
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value || null)}
+        placeholder="Enter name"
         className="h-8 w-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 text-xs text-[hsl(var(--fg))] focus:outline-none focus:ring-1 focus:ring-[#2E7D52]"
         data-testid={testId}
-      >
-        <option value="">— None —</option>
-        {members.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.name}
-          </option>
-        ))}
-      </select>
+      />
     </div>
   )
 }
@@ -295,36 +311,25 @@ function BulletListInput({
 
 // ---------------------------------------------------------------------------
 // Step indicator
+//
+// Step 2 is never "active" here: submitting navigates to /proposals/:id/preview,
+// a full-screen surface, because a .print-page is a fixed 8.5in and this builder
+// renders inside a 672px panel. The indicator stays so the rep knows a preview
+// follows rather than expecting the PDF to appear inline.
 // ---------------------------------------------------------------------------
 
-function StepIndicator({ step }: { step: 'form' | 'preview' }) {
+function StepIndicator() {
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span
-        className={cn(
-          'flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold',
-          step === 'form'
-            ? 'bg-[#2E7D52] text-white'
-            : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-fg))]',
-        )}
-      >
+      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#2E7D52] text-[10px] font-bold text-white">
         1
       </span>
-      <span className={step === 'form' ? 'font-semibold text-[hsl(var(--fg))]' : 'text-[hsl(var(--muted-fg))]'}>
-        Configure
-      </span>
+      <span className="font-semibold text-[hsl(var(--fg))]">Configure</span>
       <ChevronRight className="h-3.5 w-3.5 text-[hsl(var(--muted-fg))]" />
-      <span
-        className={cn(
-          'flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold',
-          step === 'preview'
-            ? 'bg-[#2E7D52] text-white'
-            : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-fg))]',
-        )}
-      >
+      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[hsl(var(--muted))] text-[10px] font-bold text-[hsl(var(--muted-fg))]">
         2
       </span>
-      <span className={step === 'preview' ? 'font-semibold text-[hsl(var(--fg))]' : 'text-[hsl(var(--muted-fg))]'}>
+      <span className="text-[hsl(var(--muted-fg))]">
         Preview &amp; Export
       </span>
     </div>
@@ -341,10 +346,13 @@ function StepIndicator({ step }: { step: 'form' | 'preview' }) {
 export interface ProposalPreviewSlotProps {
   formState: ProposalFormState
   lead: Lead
-  estimate: Estimate
+  /** WS2: estimate may be absent for estimate-optional proposals. */
+  estimate?: Estimate | null
   onBack: () => void
   /** The saved proposal id — null when the proposal has not yet been persisted. */
   proposalId?: string | null
+  /** Persisted chapter order (body chapters only). null = natural default order. */
+  chapterOrder?: string[] | null
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +370,7 @@ function ProposalFormStep({
   isEditing,
 }: {
   lead: Lead
-  estimate: Estimate
+  estimate?: Estimate | null
   formState: ProposalFormState
   onFormChange: (patch: Partial<ProposalFormState>) => void
   onSubmit: () => void
@@ -371,11 +379,11 @@ function ProposalFormStep({
   isEditing: boolean
 }) {
   // ---------------------------------------------------------------------------
-  // Branch scoping: the estimate now carries aspireBranchId (Slice 8), captured
-  // at intake from the selected branch. Scope the team/client-reference pickers
-  // to that branch; legacy rows with a null id fall back to all active members.
+  // Branch scoping: the estimate carries aspireBranchId (Slice 8), captured at
+  // intake from the selected branch. Scope the team/client-reference pickers to
+  // that branch; when no estimate is present fall back to all active members.
   // ---------------------------------------------------------------------------
-  const aspireBranchId: number | undefined = estimate.aspireBranchId ?? undefined
+  const aspireBranchId: number | undefined = estimate?.aspireBranchId ?? undefined
 
   const { data: branchTeamMembers = [] } = useTeamMembers(
     aspireBranchId !== undefined ? { aspireBranchId } : undefined,
@@ -386,11 +394,10 @@ function ProposalFormStep({
   )
   const { data: portfolio = [] } = usePortfolio()
 
-  // Derived filtered views for org chart pickers (branch-type members only)
+  // Derived filtered view for the Account Manager picker (branch-type members only).
+  // Agronomy/Irrigation/Production Manager are free-text on the org chart — those
+  // roles often have nobody in the roster assigned that title.
   const accountManagers = branchTeamMembers.filter((m) => m.title === 'account_manager')
-  const agronomyManagers = branchTeamMembers.filter((m) => m.title === 'agronomy_manager')
-  const irrigationManagers = branchTeamMembers.filter((m) => m.title === 'irrigation_manager')
-  const productionManagers = branchTeamMembers.filter((m) => m.title === 'production_manager')
 
   const startupPlanChecked = formState.sections.includes('startup_plan_30_60_90')
   const executiveTeamChecked = formState.sections.includes('meet_our_team_executive')
@@ -436,14 +443,20 @@ function ProposalFormStep({
       {/* Lead / estimate summary */}
       <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3.5">
         <p className="text-[13px] font-semibold text-[hsl(var(--fg))]">{lead.property_name}</p>
-        <p className="text-xs text-[hsl(var(--muted-fg))]">
-          {estimate.estimateType === 'maintenance' ? 'Maintenance' : 'Installation'} •{' '}
-          {(estimate.contractValueCents / 100).toLocaleString('en-US', {
-            style: 'currency',
-            currency: 'USD',
-            maximumFractionDigits: 0,
-          })}
-        </p>
+        {estimate ? (
+          <p className="text-xs text-[hsl(var(--muted-fg))]">
+            {estimate.estimateType === 'maintenance' ? 'Maintenance' : 'Installation'} •{' '}
+            {(estimate.contractValueCents / 100).toLocaleString('en-US', {
+              style: 'currency',
+              currency: 'USD',
+              maximumFractionDigits: 0,
+            })}
+          </p>
+        ) : (
+          <p className="text-xs text-[hsl(var(--muted-fg))]">
+            No estimate yet — pricing will show as TBD
+          </p>
+        )}
       </div>
 
       {/* Optional sections */}
@@ -569,27 +582,24 @@ function ProposalFormStep({
               )}
             </div>
 
-            {/* Optional single-picks */}
-            <SingleTeamPicker
+            {/* Optional free-text roles — no roster requirement */}
+            <NameTextInput
               label="Agronomy Manager (optional)"
-              members={agronomyManagers}
               value={formState.orgChart.agronomyManagerId}
-              onChange={(id) => patchOrgChart({ agronomyManagerId: id })}
-              data-testid="agronomy-manager-picker"
+              onChange={(name) => patchOrgChart({ agronomyManagerId: name })}
+              data-testid="agronomy-manager-input"
             />
-            <SingleTeamPicker
+            <NameTextInput
               label="Irrigation Manager (optional)"
-              members={irrigationManagers}
               value={formState.orgChart.irrigationManagerId}
-              onChange={(id) => patchOrgChart({ irrigationManagerId: id })}
-              data-testid="irrigation-manager-picker"
+              onChange={(name) => patchOrgChart({ irrigationManagerId: name })}
+              data-testid="irrigation-manager-input"
             />
-            <SingleTeamPicker
+            <NameTextInput
               label="Production Manager (optional)"
-              members={productionManagers}
               value={formState.orgChart.productionManagerId}
-              onChange={(id) => patchOrgChart({ productionManagerId: id })}
-              data-testid="production-manager-picker"
+              onChange={(name) => patchOrgChart({ productionManagerId: name })}
+              data-testid="production-manager-input"
             />
 
             {/* Crew counts */}
@@ -664,7 +674,7 @@ function ProposalFormStep({
         <MultiSelect<TeamMember>
           items={branchTeamMembers.filter((m) => m.teamType === 'branch')}
           selected={formState.teamMemberIds}
-          renderLabel={(m) => `${m.name} — ${m.title.replace(/_/g, ' ')}`}
+          renderLabel={(m) => `${m.name} — ${teamMemberTitleLabel(m.title)}`}
           onChange={(teamMemberIds) => onFormChange({ teamMemberIds })}
           data-testid="team-member-picker"
         />
@@ -686,7 +696,7 @@ function ProposalFormStep({
           <MultiSelect<TeamMember>
             items={executiveMembers}
             selected={formState.executiveTeamMemberIds}
-            renderLabel={(m) => `${m.name} — ${m.title.replace(/_/g, ' ')}`}
+            renderLabel={(m) => `${m.name} — ${teamMemberTitleLabel(m.title)}`}
             onChange={(executiveTeamMemberIds) => onFormChange({ executiveTeamMemberIds })}
             data-testid="executive-team-picker"
           />
@@ -732,6 +742,14 @@ function ProposalFormStep({
           data-testid="portfolio-picker"
         />
       </section>
+
+      {/* Documents — the three upload slots appended to the rendered PDF (Handoff 47).
+          WS2: estimate-scoped when an estimate exists; lead-scoped otherwise.
+          A regenerated proposal with an estimate inherits them. */}
+      <ProposalDocumentsSection
+        estimateId={estimate?.id ?? null}
+        leadId={estimate ? null : lead.id}
+      />
 
       {/* Signer */}
       <section
@@ -780,30 +798,24 @@ function ProposalFormStep({
 // ---------------------------------------------------------------------------
 
 export function ProposalBuilder({ lead, estimate, proposalId, onClose }: ProposalBuilderProps) {
+  const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const signerUserId = user?.id ?? ''
 
-  const [step, setStep] = useState<'form' | 'preview'>('form')
   const [formState, setFormState] = useState<ProposalFormState>(() =>
     makeDefaultFormState(signerUserId),
   )
   const [submitError, setSubmitError] = useState<string | null>(null)
-
-  // Pre-fetch config data needed by the Preview step. These are already
-  // cached if ProposalFormStep already called the same hooks.
-  const { data: allBranchTeamMembers = [] } = useTeamMembers()
-  const { data: allClientRefs = [] } = useClientReferences()
-  const { data: allPortfolio = [] } = usePortfolio()
-  const { data: executiveMembersData = [] } = useTeamMembers({ teamType: 'executive' })
 
   // Reopen flow: load an existing proposal and hydrate the form.
   const { data: savedProposal, isLoading: loadingProposal } = useProposal(proposalId ?? null)
 
   useEffect(() => {
     if (!savedProposal) return
-    // Hydrate from the saved ProposalRequest — only the four optional sections
-    // are togglable, so filter the sections array to just those.
+    // Hydrate from the saved ProposalRequest — only the optional sections in
+    // OPTIONAL_SECTIONS are togglable, so filter the sections array to just those.
     const optionalKeys = OPTIONAL_SECTIONS.map((s) => s.key)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: syncs server-fetched proposal into local form state on reopen
     setFormState({
       sections: savedProposal.sections.filter((s): s is OptionalSection =>
         optionalKeys.includes(s as OptionalSection),
@@ -831,9 +843,10 @@ export function ProposalBuilder({ lead, estimate, proposalId, onClose }: Proposa
   function buildPayload() {
     // The required pages are always present; only the form's optional selections
     // are stored in `sections` (the backend / Slice 8 knows which pages are required).
+    // WS2: estimateId is nullable — null when no estimate exists.
     return {
       leadId: lead.id,
-      estimateId: estimate.id,
+      estimateId: estimate?.id ?? null,
       createdBy: signerUserId,
       sections: formState.sections as ProposalSectionKey[],
       orgChart: formState.orgChart,
@@ -845,6 +858,12 @@ export function ProposalBuilder({ lead, estimate, proposalId, onClose }: Proposa
       executiveTeamMemberIds: formState.executiveTeamMemberIds,
       clientReferenceIds: formState.clientReferenceIds,
       portfolioPropertyIds: formState.portfolioPropertyIds,
+      // Chapter order has no field in this form — it's set later from the
+      // preview's reorder panel. On create there is nothing to preserve; on
+      // edit, round-trip whatever is already saved so re-submitting the form
+      // (e.g. to tweak team members) can't silently wipe out a rep's saved
+      // chapter order.
+      chapterOrder: savedProposal?.chapterOrder ?? null,
       signerUserId: formState.signerUserId,
     }
   }
@@ -852,12 +871,22 @@ export function ProposalBuilder({ lead, estimate, proposalId, onClose }: Proposa
   async function handleSubmit() {
     setSubmitError(null)
     try {
+      // The preview is a full-screen route, not a second step in this panel —
+      // a .print-page is a fixed 8.5in (816px) and this builder renders inside
+      // LeadDetailPanel's 672px drawer, which clipped the right quarter of every
+      // page rather than scaling it down.
+      let id = proposalId ?? null
       if (isEditing && proposalId) {
         await updateMutation.mutateAsync({ id: proposalId, patch: buildPayload() })
       } else {
-        await createMutation.mutateAsync(buildPayload())
+        const created = await createMutation.mutateAsync(buildPayload())
+        id = created.id
       }
-      setStep('preview')
+      if (!id) {
+        setSubmitError('Proposal saved but no id was returned. Please reopen it from the lead.')
+        return
+      }
+      navigate(`/proposals/${id}/preview`)
     } catch {
       setSubmitError('Failed to save proposal. Please try again.')
     }
@@ -884,7 +913,7 @@ export function ProposalBuilder({ lead, estimate, proposalId, onClose }: Proposa
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <StepIndicator step={step} />
+          <StepIndicator />
           {onClose && (
             <button
               type="button"
@@ -898,44 +927,16 @@ export function ProposalBuilder({ lead, estimate, proposalId, onClose }: Proposa
         </div>
       </div>
 
-      {step === 'form' ? (
-        <ProposalFormStep
-          lead={lead}
-          estimate={estimate}
-          formState={formState}
-          onFormChange={handleFormChange}
-          onSubmit={handleSubmit}
-          submitting={submitting}
-          submitError={submitError}
-          isEditing={isEditing}
-        />
-      ) : (
-        // ProposalPreview (Slice 8) renders all 12+ pages print-ready.
-        // Resolved data is passed from container-level hooks (already cached from
-        // ProposalFormStep). allTeamMembers is the unfiltered list for org-chart
-        // node resolution; teamMembers/executiveTeamMembers/refs/portfolio are
-        // filtered to the picked IDs.
-        <ProposalPreview
-          formState={formState}
-          lead={lead}
-          estimate={estimate}
-          onBack={() => setStep('form')}
-          proposalId={proposalId ?? createMutation.data?.id ?? null}
-          allTeamMembers={allBranchTeamMembers}
-          teamMembers={allBranchTeamMembers.filter((m) =>
-            formState.teamMemberIds.includes(m.id),
-          )}
-          executiveTeamMembers={executiveMembersData.filter((m) =>
-            formState.executiveTeamMemberIds.includes(m.id),
-          )}
-          clientReferences={allClientRefs.filter((r) =>
-            formState.clientReferenceIds.includes(r.id),
-          )}
-          portfolioProperties={allPortfolio.filter((p) =>
-            formState.portfolioPropertyIds.includes(p.id),
-          )}
-        />
-      )}
+      <ProposalFormStep
+        lead={lead}
+        estimate={estimate}
+        formState={formState}
+        onFormChange={handleFormChange}
+        onSubmit={handleSubmit}
+        submitting={submitting}
+        submitError={submitError}
+        isEditing={isEditing}
+      />
     </div>
   )
 }

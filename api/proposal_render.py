@@ -12,11 +12,12 @@ Env vars:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -66,6 +67,15 @@ class RenderResult:
     page_count: Optional[int]
     version: int
     rendered_at: Optional[str]
+    # Pages whose content did not fit their 11in sheet and was therefore clipped
+    # out of the PDF. Reported, not fatal: the render is still a usable document
+    # and deciding what to cut from an overfull page is an editorial call. The
+    # point is that a rep finds out before the client does.
+    # Each entry: {"page": int, "testId": str | None, "overflowPx": int}
+    overflowing_pages: list = field(default_factory=list)
+    # One entry per appended proposal document (Handoff 47 §5): {attachmentId,
+    # kind, fileName, pageCount, firstPage}. Empty when nothing was attached.
+    document_manifest: list = field(default_factory=list)
 
 
 def _mint_render_token(
@@ -106,6 +116,9 @@ async def render_proposal_pdf(proposal_id: str, user: dict) -> RenderResult:
 
     from db import execute, query
     from api.attachments import upload_bytes, signed_get_url
+    from api.proposal_documents import append_proposal_documents
+    from pypdf import PdfReader
+    from io import BytesIO
 
     rows = await query(
         "SELECT COALESCE(MAX(version), 0) AS max_v FROM proposal_renders WHERE proposal_id = %s",
@@ -150,6 +163,14 @@ async def render_proposal_pdf(proposal_id: str, user: dict) -> RenderResult:
                 timeout=PDF_RENDER_TIMEOUT_MS,
             )
 
+            # ProposalPrintRoute publishes this BEFORE it flips __PROPOSAL_READY__
+            # (see the ordering comment there), so by the time we get here it is
+            # already populated. Read it before page.pdf() anyway — nothing about
+            # the capture should be able to disturb it.
+            overflowing_pages = await page.evaluate(
+                "window.__PROPOSAL_OVERFLOW__ || []"
+            )
+
             # prefer_css_page_size wins, so `@page { size: letter }` in
             # studio/src/styles/proposal-print.css is what actually sizes the
             # sheet; format is only the fallback and must agree with it.
@@ -169,40 +190,67 @@ async def render_proposal_pdf(proposal_id: str, user: dict) -> RenderResult:
         finally:
             await context.close()
 
-    duration_ms = int(time.time() * 1000) - start_ms
-    page_count = pdf_bytes.count(b"/Type /Page")
+    # Append proposal documents (measurements → contract → other) to the tail,
+    # after the thank-you page (Handoff 47 §5). With nothing attached this
+    # returns pdf_bytes unchanged, so the output is byte-identical to a render
+    # without documents. The data/infra guards it raises propagate to the render
+    # route, which maps them to 422 / 503 (§7).
+    #
+    # WS2: estimate_id may be NULL for estimate-optional proposals. When it is
+    # NULL we fall back to lead_id so lead-scoped proposal documents are appended
+    # correctly. Once POST /api/proposals re-anchors uploads to the estimate (the
+    # re-anchor step), estimate_id will be set and this branch is unreachable.
+    estimate_id = prop_rows[0]["estimate_id"]
+    _lead_id = prop_rows[0]["lead_id"]
+    if estimate_id:
+        final_bytes, document_manifest = await append_proposal_documents(
+            pdf_bytes, estimate_id=estimate_id
+        )
+    else:
+        final_bytes, document_manifest = await append_proposal_documents(
+            pdf_bytes, lead_id=_lead_id
+        )
 
-    upload_bytes(object_key, pdf_bytes, "application/pdf")
+    duration_ms = int(time.time() * 1000) - start_ms
+    # The real page count of the FINAL merged bytes. The old
+    # `pdf_bytes.count(b"/Type /Page")` also matched the /Type /Pages tree node
+    # and depended on Chromium's dictionary spacing, and was meaningless after a
+    # merge (§5.4).
+    page_count = len(PdfReader(BytesIO(final_bytes)).pages)
+
+    upload_bytes(object_key, final_bytes, "application/pdf")
     download_url = signed_get_url(object_key, f"proposal-v{next_version}.pdf")
 
     rendered_at = datetime.now(timezone.utc).isoformat()
 
+    # overflowing_pages is stored as JSON, and '[]' is written deliberately when
+    # nothing was clipped: the column is NULL only for renders that predate
+    # overflow detection, so "was this render measured?" stays answerable.
     await execute(
         """
         INSERT INTO proposal_renders
             (id, proposal_id, version, object_key, page_count, status,
-             rendered_by, duration_ms, created_at)
-        VALUES (%s, %s, %s, %s, %s, 'complete', %s, %s, NOW())
+             rendered_by, duration_ms, overflowing_pages, created_at)
+        VALUES (%s, %s, %s, %s, %s, 'complete', %s, %s, %s, NOW())
         """,
         (render_id, proposal_id, next_version, object_key, page_count,
-         user["id"], duration_ms),
+         user["id"], duration_ms, json.dumps(overflowing_pages)),
     )
-
-    estimate_id = prop_rows[0]["estimate_id"]
-    if estimate_id:
-        await execute(
-            """
-            UPDATE estimates
-            SET latest_proposal_render_id = %s, latest_proposal_object_key = %s
-            WHERE id = %s
-            """,
-            (render_id, object_key, estimate_id),
-        )
 
     logger.info(
         "Proposal %s rendered: v%d, %d pages, %d ms",
         proposal_id, next_version, page_count or 0, duration_ms,
     )
+
+    if overflowing_pages:
+        # WARNING, not an exception: the PDF is still a usable document and the
+        # rep may well intend a tight page. But a silently truncated proposal
+        # reaching a customer is the failure this exists to prevent, so it must
+        # appear in the logs even when nobody is watching the UI.
+        logger.warning(
+            "Proposal %s v%d: content clipped on %d page(s): %s",
+            proposal_id, next_version, len(overflowing_pages), overflowing_pages,
+        )
 
     return RenderResult(
         id=render_id,
@@ -212,4 +260,6 @@ async def render_proposal_pdf(proposal_id: str, user: dict) -> RenderResult:
         page_count=page_count,
         version=next_version,
         rendered_at=rendered_at,
+        overflowing_pages=overflowing_pages,
+        document_manifest=document_manifest,
     )

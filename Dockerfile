@@ -6,12 +6,6 @@ RUN npm ci
 COPY studio/ ./
 ARG VITE_ENTRA_CLIENT_ID
 ARG VITE_ENTRA_TENANT_ID
-# Optional. Unset (the default) bundles the proposal photography out of
-# studio/public and serves it same-origin; set to a bucket or CDN origin to
-# serve it from there instead. See studio/src/lib/proposal/photos.ts and
-# scripts/upload_proposal_photos.py. Passing it also needs a matching
-# --build-arg in cloudbuild.yaml / cloudbuild.staging.yaml.
-ARG VITE_PROPOSAL_ASSET_BASE
 # Company info baked into the frontend bundle (VITE_) and read by the backend
 # renderer (proposal_validation.py) at runtime via os.environ.
 ARG VITE_COMPANY_NAME

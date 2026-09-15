@@ -1901,6 +1901,52 @@ async def schedule_lead_meeting(
     return {"event": event, "lead_id": lead_id}
 
 
+# ── Proposal asset proxy ─────────────────────────────────────────────────────
+#
+# Streams brand photography (headshots, service photos) from a private GCS
+# bucket through the Cloud Run service account so the bucket never needs
+# allUsers:objectViewer.  No auth required — the headless renderer and the
+# browser both call this as a plain <img src>.
+#
+# Allowed prefixes are the only three sets uploaded by upload_proposal_assets.py.
+# Anything else gets a 404 so we never proxy arbitrary bucket contents.
+
+_PROPOSAL_ASSETS_BUCKET: str = os.environ.get(
+    "PROPOSAL_ASSETS_BUCKET", "juniper-crm-proposal-assets"
+)
+_ALLOWED_ASSET_PREFIXES = (
+    "proposal/photos/",
+    "proposal/portfolio/",
+    "proposal/headshots/",
+)
+
+
+@app.get("/proposal-assets/{path:path}")
+async def serve_proposal_asset(path: str) -> Response:
+    if not any(path.startswith(p) for p in _ALLOWED_ASSET_PREFIXES):
+        raise HTTPException(status_code=404)
+    # GCS keys are literal strings — no filesystem traversal — so `..` in
+    # a key just means a blob whose name contains `..`, not a directory escape.
+    # Safe by GCS semantics; noted here so a future filesystem-backed swap is
+    # not silently assumed safe.
+    from api.attachments import _gcs
+    from google.cloud.exceptions import NotFound
+    try:
+        blob = _gcs().bucket(_PROPOSAL_ASSETS_BUCKET).blob(path)
+        data = blob.download_as_bytes()
+        content_type = blob.content_type or "application/octet-stream"
+    except NotFound:
+        raise HTTPException(status_code=404)
+    except Exception as exc:
+        logger.warning("proposal-asset proxy error for %r: %s", path, exc)
+        raise HTTPException(status_code=404)
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 # ── Frontend (SPA) ───────────────────────────────────────────────────────────
 
 _DIST_DIR = Path(__file__).parent.parent / "dist"

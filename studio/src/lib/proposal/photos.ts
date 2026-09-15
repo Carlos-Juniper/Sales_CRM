@@ -24,28 +24,9 @@ type ServiceKey = keyof typeof SERVICES_CONTENT
 type OverviewCategoryKey = (typeof SERVICE_OVERVIEW_CATEGORIES)[number]['key']
 
 /**
- * Root the photo URLs are resolved against.
- *
- * Unset (the default, and what local dev and the current deploys use): photos
- * resolve same-origin out of studio/public/proposal/photos, which is also the
- * origin api/proposal_render.py points Chromium at. Nothing to provision.
- *
- * Set to a bucket or CDN origin (`https://storage.googleapis.com/<bucket>`,
- * no trailing slash): photos resolve there instead, and the same relative keys
- * apply — scripts/upload_proposal_photos.py mirrors the public directory to
- * that prefix so the two cannot drift.
- *
- * The objects must be readable without a credential. A plain <img> carries no
- * Authorization header and cannot follow a signed-URL handshake, so a private
- * prefix renders as a broken image rather than failing loudly.
- */
-const PROPOSAL_ASSET_BASE = (
-  (import.meta.env.VITE_PROPOSAL_ASSET_BASE as string | undefined) ?? ''
-).replace(/\/+$/, '')
-
-/** Resolve a filename under proposal/photos/ to a loadable URL. */
+/** Resolve a filename under proposal/photos/ to a loadable URL (served via GCS proxy). */
 export function proposalPhotoUrl(file: string): string {
-  return `${PROPOSAL_ASSET_BASE}/proposal/photos/${file}`
+  return `/proposal-assets/proposal/photos/${file}`
 }
 
 /**
@@ -341,6 +322,6 @@ export const BUNDLED_HEADSHOT_SLUGS: ReadonlySet<string> = new Set([
 export function bundledHeadshotUrl(name: string): string | null {
   const slug = headshotSlug(name)
   return BUNDLED_HEADSHOT_SLUGS.has(slug)
-    ? `${PROPOSAL_ASSET_BASE}/proposal/headshots/headshot-${slug}.jpg`
+    ? `/proposal-assets/proposal/headshots/headshot-${slug}.jpg`
     : null
 }

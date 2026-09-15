@@ -2,44 +2,29 @@
 // Proposal background images that the readiness gate must await.
 //
 // The gate in ProposalPrintRoute enumerates <img> elements and decodes them,
-// which covers headshots and portfolio photos. It does NOT cover CSS
-// background-image: those fetches are invisible to both document.fonts.ready
-// and a querySelectorAll('img') sweep, so a capture can win the race against
-// the fetch and emit a page with no watermark behind it.
+// which covers headshots and portfolio photos (served via /proposal-assets/).
+// It does NOT cover CSS background-image: those fetches are invisible to both
+// document.fonts.ready and a querySelectorAll('img') sweep, so a capture can
+// win the race against the fetch and emit a page with no watermark behind it.
 //
 // Every url() background declared in styles/proposal-print.css therefore needs
 // an entry here. Same irreducible two-place duplication as the font list — the
 // stylesheet cannot import TypeScript — so the CSS block points back at this
 // file by name.
 //
-// CSS custom properties for these assets are set on :root by
-// applyProposalAssetCssVars() so that proposal-print.css can reference them as
-// var(--proposal-watermark). This pattern is necessary because CSS url() cannot
-// reference a var() that contains a base URL, and we need to support both the
-// same-origin fallback and a GCS origin configured via
-// VITE_PROPOSAL_ASSET_BASE at build time.
+// CSS custom properties are set on :root by applyProposalAssetCssVars() so
+// that proposal-print.css can reference them as var(--proposal-watermark).
 //
-// The Florida map is an <img>, not a CSS background, so it needs neither a
-// custom property nor a preload entry — the readiness gate's img sweep covers
-// it. It still resolves through proposalAssetUrl() so it honours the asset
-// base like every other proposal image.
+// Brand marks (watermark, Florida map) are committed to git and served
+// same-origin from /proposal/. Photography (headshots, service photos) is
+// served through the /proposal-assets/{path} GCS proxy — see photos.ts.
 // ---------------------------------------------------------------------------
 
-/** Resolve an asset path against the configured asset base (or same-origin). */
-function proposalAssetUrl(filename: string): string {
-  const base = import.meta.env.VITE_PROPOSAL_ASSET_BASE as string | undefined
-  if (base) {
-    // Ensure no double-slash between base and filename.
-    return `${base.replace(/\/$/, '')}/${filename}`
-  }
-  return `/proposal/${filename}`
-}
-
-const WATERMARK_URL = proposalAssetUrl('palm-watermark.jpeg')
+const WATERMARK_URL = '/proposal/palm-watermark.jpeg'
 
 /** Resolved URL for the Florida coverage map on the Local Experts page. */
 export function floridaMapUrl(): string {
-  return proposalAssetUrl('florida-map.png')
+  return '/proposal/florida-map.png'
 }
 
 /**

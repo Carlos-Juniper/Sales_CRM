@@ -274,7 +274,7 @@ describe('DiscrepancyFlag — API persistence', () => {
 
 describe('DiscrepancyFlag — shell integration', () => {
   beforeEach(() => {
-    useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'inside_sales' }) })
+    useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'install_estimating' }) })
   })
 
   it('mounts on the Discrepancy Review tab for an open install estimate', async () => {

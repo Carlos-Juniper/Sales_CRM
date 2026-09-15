@@ -29,6 +29,7 @@ import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 // ITB projects + scope statuses from the API (auto-generated per estimate)
 import { useItbProjects } from '@/hooks/useItbProjects'
 import { ESTIMATES_KEY, useEstimate } from '@/hooks/useEstimate'
+import { useRole } from '@/hooks/useRole'
 import type { Estimate, Property } from '@/types/estimating'
 import type { Lead } from '@/types'
 import { cn } from '@/lib/utils'
@@ -106,7 +107,11 @@ export default function EstimatingPage({
   // Queue refresh key: bump after successful intake to trigger re-fetch.
   const [queueKey, setQueueKey] = useState(0)
 
-  const tabs = visibleTabs(openEstimate?.estimateType ?? null)
+  // Handoff 50 §2: the tab bar is gated on the current user's role. Sales sees
+  // only the queue; the estimate-detail surface is estimator/approver-owned and
+  // is additionally enforced server-side (require_estimate_viewer).
+  const { role } = useRole()
+  const tabs = visibleTabs(openEstimate?.estimateType ?? null, role)
   const requestedTab = (routeTab as EstimatingTabKey | undefined) ?? 'queue'
   // If the open estimate's type hides the requested tab, fall back to the queue.
   const currentTab: EstimatingTabKey = tabs.some((t) => t.key === requestedTab)

@@ -19,11 +19,14 @@ interface NavItem {
   roles: UserRole[]
 }
 
-// Canonical roles. `admin` sees everything via canAccess.
-const SALES_NAV: UserRole[] = ['sales', 'inside_sales', 'manager']
+// Canonical roles. `admin` sees everything via canAccess. `vice_president` and
+// `ceo` are cross-branch roles (see CROSS_BRANCH_ROLES in lib/roles.ts) that
+// should see the same nav as admin, not just Estimating.
+const SALES_NAV: UserRole[] = ['sales', 'inside_sales', 'manager', 'vice_president', 'ceo']
 // The public/government feed is the inside-sales qualification queue; CRMs work
-// their own assigned leads on the Leads tab instead.
-const PUBLIC_LEADS_NAV: UserRole[] = ['inside_sales']
+// their own assigned leads on the Leads tab instead. admin/vice_president/ceo
+// get oversight access too (admin via canAccess's super-role bypass).
+const PUBLIC_LEADS_NAV: UserRole[] = ['inside_sales', 'vice_president', 'ceo']
 const ESTIMATING_NAV: UserRole[] = [
   'sales',
   'manager',

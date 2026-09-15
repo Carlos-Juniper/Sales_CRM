@@ -28,13 +28,17 @@ patched there.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+
+log = logging.getLogger(__name__)
 
 from fastapi import Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from db import execute, query
+import api.attachments as _att_mod
 from api import authz
 from api import aspire_sync
 from api import graph
@@ -137,6 +141,160 @@ async def _require_admin(user: dict) -> None:
         )
 
 
+# ── Marketing-asset guard (Handoff 50 §3) ────────────────────────────────────
+
+async def _require_marketing_manager(user: dict) -> None:
+    """403 unless the LIVE users row may manage company-wide proposal assets.
+
+    Portfolio pages, client references and team bios/headshots are company-wide
+    resources gated on the `marketing` role (Carlos's §5.1 call), with `admin`
+    retaining super-role access. Re-reads role+active from the users table (B.2)
+    so a demoted/deactivated token cannot widen scope — mirrors _require_admin.
+    """
+    live_role = await authz._live_role(user)
+    if not authz.is_marketing_manager(live_role):
+        raise HTTPException(
+            status_code=403,
+            detail="Marketing or admin role required: portfolio, client "
+            "references and team bios are company-wide proposal assets.",
+        )
+
+
+async def _require_marketing_or_branch_scope(
+    user: dict, aspire_branch_id: Optional[int]
+) -> tuple[str, Optional[str]]:
+    """Authorize a write to a team_members / client_references row (§3).
+
+    These are company-wide marketing assets, so marketing/admin may write ANY
+    row (company-wide OR any branch). A branch manager keeps write access to
+    its own branch's rows — that pre-existing path is left EXACTLY as it was,
+    tried FIRST so a BM never triggers the extra live-role read.
+
+      * Branch row (aspire_branch_id set): try branch scope first (unchanged BM
+        behaviour); if out of scope, allow only marketing/admin (a live-role
+        re-read, B.2, on this fallback only).
+      * Company-wide row (aspire_branch_id=None): marketing/admin only, via a
+        live-role re-read — the same guarantee _require_admin gave before,
+        widened to marketing.
+
+    Returns the (scope_type, scope_id) pair for the audit row.
+    """
+    if aspire_branch_id is not None:
+        try:
+            await _require_branch_write_scope(user, aspire_branch_id)
+        except HTTPException:
+            # Out of the caller's branch scope — permitted only for the
+            # cross-branch marketing/admin owners of these company-wide assets.
+            if not authz.is_marketing_manager(await authz._live_role(user)):
+                raise
+        return "branch", str(aspire_branch_id)
+    # Company-wide row: marketing/admin only (live re-read, B.2).
+    if not authz.is_marketing_manager(await authz._live_role(user)):
+        raise HTTPException(
+            status_code=403,
+            detail="Marketing or admin role required for company-wide entries.",
+        )
+    return "company", None
+
+
+async def _require_marketing_or_branch_scope_for_row(
+    user: dict, row_branch: Any
+) -> tuple[str, Optional[str]]:
+    """Same rule as _require_marketing_or_branch_scope, keyed on an EXISTING
+    row's stored aspire_branch_id (int or None). A body/path-supplied branch can
+    never widen scope — the row itself decides which branch is in play.
+    """
+    branch_id = int(row_branch) if row_branch is not None else None
+    return await _require_marketing_or_branch_scope(user, branch_id)
+
+
+# ── Proposal imagery helpers (Handoff 43 §2) ─────────────────────────────────
+#
+# Headshots and portfolio photography are uploaded as multipart to the API,
+# which validates the real bytes and writes them through
+# api.attachments.upload_bytes — the same single upload path the license/
+# certification scan endpoint uses.
+#
+# This deliberately diverges from Handoff 43 §2.1, which specified a signed-PUT
+# URL for the browser to PUT straight to GCS. Handoff 42 had just established
+# the opposite convention one surface over ("the ONLY upload path — no parallel
+# uploader is added ... no second signing route is added here"), and for files
+# of this size proxying is strictly better: the content type and the size cap
+# are enforced against the actual bytes rather than a client-declared number,
+# no bucket CORS rule for PUT is needed, and there is no window in which a
+# signed URL exists but no row references the object. The 2 GiB intake
+# attachment keeps its browser-direct resumable session — that one is proxying
+# bandwidth we should not pay for.
+
+
+async def _read_validated_image(file: UploadFile) -> tuple[bytes, str, str]:
+    """Read an uploaded image, validating type and size. -> (bytes, ext, content_type).
+
+    Both checks are 400s, not 415/413: the browser form is the only caller and
+    it pre-filters by accept=, so reaching here with a bad file means the client
+    check was bypassed, and a single status keeps the field's error handling
+    simple. The extension comes from the VALIDATED content type — never from
+    file.filename, which is attacker-controlled and would be a path traversal
+    into the renderer's own proposal/generated/ prefix.
+    """
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if content_type not in _att_mod.IMAGE_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Images must be JPEG, PNG, or WebP.",
+        )
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if len(data) > _att_mod.GCS_MAX_IMAGE_BYTES:
+        mib = _att_mod.GCS_MAX_IMAGE_BYTES // (1024 * 1024)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Image exceeds the {mib} MiB limit.",
+        )
+    return data, _att_mod.ext_for_content_type(content_type), content_type
+
+
+def _delete_object_quietly(key: Optional[str]) -> None:
+    """Best-effort GCS delete for an object no row references any more.
+
+    Swallows failures on purpose: the row has already been updated, and a
+    leaked object costs pennies while a 500 here would tell the user their
+    edit failed when it did not. The miss is logged by the storage client.
+    """
+    if not key:
+        return
+    try:
+        _att_mod.delete(key)
+    except Exception as exc:
+        log.warning("_delete_object_quietly: failed to delete GCS object %r: %s", key, exc)
+
+
+def _portfolio_row_out(r: dict) -> dict:
+    """Map a portfolio_properties row to its camelCase API shape.
+
+    photo_object_keys is a TEXT column holding a JSON array, and aiomysql hands
+    it back as a string. Malformed JSON degrades to an empty list rather than
+    raising — a bad key blob must not take down the whole Settings section.
+    """
+    photo_keys = r.get("photo_object_keys") or "[]"
+    if isinstance(photo_keys, (str, bytes, bytearray)):
+        try:
+            photo_keys = json.loads(photo_keys)
+        except (ValueError, TypeError):
+            photo_keys = []
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "cityState": r["city_state"],
+        "regionId": r["region_id"],
+        "photoObjectKeys": photo_keys if isinstance(photo_keys, list) else [],
+        "sortOrder": r["sort_order"],
+        "active": bool(r.get("active", 1)),
+    }
+
+
 # ── Branch scope guard (branch writes) ───────────────────────────────────────
 
 async def _require_branch_write_scope(user: dict, aspire_branch_id: int) -> None:
@@ -234,6 +392,22 @@ class UserAdminPatch(BaseModel):
     active: Optional[bool] = None
 
 
+class MyProfilePatch(BaseModel):
+    """Self-service update of the caller's own contact fields (Handoff 43 §3.1).
+
+    Only phone and title, and only ever on the caller's own row — no user_id
+    parameter exists, so this endpoint cannot be pointed at anyone else. Role,
+    branches and the active flag stay admin-only on
+    PATCH /api/settings/users/{id}.
+
+    An empty string clears the field back to NULL: a rep who mistyped their
+    direct line must be able to remove it, and a blank line under their name is
+    better than a wrong number on a client document.
+    """
+    phone: Optional[str] = None
+    title: Optional[str] = None
+
+
 # ── Slice 13a: H37 config table bodies ───────────────────────────────────────
 
 class TeamMemberCreate(BaseModel):
@@ -246,7 +420,7 @@ class TeamMemberCreate(BaseModel):
     """
     name: str
     title: str
-    teamType: str
+    teamType: Literal["branch", "leadership"]
     aspireBranchId: Optional[int] = None
     userId: Optional[str] = None
     location: Optional[str] = None
@@ -325,13 +499,12 @@ class PortfolioPropertyCreate(BaseModel):
     """Create body for portfolio_properties — admin-only, company-scoped.
 
     photo_object_keys is a JSON array of GCS keys; the DB column is TEXT so we
-    serialise before writing. beforeAfterObjectKeys is a JSON object or None.
+    serialise before writing.
     """
     name: str
     cityState: str
     regionId: str
     photoObjectKeys: list[str] = []
-    beforeAfterObjectKeys: Optional[dict] = None
     sortOrder: int = 0
 
 
@@ -341,7 +514,6 @@ class PortfolioPropertyPatch(BaseModel):
     cityState: Optional[str] = None
     regionId: Optional[str] = None
     photoObjectKeys: Optional[list[str]] = None
-    beforeAfterObjectKeys: Optional[dict] = None
     sortOrder: Optional[int] = None
 
 
@@ -351,11 +523,10 @@ _PP_UPDATABLE: dict[str, str] = {
     "cityState": "city_state",
     "regionId": "region_id",
     "photoObjectKeys": "photo_object_keys",
-    "beforeAfterObjectKeys": "before_after_object_keys",
     "sortOrder": "sort_order",
 }
 # portfolio_properties columns that hold JSON and must be serialised before write.
-_PP_JSON_COLS: frozenset[str] = frozenset({"photoObjectKeys", "beforeAfterObjectKeys"})
+_PP_JSON_COLS: frozenset[str] = frozenset({"photoObjectKeys"})
 
 
 # ── Slice 15a: licenses_certifications + insurance_certificates bodies ────────
@@ -410,7 +581,34 @@ _LC_UPDATABLE: dict[str, str] = {
 
 # InsuranceCreate / InsurancePatch / _INS_UPDATABLE removed — insurance documents
 # are now managed through the unified /api/settings/licenses endpoints with
-# kind='insurance'. See migration 027 and Handoff 42.
+# kind='insurance'. See migration 033 and Handoff 42.
+
+
+# ── My-profile row helper ─────────────────────────────────────────────────────
+
+async def _my_profile_row(user_id: str) -> dict:
+    """Fetch the caller's own live profile row, or 404 if missing.
+
+    Both GET /api/settings/me and PATCH /api/settings/me return the same shape;
+    this helper runs the shared SELECT so both handlers stay in sync and the
+    patch endpoint reads the POST-update row instead of reconstructing it from
+    stale locals.
+    """
+    rows = await query(
+        "SELECT id, name, email, role, phone, title FROM users WHERE id = %s",
+        [user_id],
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="User not found")
+    r = rows[0]
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "email": r["email"],
+        "role": r["role"],
+        "phone": r.get("phone"),
+        "title": r.get("title"),
+    }
 
 
 # ── Company setting column map (camel-free: bodies already use snake_case columns).
@@ -464,7 +662,7 @@ def _license_settings_out(r: dict) -> dict:
 # _insurance_settings_out removed — insurance rows now use _license_settings_out
 # (all columns are present in licenses_certifications; kind='insurance' rows
 # will have issuing_body/identifier/holder_name/issued_date as NULL). See
-# migration 027 and Handoff 42.
+# migration 033 and Handoff 42.
 
 
 def register(app, require_auth) -> None:
@@ -825,6 +1023,65 @@ def register(app, require_auth) -> None:
 
         return await get_branch_settings_payload(aspire_branch_id)
 
+    # ── Handoff 43 §3.1: the caller's own profile ────────────────────────────
+    # users.phone and users.title back the signer block on a client-facing
+    # proposal (see GET /api/proposals/:id/signer). Self-service and not
+    # admin-gated: a rep's own direct line and job title are theirs to set, and
+    # routing them through an admin is how the field stays empty forever.
+
+    @app.get("/api/settings/me")
+    async def get_my_profile(user: dict = Depends(require_auth)) -> dict:
+        """The caller's own row. Read live, not from the JWT.
+
+        /api/auth/me echoes the token claims, which carry no phone or title —
+        and a token minted before the rep set them would keep reporting them
+        empty until the session rolled over.
+        """
+        return await _my_profile_row(user["id"])
+
+    @app.patch("/api/settings/me")
+    async def patch_my_profile(
+        body: MyProfilePatch,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Update the caller's own phone and/or title. Audited like any config write."""
+        user_id = user["id"]
+
+        # Read the current row for audit from_value (404s if user is missing).
+        current = await _my_profile_row(user_id)
+
+        # A supplied-but-blank value clears the column; an omitted field is
+        # untouched. `is not None` is the distinction, so "" must not be
+        # normalised to None before this point.
+        updates: dict[str, Optional[str]] = {}
+        for field in ("phone", "title"):
+            value = getattr(body, field)
+            if value is not None:
+                trimmed = value.strip()
+                updates[field] = trimmed or None
+        if not updates:
+            raise HTTPException(status_code=400, detail="No profile fields to update")
+
+        set_clause = ", ".join(f"{col} = %s" for col in updates)
+        await execute(
+            f"UPDATE users SET {set_clause} WHERE id = %s",
+            [*updates.values(), user_id],
+        )
+
+        actor = _actor(user)
+        for col, value in updates.items():
+            await _audit(
+                scope_type="company",
+                scope_id=None,
+                setting_key=f"user.{user_id}.{col}",
+                from_value=current.get(col),
+                to_value=value,
+                actor=actor,
+            )
+
+        # Re-fetch the fresh row instead of reconstructing from stale locals.
+        return await _my_profile_row(user_id)
+
     # ── Slice 6: user administration (§2.8) — admin-only writes ──────────────
 
     @app.get("/api/settings/users/directory")
@@ -1080,16 +1337,12 @@ def register(app, require_auth) -> None:
         """
         actor = _actor(user)
 
-        if body.aspireBranchId is None:
-            # Company-wide: admin only.
-            await _require_admin(user)
-            scope_type = "company"
-            scope_id = None
-        else:
-            # Branch row: caller must have scope over this branch.
-            await _require_branch_write_scope(user, body.aspireBranchId)
-            scope_type = "branch"
-            scope_id = str(body.aspireBranchId)
+        # Handoff 50 §3: team_members is a company-wide marketing asset —
+        # marketing/admin may write any row (company-wide OR any branch); a
+        # branch manager keeps write access to its own branch's rows.
+        scope_type, scope_id = await _require_marketing_or_branch_scope(
+            user, body.aspireBranchId
+        )
 
         row_id = str(uuid.uuid4())
         await execute(
@@ -1152,15 +1405,12 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Team member not found")
         current = rows[0]
 
-        row_branch = current.get("aspire_branch_id")
-        if row_branch is None:
-            await _require_admin(user)
-            scope_type = "company"
-            scope_id = None
-        else:
-            await _require_branch_write_scope(user, int(row_branch))
-            scope_type = "branch"
-            scope_id = str(row_branch)
+        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
+        # any branch); a branch manager keeps its own branch. Scope comes
+        # from the EXISTING row, never a body/path-supplied branch id.
+        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
+            user, current.get("aspire_branch_id")
+        )
 
         updates = {
             camel: col
@@ -1203,6 +1453,102 @@ def register(app, require_auth) -> None:
             "sortOrder": r["sort_order"],
         }
 
+    # ── Handoff 43 §2: team headshot upload ──────────────────────────────────
+    # Before this, `headshotObjectKey` was writable only by typing a GCS object
+    # key into a text field, so in practice every proposal rendered initials
+    # instead of a face. Scope guard mirrors patch_team_member exactly: the
+    # row's own aspire_branch_id decides, never the path or body.
+
+    @app.post("/api/settings/team-members/{member_id}/headshot")
+    async def upload_team_member_headshot(
+        member_id: str,
+        file: UploadFile = File(...),
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Upload (or replace) one team member's headshot.
+
+        The object key is derived from the row id, so re-uploading replaces the
+        object in place and cannot orphan a key the row still points at. The
+        extension follows the validated content type, which means a JPEG
+        replaced by a PNG leaves the old object behind — that one is deleted
+        explicitly below.
+        """
+        rows = await query("SELECT * FROM team_members WHERE id = %s", [member_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="Team member not found")
+        current = rows[0]
+
+        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
+        # any branch); a branch manager keeps its own branch. Scope comes
+        # from the EXISTING row, never a body/path-supplied branch id.
+        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
+            user, current.get("aspire_branch_id")
+        )
+
+        data, ext, content_type = await _read_validated_image(file)
+        object_key = f"proposal/headshots/{member_id}.{ext}"
+        _att_mod.upload_bytes(object_key, data, content_type)
+
+        prior_key = current.get("headshot_object_key")
+        await execute(
+            "UPDATE team_members SET headshot_object_key = %s WHERE id = %s",
+            [object_key, member_id],
+        )
+        await _audit(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            setting_key=f"team_member.{member_id}.headshot_object_key",
+            from_value=prior_key,
+            to_value=object_key,
+            actor=_actor(user),
+        )
+        # A format change moves the key; the superseded object is now
+        # unreferenced. Same-key replacement is a no-op here by design.
+        if prior_key and prior_key != object_key:
+            _delete_object_quietly(prior_key)
+
+        return {"id": member_id, "headshotObjectKey": object_key}
+
+    @app.delete("/api/settings/team-members/{member_id}/headshot")
+    async def delete_team_member_headshot(
+        member_id: str,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Clear a team member's headshot and delete the stored object.
+
+        A hard delete of the object is right here, unlike the row soft-deletes
+        elsewhere in this module: nothing historical references a headshot — a
+        past proposal stores team member ids, and the photo is looked up live
+        at render time.
+        """
+        rows = await query("SELECT * FROM team_members WHERE id = %s", [member_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="Team member not found")
+        current = rows[0]
+
+        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
+        # any branch); a branch manager keeps its own branch. Scope comes
+        # from the EXISTING row, never a body/path-supplied branch id.
+        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
+            user, current.get("aspire_branch_id")
+        )
+
+        prior_key = current.get("headshot_object_key")
+        await execute(
+            "UPDATE team_members SET headshot_object_key = NULL WHERE id = %s",
+            [member_id],
+        )
+        await _audit(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            setting_key=f"team_member.{member_id}.headshot_object_key",
+            from_value=prior_key,
+            to_value=None,
+            actor=_actor(user),
+        )
+        _delete_object_quietly(prior_key)
+        return {"id": member_id, "headshotObjectKey": None}
+
     @app.delete("/api/settings/team-members/{member_id}")
     async def deactivate_team_member(
         member_id: str,
@@ -1221,15 +1567,12 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Team member not found")
         current = rows[0]
 
-        row_branch = current.get("aspire_branch_id")
-        if row_branch is None:
-            await _require_admin(user)
-            scope_type = "company"
-            scope_id = None
-        else:
-            await _require_branch_write_scope(user, int(row_branch))
-            scope_type = "branch"
-            scope_id = str(row_branch)
+        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
+        # any branch); a branch manager keeps its own branch. Scope comes
+        # from the EXISTING row, never a body/path-supplied branch id.
+        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
+            user, current.get("aspire_branch_id")
+        )
 
         await execute(
             "UPDATE team_members SET active = %s WHERE id = %s", [0, member_id]
@@ -1260,14 +1603,11 @@ def register(app, require_auth) -> None:
         """
         actor = _actor(user)
 
-        if body.aspireBranchId is None:
-            await _require_admin(user)
-            scope_type = "company"
-            scope_id = None
-        else:
-            await _require_branch_write_scope(user, body.aspireBranchId)
-            scope_type = "branch"
-            scope_id = str(body.aspireBranchId)
+        # Handoff 50 §3: client_references is a company-wide marketing asset —
+        # marketing/admin may write any row; a branch manager keeps its branch.
+        scope_type, scope_id = await _require_marketing_or_branch_scope(
+            user, body.aspireBranchId
+        )
 
         row_id = str(uuid.uuid4())
         await execute(
@@ -1329,15 +1669,12 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Client reference not found")
         current = rows[0]
 
-        row_branch = current.get("aspire_branch_id")
-        if row_branch is None:
-            await _require_admin(user)
-            scope_type = "company"
-            scope_id = None
-        else:
-            await _require_branch_write_scope(user, int(row_branch))
-            scope_type = "branch"
-            scope_id = str(row_branch)
+        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
+        # any branch); a branch manager keeps its own branch. Scope comes
+        # from the EXISTING row, never a body/path-supplied branch id.
+        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
+            user, current.get("aspire_branch_id")
+        )
 
         updates = {
             camel: col
@@ -1393,15 +1730,12 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Client reference not found")
         current = rows[0]
 
-        row_branch = current.get("aspire_branch_id")
-        if row_branch is None:
-            await _require_admin(user)
-            scope_type = "company"
-            scope_id = None
-        else:
-            await _require_branch_write_scope(user, int(row_branch))
-            scope_type = "branch"
-            scope_id = str(row_branch)
+        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
+        # any branch); a branch manager keeps its own branch. Scope comes
+        # from the EXISTING row, never a body/path-supplied branch id.
+        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
+            user, current.get("aspire_branch_id")
+        )
 
         await execute(
             "UPDATE client_references SET active = %s WHERE id = %s", [0, ref_id]
@@ -1433,38 +1767,13 @@ def register(app, require_auth) -> None:
         By default returns only active rows (active=1). include_inactive=true
         returns all rows for the admin management surface.
         """
-        await _require_admin(user)
+        await _require_marketing_manager(user)
 
         where = "" if include_inactive else "WHERE active = 1"
         rows = await query(
             f"SELECT * FROM portfolio_properties {where} ORDER BY sort_order, name",
         )
-        result = []
-        import json as _json  # local alias avoids shadowing the module-level import
-        for r in rows:
-            photo_keys = r.get("photo_object_keys") or "[]"
-            if isinstance(photo_keys, str):
-                try:
-                    photo_keys = _json.loads(photo_keys)
-                except (ValueError, TypeError):
-                    photo_keys = []
-            ba_keys = r.get("before_after_object_keys")
-            if isinstance(ba_keys, str):
-                try:
-                    ba_keys = _json.loads(ba_keys)
-                except (ValueError, TypeError):
-                    ba_keys = None
-            result.append({
-                "id": r["id"],
-                "name": r["name"],
-                "cityState": r["city_state"],
-                "regionId": r["region_id"],
-                "photoObjectKeys": photo_keys if isinstance(photo_keys, list) else [],
-                "beforeAfterObjectKeys": ba_keys,
-                "sortOrder": r["sort_order"],
-                "active": bool(r.get("active", 1)),
-            })
-        return result
+        return [_portfolio_row_out(r) for r in rows]
 
     @app.post("/api/settings/portfolio", status_code=201)
     async def create_portfolio_property(
@@ -1472,22 +1781,20 @@ def register(app, require_auth) -> None:
         user: dict = Depends(require_auth),
     ) -> dict:
         """Create a portfolio_properties row — admin-only, company-scoped."""
-        await _require_admin(user)
+        await _require_marketing_manager(user)
         actor = _actor(user)
 
         row_id = str(uuid.uuid4())
         await execute(
             """INSERT INTO portfolio_properties
-                 (id, name, city_state, region_id, photo_object_keys,
-                  before_after_object_keys, sort_order)
-               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                 (id, name, city_state, region_id, photo_object_keys, sort_order)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
             [
                 row_id,
                 body.name,
                 body.cityState,
                 body.regionId,
                 json.dumps(body.photoObjectKeys),
-                json.dumps(body.beforeAfterObjectKeys) if body.beforeAfterObjectKeys is not None else None,
                 body.sortOrder,
             ],
         )
@@ -1505,7 +1812,6 @@ def register(app, require_auth) -> None:
             "cityState": body.cityState,
             "regionId": body.regionId,
             "photoObjectKeys": body.photoObjectKeys,
-            "beforeAfterObjectKeys": body.beforeAfterObjectKeys,
             "sortOrder": body.sortOrder,
         }
 
@@ -1516,7 +1822,7 @@ def register(app, require_auth) -> None:
         user: dict = Depends(require_auth),
     ) -> dict:
         """Partial update of a portfolio_properties row — admin-only."""
-        await _require_admin(user)
+        await _require_marketing_manager(user)
 
         rows = await query(
             "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
@@ -1557,31 +1863,95 @@ def register(app, require_auth) -> None:
         refreshed = await query(
             "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
         )
-        r = refreshed[0] if refreshed else current
+        return _portfolio_row_out(refreshed[0] if refreshed else current)
 
-        import json as _json  # local alias to avoid shadowing the module-level import
-        photo_keys = r.get("photo_object_keys") or "[]"
-        if isinstance(photo_keys, str):
-            try:
-                photo_keys = _json.loads(photo_keys)
-            except (ValueError, TypeError):
-                photo_keys = []
-        ba_keys = r.get("before_after_object_keys")
-        if isinstance(ba_keys, str):
-            try:
-                ba_keys = _json.loads(ba_keys)
-            except (ValueError, TypeError):
-                ba_keys = None
+    # ── Handoff 43 §2: portfolio photography upload ──────────────────────────
+    # photo_object_keys is an ORDERED array — the Portfolio page lays photos out
+    # in array order, so append-at-end is the upload semantic and reordering is
+    # a PATCH of the whole array (already supported). Admin-only, matching every
+    # other portfolio write: the portfolio is company-scoped.
 
-        return {
-            "id": r["id"],
-            "name": r["name"],
-            "cityState": r["city_state"],
-            "regionId": r["region_id"],
-            "photoObjectKeys": photo_keys if isinstance(photo_keys, list) else [],
-            "beforeAfterObjectKeys": ba_keys,
-            "sortOrder": r["sort_order"],
-        }
+    @app.post("/api/settings/portfolio/{property_id}/photos")
+    async def upload_portfolio_photo(
+        property_id: str,
+        file: UploadFile = File(...),
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Append one photo to a portfolio property. Returns the full new array.
+
+        The key carries a random suffix rather than an array index: an index
+        would collide with itself the moment a photo in the middle is removed
+        and another uploaded, silently overwriting a live photo.
+        """
+        await _require_marketing_manager(user)
+
+        rows = await query(
+            "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Portfolio property not found")
+        current = _portfolio_row_out(rows[0])
+
+        data, ext, content_type = await _read_validated_image(file)
+        object_key = f"proposal/portfolio/{property_id}/{uuid.uuid4().hex[:12]}.{ext}"
+        _att_mod.upload_bytes(object_key, data, content_type)
+
+        keys = [*current["photoObjectKeys"], object_key]
+        await execute(
+            "UPDATE portfolio_properties SET photo_object_keys = %s WHERE id = %s",
+            [json.dumps(keys), property_id],
+        )
+        await _audit(
+            scope_type="company",
+            scope_id=None,
+            setting_key=f"portfolio_property.{property_id}.photo_object_keys",
+            from_value=current["photoObjectKeys"],
+            to_value=keys,
+            actor=_actor(user),
+        )
+        return {"id": property_id, "photoObjectKeys": keys}
+
+    @app.delete("/api/settings/portfolio/{property_id}/photos")
+    async def delete_portfolio_photo(
+        property_id: str,
+        key: str,
+        user: dict = Depends(require_auth),
+    ) -> dict:
+        """Remove one photo from a portfolio property and delete the object.
+
+        `key` must already appear in this row's photo_object_keys. That check is
+        the whole security boundary: without it this endpoint would delete any
+        object in the bucket by name, including a rendered proposal PDF.
+        """
+        await _require_marketing_manager(user)
+
+        rows = await query(
+            "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Portfolio property not found")
+        current = _portfolio_row_out(rows[0])
+
+        if key not in current["photoObjectKeys"]:
+            raise HTTPException(
+                status_code=404, detail="That photo does not belong to this property."
+            )
+
+        keys = [k for k in current["photoObjectKeys"] if k != key]
+        await execute(
+            "UPDATE portfolio_properties SET photo_object_keys = %s WHERE id = %s",
+            [json.dumps(keys), property_id],
+        )
+        await _audit(
+            scope_type="company",
+            scope_id=None,
+            setting_key=f"portfolio_property.{property_id}.photo_object_keys",
+            from_value=current["photoObjectKeys"],
+            to_value=keys,
+            actor=_actor(user),
+        )
+        _delete_object_quietly(key)
+        return {"id": property_id, "photoObjectKeys": keys}
 
     @app.delete("/api/settings/portfolio/{property_id}")
     async def deactivate_portfolio_property(
@@ -1596,7 +1966,7 @@ def register(app, require_auth) -> None:
         must remain resolvable; setting active=0 removes it from the generation
         surface while preserving the record.
         """
-        await _require_admin(user)
+        await _require_marketing_manager(user)
 
         rows = await query(
             "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
@@ -1927,7 +2297,7 @@ def register(app, require_auth) -> None:
     # /api/settings/insurance/upload endpoint have been removed. Insurance
     # documents are now managed through the unified /api/settings/licenses
     # (or /api/settings/documents) endpoints with kind='insurance'. See
-    # migration 027 for the data migration from insurance_certificates.
+    # migration 033 for the data migration from insurance_certificates.
 
 
 async def _replace_user_branches(

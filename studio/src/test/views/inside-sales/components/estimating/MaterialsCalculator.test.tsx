@@ -13,10 +13,11 @@
 //  9. Install-only: tab hidden for maintenance estimate.
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { screen, fireEvent, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { render } from '@/test/utils'
+import { render, makeUser } from '@/test/utils'
+import { useAuthStore } from '@/store/authStore'
 import { buildInstallEstimate, buildMaintenanceEstimate } from '@/mocks/estimatingData'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 import { MaterialsCalculator } from '@/views/inside-sales/components/estimating/MaterialsCalculator'
@@ -71,6 +72,12 @@ function renderCalc(estimate = install) {
 // ---------------------------------------------------------------------------
 // 1. Install-only visibility (tab-level + component-level)
 // ---------------------------------------------------------------------------
+
+// Handoff 50 §2: the tab bar is role-gated, so tab-visibility assertions run
+// as an estimator (the persona that sees the estimating tabs).
+beforeEach(() => {
+  useAuthStore.setState({ user: makeUser({ role: 'install_estimating' }) })
+})
 
 describe('install-only visibility', () => {
   it('renders the Materials Calculator tab button only for install estimates', () => {

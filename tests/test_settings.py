@@ -530,7 +530,6 @@ class TestPortfolioSoftDelete:
         "city_state": "Bonita Springs, FL",
         "region_id": "east-coast",
         "photo_object_keys": "[]",
-        "before_after_object_keys": None,
         "sort_order": 0,
         "active": 1,
     }
@@ -606,13 +605,13 @@ class TestPortfolioSoftDelete:
 class TestInsuranceSoftDelete:
     """Handoff 42: Insurance soft-delete via unified /api/settings/licenses endpoint.
 
-    After migration 028, insurance_certificates is dropped. Insurance documents
+    After migration 033, insurance_certificates is dropped. Insurance documents
     live in licenses_certifications (kind='insurance') and use the same
     soft-delete path as licenses. The old /api/settings/insurance endpoints
     are removed.
     """
 
-    # An insurance-kind row in licenses_certifications (post migration 028).
+    # An insurance-kind row in licenses_certifications (post migration 033).
     _EXISTING_ROW = {
         "id": "ins-001",
         "kind": "insurance",
@@ -815,3 +814,234 @@ class TestBranchSettingsEnriched:
         r = client.get("/api/settings/branch/1403")
         assert r.status_code == 200
         assert r.json()["crewRateCentsPerHour"] == 22500
+
+
+# ── Handoff 50 §3: the Marketing role — company-wide proposal-asset management ─
+#
+# Scope decision (Carlos, 2026-09-08): portfolio_properties, client_references
+# and team_members are COMPANY-WIDE resources gated on the `marketing` role
+# (plus admin). Marketing edits them across ALL branches. A branch manager's
+# existing branch-scoped access to team_members/client_references is unchanged.
+
+
+class TestMarketingPortfolioManagement:
+    """portfolio_properties is company-wide, gated on marketing + admin."""
+
+    _ROW = {
+        "id": "pp-001",
+        "name": "Bonita Springs Estate",
+        "city_state": "Bonita Springs, FL",
+        "region_id": "east-coast",
+        "photo_object_keys": "[]",
+        "sort_order": 0,
+        "active": 1,
+    }
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_marketing_can_list_portfolio(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        as_role("marketing")
+        mock_authz_query.return_value = _live("marketing")
+        mock_query.return_value = [self._ROW]
+        r = client.get("/api/settings/portfolio")
+        assert r.status_code == 200
+        assert r.json()[0]["name"] == "Bonita Springs Estate"
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_marketing_can_create_portfolio(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("marketing")
+        mock_authz_query.return_value = _live("marketing")
+        r = client.post(
+            "/api/settings/portfolio",
+            json={"name": "New Estate", "cityState": "Naples, FL", "regionId": "east-coast"},
+        )
+        assert r.status_code == 201
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_marketing_can_soft_delete_portfolio(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("marketing")
+        mock_authz_query.return_value = _live("marketing")
+        mock_query.return_value = [self._ROW]
+        r = client.delete("/api/settings/portfolio/pp-001")
+        assert r.status_code == 200
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_sales_cannot_manage_portfolio(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("sales")
+        mock_authz_query.return_value = _live("sales")
+        r = client.post(
+            "/api/settings/portfolio",
+            json={"name": "X", "cityState": "Y", "regionId": "z"},
+        )
+        assert r.status_code == 403
+        mock_exec.assert_not_awaited()
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_manager_cannot_manage_company_portfolio(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        # Portfolio is company-wide: a branch manager (non-marketing) is refused.
+        as_role("manager")
+        mock_authz_query.return_value = _live("manager")
+        r = client.post(
+            "/api/settings/portfolio",
+            json={"name": "X", "cityState": "Y", "regionId": "z"},
+        )
+        assert r.status_code == 403
+
+
+class TestMarketingTeamMembers:
+    """team_members: marketing edits any branch; managers keep their own branch."""
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_marketing_can_create_company_wide_member(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("marketing")
+        mock_authz_query.return_value = _live("marketing")
+        r = client.post(
+            "/api/settings/team-members",
+            json={"name": "Caitlyn F.", "title": "Marketing", "teamType": "leadership"},
+        )
+        assert r.status_code == 201
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_marketing_can_create_any_branch_member(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        # Marketing is cross-branch: it may create a team member for a branch it
+        # holds no user_branches row for. Branch scope is tried first (empty →
+        # out of scope), then the marketing fallback live-role read allows it.
+        as_role("marketing")
+        mock_authz_query.side_effect = [[], _live("marketing")]
+        r = client.post(
+            "/api/settings/team-members",
+            json={"name": "Field Lead", "title": "PM", "teamType": "branch", "aspireBranchId": 9999},
+        )
+        assert r.status_code == 201
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_sales_cannot_create_team_member(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("sales")
+        mock_authz_query.return_value = _live("sales")
+        r = client.post(
+            "/api/settings/team-members",
+            json={"name": "X", "title": "Y", "teamType": "leadership"},
+        )
+        assert r.status_code == 403
+
+
+def _ref_body(**over) -> dict:
+    """A complete ClientReferenceCreate body (all required fields present)."""
+    body = {
+        "propertyName": "Coral Bay HOA",
+        "servicesProvided": "Maintenance",
+        "contactName": "Jane Doe",
+        "phone": "555-1212",
+        "email": "jane@example.com",
+        "address": "1 Palm Way",
+        "clientSinceYear": 2019,
+    }
+    body.update(over)
+    return body
+
+
+class TestMarketingClientReferences:
+    """client_references: marketing edits any branch; company-wide gated on role."""
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_marketing_can_create_company_wide_reference(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("marketing")
+        mock_authz_query.return_value = _live("marketing")
+        r = client.post("/api/settings/client-references", json=_ref_body())
+        assert r.status_code == 201
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_marketing_can_create_any_branch_reference(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        # Branch scope tried first (empty → out of scope), then the marketing
+        # fallback live-role read allows the cross-branch write.
+        as_role("marketing")
+        mock_authz_query.side_effect = [[], _live("marketing")]
+        r = client.post(
+            "/api/settings/client-references", json=_ref_body(aspireBranchId=9999)
+        )
+        assert r.status_code == 201
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_sales_cannot_create_client_reference(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("sales")
+        mock_authz_query.return_value = _live("sales")
+        r = client.post("/api/settings/client-references", json=_ref_body())
+        assert r.status_code == 403
+
+
+class TestManagerBranchScopeUnchanged:
+    """A branch manager's existing branch-scoped access is unchanged (§3 AC)."""
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_manager_can_still_create_member_for_own_branch(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("manager")
+        # Branch scope is tried FIRST (unchanged BM path): resolve_branch_scope
+        # reads user_branches → manager owns 1403, so no live-role read happens.
+        mock_authz_query.return_value = [{"aspire_branch_id": 1403}]
+        r = client.post(
+            "/api/settings/team-members",
+            json={"name": "Local PM", "title": "PM", "teamType": "branch", "aspireBranchId": 1403},
+        )
+        assert r.status_code == 201
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_manager_cannot_create_member_for_foreign_branch(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("manager")
+        # (1) branch scope read → owns only 1403, so 3696 is out of scope; then
+        # (2) the marketing fallback live-role read → manager, so 403 stands.
+        mock_authz_query.side_effect = [[{"aspire_branch_id": 1403}], _live("manager")]
+        r = client.post(
+            "/api/settings/team-members",
+            json={"name": "Elsewhere", "title": "PM", "teamType": "branch", "aspireBranchId": 3696},
+        )
+        assert r.status_code == 403

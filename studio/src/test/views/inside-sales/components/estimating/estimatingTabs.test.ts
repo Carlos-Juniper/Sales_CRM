@@ -44,12 +44,12 @@ describe('ESTIMATING_TABS config', () => {
 })
 
 describe('visibleTabs (estimateType-aware visibility)', () => {
-  it('returns every tab when no estimate is open', () => {
-    expect(visibleTabs(null)).toEqual(ESTIMATING_TABS)
+  it('returns every tab when no estimate is open (estimator role)', () => {
+    expect(visibleTabs(null, 'maintenance_estimating')).toEqual(ESTIMATING_TABS)
   })
 
   it('maintenance hides Materials Calculator and Discrepancy Review but keeps Takeoff Insert', () => {
-    const keys = visibleTabs('maintenance').map((t) => t.key)
+    const keys = visibleTabs('maintenance', 'maintenance_estimating').map((t) => t.key)
     expect(keys).not.toContain('materials')
     expect(keys).not.toContain('discrepancy')
     expect(keys).toContain('takeoff')
@@ -62,12 +62,54 @@ describe('visibleTabs (estimateType-aware visibility)', () => {
   })
 
   it('install hides Takeoff Insert but keeps Materials Calculator and Discrepancy Review', () => {
-    const keys = visibleTabs('install').map((t) => t.key)
+    const keys = visibleTabs('install', 'install_estimating').map((t) => t.key)
     expect(keys).not.toContain('takeoff')
     expect(keys).toContain('materials')
     expect(keys).toContain('discrepancy')
     expect(keys).toContain('queue')
     expect(keys).toContain('editor')
     expect(keys).toContain('margins')
+  })
+})
+
+describe('visibleTabs (role-aware visibility — Handoff 50 §2)', () => {
+  it('sales sees ONLY the queue tab, with no estimate open', () => {
+    expect(visibleTabs(null, 'sales').map((t) => t.key)).toEqual(['queue'])
+  })
+
+  it('sales sees ONLY the queue tab, with an estimate open', () => {
+    expect(visibleTabs('maintenance', 'sales').map((t) => t.key)).toEqual(['queue'])
+    expect(visibleTabs('install', 'sales').map((t) => t.key)).toEqual(['queue'])
+  })
+
+  it('estimators see every estimator tab (no regression) with no estimate open', () => {
+    expect(visibleTabs(null, 'maintenance_estimating')).toEqual(ESTIMATING_TABS)
+    expect(visibleTabs(null, 'install_estimating')).toEqual(ESTIMATING_TABS)
+  })
+
+  it('manager-tier approver roles see every tab', () => {
+    for (const role of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin'] as const) {
+      expect(visibleTabs(null, role)).toEqual(ESTIMATING_TABS)
+    }
+  })
+
+  it('marketing does not reach estimator tabs — sees only the queue at most', () => {
+    // Marketing is not an estimating persona; it must not gain the editor.
+    const keys = visibleTabs(null, 'marketing').map((t) => t.key)
+    expect(keys).not.toContain('editor')
+    expect(keys).not.toContain('takeoff')
+  })
+
+  it('stays a pure function of config — every returned tab is a config row', () => {
+    for (const role of ['sales', 'maintenance_estimating', 'manager'] as const) {
+      for (const tab of visibleTabs(null, role)) {
+        expect(ESTIMATING_TABS).toContain(tab)
+      }
+    }
+  })
+
+  it('applies role and type filters together', () => {
+    // Sales is queue-only regardless of type; type filter cannot re-add tabs.
+    expect(visibleTabs('install', 'sales').map((t) => t.key)).toEqual(['queue'])
   })
 })

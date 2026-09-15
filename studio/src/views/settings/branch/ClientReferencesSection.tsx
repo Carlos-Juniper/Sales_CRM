@@ -23,9 +23,25 @@ import { SettingsFormShell, FormStatus } from '../company/formStatus'
  *   - Branch-owned rows: BM can create/edit/deactivate.
  *   - Company-wide rows (aspireBranchId === null): read-only for BM, admin-editable only.
  */
-export function ClientReferencesSection({ aspireBranchId }: { aspireBranchId: number }) {
-  const { data, isLoading, isError } = useClientReferences({ aspireBranchId })
+/**
+ * @param aspireBranchId  a branch id, or `null` for the company-wide references
+ *        (Handoff 50 §3 Marketing group). In company-wide mode the list shows
+ *        only company-wide rows and `canEditCompanyWide` (marketing/admin)
+ *        governs edit rights.
+ */
+export function ClientReferencesSection({
+  aspireBranchId,
+  canEditCompanyWide = false,
+}: {
+  aspireBranchId: number | null
+  canEditCompanyWide?: boolean
+}) {
+  const companyWide = aspireBranchId === null
+  const { data, isLoading, isError } = useClientReferences(
+    companyWide ? undefined : { aspireBranchId },
+  )
   const { isAdmin } = useRole()
+  const canEditCompany = isAdmin || canEditCompanyWide
   const [showCreate, setShowCreate] = useState(false)
 
   if (isLoading) {
@@ -45,17 +61,23 @@ export function ClientReferencesSection({ aspireBranchId }: { aspireBranchId: nu
     )
   }
 
-  const refs = data ?? []
+  const refs = (data ?? []).filter((r) =>
+    companyWide ? r.aspireBranchId === null : true,
+  )
 
   return (
     <SettingsFormShell
       slug="client-references"
       title="Client references"
-      description="Client references for proposal packages. Company-wide rows are read-only here — edit them as admin."
+      description={
+        companyWide
+          ? 'Company-wide client references included in every proposal package.'
+          : 'Client references for proposal packages. Company-wide rows are read-only here — edit them as admin.'
+      }
     >
       {refs.length === 0 && !showCreate && (
         <p className="text-xs text-[var(--fg)] opacity-60 mb-3">
-          No client references yet for this branch.
+          {companyWide ? 'No company-wide client references yet.' : 'No client references yet for this branch.'}
         </p>
       )}
 
@@ -65,7 +87,7 @@ export function ClientReferencesSection({ aspireBranchId }: { aspireBranchId: nu
             key={ref.id}
             ref={ref}
             branchId={aspireBranchId}
-            isAdmin={isAdmin}
+            isAdmin={canEditCompany}
           />
         ))}
       </ul>
@@ -96,11 +118,11 @@ function ClientReferenceRow({
   isAdmin,
 }: {
   ref: ClientReference
-  branchId: number
+  branchId: number | null
   isAdmin: boolean
 }) {
   const [editing, setEditing] = useState(false)
-  const deactivate = useDeactivateClientReference(branchId)
+  const deactivate = useDeactivateClientReference(branchId ?? 0)
 
   const isCompanyWide = cr.aspireBranchId === null
   const canEdit = isAdmin || !isCompanyWide
@@ -162,7 +184,7 @@ function ClientReferenceForm({
   existing,
   onDone,
 }: {
-  aspireBranchId: number
+  aspireBranchId: number | null
   existing?: ClientReference
   onDone: () => void
 }) {
@@ -177,8 +199,8 @@ function ClientReferenceForm({
     String(existing?.clientSinceYear ?? new Date().getFullYear()),
   )
 
-  const create = useCreateClientReference(aspireBranchId)
-  const update = useUpdateClientReference(aspireBranchId)
+  const create = useCreateClientReference(aspireBranchId ?? 0)
+  const update = useUpdateClientReference(aspireBranchId ?? 0)
 
   const isPending = create.isPending || update.isPending
   const isSuccess = create.isSuccess || update.isSuccess

@@ -409,6 +409,12 @@ describe('EstimateQueue — role & branch scoping (BRD I-9.5)', () => {
 // ----- Shell integration (AC 5, end to end through EstimatingPage) ---------------
 
 describe('EstimateQueue — EstimatingPage integration', () => {
+  // Handoff 50 §2: the Line-Item Editor tab is estimator/approver-owned, so
+  // this end-to-end flow (queue → editor) runs as an estimator.
+  beforeEach(() => {
+    useAuthStore.setState({ user: makeUser({ role: 'maintenance_estimating', branch_id: 'b1' }) })
+  })
+
   it('opening a maintenance estimate from the queue lands on the Line-Item Editor tab', async () => {
     const user = userEvent.setup()
     render(<EstimatingPage />)

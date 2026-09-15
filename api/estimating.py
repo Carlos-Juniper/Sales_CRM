@@ -1483,6 +1483,11 @@ def register(app, require_auth) -> None:
 
     @app.get("/api/estimating/estimates/{estimate_id}")
     async def get_estimate(estimate_id: str, _user: dict = Depends(require_auth)) -> dict:
+        # Handoff 50 §2: the estimate-detail surface is estimator/approver-owned.
+        # A sales user reaches an estimate only via the queue; opening one
+        # directly (by URL) is refused, so hiding the tab is backed by a real
+        # server-side 403 — not cosmetic. Fires BEFORE the DB load.
+        authz.require_estimate_viewer(_user)
         est = await _load_estimate(estimate_id)
         if est is None:
             raise HTTPException(status_code=404, detail="Not found")

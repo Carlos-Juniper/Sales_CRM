@@ -11,6 +11,23 @@ export const COMPANY_INFO = {
   website: import.meta.env.VITE_COMPANY_WEBSITE as string,
 } as const
 
+/**
+ * Display form of a company URL: no scheme, no trailing slash.
+ *
+ * The proposal footer prints the website as bare text (`junipercares.com`)
+ * while still linking to the full URL, matching the reference document. Doing
+ * this at the render site rather than in the env var keeps the output correct
+ * however VITE_COMPANY_WEBSITE happens to be written across .env, both
+ * cloudbuild files and the Dockerfile ARG.
+ *
+ * Returns '' for an empty/undefined input — vitest.config.ts blanks the var so
+ * tests exercise the no-website branch.
+ */
+export function formatWebsiteLabel(url: string | undefined): string {
+  if (!url) return ''
+  return url.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+}
+
 export const LEAD_TYPE_COLORS = {
   HOA: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-300', border: 'border-green-200 dark:border-green-700' },
   commercial: { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-700 dark:text-amber-300', border: 'border-amber-200 dark:border-amber-700' },

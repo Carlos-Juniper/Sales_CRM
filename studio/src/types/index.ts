@@ -46,6 +46,10 @@ export type UserRole =
   | 'install_estimating'
   | 'vice_president'
   | 'ceo'
+  // Handoff 50 §3: cross-branch owner of company-wide proposal assets
+  // (portfolio, client references, team bios/headshots). Not an estimator or
+  // approver — see api/authz.py MARKETING_ROLES.
+  | 'marketing'
 
 export const CANONICAL_ROLES: readonly UserRole[] = [
   'procurement',
@@ -58,6 +62,7 @@ export const CANONICAL_ROLES: readonly UserRole[] = [
   'install_estimating',
   'vice_president',
   'ceo',
+  'marketing',
 ] as const
 
 // Legacy auth role still present in older JWTs / un-migrated rows; it

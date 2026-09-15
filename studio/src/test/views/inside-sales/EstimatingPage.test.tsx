@@ -7,7 +7,11 @@ import { buildMaintenanceEstimate, buildInstallEstimate } from '@/mocks/estimati
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 
 function seedUser() {
-  useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'inside_sales' }) })
+  // Handoff 50 §2: the tab bar is now role-gated. These tests exercise the
+  // full estimating workspace (editor, takeoff, margins…), so they run as an
+  // estimator — the persona that sees every tab. Sales-only visibility is
+  // covered by estimatingTabs.test.ts.
+  useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'maintenance_estimating' }) })
 }
 
 const ALL_TAB_LABELS = [

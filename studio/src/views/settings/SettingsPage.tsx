@@ -13,6 +13,7 @@ import { CompanySection } from './company/CompanySection'
 import { companySectionOwnsSlug } from './company/companySlugs'
 import { UsersSection } from './company/users/UsersSection'
 import { BranchSection } from './branch/BranchSection'
+import { MarketingSection } from './marketing/MarketingSection'
 import { MineSection } from './mine/MineSection'
 
 /**
@@ -136,6 +137,10 @@ function renderSectionBody(
   }
   if (groupId === 'company' && companySectionOwnsSlug(section.slug)) {
     return <CompanySection slug={section.slug} label={section.label} />
+  }
+  if (groupId === 'marketing') {
+    // Handoff 50 §3: company-wide proposal-asset management for marketing.
+    return <MarketingSection slug={section.slug} />
   }
   if (groupId === 'branch') {
     // BranchSection renders the form for owned slugs, a SectionPlaceholder for

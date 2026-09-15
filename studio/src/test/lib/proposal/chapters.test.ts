@@ -14,6 +14,7 @@ const BASE_INPUTS = {
   hasOrgChart: false,
   hasExecutiveTeam: false,
   hasPortfolio: false,
+  hasContract: false,
 }
 
 describe('naturalBodyChapterKeys', () => {
@@ -33,18 +34,22 @@ describe('naturalBodyChapterKeys', () => {
     ])
   })
 
-  it('gates org-chart, executive team, and portfolio on their own flags', () => {
+  it('gates org-chart, executive team, portfolio, and contract on their own flags', () => {
     const keys = naturalBodyChapterKeys({
       ...BASE_INPUTS,
       hasOrgChart: true,
       hasExecutiveTeam: true,
       hasPortfolio: true,
+      hasContract: true,
     })
     expect(keys).toContain('org-chart')
     expect(keys).toContain('meet-the-team-executive')
     expect(keys).toContain('portfolio')
+    expect(keys).toContain('contract')
     // Executive team is listed before the branch roster (reference order).
     expect(keys.indexOf('meet-the-team-executive')).toBeLessThan(keys.indexOf('meet-the-team'))
+    // Contract is listed after portfolio (maintenance agreement comes last).
+    expect(keys.indexOf('contract')).toBeGreaterThan(keys.indexOf('portfolio'))
   })
 
   it('gates the optional-section chapters on formState.sections', () => {
@@ -89,6 +94,7 @@ describe('chapterTitle', () => {
       hasOrgChart: true,
       hasExecutiveTeam: true,
       hasPortfolio: true,
+      hasContract: true,
       sections: new Set<OptionalSection>(['startup_plan_30_60_90', 'juniper_sync', 'juniper_mapping']),
     })
     for (const key of keys) {

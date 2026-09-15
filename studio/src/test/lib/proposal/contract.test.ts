@@ -1,0 +1,231 @@
+// ---------------------------------------------------------------------------
+// contract.test.ts — Contract generator calculation layer tests
+//
+// Covers buildContractRows, buildContractTotals, and buildPaymentSchedule
+// functions from lib/proposal/contract.ts
+// ---------------------------------------------------------------------------
+
+import { describe, it, expect } from 'vitest'
+import {
+  buildContractRows,
+  buildContractTotals,
+  buildPaymentSchedule,
+} from '@/lib/proposal/contract'
+import type { Estimate } from '@/types/estimating'
+
+// Helper to create a minimal maintenance estimate
+function makeEstimate(
+  sections: Array<{
+    squareFeet: number
+    services: Array<{
+      label: string
+      qty: number
+      unitSellCents: number
+      complexityPct: number
+      billingType?: 'recurring' | 'one_time'
+    }>
+  }>,
+  serviceStartDate?: string | null,
+): Estimate {
+  return {
+    id: 'est-test',
+    estimateType: 'maintenance',
+    name: 'Test Estimate',
+    aspireNumber: '12345',
+    estimateNumber: 1,
+    aspireOpportunityId: null,
+    aspireSyncStatus: 'synced',
+    propertyId: null,
+    clientName: 'Test Client',
+    aspireBranchId: 1,
+    branchCity: 'Test City',
+    acreage: 5,
+    contractValueCents: 100000,
+    targetMargin: 0.22,
+    status: 'approved',
+    lifecycle: 'approved',
+    aspireOwner: 'estimating',
+    priority: 'medium',
+    winProbability: 0.8,
+    siteWalkDate: null,
+    dueBackDate: '2024-01-01',
+    anticipatedCloseDate: null,
+    serviceStartDate: serviceStartDate ?? null,
+    assignedLsEstimator: null,
+    assignedIrrEstimator: null,
+    crmRep: null,
+    customerType: 'commercial',
+    sections: sections.map((sec, sIdx) => ({
+      id: `sec-${sIdx}`,
+      estimateId: 'est-test',
+      name: `Section ${sIdx + 1}`,
+      squareFeet: sec.squareFeet,
+      sortOrder: sIdx,
+      services: sec.services.map((svc, svIdx) => ({
+        id: `svc-${sIdx}-${svIdx}`,
+        sectionId: `sec-${sIdx}`,
+        catalogItemId: null,
+        label: svc.label,
+        qty: svc.qty,
+        uom: '/yr',
+        complexityPct: svc.complexityPct,
+        unitSellCents: svc.unitSellCents,
+        embeddedCostCents: null,
+        targetGm: null,
+        hours: null,
+        sortOrder: svIdx,
+        billingType: svc.billingType ?? 'recurring',
+        components: [],
+      })),
+    })),
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+  } as Estimate
+}
+
+describe('buildContractRows', () => {
+  it('creates one row per service, ordered by section then service sortOrder', () => {
+    const estimate = makeEstimate([
+      {
+        squareFeet: 10000,
+        services: [
+          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
+          { label: 'Edging', qty: 12, unitSellCents: 200, complexityPct: 0 },
+        ],
+      },
+      {
+        squareFeet: 5000,
+        services: [
+          { label: 'Mulch', qty: 1, unitSellCents: 300, complexityPct: 0, billingType: 'one_time' },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+
+    expect(rows).toHaveLength(3)
+    expect(rows[0].label).toBe('Mowing')
+    expect(rows[1].label).toBe('Edging')
+    expect(rows[2].label).toBe('Mulch')
+  })
+
+  it('calculates priceEachCents correctly', () => {
+    const estimate = makeEstimate([
+      {
+        squareFeet: 10000,
+        services: [
+          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+
+    expect(rows[0].priceEachCents).toBe(5000)
+    expect(rows[0].occurs).toBe(12)
+  })
+
+  it('applies complexity percentage correctly', () => {
+    const estimate = makeEstimate([
+      {
+        squareFeet: 10000,
+        services: [
+          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0.10 },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+
+    expect(rows[0].priceEachCents).toBe(5500)
+    expect(rows[0].extPriceCents).toBe(66000)
+  })
+})
+
+describe('buildContractTotals', () => {
+  it('sums all rows correctly', () => {
+    const rows = [
+      {
+        label: 'Mowing',
+        occurs: 12,
+        priceEachCents: 5000,
+        extPriceCents: 60000,
+        salesTaxCents: 0,
+        totalPriceCents: 60000,
+        isRecurring: true,
+      },
+      {
+        label: 'Mulch',
+        occurs: null,
+        priceEachCents: 1500,
+        extPriceCents: 1500,
+        salesTaxCents: 0,
+        totalPriceCents: 1500,
+        isRecurring: false,
+      },
+    ]
+
+    const totals = buildContractTotals(rows)
+
+    expect(totals.extPriceCents).toBe(61500)
+    expect(totals.totalPriceCents).toBe(61500)
+  })
+})
+
+describe('buildPaymentSchedule', () => {
+  it('distributes payment evenly across 12 months', () => {
+    const rows = [
+      {
+        label: 'Mowing',
+        occurs: 12,
+        priceEachCents: 5000,
+        extPriceCents: 60000,
+        salesTaxCents: 0,
+        totalPriceCents: 60000,
+        isRecurring: true,
+      },
+    ]
+
+    const schedule = buildPaymentSchedule(rows, null)
+
+    expect(schedule).toHaveLength(12)
+    expect(schedule.every((m) => m.amountCents === 5000)).toBe(true)
+  })
+
+  it('starts from serviceStartDate month when provided', () => {
+    const rows = [
+      {
+        label: 'Mowing',
+        occurs: 12,
+        priceEachCents: 5000,
+        extPriceCents: 60000,
+        salesTaxCents: 0,
+        totalPriceCents: 60000,
+        isRecurring: true,
+      },
+    ]
+
+    const schedule = buildPaymentSchedule(rows, new Date('2024-03-01'))
+
+    expect(schedule[0].month).toBe('March')
+    expect(schedule[1].month).toBe('April')
+  })
+
+  it('defaults to January when serviceStartDate is null', () => {
+    const rows = [
+      {
+        label: 'Mowing',
+        occurs: 12,
+        priceEachCents: 5000,
+        extPriceCents: 60000,
+        salesTaxCents: 0,
+        totalPriceCents: 60000,
+        isRecurring: true,
+      },
+    ]
+
+    const schedule = buildPaymentSchedule(rows, null)
+
+    expect(schedule[0].month).toBe('January')
+  })
+})

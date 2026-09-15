@@ -8,7 +8,7 @@ export default function LeadFeedPage() {
   return (
     <LeadListView
       title="Public Leads"
-      scope={{ sources: GOV_LEAD_SOURCES }}
+      scope={{ sources: GOV_LEAD_SOURCES, unassigned_only: true }}
       emptyTitle="No public leads match your filters"
       emptyDescription="Government opportunities arrive from the weekly HigherGov refresh."
     />

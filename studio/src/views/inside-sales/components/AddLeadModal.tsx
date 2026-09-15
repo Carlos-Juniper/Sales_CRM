@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useCreateLead } from '@/hooks/useLeads'
+import { useBranchList } from '@/hooks/useBranchList'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,7 +10,9 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { LEAD_TYPES } from '@/types'
 import type { LeadStatus, LeadType } from '@/types'
+import type { Property } from '@/types/estimating'
 import { stageForStatus } from '@/lib/pipelineStages'
+import { PropertySelector } from './estimating/PropertySelector'
 
 interface AddLeadModalProps {
   open: boolean
@@ -19,18 +22,20 @@ interface AddLeadModalProps {
 
 export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps) {
   const createLead = useCreateLead()
-  const [form, setForm] = useState({
-    property_name: '',
-    address: '',
-    city: '',
-    state: 'AZ',
+  const { data: branches } = useBranchList()
+
+  const INITIAL_FORM = {
     lead_type: 'HOA' as LeadType,
     estimated_contract_value: '',
     estimated_acreage: '',
     units: '',
     contact_name: '',
     contact_email: '',
-  })
+  }
+  const [form, setForm] = useState(INITIAL_FORM)
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null)
+  const [branchId, setBranchId] = useState<string>('')
+  const [validationError, setValidationError] = useState<string | null>(null)
 
   function set(field: string, value: string) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -38,21 +43,36 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
 
   async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
+
+    if (!selectedProperty) {
+      setValidationError('Please select a property before submitting.')
+      return
+    }
+    if (!branchId) {
+      setValidationError('Please select a branch before submitting.')
+      return
+    }
+    setValidationError(null)
+
     try {
       await createLead.mutateAsync({
-        property_name: form.property_name,
-        city: form.city,
-        state: form.state,
+        // Property fields sourced from the selected property.
+        property_id: selectedProperty.id,
+        property_name: selectedProperty.name,
+        city: selectedProperty.city ?? '',
+        state: selectedProperty.state ?? '',
         lead_type: form.lead_type,
         estimated_contract_value: parseFloat(form.estimated_contract_value) || 0,
         estimated_acreage: parseFloat(form.estimated_acreage) || 0,
         status: defaultStatus,
-        address: form.address || undefined,
         units: parseInt(form.units) || undefined,
         contact_name: form.contact_name || undefined,
         contact_email: form.contact_email || undefined,
+        branch_id: branchId,
       })
-      setForm({ property_name: '', address: '', city: '', state: 'AZ', lead_type: 'HOA', estimated_contract_value: '', estimated_acreage: '', units: '', contact_name: '', contact_email: '' })
+      setForm(INITIAL_FORM)
+      setSelectedProperty(null)
+      setBranchId('')
       onClose()
     } catch {
       // error toast shown by useCreateLead's onError
@@ -66,51 +86,45 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add lead to {colLabel}</DialogTitle>
+          <DialogDescription>
+            Create a manual lead. A property and branch are required.
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-3">
+          {/* Property — required; replaces the old property_name/address/city/state fields */}
           <div className="space-y-1">
-            <Label className="text-xs">Property name *</Label>
-            <Input
-              value={form.property_name}
-              onChange={(e) => set('property_name', e.target.value)}
-              placeholder="Silverleaf HOA"
-              required
-              className="h-8 text-xs"
+            <Label className="text-xs">Property *</Label>
+            <PropertySelector
+              value={selectedProperty}
+              onSelect={setSelectedProperty}
+              origin={{ sourceType: 'manual' }}
             />
           </div>
 
+          {/* Branch picker — required */}
           <div className="space-y-1">
-            <Label className="text-xs">Address</Label>
-            <Input
-              value={form.address}
-              onChange={(e) => set('address', e.target.value)}
-              placeholder="123 Main St"
-              className="h-8 text-xs"
-            />
+            <Label htmlFor="add-lead-branch" className="text-xs">Branch *</Label>
+            <select
+              id="add-lead-branch"
+              aria-label="Branch"
+              value={branchId}
+              onChange={(e) => setBranchId(e.target.value)}
+              className="h-8 w-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--bg))] px-2 text-xs text-[hsl(var(--fg))] focus:outline-none focus:ring-2 focus:ring-[#2E7D52]"
+            >
+              <option value="">Select branch…</option>
+              {(branches ?? []).map((b) => (
+                <option key={b.aspireBranchId} value={String(b.aspireBranchId)}>
+                  {b.city ?? b.branchName}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">City *</Label>
-              <Input
-                value={form.city}
-                onChange={(e) => set('city', e.target.value)}
-                placeholder="Phoenix"
-                required
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">State</Label>
-              <Input
-                value={form.state}
-                onChange={(e) => set('state', e.target.value)}
-                placeholder="AZ"
-                className="h-8 text-xs"
-              />
-            </div>
-          </div>
+          {/* Validation error */}
+          {validationError && (
+            <p role="alert" className="text-xs text-red-600">{validationError}</p>
+          )}
 
           <div className="space-y-1">
             <Label className="text-xs">Lead type</Label>

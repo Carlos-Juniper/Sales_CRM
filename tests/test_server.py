@@ -283,6 +283,140 @@ def test_create_lead_requires_property_name_city_state_lead_type(authed):
     assert resp.status_code == 422
 
 
+def test_create_lead_persists_submitted_address(authed):
+    """Handoff 49 §4.1: `address` was silently dropped — it must reach the INSERT."""
+    with patch("api.server.execute", new_callable=AsyncMock, return_value=1) as mock_execute, \
+         patch("api.server.query", new_callable=AsyncMock, return_value=[_LEAD_ROW]):
+        resp = client.post(
+            "/api/leads",
+            json={
+                "property_name": "Test HOA",
+                "city": "Fort Myers",
+                "state": "FL",
+                "lead_type": "HOA",
+                "address": "456 Oak Ave",
+            },
+        )
+
+    assert resp.status_code == 201
+    sql, params = mock_execute.await_args[0]
+    assert "address" in sql
+    assert "456 Oak Ave" in params
+    # created_by must remain the final param (the session id).
+    assert params[-1] == _AUTHED_USER["id"]
+
+
+def test_create_lead_persists_branch_id(authed):
+    """WS1: branch_id from the form is stored on the leads row."""
+    with patch("api.server.execute", new_callable=AsyncMock, return_value=1) as mock_execute, \
+         patch("api.server.query", new_callable=AsyncMock, return_value=[_LEAD_ROW]):
+        resp = client.post(
+            "/api/leads",
+            json={
+                "property_name": "Palmetto Cove HOA",
+                "city": "Fort Myers",
+                "state": "FL",
+                "lead_type": "HOA",
+                "branch_id": "branch-tampa",
+            },
+        )
+
+    assert resp.status_code == 201
+    sql, params = mock_execute.await_args[0]
+    assert "branch_id" in sql
+    assert "branch-tampa" in params
+
+
+def test_create_lead_auto_property(authed):
+    """WS1 safety net: no property_id → backend creates a manual property and links it."""
+    prop_row = {
+        "id": "auto-prop-1",
+        "name": "Lakewood Estates",
+        "property_type": "manual",
+        "source_type": "manual",
+        "source_id": None,
+        "address1": "100 Lakewood Dr",
+        "address2": None,
+        "city": "Naples",
+        "state": "FL",
+        "zip": None,
+        "branch_city": None,
+        "customer_type": None,
+        "management_company_id": None,
+        "aspire_property_id": None,
+        "aspire_sync_status": "pending",
+        "created_at": datetime(2026, 9, 9),
+        "updated_at": datetime(2026, 9, 9),
+    }
+    lead_row_with_prop = {**_LEAD_ROW, "property_id": "auto-prop-1"}
+
+    execute_calls = []
+
+    async def fake_execute(sql, params=None):
+        execute_calls.append((sql, params))
+        return 1
+
+    with patch("api.server.execute", side_effect=fake_execute), \
+         patch("api.server.query", new_callable=AsyncMock, return_value=[lead_row_with_prop]):
+        resp = client.post(
+            "/api/leads",
+            json={
+                "property_name": "Lakewood Estates",
+                "address": "100 Lakewood Dr",
+                "city": "Naples",
+                "state": "FL",
+                "lead_type": "HOA",
+            },
+        )
+
+    assert resp.status_code == 201
+    # Two execute calls: one for the auto-property INSERT, one for the lead INSERT.
+    assert len(execute_calls) == 2
+    prop_sql, prop_params = execute_calls[0]
+    assert "properties" in prop_sql
+    assert "manual" in prop_sql  # source_type='manual' is a literal in the SQL
+    # The second execute is the leads INSERT and must include a non-null property_id.
+    lead_sql, lead_params = execute_calls[1]
+    assert "leads" in lead_sql
+    # property_id param must be non-null (the auto-created id).
+    prop_id_idx = None
+    for i, p in enumerate(lead_params):
+        if isinstance(p, str) and len(p) == 36 and p.count('-') == 4:
+            prop_id_idx = i
+            break
+    assert prop_id_idx is not None, "Expected a UUID property_id in the leads INSERT params"
+
+
+def test_create_lead_with_existing_property(authed):
+    """WS1: supplying a valid property_id skips auto-property creation."""
+    execute_calls = []
+
+    async def fake_execute(sql, params=None):
+        execute_calls.append((sql, params))
+        return 1
+
+    lead_row_with_prop = {**_LEAD_ROW, "property_id": "existing-prop-99"}
+    with patch("api.server.execute", side_effect=fake_execute), \
+         patch("api.server.query", new_callable=AsyncMock, return_value=[lead_row_with_prop]):
+        resp = client.post(
+            "/api/leads",
+            json={
+                "property_name": "Existing Property HOA",
+                "city": "Tampa",
+                "state": "FL",
+                "lead_type": "HOA",
+                "property_id": "existing-prop-99",
+            },
+        )
+
+    assert resp.status_code == 201
+    # Only one execute call — no auto-property INSERT.
+    assert len(execute_calls) == 1
+    sql, params = execute_calls[0]
+    assert "leads" in sql
+    assert "existing-prop-99" in params
+
+
 # ── PATCH /api/leads/:id ──────────────────────────────────────────────────────
 
 

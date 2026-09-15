@@ -39,6 +39,19 @@ export function maintServiceLine(
   return Math.round((sqft / 1000) * rateCentsPer1000Sf * qty * (1 + complexityPct))
 }
 
+/**
+ * Price per occurrence for a maintenance service in integer cents.
+ * This is maintServiceLine with qty=1, used in contract "PRICE EACH" column.
+ * Computed independently (not as extPrice / qty) to avoid rounding drift.
+ */
+export function priceEachCents(
+  sqft: number,
+  rateCentsPer1000Sf: number,
+  complexityPct: number,
+): number {
+  return maintServiceLine(sqft, rateCentsPer1000Sf, 1, complexityPct)
+}
+
 /** Install line total in integer cents: QTY × unit sell price. */
 export function installLineTotal(qty: number, unitSellCents: number): number {
   return Math.round(qty * unitSellCents)

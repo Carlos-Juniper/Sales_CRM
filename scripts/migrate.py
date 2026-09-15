@@ -454,6 +454,16 @@ def detect_028(conn) -> bool:
     return not table_exists(conn, "insurance_certificates")
 
 
+def detect_044(conn) -> bool:
+    """044 applied ↔ catalog_items.scope_text column exists.
+
+    Keyed on scope_text (the first column added by the migration). The migration
+    also adds catalog_items.billing_type and estimates.estimate_number, but scope_text
+    is sufficient to detect whether the migration has been applied.
+    """
+    return column_exists(conn, "catalog_items", "scope_text")
+
+
 def detect_022(conn) -> bool:
     """022 applied ↔ estimates.branch column is absent.
 
@@ -781,6 +791,7 @@ _DETECT: dict = {
     "040_proposal_chapter_order":                 detect_040,
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
+    "044_contract_generator":                     detect_044,
 }
 
 

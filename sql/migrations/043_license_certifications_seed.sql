@@ -14,8 +14,8 @@
 -- identifier (license number) and issued_date are NULL — not visible on the
 -- scanned documents; can be updated through the Settings > Licenses UI once live.
 --
--- "Kyle Leverette (Fort Myers).png" was uploaded but has no license type label;
--- it is omitted from this seed and should be reviewed manually before adding.
+-- "Kyle Leverette (Fort Myers).png" (no license-type label in filename) is a
+-- second Certified Pest Control Operator scan, associated with Fort Myers branch.
 
 INSERT IGNORE INTO `licenses_certifications`
     (id, kind, name, issuing_body, holder_name,
@@ -52,16 +52,26 @@ VALUES
  'certifications/orlando/Josh Burton (Orlando)  - Pest Control License.pdf',
  1, 30),
 
--- ── Kyle Leverette — Regional Director, Southwest Florida (company-wide) ─────
+-- ── Kyle Leverette — Fort Myers Maintenance (3696) ──────────────────────────
 ('lc-kl-pestcontrol',
  'license',
  'Certified Pest Control Operator',
  'Florida Department of Agriculture and Consumer Services',
  'Kyle Leverette',
- NULL,          -- company-wide
+ 3696,
  NULL,
  'certifications/fort-myers/Kyle Leverette (Fort Myers) - Pest Control.pdf',
  1, 40),
+
+('lc-kl-pestcontrol-2',
+ 'license',
+ 'Certified Pest Control Operator',
+ 'Florida Department of Agriculture and Consumer Services',
+ 'Kyle Leverette',
+ 3696,
+ NULL,
+ 'certifications/fort-myers/Kyle Leverette (Fort Myers).png',
+ 1, 41),
 
 -- ── Andrew Crespo — Fort Myers Maintenance (3696) ───────────────────────────
 ('lc-ac-pestcontrol',

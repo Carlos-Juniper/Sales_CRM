@@ -299,6 +299,10 @@ export interface SectionService {
   /** Tracked for production planning; does NOT drive price. */
   hours: number | null
   sortOrder: number
+  /** Contract generator fields (from catalog_items, for approved/won maintenance estimates) */
+  serviceType?: string | null
+  scopeText?: string | null
+  billingType?: 'recurring' | 'one_time' | null
   /** Install kit breakdown (expandable rows). Empty for maintenance. */
   components: SectionServiceComponent[]
 }

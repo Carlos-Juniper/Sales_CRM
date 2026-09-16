@@ -35,6 +35,7 @@ const CHAPTER_TITLES: Record<string, string> = {
   'insurance': 'Insurance',
   'licenses': 'Licenses & Certifications',
   'portfolio': 'Portfolio',
+  'contract': 'Landscape Maintenance Agreement',
 }
 
 export function chapterTitle(key: string): string {
@@ -46,6 +47,7 @@ export interface NaturalChapterInputs {
   hasOrgChart: boolean
   hasExecutiveTeam: boolean
   hasPortfolio: boolean
+  hasContract: boolean
 }
 
 /**
@@ -70,6 +72,7 @@ export function naturalBodyChapterKeys(inputs: NaturalChapterInputs): string[] {
   if (inputs.hasExecutiveTeam) keys.push('meet-the-team-executive')
   keys.push('meet-the-team', 'references', 'insurance', 'licenses')
   if (inputs.hasPortfolio) keys.push('portfolio')
+  if (inputs.hasContract) keys.push('contract')
   return keys
 }
 

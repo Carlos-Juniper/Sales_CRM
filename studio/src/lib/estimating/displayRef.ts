@@ -9,10 +9,11 @@
  */
 import type { AspireSyncStatus } from '@/types/estimating'
 
-/** The minimal estimate shape displayRef/matchesRef need. */
+/** The minimal estimate shape displayRef/matchesRef/contractNumber need. */
 export interface RefLike {
   id: string
   aspireNumber: string | null
+  estimateNumber?: number | null
   aspireSyncStatus?: AspireSyncStatus
 }
 

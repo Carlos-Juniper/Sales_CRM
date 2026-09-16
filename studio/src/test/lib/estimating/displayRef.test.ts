@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { displayRef, matchesRef } from '@/lib/estimating/displayRef'
+import { displayRef, matchesRef, contractNumber } from '@/lib/estimating/displayRef'
 
 // Minimal shape displayRef reads — a partial estimate.
 function est(over: Partial<Parameters<typeof displayRef>[0]> = {}) {
@@ -41,6 +41,16 @@ describe('displayRef', () => {
     const ref = displayRef({ id: 'est-1', aspireNumber: 'ASP-9', aspireSyncStatus: undefined })
     expect(ref).toEqual({ text: 'ASP-9', state: 'synced' })
   })
+
+  it('falls back to JN-{estimateNumber} when aspireNumber is null', () => {
+    const ref = displayRef(est({ aspireNumber: null, estimateNumber: 42, aspireSyncStatus: 'synced' }))
+    expect(ref).toEqual({ text: 'JN-42', state: 'synced' })
+  })
+
+  it('prefers aspireNumber over estimateNumber when both exist', () => {
+    const ref = displayRef(est({ aspireNumber: '408123', estimateNumber: 42, aspireSyncStatus: 'synced' }))
+    expect(ref).toEqual({ text: '408123', state: 'synced' })
+  })
 })
 
 describe('matchesRef', () => {
@@ -64,5 +74,19 @@ describe('matchesRef', () => {
 
   it('does not match an unrelated term', () => {
     expect(matchesRef(e, 'zzz')).toBe(false)
+  })
+})
+
+describe('contractNumber', () => {
+  it('returns aspireNumber when present', () => {
+    expect(contractNumber({ id: 'est-1', aspireNumber: '408123', estimateNumber: 42 })).toBe('408123')
+  })
+
+  it('falls back to JN-{estimateNumber} when aspireNumber is null', () => {
+    expect(contractNumber({ id: 'est-1', aspireNumber: null, estimateNumber: 42 })).toBe('JN-42')
+  })
+
+  it('returns "Pending" when both are null', () => {
+    expect(contractNumber({ id: 'est-1', aspireNumber: null, estimateNumber: null })).toBe('Pending')
   })
 })

@@ -140,6 +140,10 @@ export default function ProposalPreviewRoute(): React.ReactElement {
     hasOrgChart: doc.formState.orgChart.included,
     hasExecutiveTeam: doc.executiveTeamMembers.length > 0,
     hasPortfolio: photographedProperties.length > 0,
+    hasContract:
+      doc.estimate != null &&
+      doc.estimate.estimateType === 'maintenance' &&
+      (doc.estimate.status === 'approved' || doc.estimate.lifecycle === 'won'),
   })
   const orderedChapterKeys = resolveChapterOrder(naturalChapterKeys, doc.chapterOrder)
 

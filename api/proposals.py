@@ -583,24 +583,33 @@ def register(app, require_auth) -> None:
         return [_portfolio_property_out(r) for r in rows]
 
     # ── GET /api/proposals/config/insurance ─────────────────────────────────
-    # Returns the current (most recent by uploaded_at) insurance certificate.
-    # The settings handoff admin UI handles upload/renewal. Returns null body
-    # (empty list) when no cert has been seeded — the frontend should handle
-    # this gracefully (shows a placeholder on the Insurance page).
+    # Returns the current insurance certificate for a branch. A branch-scoped
+    # row (aspire_branch_id matches) wins over the company-wide fallback
+    # (aspire_branch_id IS NULL) when both exist, same null-branch-inclusion
+    # rule as licenses (Amendment A.6) but collapsed to a single "current cert"
+    # instead of a list. Returns null when no cert has been seeded — the
+    # frontend should handle this gracefully (shows a placeholder on the
+    # Insurance page).
 
     @app.get("/api/proposals/config/insurance")
     async def get_proposal_insurance(
+        aspire_branch_id: Optional[int] = Query(None),
         _user: dict = Depends(require_auth),
     ) -> Optional[dict]:
-        # Handoff 42: insurance data migrated from insurance_certificates into
-        # licenses_certifications (kind='insurance'). Ordered by updated_at DESC
-        # (equivalent to the former uploaded_at DESC). Company-wide rows only
-        # (aspire_branch_id IS NULL) — insurance is not branch-filtered here.
-        rows = await query(
-            "SELECT * FROM licenses_certifications "
-            "WHERE kind = 'insurance' AND active = 1 "
-            "ORDER BY updated_at DESC LIMIT 1",
-        )
+        if aspire_branch_id is not None:
+            rows = await query(
+                "SELECT * FROM licenses_certifications "
+                "WHERE kind = 'insurance' AND active = 1 "
+                "AND (aspire_branch_id IS NULL OR aspire_branch_id = %s) "
+                "ORDER BY (aspire_branch_id = %s) DESC, updated_at DESC LIMIT 1",
+                (aspire_branch_id, aspire_branch_id),
+            )
+        else:
+            rows = await query(
+                "SELECT * FROM licenses_certifications "
+                "WHERE kind = 'insurance' AND active = 1 AND aspire_branch_id IS NULL "
+                "ORDER BY updated_at DESC LIMIT 1",
+            )
         if not rows:
             return None
         return _insurance_cert_out(rows[0])

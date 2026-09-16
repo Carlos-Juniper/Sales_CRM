@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Landscape Maintenance Agreement — Coral Bay HOA (Sample)</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Georgia', serif;
+      background: #e5e5e5;
+      padding: 40px 0;
+      color: #1a1a1a;
+    }
+
+    /* ── Page shell (matches PrintPage dimensions) ────────────────────── */
+    .page {
+      width: 816px;          /* 8.5in @ 96dpi */
+      min-height: 1056px;    /* 11in @ 96dpi */
+      background: #fff;
+      margin: 0 auto 32px;
+      padding: 64px 72px 72px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.18);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header bar (green stripe matching Juniper brand) ─────────────── */
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 3px solid #2d6a3f;
+      padding-bottom: 14px;
+      margin-bottom: 28px;
+    }
+    .page-header .logo-text {
+      font-size: 22px;
+      font-weight: 700;
+      color: #2d6a3f;
+      letter-spacing: 1px;
+      font-family: 'Arial', sans-serif;
+    }
+    .page-header .doc-label {
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #6b7280;
+      font-family: 'Arial', sans-serif;
+    }
+
+    /* ── Page title ───────────────────────────────────────────────────── */
+    .page-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #2d6a3f;
+      letter-spacing: .5px;
+      margin-bottom: 10px;
+      font-family: 'Arial', sans-serif;
+      text-transform: uppercase;
+    }
+    .contract-meta {
+      display: flex;
+      gap: 40px;
+      margin-bottom: 22px;
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      color: #374151;
+    }
+    .contract-meta span strong { color: #1a1a1a; }
+
+    .contract-intro {
+      font-size: 11px;
+      line-height: 1.65;
+      color: #374151;
+      margin-bottom: 22px;
+      border-left: 3px solid #2d6a3f;
+      padding-left: 14px;
+      font-family: 'Arial', sans-serif;
+    }
+
+    /* ── Scope table (page 1) ─────────────────────────────────────────── */
+    .scope-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10.5px;
+      font-family: 'Arial', sans-serif;
+    }
+    .scope-table thead tr {
+      background: #2d6a3f;
+      color: #fff;
+    }
+    .scope-table thead th {
+      padding: 9px 12px;
+      text-align: left;
+      font-weight: 600;
+      letter-spacing: .5px;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+    .scope-table thead th:first-child { width: 22%; }
+    .scope-table tbody tr:nth-child(even) { background: #f0faf4; }
+    .scope-table tbody tr:hover { background: #dcf5e7; }
+    .scope-table td {
+      padding: 9px 12px;
+      vertical-align: top;
+      border-bottom: 1px solid #e5e7eb;
+      line-height: 1.55;
+    }
+    .scope-table td.service-label {
+      font-weight: 600;
+      color: #1a4731;
+      white-space: nowrap;
+    }
+
+    /* ── Section heading row ──────────────────────────────────────────── */
+    .scope-table tr.section-heading td {
+      background: #e8f5ee;
+      font-weight: 700;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #2d6a3f;
+      border-bottom: 1px solid #c3e6d0;
+      padding: 7px 12px;
+    }
+
+    /* ── Page 2 — CONTRACT SUMMARY + PAYMENT SCHEDULE ────────────────── */
+    .summary-section { margin-bottom: 36px; }
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      background: #2d6a3f;
+      padding: 8px 14px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 0;
+      font-family: 'Arial', sans-serif;
+    }
+
+    /* CONTRACT SUMMARY table */
+    .totals-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      font-family: 'Arial', sans-serif;
+    }
+    .totals-table td {
+      padding: 9px 16px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .totals-table td.label { color: #374151; width: 70%; }
+    .totals-table td.amount { text-align: right; font-variant-numeric: tabular-nums; }
+    .totals-table tr.total-row td {
+      font-weight: 700;
+      font-size: 12px;
+      color: #1a4731;
+      border-top: 2px solid #2d6a3f;
+      border-bottom: 2px solid #2d6a3f;
+    }
+    .totals-table tr.monthly-row td {
+      background: #f0faf4;
+      font-weight: 700;
+      font-size: 13px;
+      color: #2d6a3f;
+    }
+
+    /* PAYMENT SCHEDULE table */
+    .schedule-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-left: 1px solid #e5e7eb;
+      border-top: 1px solid #e5e7eb;
+    }
+    .schedule-cell {
+      border-right: 1px solid #e5e7eb;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 10px 14px;
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+    }
+    .schedule-cell .month-name { color: #374151; font-weight: 600; margin-bottom: 2px; }
+    .schedule-cell .month-amount {
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      color: #1a4731;
+      font-weight: 700;
+    }
+    .schedule-cell:nth-child(4n+1) { background: #f9fafb; }
+
+    /* ── Footer watermark ─────────────────────────────────────────────── */
+    .page-footer {
+      margin-top: auto;
+      padding-top: 18px;
+      border-top: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: 'Arial', sans-serif;
+      font-size: 9px;
+      color: #9ca3af;
+      letter-spacing: .5px;
+    }
+    .badge {
+      display: inline-block;
+      background: #f0faf4;
+      border: 1px solid #2d6a3f;
+      color: #2d6a3f;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      padding: 3px 8px;
+      text-transform: uppercase;
+      font-family: 'Arial', sans-serif;
+    }
+    .sample-watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-35deg);
+      font-size: 96px;
+      font-weight: 900;
+      color: rgba(45, 106, 63, 0.05);
+      letter-spacing: 8px;
+      font-family: 'Arial', sans-serif;
+      pointer-events: none;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    @media print {
+      body { background: white; padding: 0; }
+      .page { box-shadow: none; margin: 0; page-break-after: always; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 1 — Landscape Maintenance Agreement / Scope of Work              -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="sample-watermark">SAMPLE</div>
+
+  <div class="page-header">
+    <span class="logo-text">JUNIPER</span>
+    <span class="doc-label">Landscape Maintenance Agreement</span>
+  </div>
+
+  <h1 class="page-title">Landscape Maintenance Agreement</h1>
+
+  <div class="contract-meta">
+    <span><strong>Client:</strong> Coral Bay HOA</span>
+    <span><strong>Contract #:</strong> JN-1001</span>
+    <span><strong>Aspire #:</strong> CB-2024-001</span>
+    <span><strong>Service Start:</strong> January 1, 2025</span>
+  </div>
+
+  <p class="contract-intro">
+    This agreement outlines the scope of landscape maintenance services to be provided
+    by Juniper Landscaping. Services will be performed in a professional manner using
+    commercial-grade equipment and trained personnel.
+  </p>
+
+  <!-- Scope of Work table -->
+  <table class="scope-table">
+    <thead>
+      <tr>
+        <th>Service</th>
+        <th>Scope of Work</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Section heading: Main Property (Section 1) -->
+      <tr class="section-heading">
+        <td colspan="2">Section 1 — Main Property (342,000 sq ft)</td>
+      </tr>
+      <tr>
+        <td class="service-label">Mowing &amp; Edging</td>
+        <td>Juniper will mow all turf areas on the property from March through October. During the months of November through February, mowing will be performed on an as-needed basis to maintain a neat and professional appearance. All mowing will be performed with commercial-grade equipment, and clippings will be dispersed evenly to promote a healthy turf. String trimming and edging will be performed around all hardscape, landscape beds, and other obstacles to provide a clean, finished appearance.</td>
+      </tr>
+      <tr>
+        <td class="service-label">Shrub &amp; Hedge Trimming</td>
+        <td>Juniper will prune and shape all shrubs and hedges to maintain their natural form, promote healthy growth, and ensure proper clearance from buildings and walkways. Pruning will be performed by trained technicians using industry best practices, and all debris will be removed from the property.</td>
+      </tr>
+      <tr>
+        <td class="service-label">Landscape Bed Maintenance</td>
+        <td>Juniper will maintain all landscape beds by removing weeds, edging bed borders, and cultivating mulch or groundcover as needed. Beds will be kept neat and free of debris to showcase plant materials and maintain a professional appearance.</td>
+      </tr>
+      <tr>
+        <td class="service-label">Irrigation System Maintenance</td>
+        <td>Juniper will inspect and maintain the irrigation system to ensure proper operation and efficient water use. Services include adjusting spray heads, repairing leaks, replacing broken components, and programming controllers for optimal watering schedules. Monthly walk-throughs will identify issues before they impact plant health.</td>
+      </tr>
+      <tr>
+        <td class="service-label">Fertilization</td>
+        <td>Juniper will apply a balanced, slow-release fertilizer to all turf areas to promote healthy, vigorous growth and a rich green color. Applications will be timed to align with the growing season and will be performed by licensed applicators in accordance with state regulations.</td>
+      </tr>
+      <tr>
+        <td class="service-label">Weed Control</td>
+        <td>Juniper will apply pre-emergent and post-emergent herbicides to control weeds in turf and landscape beds. Applications will be performed by licensed technicians using EPA-approved products, and all work will comply with state and local regulations.</td>
+      </tr>
+      <tr>
+        <td class="service-label">Pest Control</td>
+        <td>Juniper will monitor for and treat common landscape pests, including insects, fungi, and diseases. Treatments will be applied by licensed technicians using integrated pest management (IPM) principles to minimize environmental impact while protecting plant health.</td>
+      </tr>
+
+      <!-- Section heading: Entrance / Amenity Areas (Section 2) -->
+      <tr class="section-heading">
+        <td colspan="2">Section 2 — Entrance &amp; Amenity Areas (28,500 sq ft)</td>
+      </tr>
+      <tr>
+        <td class="service-label">Mulch Application</td>
+        <td>Juniper will install premium mulch in all landscape beds to a depth of 2–3 inches. Mulch conserves soil moisture, suppresses weed growth, and provides a finished appearance. Existing mulch will be cultivated and refreshed prior to application, and all bed borders will be re-edged. <em>(One-time application — not included in monthly recurring base.)</em></td>
+      </tr>
+      <tr>
+        <td class="service-label">Annual Flower Installation</td>
+        <td>Juniper will install seasonal annual flowers in designated beds and planters. Plant material will be selected for color, bloom time, and performance in the local climate. Beds will be prepared with soil amendments as needed, and all installations will be watered-in upon completion. <em>(One-time per season — not included in monthly recurring base.)</em></td>
+      </tr>
+      <tr>
+        <td class="service-label">Tree Trimming</td>
+        <td>Juniper will trim and maintain trees to ensure proper clearance from buildings, walkways, and overhead utilities. Trimming will focus on removing dead or damaged branches, shaping for aesthetics, and promoting healthy growth. All work will be performed by trained arborists in accordance with ANSI A300 standards.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="page-footer">
+    <span>Juniper Landscaping · (561) 555-0100 · juniperlandscaping.com</span>
+    <span class="badge">Page 1 of 2</span>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 2 — Contract Summary + Payment Schedule                          -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="sample-watermark">SAMPLE</div>
+
+  <div class="page-header">
+    <span class="logo-text">JUNIPER</span>
+    <span class="doc-label">Landscape Maintenance Agreement</span>
+  </div>
+
+  <!-- CONTRACT SUMMARY -->
+  <div class="summary-section">
+    <div class="section-title">CONTRACT SUMMARY</div>
+    <table class="totals-table">
+      <tbody>
+        <tr>
+          <td class="label">Extended Price (Annual — Recurring Services):</td>
+          <td class="amount">$187,200.00</td>
+        </tr>
+        <tr>
+          <td class="label">One-Time Services (Mulch, Annuals):</td>
+          <td class="amount">$12,800.00</td>
+        </tr>
+        <tr>
+          <td class="label">Sales Tax:</td>
+          <td class="amount">$0.00</td>
+        </tr>
+        <tr class="total-row">
+          <td class="label">Total Contract Value (Annual):</td>
+          <td class="amount">$200,000.00</td>
+        </tr>
+        <tr class="monthly-row">
+          <td class="label">Monthly Base Amount (Recurring):</td>
+          <td class="amount">$15,600.00</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- PAYMENT SCHEDULE -->
+  <div class="summary-section">
+    <div class="section-title">PAYMENT SCHEDULE — 12-Month Recurring Base</div>
+    <div class="schedule-grid">
+      <!-- Row 1 -->
+      <div class="schedule-cell">
+        <div class="month-name">January</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <div class="schedule-cell">
+        <div class="month-name">February</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <div class="schedule-cell">
+        <div class="month-name">March</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <div class="schedule-cell">
+        <div class="month-name">April</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <!-- Row 2 -->
+      <div class="schedule-cell">
+        <div class="month-name">May</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <div class="schedule-cell">
+        <div class="month-name">June</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <div class="schedule-cell">
+        <div class="month-name">July</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <div class="schedule-cell">
+        <div class="month-name">August</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <!-- Row 3 -->
+      <div class="schedule-cell">
+        <div class="month-name">September</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <div class="schedule-cell">
+        <div class="month-name">October</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <div class="schedule-cell">
+        <div class="month-name">November</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+      <div class="schedule-cell">
+        <div class="month-name">December</div>
+        <div class="month-amount">$15,600.00</div>
+      </div>
+    </div>
+    <p style="font-size:9px;color:#6b7280;margin-top:8px;font-family:Arial,sans-serif;">
+      * One-time services (Mulch Application, Annual Flower Installation) are invoiced separately upon completion and are not reflected in the monthly schedule above.
+    </p>
+  </div>
+
+  <!-- Signature block -->
+  <div style="margin-top: 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; font-family: Arial, sans-serif; font-size: 10.5px;">
+    <div>
+      <div style="font-weight:700;color:#2d6a3f;margin-bottom:18px;letter-spacing:.5px;text-transform:uppercase;font-size:10px;">Authorized by Client</div>
+      <div style="border-bottom:1px solid #374151;margin-bottom:6px;height:32px;"></div>
+      <div style="color:#6b7280;">Signature</div>
+      <div style="border-bottom:1px solid #374151;margin-top:18px;margin-bottom:6px;height:32px;"></div>
+      <div style="color:#6b7280;">Printed Name &amp; Title</div>
+      <div style="border-bottom:1px solid #374151;margin-top:18px;margin-bottom:6px;height:24px;"></div>
+      <div style="color:#6b7280;">Date</div>
+    </div>
+    <div>
+      <div style="font-weight:700;color:#2d6a3f;margin-bottom:18px;letter-spacing:.5px;text-transform:uppercase;font-size:10px;">Authorized by Juniper Landscaping</div>
+      <div style="border-bottom:1px solid #374151;margin-bottom:6px;height:32px;"></div>
+      <div style="color:#6b7280;">Signature</div>
+      <div style="border-bottom:1px solid #374151;margin-top:18px;margin-bottom:6px;height:32px;"></div>
+      <div style="color:#6b7280;">Printed Name &amp; Title</div>
+      <div style="border-bottom:1px solid #374151;margin-top:18px;margin-bottom:6px;height:24px;"></div>
+      <div style="color:#6b7280;">Date</div>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <span>Juniper Landscaping · (561) 555-0100 · juniperlandscaping.com</span>
+    <span class="badge">Page 2 of 2</span>
+  </div>
+</div>
+
+</body>
+</html>

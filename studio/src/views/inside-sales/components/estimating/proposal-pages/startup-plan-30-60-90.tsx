@@ -18,14 +18,20 @@ import { PrintPage } from './shared'
 
 export function StartupPlan306090({ startupPlan }: { startupPlan: StartupPlanInput }) {
   const { dayZero, day30 } = STARTUP_PLAN_SEED
+  const maxDays = startupPlan.planMaxDays ?? 30
+
   const phases: { title: string; bullets: string[] }[] = [
     { title: 'Day Zero', bullets: dayZero.map((b) => b.text) },
     { title: 'Day 30', bullets: day30.map((b) => b.text) },
-    { title: 'Day 60', bullets: startupPlan.day60 },
-    { title: 'Day 90', bullets: startupPlan.day90 },
-    { title: 'Day 120+', bullets: startupPlan.day120Plus },
-    { title: 'Ongoing', bullets: startupPlan.ongoing },
+    ...(maxDays >= 60 ? [{ title: 'Day 60', bullets: startupPlan.day60 }] : []),
+    ...(maxDays >= 90 ? [{ title: 'Day 90', bullets: startupPlan.day90 }] : []),
+    ...(startupPlan.day120Plus.length > 0 ? [{ title: 'Day 120+', bullets: startupPlan.day120Plus }] : []),
+    ...(startupPlan.ongoing.length > 0 ? [{ title: 'Ongoing', bullets: startupPlan.ongoing }] : []),
   ].filter((p) => p.bullets.length > 0)
+
+  // Core phases (0 + 30 + optional 60/90) determine card width; extras don't.
+  const coreCount = 2 + (maxDays >= 60 ? 1 : 0) + (maxDays >= 90 ? 1 : 0)
+  const gridClass = `startup-plan-grid startup-plan-grid--${coreCount}`
 
   return (
     <PrintPage data-testid="page-startup-plan" className="startup-plan-page">
@@ -40,7 +46,7 @@ export function StartupPlan306090({ startupPlan }: { startupPlan: StartupPlanInp
         </div>
       </div>
       <div className="startup-plan-band">
-        <div className="startup-plan-grid">
+        <div className={gridClass}>
           {phases.map((phase) => (
             <div className="startup-plan-card" key={phase.title}>
               <div className="startup-plan-card-head">{phase.title}</div>

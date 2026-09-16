@@ -302,6 +302,13 @@ export interface SectionService {
   /** Contract generator fields (from catalog_items, for approved/won maintenance estimates) */
   serviceType?: string | null
   scopeText?: string | null
+  /**
+   * Per-line override of the contract's recurring/one-time split. `null`
+   * derives it from the catalog item's `billingType`; a hand-entered line has
+   * no catalog item, so without an explicit value here it resolves to null and
+   * drops out of the contract's 12-month payment-schedule base. Same override
+   * shape as `discipline`.
+   */
   billingType?: 'recurring' | 'one_time' | null
   /** Install kit breakdown (expandable rows). Empty for maintenance. */
   components: SectionServiceComponent[]

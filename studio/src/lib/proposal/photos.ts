@@ -325,3 +325,14 @@ export function bundledHeadshotUrl(name: string): string | null {
     ? `/proposal-assets/proposal/headshots/headshot-${slug}.jpg`
     : null
 }
+
+/**
+ * Passthrough proxy URL for a GCS object key that already lives in the
+ * bundled proposal-assets bucket — e.g. the flat `proposal/portfolio/<slug>.jpg`
+ * keys seeded by migration 036 (bulk rasterized portfolio photography, not a
+ * rep upload). Rep-uploaded objects live in a different bucket and resolve via
+ * useProposalMediaUrl instead; this is the fallback for the ones that don't.
+ */
+export function proposalAssetUrl(objectKey: string): string {
+  return `/proposal-assets/${objectKey}`
+}

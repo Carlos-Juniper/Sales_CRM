@@ -373,7 +373,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
         // Pipeline kanban redesign — moves the linked lead Qualifying→Estimating.
         leadId: form.leadId || null,
         serviceLine,
-        clientName: form.company || form.contactPerson,
+        clientName: form.company || selectedProperty.name || form.contactPerson,
         aspireBranchId,
         branchCity,
         customerType: form.industry as InstallCustomerType,

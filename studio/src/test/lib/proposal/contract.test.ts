@@ -22,7 +22,7 @@ function makeEstimate(
       qty: number
       unitSellCents: number
       complexityPct: number
-      billingType?: 'recurring' | 'one_time'
+      billingType?: 'recurring' | 'one_time' | null
     }>
   }>,
   serviceStartDate?: string | null,
@@ -74,7 +74,7 @@ function makeEstimate(
         targetGm: null,
         hours: null,
         sortOrder: svIdx,
-        billingType: svc.billingType ?? 'recurring',
+        billingType: svc.billingType === undefined ? 'recurring' : svc.billingType,
         components: [],
       })),
     })),
@@ -227,5 +227,56 @@ describe('buildPaymentSchedule', () => {
     const schedule = buildPaymentSchedule(rows, null)
 
     expect(schedule[0].month).toBe('January')
+  })
+
+  describe('a line with no derivable billing type', () => {
+    // All maintenance work bundles into the contract and is split across the
+    // 12-month schedule. A hand-entered line has no catalog item to derive a
+    // billing type from and arrives as null — it must still bundle, not vanish
+    // from the schedule while still counting toward the contract total.
+    const withNullBillingType = () =>
+      makeEstimate([
+        {
+          squareFeet: 10000,
+          services: [
+            { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
+            { label: 'Hand-entered extra', qty: 4, unitSellCents: 250, complexityPct: 0, billingType: null },
+          ],
+        },
+      ])
+
+    it('treats it as recurring', () => {
+      const rows = buildContractRows(withNullBillingType())
+      expect(rows.find((r) => r.label === 'Hand-entered extra')?.isRecurring).toBe(true)
+    })
+
+    it('still prints its occurrence count', () => {
+      const rows = buildContractRows(withNullBillingType())
+      expect(rows.find((r) => r.label === 'Hand-entered extra')?.occurs).toBe(4)
+    })
+
+    it('includes it in the payment-schedule base, which reconciles to the total', () => {
+      const rows = buildContractRows(withNullBillingType())
+      const totals = buildContractTotals(rows)
+      const scheduled = buildPaymentSchedule(rows, null).reduce((n, m) => n + m.amountCents, 0)
+      expect(scheduled).toBe(totals.extPriceCents)
+    })
+
+    it('still lets an explicit one-time mark opt a line out', () => {
+      const estimate = makeEstimate([
+        {
+          squareFeet: 10000,
+          services: [
+            { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
+            { label: 'Mulch', qty: 1, unitSellCents: 300, complexityPct: 0, billingType: 'one_time' },
+          ],
+        },
+      ])
+      const rows = buildContractRows(estimate)
+      const totals = buildContractTotals(rows)
+      const scheduled = buildPaymentSchedule(rows, null).reduce((n, m) => n + m.amountCents, 0)
+      expect(rows.find((r) => r.label === 'Mulch')?.isRecurring).toBe(false)
+      expect(scheduled).toBeLessThan(totals.extPriceCents)
+    })
   })
 })

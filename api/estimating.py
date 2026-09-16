@@ -222,7 +222,23 @@ def _component_out(r: dict) -> dict:
     }
 
 
-def _service_out(r: dict, components: list[dict]) -> dict:
+def _service_out(
+    r: dict, components: list[dict], catalog_data: Optional[dict] = None
+) -> dict:
+    """Serialize one section_service row.
+
+    `catalog_data` is the joined catalog_items row (service_type, scope_text,
+    billing_type) that the contract generator reads to split recurring from
+    one-time services and print each service's scope paragraph. Only
+    _load_estimate has it in hand; the single-row routes below pass nothing and
+    the derived fields serialize as None, matching the optional fields on the
+    SectionService TS interface.
+
+    billingType resolves the per-line override first (migration 046), falling
+    back to the catalog item. A hand-entered line has no catalog item, so
+    without the override it would resolve to None and drop out of the
+    contract's payment-schedule base. Mirrors the `discipline` override.
+    """
     return {
         "id": r["id"],
         "sectionId": r["section_id"],
@@ -237,6 +253,10 @@ def _service_out(r: dict, components: list[dict]) -> dict:
         "targetGm": _num(r["target_gm"]),
         "hours": _num(r["hours"]),
         "sortOrder": r["sort_order"],
+        # Contract generator fields, sourced from the line's catalog item.
+        "serviceType": (catalog_data or {}).get("service_type"),
+        "scopeText": (catalog_data or {}).get("scope_text"),
+        "billingType": r.get("billing_type") or (catalog_data or {}).get("billing_type"),
         "components": components,
     }
 
@@ -1176,14 +1196,15 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
     service_id = _new_id("svc")
     await execute(
         """INSERT INTO section_services
-             (id, section_id, catalog_item_id, discipline, label, qty, uom, complexity_pct,
-              unit_sell_cents, embedded_cost_cents, target_gm, hours, sort_order)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+             (id, section_id, catalog_item_id, discipline, billing_type, label, qty, uom,
+              complexity_pct, unit_sell_cents, embedded_cost_cents, target_gm, hours, sort_order)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
             service_id,
             section_id,
             svc.get("catalogItemId"),
             svc.get("discipline"),
+            svc.get("billingType"),
             svc["label"],
             svc.get("qty", 0),
             svc.get("uom", ""),
@@ -1476,6 +1497,7 @@ def register(app, require_auth) -> None:
                 est_type,
                 body.get("name", ""),
                 body.get("aspireNumber"),
+                estimate_number,
                 body.get("clientName", ""),
                 branch_city,
                 aspire_branch_id,
@@ -2020,6 +2042,7 @@ def register(app, require_auth) -> None:
         cols = {
             "catalogItemId": "catalog_item_id",
             "discipline": "discipline",
+            "billingType": "billing_type",
             "label": "label",
             "qty": "qty",
             "uom": "uom",

@@ -3,6 +3,7 @@ import type {
   BranchCoverageGroup,
   BranchProfile,
   ClientReference,
+  InsuranceCert,
   LicenseCertificationGroups,
   PortfolioProperty,
   ProposalRender,
@@ -78,14 +79,17 @@ export const proposalConfigApi = {
   },
 
   /**
-   * GET /api/proposals/config/insurance
-   * Returns the most recent insurance certificate metadata (object key + expiry),
-   * or null when no certificate has been uploaded yet.
+   * GET /api/proposals/config/insurance?aspire_branch_id=
+   * Returns the current insurance certificate metadata (object key + expiry),
+   * or null when no certificate has been uploaded yet. When aspire_branch_id
+   * is supplied, a branch-scoped cert wins over the company-wide fallback.
    */
-  insurance: () =>
-    apiClient.get<{ id: string; objectKey: string; expiryDate: string; label: string | null; uploadedAt: string } | null>(
-      '/proposals/config/insurance',
-    ),
+  insurance: (params?: { aspireBranchId?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.aspireBranchId !== undefined) qs.set('aspire_branch_id', String(params.aspireBranchId))
+    const q = qs.toString()
+    return apiClient.get<InsuranceCert | null>(`/proposals/config/insurance${q ? `?${q}` : ''}`)
+  },
 
   /**
    * GET /api/proposals/config/licenses?aspire_branch_id=&include_expired=

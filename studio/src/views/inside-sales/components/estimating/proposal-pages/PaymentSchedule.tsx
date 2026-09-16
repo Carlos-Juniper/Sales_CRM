@@ -1,44 +1,58 @@
 // ---------------------------------------------------------------------------
-// PaymentSchedule — 12-month payment schedule table
+// PaymentSchedule — PAYMENT SCHEDULE table for the Landscape Maintenance
+// Agreement's final page.
 //
-// Displays the monthly payment breakdown starting from the service start date.
-// Uses buildPaymentSchedule from lib/proposal/contract.ts
+// Matches the reference (business docs/Pointe Jupiter Yacht Club.pdf, p.42):
+// one row per month (Schedule / Price / Sales Tax / Total Price) starting
+// from the service start date, with a totals row. Uses buildPaymentSchedule
+// from lib/proposal/contract.ts.
 // ---------------------------------------------------------------------------
 
 import { buildContractRows, buildPaymentSchedule } from '@/lib/proposal/contract'
 import type { Estimate } from '@/types/estimating'
 
 function formatCurrency(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`
+  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 export function PaymentSchedule({ estimate }: { estimate: Estimate }) {
   const rows = buildContractRows(estimate)
-  
+
   // Parse serviceStartDate from ISO string to Date
   const serviceStartDate = estimate.serviceStartDate
     ? new Date(estimate.serviceStartDate)
     : null
 
   const schedule = buildPaymentSchedule(rows, serviceStartDate)
+  const totalCents = schedule.reduce((sum, m) => sum + m.amountCents, 0)
 
   return (
     <div className="payment-schedule">
-      <h2 className="section-title">PAYMENT SCHEDULE</h2>
-      <table className="schedule-table">
+      <h2 className="section-title">Payment Schedule</h2>
+      <table className="contract-tbl schedule-tbl">
         <thead>
           <tr>
-            <th>Month</th>
-            <th>Amount</th>
+            <th>Schedule</th>
+            <th className="num">Price</th>
+            <th className="num">Sales Tax</th>
+            <th className="num">Total Price</th>
           </tr>
         </thead>
         <tbody>
           {schedule.map((month, i) => (
             <tr key={i}>
-              <td className="month-name">{month.month}</td>
-              <td className="month-amount">{formatCurrency(month.amountCents)}</td>
+              <td>{month.month}</td>
+              <td className="num">{formatCurrency(month.amountCents)}</td>
+              <td className="num">{formatCurrency(0)}</td>
+              <td className="num">{formatCurrency(month.amountCents)}</td>
             </tr>
           ))}
+          <tr className="total-row">
+            <td>Total</td>
+            <td className="num">{formatCurrency(totalCents)}</td>
+            <td className="num">{formatCurrency(0)}</td>
+            <td className="num">{formatCurrency(totalCents)}</td>
+          </tr>
         </tbody>
       </table>
     </div>

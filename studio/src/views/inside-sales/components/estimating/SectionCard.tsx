@@ -12,6 +12,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { DisciplineSelect } from './DisciplineSelect'
+import { BillingTypeSelect } from './BillingTypeSelect'
 import type { EstimateSection, SectionService } from '@/types/estimating'
 import {
   acresFromSqft,
@@ -82,7 +83,7 @@ function ServiceRow({
   return (
     <div
       data-testid={`service-row-${svc.label}`}
-      className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 px-4 py-2 border-t border-[hsl(var(--border))]"
+      className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 px-4 py-2 border-t border-[hsl(var(--border))]"
     >
       <div className="min-w-0">
         <p className="text-sm text-[hsl(var(--fg))] truncate">{svc.label}</p>
@@ -151,6 +152,15 @@ function ServiceRow({
         label={svc.label}
         value={svc.discipline ?? null}
         onChange={(discipline) => onServiceChange(svc.id, { discipline })}
+        className={cn(cellInput, BLUE_CELL)}
+      />
+
+      {/* Marks the exception to the 12-month contract bundle: a line billed
+          once, when performed, rather than spread across the schedule. */}
+      <BillingTypeSelect
+        label={svc.label}
+        value={svc.billingType ?? null}
+        onChange={(billingType) => onServiceChange(svc.id, { billingType })}
         className={cn(cellInput, BLUE_CELL)}
       />
 
@@ -246,11 +256,12 @@ export function SectionCard({
         </div>
 
         {/* Column headers */}
-        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))]">
+        <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-3 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))]">
           <span>Service</span>
           <span>Occurrences</span>
           <span>Complexity</span>
           <span>Discipline</span>
+          <span>Billing</span>
           <span className="text-right">Line total</span>
         </div>
 

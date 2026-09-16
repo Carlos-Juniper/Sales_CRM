@@ -48,6 +48,7 @@ import type { ProposalFormState } from '@/views/inside-sales/components/estimati
 vi.mock('@/hooks/useProposals', () => ({
   useProposalConfig: vi.fn(),
   useProposalLicenses: vi.fn(),
+  useProposalInsurance: vi.fn(),
   useProposalMediaUrl: vi.fn(),
   useRenderProposal: vi.fn(),
   // other hooks not consumed by ProposalPreview
@@ -95,13 +96,14 @@ vi.mock('@/lib/proposal/staticContent', async (importActual) => {
   }
 })
 
-import { useProposalConfig, useProposalLicenses, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
+import { useProposalConfig, useProposalLicenses, useProposalInsurance, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
 import { SERVICES_CONTENT, SERVICE_OVERVIEW_CATEGORIES } from '@/lib/proposal/staticContent'
 import { overviewCategoryPhotoUrl } from '@/lib/proposal/photos'
 import { measureProposalOverflow } from '@/hooks/useProposalOverflow'
 
 const mockUseProposalConfig = useProposalConfig as MockedFunction<typeof useProposalConfig>
 const mockUseProposalLicenses = useProposalLicenses as MockedFunction<typeof useProposalLicenses>
+const mockUseProposalInsurance = useProposalInsurance as MockedFunction<typeof useProposalInsurance>
 const mockUseProposalMediaUrl = useProposalMediaUrl as MockedFunction<typeof useProposalMediaUrl>
 const mockUseRenderProposal = useRenderProposal as MockedFunction<typeof useRenderProposal>
 
@@ -381,13 +383,6 @@ function setupDefaultMocks() {
   mockUseProposalConfig.mockReturnValue({
     branches: [mockBranch1, mockBranch2],
     branchCoverage: mockBranchCoverage,
-    insurance: {
-      id: 'ins-001',
-      objectKey: 'proposal/insurance/cert-2026.pdf',
-      expiryDate: '2027-03-31',
-      label: 'General Liability',
-      uploadedAt: '2026-01-01T00:00:00Z',
-    },
     loaded: true,
   })
   // Empty is the live state: every credential on file is currently expired, and
@@ -395,6 +390,15 @@ function setupDefaultMocks() {
   mockUseProposalLicenses.mockReturnValue({
     data: { licenses: [], certifications: [] },
   } as ReturnType<typeof useProposalLicenses>)
+  mockUseProposalInsurance.mockReturnValue({
+    data: {
+      id: 'ins-001',
+      objectKey: 'proposal/insurance/cert-2026.pdf',
+      expiryDate: '2027-03-31',
+      label: 'General Liability',
+      uploadedAt: '2026-01-01T00:00:00Z',
+    },
+  } as ReturnType<typeof useProposalInsurance>)
   mockUseProposalMediaUrl.mockReturnValue({
     data: undefined,
     isLoading: false,
@@ -411,6 +415,7 @@ function setupDefaultMocks() {
 function renderPreview(
   formStateOverrides?: Partial<ProposalFormState>,
   propsOverrides?: {
+    lead?: Lead
     teamMembers?: TeamMember[]
     executiveTeamMembers?: TeamMember[]
     clientReferences?: ClientReference[]
@@ -434,7 +439,7 @@ function renderPreview(
   return render(
     <ProposalPreview
       formState={formState}
-      lead={mockLead}
+      lead={propsOverrides?.lead ?? mockLead}
       estimate={estimate}
       onBack={vi.fn()}
       proposalId={proposalId}
@@ -976,7 +981,6 @@ describe('ProposalPreview — proximity footer', () => {
     mockUseProposalConfig.mockReturnValue({
       branches: [],
       branchCoverage: mockBranchCoverage,
-      insurance: null,
       loaded: true,
     })
     renderPreview()
@@ -1395,7 +1399,6 @@ describe('Local Landscape Experts – region tables', () => {
           regions: [{ regionId: '', regionName: '', branches: ['Nowhere'] }],
         },
       ],
-      insurance: null,
       loaded: true,
     })
     renderPreview()
@@ -1970,5 +1973,23 @@ describe('ProposalPreview — chapter reorder', () => {
     expect(testIds).not.toContain('page-org-chart')
     expect(testIds).toContain(`page-portfolio-${mockPortfolioProperty.id}`)
     expect(testIds.indexOf('page-licenses-certifications')).toBeLessThan(testIds.indexOf('page-insurance'))
+  })
+})
+
+describe('ProposalPreview — contract chapter', () => {
+  it("shows the lead's property name, not the estimate's clientName", () => {
+    // clientName and property_name deliberately differ here — the contract
+    // chapter must read the same source of truth as the cover page (the
+    // lead), not a possibly-stale independent field on the estimate.
+    renderPreview(
+      {},
+      {
+        lead: { ...mockLead, property_name: 'Willowbrook Estates' },
+        estimate: { ...mockEstimate, clientName: 'Coral Bay HOA' },
+      },
+    )
+    const page = screen.getByTestId('page-contract-scope')
+    expect(within(page).getByText('Willowbrook Estates')).toBeInTheDocument()
+    expect(within(page).queryByText('Coral Bay HOA')).not.toBeInTheDocument()
   })
 })

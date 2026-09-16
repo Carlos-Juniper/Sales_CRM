@@ -300,7 +300,7 @@ export function MaintenanceIntakeModal({
         // free-text override. Moves the lead Qualifying→Estimating on create.
         leadId: leadCtx?.leadNumber || null,
         serviceLine,
-        clientName: form.company || form.contactName,
+        clientName: form.company || selectedProperty?.name || form.contactName,
         aspireBranchId,
         branchCity,
         customerType: form.customerType,

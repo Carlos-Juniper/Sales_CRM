@@ -1,38 +1,53 @@
 // ---------------------------------------------------------------------------
 // Contract Page — Landscape Maintenance Agreement for approved/won estimates
 //
-// Three sections:
-// 1. Scope text table (one row per service with narrative)
-// 2. CONTRACT SUMMARY (annual/monthly totals)
-// 3. PAYMENT SCHEDULE (12-month breakdown)
+// Matches the structure of the reference (business docs/Pointe Jupiter Yacht
+// Club.pdf, p.37-42):
+// 1. Description of Services / Frequency table + Annual Maintenance Price,
+//    plus an Optional Services table for one-time line items (ContractLines).
+// 2. Services — one scope-of-work paragraph per unique service
+//    (ContractScopeNarrative), paginated.
+// 3. Terms & Conditions — static boilerplate, identical on every contract
+//    (ContractTerms).
+// 4. Payment Schedule + signature blocks (PaymentSchedule, ContractSignatures).
 //
 // Only rendered for maintenance estimates with lifecycle approved or won.
 // ---------------------------------------------------------------------------
 
 import { PrintPage } from './shared'
 import { ContractLines } from './ContractLines'
-import { ContractTotals } from './ContractTotals'
+import { ContractScopeNarrative } from './ContractScopeNarrative'
+import { ContractTerms } from './ContractTerms'
 import { PaymentSchedule } from './PaymentSchedule'
+import { ContractSignatures } from './ContractSignatures'
 import type { Estimate } from '@/types/estimating'
 
-export function ContractPage({ estimate }: { estimate: Estimate }) {
+export function ContractPage({
+  estimate,
+  lead,
+}: {
+  estimate: Estimate
+  lead: { property_name: string }
+}) {
   return (
     <>
-      {/* Page 1: Service scope narratives */}
+      {/* Page 1: Description of Services + Frequency, Optional Services */}
       <PrintPage data-testid="page-contract-scope" className="contract">
         <h1 className="page-title">Landscape Maintenance Agreement</h1>
-        <p className="contract-intro">
-          This agreement outlines the scope of landscape maintenance services to be provided
-          by Juniper Landscaping. Services will be performed in a professional manner using
-          commercial-grade equipment and trained personnel.
-        </p>
+        {lead.property_name && <p className="contract-property">{lead.property_name}</p>}
         <ContractLines estimate={estimate} />
       </PrintPage>
 
-      {/* Page 2: Contract summary and payment schedule */}
+      {/* Page(s) 2+: scope-of-work narrative, one entry per unique service */}
+      <ContractScopeNarrative estimate={estimate} />
+
+      {/* Terms & Conditions — same boilerplate on every contract */}
+      <ContractTerms />
+
+      {/* Final page: payment schedule + signatures */}
       <PrintPage data-testid="page-contract-summary" className="contract">
-        <ContractTotals estimate={estimate} />
         <PaymentSchedule estimate={estimate} />
+        <ContractSignatures lead={lead} />
       </PrintPage>
     </>
   )

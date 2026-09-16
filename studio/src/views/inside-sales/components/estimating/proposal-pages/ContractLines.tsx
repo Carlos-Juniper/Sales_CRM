@@ -1,54 +1,82 @@
 // ---------------------------------------------------------------------------
-// ContractLines — scope text table for Landscape Maintenance Agreement
+// ContractLines — "Description of Services" tables for the Landscape
+// Maintenance Agreement's first page.
 //
-// Displays one row per service (section_services), ordered by section/service
-// sortOrder. Each row shows the service label and its scope narrative
-// (catalog_items.scope_text).
+// Matches the reference (business docs/Pointe Jupiter Yacht Club.pdf, p.37):
+// one table of recurring services with a Frequency column and a bold Annual
+// Maintenance Price total row, followed by a separate Optional Services table
+// (Frequency / Cost per Occ. / Annual Cost) for one-time line items. Neither
+// table carries scope narrative — that's ContractScopeNarrative's job.
 // ---------------------------------------------------------------------------
 
+import { buildContractRows, buildContractTotals } from '@/lib/proposal/contract'
 import type { Estimate } from '@/types/estimating'
 
+function formatCurrency(cents: number): string {
+  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 export function ContractLines({ estimate }: { estimate: Estimate }) {
-  // Sort sections by sortOrder
-  const sortedSections = [...estimate.sections].sort((a, b) => a.sortOrder - b.sortOrder)
+  const rows = buildContractRows(estimate)
+  if (rows.length === 0) return null
 
-  const rows: Array<{ label: string; scopeText: string }> = []
-
-  for (const section of sortedSections) {
-    // Sort services within section by sortOrder
-    const sortedServices = [...section.services].sort((a, b) => a.sortOrder - b.sortOrder)
-
-    for (const svc of sortedServices) {
-      const scopeText = svc.scopeText || ''
-      rows.push({
-        label: svc.label,
-        scopeText,
-      })
-    }
-  }
-
-  if (rows.length === 0) {
-    return null
-  }
+  const recurringRows = rows.filter((r) => r.isRecurring)
+  const oneTimeRows = rows.filter((r) => !r.isRecurring)
+  const { extPriceCents: annualMaintenancePriceCents } = buildContractTotals(recurringRows)
 
   return (
     <div className="contract-lines">
-      <table className="scope-table">
-        <thead>
-          <tr>
-            <th>Service</th>
-            <th>Scope of Work</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i}>
-              <td className="service-label">{row.label}</td>
-              <td className="scope-text">{row.scopeText}</td>
+      {recurringRows.length > 0 && (
+        <table className="contract-tbl services-tbl">
+          <thead>
+            <tr>
+              <th>Description of Services</th>
+              <th className="num">Frequency</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr className="group-row">
+              <td colSpan={2}>General Maintenance Services</td>
+            </tr>
+            {recurringRows.map((row, i) => (
+              <tr key={i}>
+                <td>{row.label}</td>
+                <td className="num">{row.occurs ?? ''}</td>
+              </tr>
+            ))}
+            <tr className="total-row">
+              <td>Annual Maintenance Price</td>
+              <td className="num">{formatCurrency(annualMaintenancePriceCents)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+
+      {oneTimeRows.length > 0 && (
+        <>
+          <div className="optional-services-label">Optional Services</div>
+          <table className="contract-tbl optional-tbl">
+            <thead>
+              <tr>
+                <th>Description of Services</th>
+                <th className="num">Frequency</th>
+                <th className="num">Cost per Occ.</th>
+                <th className="num">Annual Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {oneTimeRows.map((row, i) => (
+                <tr key={i}>
+                  <td>{row.label}</td>
+                  <td className="num">1</td>
+                  <td className="num">{formatCurrency(row.priceEachCents)}</td>
+                  <td className="num">{formatCurrency(row.extPriceCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   )
 }

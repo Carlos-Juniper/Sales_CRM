@@ -496,11 +496,17 @@
    page's containers so every other page's labels are unaffected. A touch
    more bottom margin than the shared label separates the heading from its
    content below. */
-.proposal-root .comm-cols .copy-list-label,
-.proposal-root .comm-sched .copy-list-label {
+.proposal-root .comm-cols .copy-list-label {
   color: var(--jn-green);
   font-size: 13pt;
   margin-bottom: 6pt;
+}
+
+.proposal-root .comm-sched .copy-list-label {
+  color: var(--jn-green);
+  font-size: 26pt;
+  margin-bottom: 16pt;
+  text-align: center;
 }
 
 
@@ -603,7 +609,7 @@
   flex: 1 1 0;
   display: grid;
   gap: 0.16in;
-  margin: 0.20in calc(-1 * var(--jn-gutter)) 0.12in;
+  margin: 0.20in calc(-1 * var(--jn-gutter)) 0;
   width: calc(100% + 2 * var(--jn-gutter));
   min-height: 3.00in;
 }
@@ -650,9 +656,15 @@
   grid-column: 1 / -1;
 }
 
+/* Turf only: enlarge bottom-row images without affecting Design or Maintenance */
+.proposal-root .print-page[data-testid="page-service-services_turf"] .service-collage.hero-row2 {
+  grid-template-rows: 1fr 2.4in;
+}
+
 /* Installation: 2 stacked left + 1 tall right */
 .proposal-root .service-collage.split-tall {
   margin-inline: -0.24in;
+  margin-bottom: 0.12in; /* restore base margin — Installation is do-not-touch */
   width: calc(100% + 0.48in);
   grid-template-columns: 3.95in 1fr;
   grid-template-rows: 1fr 1fr;
@@ -684,9 +696,9 @@
 /* Irrigation split layout: full-width header, then copy-left / photos-right */
 .proposal-root .service-split {
   display: grid;
-  grid-template-columns: 2.80in 1fr;
+  grid-template-columns: 2.20in 1.5fr;
   gap: 0.19in;
-  margin: 0.20in 0 0.12in 0;
+  margin: 0.20in 0 0 0;
   min-height: 5.00in;
   flex: 1 1 auto;
 }
@@ -894,17 +906,14 @@
 
 .proposal-root .sync-body {
   display: grid;
-  grid-template-columns: 2.3in 1fr;
-  gap: 0.4in;
+  grid-template-columns: 2.0in 1fr;
+  gap: 0.2in;
   margin-top: 0.2in;
   padding-top: 0.22in;
   border-top: 1px solid var(--jn-hairline);
-  align-items: stretch;
-  /* Stretches the sidebar's green fill down the sheet regardless of how much
-     room the Highlights/QR copy alone would need — sized off the well's own
-     content budget (11in page - 0.63in top - ~0.85in footer clearance, minus
-     the title/lede block above), not guessed. */
-  min-height: 6.4in;
+  /* start (not stretch) so the green sidebar ends at its natural content
+     height rather than stretching to the bottom of the page. */
+  align-items: start;
 }
 
 .proposal-root .sync-sidebar {
@@ -925,6 +934,9 @@
 
 .proposal-root .sync-qr-block {
   margin-top: 0.35in;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 /* White quiet zone matters for scannability — the sidebar behind it is solid
@@ -962,38 +974,35 @@
 .proposal-root .sync-app-photos {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.24in;
-  margin-top: 0.24in;
-  align-items: start;
+  gap: 0.06in;
+  margin-top: 0.2in;
 }
 
 .proposal-root .sync-app-photos > img {
   width: 100%;
-  /* ~42% larger than the original 3.6in — the reference's phones read much
-     bigger relative to the sidebar/worklist copy above them. */
-  height: 5.1in;
+  /* Cropped images are 320×500 portrait (0.64:1). With sync-main at ~5.14in
+     and each column ~2.54in wide, width-constrained height = 2.54/0.64 ≈
+     3.97in — set container to 4.0in so the phone fills the column fully. */
+  height: 4.0in;
   object-fit: contain;
   display: block;
 }
 
 /* --- Irrigation Reporting Sample --------------------------------------------
-   Two real report screenshots side by side. The source pair (an irrigation
-   inspection form and a weekly services table) are two different aspect
-   ratios, so — unlike the Juniper Sync app photos above — a shared fixed
-   height would letterbox one of them inside a lot of dead space. Each column
-   instead sizes to its own image's natural ratio and top-aligns, matching the
-   reference page exactly. */
+   Two real report screenshots side by side. Fixed height on both images
+   forces equal sizing regardless of aspect ratio differences; object-fit:cover
+   keeps each image filling its column without letterboxing. */
 .proposal-root .reporting-sample-photos {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.3in;
+  gap: 0.12in;
   margin: 0.24in 0;
-  align-items: start;
 }
 
 .proposal-root .reporting-sample-photos > img {
   width: 100%;
-  height: auto;
+  height: 4.2in;
+  object-fit: cover;
   display: block;
 }
 
@@ -1384,11 +1393,20 @@
   margin: 0;
 }
 
+/* Clamped to the height of the photo + id-box column (2.733in budget minus
+   the bio-box's own border+padding) so a rep-authored bio of any length can
+   never grow a row taller than its neighbors and push the 3-per-page stack
+   past the footer. 12 lines at this font-size/line-height fits that budget. */
 .proposal-root .team-card .bi {
   font-size: 9.75pt;
   line-height: 1.46;
   color: var(--jn-ink);
   margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 12;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* --- Service overview grid (icon badges) -----------------------------------
@@ -1500,8 +1518,8 @@
   align-items: baseline;
   gap: 0.12in;
   break-inside: avoid;
-  padding: 0.1in 0;
-  font-size: 12pt;
+  padding: 0.072in 0;
+  font-size: 10.5pt;
 }
 
 .proposal-root .toc-entry-title {
@@ -1566,7 +1584,15 @@
   height: 100%;
 }
 
+/* position:absolute (rather than width/height:100%) is load-bearing: the
+   image deliberately bleeds under the footer bar (see portfolio-property-page.tsx),
+   and useProposalOverflow's measurer skips absolutely-positioned children of
+   .well specifically so intentional full-bleed art isn't flagged as clipped
+   content. An in-flow 100%-height image would report ~61pt of false-positive
+   overflow on every one of these pages. */
 .proposal-root .portfolio-full-bleed-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -2064,7 +2090,7 @@
   grid-template-columns: 1.75fr 1.25fr;
   gap: 0.34in;
   align-items: start;
-  margin-top: 0.1in;
+  margin-top: 0.24in;
 }
 
 .proposal-root .customer-care-team .copy-list-label-green {
@@ -2287,7 +2313,7 @@
   flex: 0 0 auto;
   margin: 0 calc(-1 * var(--jn-gutter));
   width: calc(100% + 2 * var(--jn-gutter));
-  height: 2.42in;
+  height: 2.24in;
   overflow: hidden;
 }
 
@@ -2389,6 +2415,18 @@
   flex-direction: column;
 }
 
+/* 2-phase (up-to-30): two wide cards centered in the band */
+.proposal-root .startup-plan-grid--2 .startup-plan-card {
+  flex: 0 0 3.3in;
+  max-width: 3.3in;
+}
+
+/* 4-phase (up-to-90): 2×2 grid with wider cards */
+.proposal-root .startup-plan-grid--4 .startup-plan-card {
+  flex: 0 0 3.3in;
+  max-width: 3.3in;
+}
+
 /* Chevron banner. The clip-path eats the right edge, so the right padding is
    heavier than the left to keep the label optically centred in what remains. */
 .proposal-root .startup-plan-card-head {
@@ -2429,5 +2467,148 @@
   top: 0.043in;
   width: 0.045in;
   height: 0.045in;
+}
+
+/* --- Contract generator (Landscape Maintenance Agreement) ------------------
+   Reference: business docs/Pointe Jupiter Yacht Club.pdf, p.37-42. Reuses the
+   .branch-tbl green-header/hairline-rule convention (see "Branch tables" above)
+   under a generic .contract-tbl name since the same shape covers three
+   different tables here (services, optional services, payment schedule). */
+
+.proposal-root .contract-property {
+  font-family: var(--jn-display);
+  font-size: 13.5pt;
+  font-weight: 700;
+  color: var(--jn-ink);
+  text-align: center;
+  margin: 0 0 0.3in;
+}
+
+.proposal-root .section-title {
+  font-family: var(--jn-display);
+  color: var(--jn-green);
+  font-size: 18pt;
+  font-weight: 700;
+  margin: 0 0 0.2in;
+}
+
+.proposal-root .contract-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.05in;
+}
+
+.proposal-root .contract-tbl th {
+  background: var(--jn-green);
+  color: #fff;
+  font-family: var(--jn-display);
+  font-size: 9.75pt;
+  font-weight: 700;
+  text-align: left;
+  padding: 0.06in 0.09in;
+}
+
+.proposal-root .contract-tbl th.num,
+.proposal-root .contract-tbl td.num {
+  text-align: right;
+}
+
+.proposal-root .contract-tbl td {
+  font-family: var(--jn-body);
+  font-size: 9.75pt;
+  padding: 0.05in 0.09in;
+  border-bottom: 0.75pt solid var(--jn-table-rule);
+  color: var(--jn-ink);
+}
+
+/* Category header row inside the services table (e.g. "General Maintenance
+   Services") — reference shades this row instead of repeating a th. */
+.proposal-root .contract-tbl .group-row td {
+  background: var(--jn-band);
+  font-weight: 700;
+  border-bottom: 0.75pt solid var(--jn-hairline);
+}
+
+.proposal-root .contract-tbl .total-row td {
+  font-weight: 700;
+  border-top: 1.5pt solid var(--jn-ink);
+  border-bottom: none;
+}
+
+.proposal-root .optional-services-label {
+  font-family: var(--jn-display);
+  font-size: 11pt;
+  font-weight: 700;
+  color: var(--jn-green);
+  margin: 0.3in 0 0.08in;
+}
+
+/* --- Services scope narrative ------------------------------------------- */
+
+.proposal-root .contract-scope {
+  display: grid;
+  row-gap: 0.22in;
+}
+
+.proposal-root .scope-entry-title {
+  font-family: var(--jn-display);
+  color: var(--jn-green);
+  font-size: 11.5pt;
+  font-weight: 700;
+  margin: 0 0 0.05in;
+}
+
+.proposal-root .scope-entry-text {
+  font-size: 9.75pt;
+  line-height: 1.4;
+  color: var(--jn-ink);
+  margin: 0;
+}
+
+/* ContractTerms sections can carry more than one paragraph (ContractScopeNarrative
+   entries never do) — space the second and later paragraphs without adding
+   top margin to the first, which would double up with scope-entry-title's own
+   bottom margin. */
+.proposal-root .scope-entry-text + .scope-entry-text {
+  margin-top: 0.12in;
+}
+
+/* --- Contract signatures ---------------------------------------------------
+   Two blank By / Print Name / Date blocks side by side, captioned with the
+   contracting party's name — matches the reference's wet-signature layout. */
+
+.proposal-root .contract-signatures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 0.5in;
+  margin-top: 0.5in;
+}
+
+.proposal-root .sig-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.12in;
+  margin-bottom: 0.22in;
+}
+
+.proposal-root .sig-label {
+  font-family: var(--jn-display);
+  font-size: 9.75pt;
+  font-weight: 700;
+  color: var(--jn-ink);
+  white-space: nowrap;
+}
+
+.proposal-root .sig-rule {
+  flex: 1 1 auto;
+  border-bottom: 0.75pt solid var(--jn-ink);
+  height: 0.14in;
+}
+
+.proposal-root .sig-caption {
+  font-family: var(--jn-display);
+  font-size: 9.75pt;
+  font-weight: 700;
+  color: var(--jn-ink);
 }
 

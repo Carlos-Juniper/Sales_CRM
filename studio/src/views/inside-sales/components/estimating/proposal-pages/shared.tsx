@@ -23,6 +23,7 @@ import {
   serviceDetailPhotoUrls,
   orgIconUrl,
   bundledHeadshotUrl,
+  proposalAssetUrl,
 } from '@/lib/proposal/photos'
 import { useProposalMediaUrl } from '@/hooks/useProposals'
 import { teamMemberTitleLabel } from '@/lib/proposal/titleLabels'
@@ -231,21 +232,36 @@ export function PortfolioPhoto({
   loadedClassName?: string
 }) {
   const [error, setError] = useState(false)
-  // Rep-uploaded portfolio images are GCS objects — resolve via the media URL
-  // hook (same path as HeadshotImg) so PR9's proxy cutover is automatic.
+  const [bundledError, setBundledError] = useState(false)
+  // Rep-uploaded portfolio images are GCS objects in the attachments bucket —
+  // resolve via the media URL hook (same path as ProposalHeadshot). The bulk
+  // rasterized properties (migration 036) never went through that upload flow
+  // though: their object keys live in the bundled proposal-assets bucket
+  // instead, so when the signed-URL lookup comes back empty we fall back to
+  // the same /proposal-assets/ proxy the bundled headshots use.
   const { data } = useProposalMediaUrl(objectKey)
-  if (error || !data?.url) {
-    const placeholderClass = loadedClassName === 'photo' ? 'photo' : `photo ${loadedClassName}`
-    return <div className={placeholderClass} />
+  if (!error && data?.url) {
+    return (
+      <img
+        src={data.url}
+        alt={alt}
+        className={loadedClassName}
+        onError={() => setError(true)}
+      />
+    )
   }
-  return (
-    <img
-      src={data.url}
-      alt={alt}
-      className={loadedClassName}
-      onError={() => setError(true)}
-    />
-  )
+  if (!bundledError) {
+    return (
+      <img
+        src={proposalAssetUrl(objectKey)}
+        alt={alt}
+        className={loadedClassName}
+        onError={() => setBundledError(true)}
+      />
+    )
+  }
+  const placeholderClass = loadedClassName === 'photo' ? 'photo' : `photo ${loadedClassName}`
+  return <div className={placeholderClass} />
 }
 
 // ---------------------------------------------------------------------------

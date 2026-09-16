@@ -1,0 +1,1669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Juniper Proposal — Coral Bay HOA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700;900&family=Open+Sans:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <style>
+    /* ── Root variables (from proposal-print.css) ──────────────────────── */
+    :root {
+      --jn-green:      #038442;
+      --jn-orange:     #e87825;
+      --jn-orange-alt: #f47320;
+      --jn-ink:        #000000;
+      --jn-band:       #f0f0f0;
+      --jn-hairline:   #cccccc;
+      --jn-table-rule: #d6dee0;
+      --jn-page-w:     816px;   /* 8.5in @ 96dpi */
+      --jn-page-h:     1056px;  /* 11in  @ 96dpi */
+      --jn-gutter:     55.7px;  /* 0.58in */
+      --jn-top:        60.5px;  /* 0.63in */
+      --jn-footer-h:   64px;    /* 0.667in */
+      --jn-display:    'Lato', Arial, sans-serif;
+      --jn-body:       'Open Sans', Arial, sans-serif;
+    }
+
+    /* ── Reset ─────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #d0d0d0;
+      padding: 32px 0 64px;
+      font-family: var(--jn-body);
+      color: var(--jn-ink);
+    }
+
+    /* ── Page shell ─────────────────────────────────────────────────────── */
+    .page {
+      width: var(--jn-page-w);
+      height: var(--jn-page-h);
+      background: #fff;
+      margin: 0 auto 24px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 2px 16px rgba(0,0,0,.22);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Palm-frond watermark simulation */
+    .page.frond::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      opacity: 0.07;
+      background: radial-gradient(ellipse 160% 180% at 105% -10%,
+        #038442 0%, #038442 30%, transparent 70%),
+        radial-gradient(ellipse 80% 120% at 95% 5%,
+        #038442 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    /* ── Content well ───────────────────────────────────────────────────── */
+    .well {
+      position: relative;
+      z-index: 1;
+      flex: 1 1 0;
+      padding: var(--jn-top) var(--jn-gutter) calc(var(--jn-footer-h) + 17px);
+      overflow: hidden;
+    }
+
+    /* ── Footer bar ─────────────────────────────────────────────────────── */
+    .footer-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: var(--jn-footer-h);
+      background: var(--jn-green);
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 var(--jn-gutter);
+    }
+    .footer-bar .footer-logo {
+      font-family: 'Lato', Arial, sans-serif;
+      font-weight: 900;
+      font-size: 18px;
+      color: #fff;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    .footer-bar .footer-site {
+      font-family: 'Open Sans', Arial, sans-serif;
+      font-size: 10px;
+      color: rgba(255,255,255,.75);
+      letter-spacing: 1px;
+    }
+    .footer-bar .footer-pg {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    /* ── Typography ─────────────────────────────────────────────────────── */
+    .eyebrow {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--jn-orange);
+      margin-bottom: 4px;
+    }
+    .eyebrow.green { color: var(--jn-green); }
+
+    .page-title {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 28px;
+      font-weight: 900;
+      color: var(--jn-green);
+      line-height: 1.1;
+      margin-bottom: 14px;
+    }
+    .page-title.caps { text-transform: uppercase; }
+    .page-title.alt  { color: var(--jn-orange-alt); }
+
+    .lede {
+      font-family: 'Open Sans', Arial, sans-serif;
+      font-size: 11px;
+      line-height: 1.65;
+      color: #333;
+      margin-bottom: 14px;
+    }
+
+    p { font-size: 10.5px; line-height: 1.6; color: #333; margin-bottom: 8px; font-family: 'Open Sans', Arial, sans-serif; }
+    strong { font-weight: 700; }
+
+    /* ── Section label ──────────────────────────────────────────────────── */
+    .section-label {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--jn-orange);
+      margin-bottom: 2px;
+      margin-top: 16px;
+    }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* COVER PAGE                                                          */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .cover-page {
+      background: linear-gradient(160deg, #f8f8f5 0%, #eef7f0 60%, #d4ecdb 100%);
+    }
+    .cover-page .well {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-start;
+      padding-top: 120px;
+    }
+    .cover-logo {
+      font-family: 'Lato', Arial, sans-serif;
+      font-weight: 900;
+      font-size: 36px;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      color: var(--jn-green);
+      margin-bottom: 6px;
+      line-height: 1;
+    }
+    .cover-tagline {
+      font-family: 'Open Sans', Arial, sans-serif;
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: #6b8f74;
+      text-transform: uppercase;
+      margin-bottom: 80px;
+    }
+    .cover-eyebrow {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--jn-orange);
+      margin-bottom: 10px;
+    }
+    .cover-title {
+      font-size: 48px !important;
+      font-weight: 900;
+      line-height: 1.05;
+      color: var(--jn-green);
+      margin-bottom: 48px;
+    }
+    .cover-prepared { margin-top: 12px; }
+    .cover-prepared .lbl {
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #888;
+      font-family: 'Lato', Arial, sans-serif;
+    }
+    .cover-prepared .nm {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--jn-ink);
+      font-family: 'Lato', Arial, sans-serif;
+    }
+    .cover-date-pill {
+      position: absolute;
+      bottom: calc(var(--jn-footer-h) + 24px);
+      left: var(--jn-gutter);
+      background: var(--jn-orange);
+      color: #fff;
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 7px 18px;
+      border-radius: 20px;
+      letter-spacing: .5px;
+      z-index: 6;
+    }
+    /* Frond decoration on cover */
+    .cover-frond {
+      position: absolute;
+      top: -40px;
+      right: -60px;
+      width: 420px;
+      height: 580px;
+      opacity: 0.12;
+      background: conic-gradient(from 200deg at 110% -10%,
+        var(--jn-green) 0deg, transparent 40deg,
+        var(--jn-green) 50deg, transparent 90deg,
+        var(--jn-green) 100deg, transparent 140deg);
+      border-radius: 50%;
+      transform: rotate(-15deg);
+      z-index: 0;
+    }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* INTRO LETTER                                                        */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .letter-band {
+      position: absolute;
+      bottom: var(--jn-footer-h);
+      left: 0; right: 0;
+      height: 120px;
+      background: linear-gradient(135deg, var(--jn-green) 0%, #05a352 100%);
+      z-index: 2;
+      overflow: hidden;
+    }
+    .letter-band-text {
+      position: absolute;
+      bottom: 16px;
+      left: var(--jn-gutter);
+      color: rgba(255,255,255,.25);
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 64px;
+      font-weight: 900;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .signer-block {
+      margin-top: 20px;
+    }
+    .signer-block .closing { font-size: 11px; color: #333; margin-bottom: 4px; }
+    .signer-block .sig-name {
+      font-family: 'Lato', Arial, sans-serif;
+      font-weight: 900;
+      font-size: 13px;
+      color: var(--jn-green);
+      margin-top: 8px;
+    }
+    .signer-block .sig-title { font-size: 10px; color: #666; }
+    .signer-block .sig-contact { font-size: 10px; color: #444; }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* TABLE OF CONTENTS                                                   */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .toc-list { list-style: none; margin-top: 24px; }
+    .toc-entry {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--jn-table-rule);
+      font-family: 'Open Sans', Arial, sans-serif;
+      font-size: 12px;
+    }
+    .toc-entry:last-child { border-bottom: none; }
+    .toc-num {
+      font-family: 'Lato', Arial, sans-serif;
+      font-weight: 700;
+      color: var(--jn-orange);
+      min-width: 24px;
+      font-size: 11px;
+    }
+    .toc-title { flex: 1; color: var(--jn-ink); font-weight: 600; }
+    .toc-dots {
+      flex: 1;
+      border-bottom: 2px dotted var(--jn-hairline);
+      margin: 0 8px;
+      position: relative;
+      top: -3px;
+    }
+    .toc-pg {
+      font-family: 'Lato', Arial, sans-serif;
+      font-weight: 700;
+      color: var(--jn-green);
+      min-width: 24px;
+      text-align: right;
+    }
+    /* contract row highlight */
+    .toc-entry.contract-row { background: #f0faf4; margin: 0 -12px; padding: 9px 12px; }
+    .toc-entry.contract-row .toc-title { color: var(--jn-green); }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* ROOTED IN FLORIDA / ABOUT US                                        */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .rooted-body {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 20px;
+      margin-top: 16px;
+    }
+    .photo-pair { display: flex; flex-direction: column; gap: 10px; }
+    .photo-pair .photo-block {
+      background: var(--jn-band);
+      height: 200px;
+      border-radius: 2px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .photo-placeholder {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #c8dfc8 0%, #9ac49a 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,.6);
+      font-size: 28px;
+    }
+    .rooted-panel {
+      background: var(--jn-band);
+      padding: 20px;
+      border-radius: 2px;
+    }
+    .rooted-panel p { font-size: 10.5px; margin-bottom: 10px; }
+    .stats { margin-top: 20px; display: flex; flex-direction: column; gap: 12px; }
+    .stat .num {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 22px;
+      font-weight: 900;
+      color: var(--jn-green);
+      line-height: 1;
+    }
+    .stat .lbl { font-size: 9.5px; color: #555; }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* SERVICE OVERVIEW GRID                                               */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .service-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .service-cell {
+      position: relative;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .service-cell .shot {
+      height: 150px;
+      background: linear-gradient(135deg, #c8dfc8 0%, #7ab87a 100%);
+      position: relative;
+    }
+    .service-cell .icon-badge {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      width: 36px;
+      height: 36px;
+      background: var(--jn-orange);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 900;
+      z-index: 2;
+    }
+    .service-cell .shot-label {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,.5));
+      color: #fff;
+      font-family: 'Lato', Arial, sans-serif;
+      font-weight: 700;
+      font-size: 12px;
+      padding: 20px 10px 8px;
+    }
+    .service-cell .cell-body {
+      background: #f8f8f8;
+      padding: 8px 10px;
+    }
+    .service-cell .cell-body ul {
+      padding-left: 14px;
+      margin-top: 4px;
+    }
+    .service-cell .cell-body li {
+      font-size: 9px;
+      color: #444;
+      line-height: 1.5;
+    }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* SERVICE DETAIL (MAINTENANCE)                                        */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .service-detail-hero {
+      height: 280px;
+      background: linear-gradient(135deg, #a8cfa8 0%, #4a9a4a 100%);
+      margin: 14px calc(-1 * var(--jn-gutter));
+      display: flex;
+      align-items: flex-end;
+      padding: 20px var(--jn-gutter);
+      position: relative;
+    }
+    .service-detail-hero .hero-badge {
+      background: var(--jn-orange);
+      color: #fff;
+      font-family: 'Lato', Arial, sans-serif;
+      font-weight: 900;
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 5px 14px;
+    }
+    .service-bullets {
+      margin-top: 14px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 20px;
+    }
+    .service-bullet {
+      display: flex;
+      gap: 7px;
+      align-items: flex-start;
+      font-size: 10.5px;
+      color: #333;
+      line-height: 1.5;
+    }
+    .service-bullet::before {
+      content: '🌿';
+      font-size: 10px;
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* MEET OUR TEAM                                                       */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .team-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .team-card { text-align: center; }
+    .team-card .avatar {
+      width: 100%;
+      height: 120px;
+      background: linear-gradient(135deg, #c8dfc8 0%, #8ab88a 100%);
+      border-radius: 2px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      color: rgba(255,255,255,.5);
+    }
+    .team-card .tm-name {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--jn-ink);
+    }
+    .team-card .tm-title {
+      font-size: 9px;
+      color: var(--jn-green);
+      font-weight: 600;
+    }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* CLIENT REFERENCES                                                   */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .ref-list { margin-top: 20px; }
+    .ref-entry { padding: 16px 0; }
+    .ref-divider { border: none; border-top: 1px solid var(--jn-table-rule); margin-bottom: 16px; }
+    .ref-entry p { font-size: 11px; margin-bottom: 4px; }
+    .ref-sub { padding-left: 20px; margin-top: 4px; }
+    .ref-sub li { font-size: 10.5px; color: #444; line-height: 1.6; }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* INSURANCE & LICENSES                                                */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .insurance-block {
+      margin-top: 24px;
+      background: var(--jn-band);
+      padding: 24px;
+      border-left: 4px solid var(--jn-green);
+    }
+    .license-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .license-card {
+      background: var(--jn-band);
+      padding: 14px;
+      border-radius: 2px;
+      border-top: 3px solid var(--jn-green);
+    }
+    .license-card .lic-name { font-size: 10px; font-weight: 700; color: var(--jn-green); margin-bottom: 4px; font-family: 'Lato', Arial, sans-serif; }
+    .license-card .lic-number { font-size: 9px; color: #555; }
+    .license-card .lic-holder { font-size: 9px; color: #333; font-weight: 600; }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* CONTRACT PAGE — SCOPE TABLE                                         */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .contract-intro {
+      font-size: 10.5px;
+      line-height: 1.65;
+      color: #374151;
+      margin-bottom: 18px;
+      border-left: 3px solid var(--jn-green);
+      padding-left: 14px;
+      font-family: 'Open Sans', Arial, sans-serif;
+    }
+    .contract-meta {
+      display: flex;
+      gap: 32px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .contract-meta-item {
+      font-family: 'Open Sans', Arial, sans-serif;
+      font-size: 10px;
+      color: #555;
+    }
+    .contract-meta-item strong { color: var(--jn-ink); font-size: 10.5px; }
+
+    .scope-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5px;
+      font-family: 'Open Sans', Arial, sans-serif;
+    }
+    .scope-table thead tr { background: var(--jn-green); }
+    .scope-table thead th {
+      padding: 8px 10px;
+      text-align: left;
+      color: #fff;
+      font-weight: 700;
+      font-size: 9px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      font-family: 'Lato', Arial, sans-serif;
+    }
+    .scope-table thead th:first-child { width: 18%; }
+    .scope-table tbody tr:nth-child(even) { background: #f4fbf7; }
+    .scope-table td {
+      padding: 8px 10px;
+      vertical-align: top;
+      border-bottom: 1px solid var(--jn-table-rule);
+      line-height: 1.55;
+    }
+    .scope-table td.svc-label {
+      font-weight: 700;
+      color: #1a4731;
+      font-family: 'Lato', Arial, sans-serif;
+    }
+    .scope-table tr.section-hdr td {
+      background: #e0f2e7;
+      font-weight: 700;
+      font-size: 8.5px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--jn-green);
+      border-bottom: 1px solid #b8dfc8;
+      padding: 6px 10px;
+      font-family: 'Lato', Arial, sans-serif;
+    }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* CONTRACT PAGE 2 — SUMMARY + SCHEDULE                               */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .sec-title-bar {
+      background: var(--jn-green);
+      color: #fff;
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 8px 14px;
+      margin-bottom: 0;
+    }
+    .totals-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      font-family: 'Open Sans', Arial, sans-serif;
+      margin-bottom: 28px;
+    }
+    .totals-table td {
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--jn-table-rule);
+    }
+    .totals-table td.t-label { color: #374151; }
+    .totals-table td.t-amount { text-align: right; font-variant-numeric: tabular-nums; font-family: 'Lato', Arial, sans-serif; }
+    .totals-table tr.t-total td {
+      font-weight: 700;
+      font-size: 12px;
+      color: #1a4731;
+      border-top: 2px solid var(--jn-green);
+      border-bottom: 2px solid var(--jn-green);
+    }
+    .totals-table tr.t-monthly td {
+      background: #f0faf4;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--jn-green);
+    }
+
+    /* Service line breakdown table */
+    .line-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5px;
+      font-family: 'Open Sans', Arial, sans-serif;
+      margin-bottom: 20px;
+    }
+    .line-table thead tr { background: #e0f2e7; }
+    .line-table thead th {
+      padding: 6px 10px;
+      text-align: left;
+      color: var(--jn-green);
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      font-family: 'Lato', Arial, sans-serif;
+    }
+    .line-table thead th.right { text-align: right; }
+    .line-table tbody td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--jn-table-rule);
+      color: #333;
+    }
+    .line-table tbody td.right { text-align: right; font-variant-numeric: tabular-nums; font-family: 'Lato', Arial, sans-serif; }
+    .line-table tbody tr:last-child td { border-bottom: none; }
+    .line-table tfoot td {
+      padding: 7px 10px;
+      font-weight: 700;
+      border-top: 2px solid var(--jn-green);
+      color: var(--jn-green);
+      font-family: 'Lato', Arial, sans-serif;
+    }
+    .line-table tfoot td.right { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* Payment schedule grid */
+    .schedule-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-left: 1px solid var(--jn-table-rule);
+      border-top: 1px solid var(--jn-table-rule);
+      margin-bottom: 16px;
+    }
+    .sched-cell {
+      border-right: 1px solid var(--jn-table-rule);
+      border-bottom: 1px solid var(--jn-table-rule);
+      padding: 10px 14px;
+    }
+    .sched-cell:nth-child(4n+1) { background: #f9fafb; }
+    .sched-cell .m-name {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      color: #374151;
+      margin-bottom: 2px;
+    }
+    .sched-cell .m-amt {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 14px;
+      font-weight: 900;
+      color: #1a4731;
+      font-variant-numeric: tabular-nums;
+    }
+    .sched-note {
+      font-size: 8.5px;
+      color: #9ca3af;
+      font-family: 'Open Sans', Arial, sans-serif;
+      line-height: 1.5;
+      margin-top: 8px;
+    }
+
+    /* Signature block */
+    .sig-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      margin-top: 28px;
+    }
+    .sig-party .sig-party-label {
+      font-family: 'Lato', Arial, sans-serif;
+      font-weight: 700;
+      font-size: 9px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--jn-green);
+      margin-bottom: 16px;
+    }
+    .sig-line {
+      border-bottom: 1px solid #374151;
+      height: 28px;
+      margin-bottom: 4px;
+    }
+    .sig-line-label {
+      font-size: 8.5px;
+      color: #9ca3af;
+      font-family: 'Open Sans', Arial, sans-serif;
+      margin-bottom: 14px;
+    }
+
+    /* ════════════════════════════════════════════════════════════════════ */
+    /* CLOSING / THANK YOU PAGE                                           */
+    /* ════════════════════════════════════════════════════════════════════ */
+    .closing-page {
+      background: var(--jn-green);
+    }
+    .closing-page .well {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .closing-logo {
+      font-family: 'Lato', Arial, sans-serif;
+      font-weight: 900;
+      font-size: 48px;
+      letter-spacing: 8px;
+      text-transform: uppercase;
+      color: #fff;
+      margin-bottom: 10px;
+    }
+    .closing-tagline {
+      font-size: 12px;
+      letter-spacing: 3px;
+      color: rgba(255,255,255,.65);
+      text-transform: uppercase;
+      font-family: 'Lato', Arial, sans-serif;
+      margin-bottom: 40px;
+    }
+    .closing-thank {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 32px;
+      font-weight: 300;
+      color: rgba(255,255,255,.9);
+      margin-bottom: 8px;
+    }
+    .closing-sub {
+      font-size: 12px;
+      color: rgba(255,255,255,.6);
+      font-family: 'Open Sans', Arial, sans-serif;
+    }
+
+    /* ── Utilities ──────────────────────────────────────────────────────── */
+    .green-band {
+      background: var(--jn-green);
+      margin: 0 calc(-1 * var(--jn-gutter));
+      padding: 10px var(--jn-gutter);
+      color: #fff;
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .photo-hero {
+      margin: 14px calc(-1 * var(--jn-gutter));
+      background: linear-gradient(135deg, #a8cfa8 0%, #4a9a4a 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,.3);
+      font-size: 48px;
+    }
+    .copy-list { margin: 10px 0 0 0; list-style: none; }
+    .copy-list li {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      font-size: 10.5px;
+      color: #333;
+      line-height: 1.55;
+      margin-bottom: 7px;
+      padding-left: 4px;
+    }
+    .copy-list li::before {
+      content: '▸';
+      color: var(--jn-orange);
+      font-size: 10px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; }
+    .col-label {
+      font-family: 'Lato', Arial, sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--jn-green);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    @media print {
+      body { background: white; padding: 0; }
+      .page { box-shadow: none; margin: 0; page-break-after: always; height: 11in; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 1 — COVER                                                         -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page cover-page frond">
+  <div class="cover-frond"></div>
+  <div class="well">
+    <div class="cover-logo">JUNIPER</div>
+    <div class="cover-tagline">Landscape &nbsp;·&nbsp; Horticulture &nbsp;·&nbsp; Technology</div>
+    <div class="cover-eyebrow">Proposal for</div>
+    <h1 class="page-title cover-title">Coral Bay HOA</h1>
+    <div class="cover-prepared">
+      <p class="lbl">Prepared by</p>
+      <p class="nm">Carlos Hernandez</p>
+    </div>
+  </div>
+  <div class="cover-date-pill">September 15, 2026</div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 2 — INTRO LETTER                                                  -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <h2 style="font-family:'Lato',Arial,sans-serif;font-size:17px;color:var(--jn-green);margin-bottom:18px;">Dear Jennifer Martinez:</h2>
+    <p>Thank you for considering Juniper to be a part of your landscape maintenance contract bidding process for Coral Bay HOA. At Juniper, our team of professionals understands that each project is unique because no two clients are identical. We bring a straightforward, focused analysis to each property's individual needs. We take pride in our commitment to quality, dependability, and industry best practices drives us forward. This commitment empowers us to meet our clients' requirements and to serve their expanding needs as our relationship continues to grow.</p>
+    <p style="margin-top:10px;">With over 25 years of experience in servicing communities throughout Florida, Juniper has been providing excellent landscaping services and has skilled team members dedicated to your landscaping initiatives. We understand the importance of maintaining a beautiful and well-maintained landscape, and we take pride in our attention to detail and commitment to delivering exceptional results.</p>
+    <p style="margin-top:10px;">We look forward to having the opportunity to work with you and to discuss the enclosed information. If you have any questions, please contact me at (561) 555-0142 or carlos.hernandez@juniperlandscaping.com.</p>
+    <div class="signer-block" style="margin-top:24px;">
+      <p class="closing" style="font-size:11px;">Thank you,</p>
+      <div style="margin-top:28px;border-bottom:1px solid #333;width:180px;height:28px;display:flex;align-items:flex-end;padding-bottom:2px;">
+        <span style="font-family:'Lato',Arial,sans-serif;font-size:22px;color:var(--jn-green);font-weight:300;font-style:italic;">Carlos Hernandez</span>
+      </div>
+      <div style="margin-top:6px;">
+        <div class="sig-name" style="font-family:'Lato',Arial,sans-serif;font-weight:700;font-size:13px;color:var(--jn-ink);">Carlos Hernandez</div>
+        <div class="sig-title" style="font-size:10px;color:#666;">Business Development Manager</div>
+        <div class="sig-contact" style="font-size:10px;color:#444;margin-top:2px;">(561) 555-0142 · carlos.hernandez@juniperlandscaping.com</div>
+      </div>
+    </div>
+  </div>
+  <div class="letter-band">
+    <div class="letter-band-text">JUNIPER LANDSCAPING</div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 3 — TABLE OF CONTENTS                                             -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <h1 class="page-title">Table of Contents</h1>
+    <ol class="toc-list">
+      <li class="toc-entry"><span class="toc-num">1</span><span class="toc-title">Rooted in Florida</span><span class="toc-dots"></span><span class="toc-pg">4</span></li>
+      <li class="toc-entry"><span class="toc-num">2</span><span class="toc-title">Your Local Landscape Experts</span><span class="toc-dots"></span><span class="toc-pg">5</span></li>
+      <li class="toc-entry"><span class="toc-num">3</span><span class="toc-title">Our Services</span><span class="toc-dots"></span><span class="toc-pg">6</span></li>
+      <li class="toc-entry"><span class="toc-num">4</span><span class="toc-title">Landscape Maintenance</span><span class="toc-dots"></span><span class="toc-pg">7</span></li>
+      <li class="toc-entry"><span class="toc-num">5</span><span class="toc-title">Juniper Cares</span><span class="toc-dots"></span><span class="toc-pg">8</span></li>
+      <li class="toc-entry"><span class="toc-num">6</span><span class="toc-title">Start Up Communication</span><span class="toc-dots"></span><span class="toc-pg">9</span></li>
+      <li class="toc-entry"><span class="toc-num">7</span><span class="toc-title">Customer Care — People Make the Difference</span><span class="toc-dots"></span><span class="toc-pg">10</span></li>
+      <li class="toc-entry"><span class="toc-num">8</span><span class="toc-title">Meet Our Team</span><span class="toc-dots"></span><span class="toc-pg">11</span></li>
+      <li class="toc-entry"><span class="toc-num">9</span><span class="toc-title">Client References</span><span class="toc-dots"></span><span class="toc-pg">12</span></li>
+      <li class="toc-entry"><span class="toc-num">10</span><span class="toc-title">Insurance</span><span class="toc-dots"></span><span class="toc-pg">13</span></li>
+      <li class="toc-entry"><span class="toc-num">11</span><span class="toc-title">Licenses &amp; Certifications</span><span class="toc-dots"></span><span class="toc-pg">14</span></li>
+      <li class="toc-entry contract-row"><span class="toc-num" style="color:var(--jn-green);">12</span><span class="toc-title">Landscape Maintenance Agreement ★ NEW</span><span class="toc-dots"></span><span class="toc-pg">15</span></li>
+    </ol>
+    <div style="margin-top:32px;padding:14px 16px;background:#f0faf4;border-left:3px solid var(--jn-green);">
+      <p style="font-size:10px;color:var(--jn-green);font-weight:700;font-family:'Lato',Arial,sans-serif;margin-bottom:4px;">CONTRACT INCLUDED</p>
+      <p style="font-size:10px;color:#374151;margin:0;">This proposal includes a Landscape Maintenance Agreement (pages 15–16) with full scope narrative, annual contract summary, and 12-month payment schedule.</p>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">3</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 4 — ROOTED IN FLORIDA                                             -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;">
+      <div>
+        <p class="eyebrow">About Juniper</p>
+        <h1 class="page-title">Rooted in Florida</h1>
+      </div>
+      <div style="font-size:40px;opacity:.15;color:var(--jn-green);font-family:'Lato',Arial,sans-serif;font-weight:900;">🌴</div>
+    </div>
+    <p class="lede">Juniper is a Florida-grown company built on the belief that great landscape care starts with people who truly love this state — its climate, its communities, and its ecosystems.</p>
+    <div class="rooted-body">
+      <div class="photo-pair">
+        <div class="photo-block"><div class="photo-placeholder">🌿</div></div>
+        <div class="photo-block"><div class="photo-placeholder">🏡</div></div>
+      </div>
+      <div class="rooted-panel">
+        <p class="col-label" style="color:var(--jn-orange);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;font-family:'Lato',Arial,sans-serif;margin-bottom:10px;">Where We Started</p>
+        <p>Founded in 1998, Juniper began as a small team of passionate horticulturists committed to restoring and maintaining Florida's unique landscapes. From a single crew and one truck, we have grown into one of Florida's most trusted full-service landscape companies — without losing the family culture that started it all.</p>
+        <p style="margin-top:10px;">Our founders never left the field. Today's leadership still walks properties, talks to crews, and treats every client relationship as a long-term partnership.</p>
+        <div class="stats">
+          <div class="stat"><div class="num">3,200+</div><div class="lbl">Horticulturally trained employees</div></div>
+          <div class="stat"><div class="num">750+</div><div class="lbl">Vehicles in our fleet</div></div>
+          <div class="stat"><div class="num">12</div><div class="lbl">Operating locations throughout Florida</div></div>
+          <div class="stat"><div class="num">28 yrs</div><div class="lbl">Serving Florida communities</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">4</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 5 — LOCAL LANDSCAPE EXPERTS                                       -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <p class="eyebrow">About Us</p>
+    <h1 class="page-title">Your Local Landscape Experts</h1>
+    <p class="lede">Juniper is founded in Florida and our entire leadership team lives in-state. Our Juniper team members are experienced professionals familiar with the local landscape palette.</p>
+    <div class="two-col">
+      <div>
+        <p class="col-label">Southeast Florida Coverage</p>
+        <ul class="copy-list">
+          <li>Palm Beach County</li>
+          <li>Broward County</li>
+          <li>Miami-Dade County</li>
+          <li>Martin &amp; St. Lucie Counties</li>
+          <li>Indian River County</li>
+        </ul>
+      </div>
+      <div>
+        <p class="col-label">Why Local Matters</p>
+        <ul class="copy-list">
+          <li>Intimate knowledge of South Florida soil types, irrigation needs, and seasonal growth patterns</li>
+          <li>Relationships with local nurseries, suppliers, and municipal regulators</li>
+          <li>Branch managers live in the communities they serve</li>
+          <li>Storm response crews staged locally — never relying on out-of-state mobilization</li>
+        </ul>
+      </div>
+    </div>
+    <div style="margin-top:24px;background:var(--jn-band);padding:20px;border-left:3px solid var(--jn-orange);">
+      <p class="col-label" style="color:var(--jn-orange);">Fort Lauderdale Branch — Your Local Team</p>
+      <p>Your Coral Bay HOA account will be serviced out of our Fort Lauderdale branch. This branch has been operating since 2004 and currently maintains over 85 HOA and commercial properties in Broward County. Your dedicated account manager and crew supervisor both live within 15 minutes of your property.</p>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">5</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 6 — OUR SERVICES OVERVIEW                                         -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <p class="eyebrow">Our Services</p>
+    <h1 class="page-title">Full Service Landscape Company</h1>
+    <div class="service-grid">
+      <div class="service-cell">
+        <div class="shot" style="background:linear-gradient(135deg,#c8dfc8,#4a9a4a);">
+          <div class="icon-badge">✏</div>
+          <div class="shot-label">Design &amp; Planning</div>
+        </div>
+        <div class="cell-body">
+          <ul><li>Land planning &amp; site design</li><li>3D rendering &amp; visualization</li><li>Plant palette &amp; material specs</li></ul>
+        </div>
+      </div>
+      <div class="service-cell">
+        <div class="shot" style="background:linear-gradient(135deg,#d4e8b8,#6ab032);">
+          <div class="icon-badge">🌿</div>
+          <div class="shot-label">Maintenance</div>
+        </div>
+        <div class="cell-body">
+          <ul><li>Mowing, edging &amp; bed care</li><li>Fertilization &amp; pest control</li><li>Irrigation management</li></ul>
+        </div>
+      </div>
+      <div class="service-cell">
+        <div class="shot" style="background:linear-gradient(135deg,#b8d8c8,#3a8a5a);">
+          <div class="icon-badge">⛏</div>
+          <div class="shot-label">Installation</div>
+        </div>
+        <div class="cell-body">
+          <ul><li>Mulch &amp; groundcover</li><li>Annual &amp; perennial installs</li><li>Hardscape &amp; enhancements</li></ul>
+        </div>
+      </div>
+      <div class="service-cell">
+        <div class="shot" style="background:linear-gradient(135deg,#a8c8d8,#3a6a8a);">
+          <div class="icon-badge">💧</div>
+          <div class="shot-label">Irrigation</div>
+        </div>
+        <div class="cell-body">
+          <ul><li>System inspection &amp; repair</li><li>Controller programming</li><li>Water-efficient upgrades</li></ul>
+        </div>
+      </div>
+      <div class="service-cell">
+        <div class="shot" style="background:linear-gradient(135deg,#d8c8a8,#8a6a3a);">
+          <div class="icon-badge">🌳</div>
+          <div class="shot-label">Arboriculture</div>
+        </div>
+        <div class="cell-body">
+          <ul><li>Certified arborist services</li><li>ANSI A300 pruning</li><li>Tree risk assessment</li></ul>
+        </div>
+      </div>
+      <div class="service-cell">
+        <div class="shot" style="background:linear-gradient(135deg,#c8d8e8,#4a6a9a);">
+          <div class="icon-badge">⚡</div>
+          <div class="shot-label">Storm Response</div>
+        </div>
+        <div class="cell-body">
+          <ul><li>24/7 emergency response</li><li>Debris removal &amp; cleanup</li><li>Pre-storm preparation</li></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">6</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 7 — LANDSCAPE MAINTENANCE SERVICE PAGE                            -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="service-detail-hero" style="height:260px;margin-bottom:0;">
+    <div class="hero-badge">Landscape Maintenance</div>
+  </div>
+  <div class="well" style="padding-top:18px;">
+    <p class="lede" style="margin-bottom:10px;">Juniper's maintenance programs are built on scientific horticulture, not just weekly mowing. We prescribe service frequencies that match your turf science — not a cookie-cutter schedule.</p>
+    <div class="service-bullets">
+      <div class="service-bullet">Mowing &amp; Edging — commercial-grade equipment, dispersed clippings, clean finish every visit</div>
+      <div class="service-bullet">Landscape Bed Maintenance — weeding, edging, mulch cultivation to showcase plant material</div>
+      <div class="service-bullet">Shrub &amp; Hedge Trimming — natural form pruning by trained technicians, all debris removed</div>
+      <div class="service-bullet">Fertilization — slow-release, balanced formula applied by licensed applicators</div>
+      <div class="service-bullet">Weed Control — pre-emergent &amp; post-emergent applications, EPA-approved products</div>
+      <div class="service-bullet">Pest Control — integrated pest management (IPM), minimal environmental impact</div>
+      <div class="service-bullet">Irrigation Management — monthly walk-throughs, head adjustment, controller optimization</div>
+      <div class="service-bullet">Tree Trimming — ANSI A300 standards, deadwood removal, clearance maintenance</div>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">7</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 8 — JUNIPER CARES                                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <h1 class="page-title">Juniper Cares</h1>
+    <p class="lede">At Juniper, we believe our people are our greatest strength. Juniper Cares was created to support employees when life brings unexpected challenges — because no one should have to face hardship alone.</p>
+    <div class="two-col" style="margin-top:20px;">
+      <div>
+        <p class="col-label" style="color:var(--jn-orange);">What Is Juniper Cares?</p>
+        <p>Juniper Cares is an employee assistance fund supported by the generosity of our team and company. The program raises and distributes funds to help qualified employees experiencing financial hardship due to circumstances beyond their control.</p>
+        <p style="margin-top:10px;">The fund is designed to provide temporary assistance including:</p>
+        <ul class="copy-list" style="margin-top:8px;">
+          <li>Medical emergencies and unexpected illness</li>
+          <li>Natural disasters and property loss</li>
+          <li>Death of an immediate family member</li>
+          <li>Other extraordinary hardship circumstances</li>
+        </ul>
+      </div>
+      <div>
+        <p class="col-label">Why It Matters to You</p>
+        <p>When Juniper employees know their company has their back, they show up differently. More engaged, more committed, more invested in the properties they care for every day.</p>
+        <p style="margin-top:10px;">Your community benefits from a workforce that feels valued and supported — and that sense of care flows directly into the quality of service your residents experience.</p>
+        <div style="margin-top:20px;background:#f0faf4;padding:14px;border-left:3px solid var(--jn-green);">
+          <p style="font-weight:700;color:var(--jn-green);font-size:11px;margin-bottom:4px;">$340,000+</p>
+          <p style="font-size:10px;color:#555;margin:0;">distributed to employees in need since the program's founding</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">8</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 9 — START UP COMMUNICATION                                        -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <p class="eyebrow">Getting Started Right</p>
+    <h1 class="page-title">Start Up Communication</h1>
+    <p class="lede">A smooth transition is the foundation of a great long-term relationship. Juniper's structured startup process ensures nothing falls through the cracks between contract signing and your first service day.</p>
+    <div class="two-col" style="margin-top:20px;">
+      <div>
+        <p class="col-label">Initial Site Walk &amp; Assessment</p>
+        <ul class="copy-list">
+          <li>Full property walk with your Juniper account manager</li>
+          <li>Document all site-specific conditions, obstacles, and priorities</li>
+          <li>Photograph areas requiring special attention</li>
+          <li>Confirm irrigation zones, gate codes, and access schedules</li>
+        </ul>
+        <p class="col-label" style="margin-top:20px;">Crew Introduction Meeting</p>
+        <ul class="copy-list">
+          <li>Introduce lead supervisor and regular crew to board contact</li>
+          <li>Walk the property with the crew before first service</li>
+          <li>Establish escalation contacts and communication preferences</li>
+        </ul>
+      </div>
+      <div>
+        <p class="col-label">Communication Cadence</p>
+        <ul class="copy-list">
+          <li>Monthly service reports emailed to board contact</li>
+          <li>Quarterly account manager site visits</li>
+          <li>Annual contract review meeting with management</li>
+          <li>24-hour response commitment on all service tickets</li>
+        </ul>
+        <p class="col-label" style="margin-top:20px;">Juniper Sync Onboarding</p>
+        <ul class="copy-list">
+          <li>Account setup for Juniper Sync work order portal</li>
+          <li>Training session for property manager and board</li>
+          <li>Resident communication template provided for distribution</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">9</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 10 — CUSTOMER CARE                                                -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <p class="eyebrow">Customer Care</p>
+    <h1 class="page-title">People Make the Difference</h1>
+    <p class="lede">We understand that for many residents, speaking in person with a manager is preferable. For this reason, a manager always accompanies Juniper crews and is available on-site for communication and problem-solving.</p>
+    <div class="photo-hero" style="height:200px;margin:14px calc(-1 * 55.7px);">
+      <span>📸</span>
+    </div>
+    <div class="two-col" style="margin-top:18px;">
+      <div>
+        <p class="col-label" style="color:var(--jn-green);">In-House Customer Care Team</p>
+        <p style="font-size:10.5px;">We have created a dedicated department to support residents, account managers, and field teams. Multiple channels ensure you can always reach a live person who knows your property.</p>
+      </div>
+      <div>
+        <p class="col-label">Reach Us</p>
+        <ul class="copy-list">
+          <li><strong>Visit:</strong> juniperlandscaping.com/sync</li>
+          <li><strong>Email:</strong> customercare@juniperlandscaping.com</li>
+          <li><strong>Call:</strong> (561) 555-0100 — M–F, 7am–6pm</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">10</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 11 — MEET OUR TEAM                                                -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <p class="eyebrow">Your Juniper Team</p>
+    <h1 class="page-title">Meet Our Team</h1>
+    <div class="team-grid">
+      <div class="team-card">
+        <div class="avatar">👤</div>
+        <div class="tm-name">Marco Rivera</div>
+        <div class="tm-title">Branch Manager</div>
+      </div>
+      <div class="team-card">
+        <div class="avatar">👤</div>
+        <div class="tm-name">Angela Torres</div>
+        <div class="tm-title">Account Manager</div>
+      </div>
+      <div class="team-card">
+        <div class="avatar">👤</div>
+        <div class="tm-name">Derek Simmons</div>
+        <div class="tm-title">Lead Supervisor</div>
+      </div>
+      <div class="team-card">
+        <div class="avatar">👤</div>
+        <div class="tm-name">Sandra Pham</div>
+        <div class="tm-title">Irrigation Specialist</div>
+      </div>
+      <div class="team-card">
+        <div class="avatar">👤</div>
+        <div class="tm-name">Kevin Grant</div>
+        <div class="tm-title">Crew Leader</div>
+      </div>
+      <div class="team-card">
+        <div class="avatar">👤</div>
+        <div class="tm-name">Lena Dubois</div>
+        <div class="tm-title">Horticulturist</div>
+      </div>
+      <div class="team-card">
+        <div class="avatar">👤</div>
+        <div class="tm-name">Carlos Hernandez</div>
+        <div class="tm-title">Business Dev. Manager</div>
+      </div>
+      <div class="team-card">
+        <div class="avatar">👤</div>
+        <div class="tm-name">Patricia Cole</div>
+        <div class="tm-title">Customer Care</div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">11</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 12 — CLIENT REFERENCES                                            -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <h1 class="page-title caps alt">Client References</h1>
+    <div class="ref-list">
+      <div class="ref-entry">
+        <p><strong>Name:</strong> Pointe Jupiter Yacht Club</p>
+        <p><strong>Services Provided:</strong> Full-service landscape maintenance, irrigation management, annual color installation</p>
+        <p><strong>Client Information:</strong> Robert Kaufmann, Property Manager</p>
+        <ul class="ref-sub">
+          <li><strong>Phone Number:</strong> (561) 744-0001</li>
+          <li><strong>Email:</strong> rkaufmann@pointejupiter.com</li>
+          <li><strong>Address:</strong> 100 Yacht Club Dr., Jupiter, FL 33477</li>
+        </ul>
+        <p><strong>Client Since:</strong> 2018</p>
+      </div>
+      <div class="ref-entry">
+        <hr class="ref-divider">
+        <p><strong>Name:</strong> Hyatt Place — Fort Lauderdale</p>
+        <p><strong>Services Provided:</strong> Commercial landscape maintenance, mulch, tree trimming</p>
+        <p><strong>Client Information:</strong> Diane Walsh, General Manager</p>
+        <ul class="ref-sub">
+          <li><strong>Phone Number:</strong> (954) 200-8800</li>
+          <li><strong>Email:</strong> d.walsh@hyattplace-ftl.com</li>
+        </ul>
+        <p><strong>Client Since:</strong> 2020</p>
+      </div>
+      <div class="ref-entry">
+        <hr class="ref-divider">
+        <p><strong>Name:</strong> East County Middle School — Palm Beach County</p>
+        <p><strong>Services Provided:</strong> Grounds maintenance, turf management, irrigation service</p>
+        <p><strong>Client Information:</strong> Luis Fernandez, Facilities Director</p>
+        <ul class="ref-sub">
+          <li><strong>Phone Number:</strong> (561) 996-4100</li>
+          <li><strong>Email:</strong> luis.fernandez@palmbeachschools.org</li>
+        </ul>
+        <p><strong>Client Since:</strong> 2019</p>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">12</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 13 — INSURANCE                                                    -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <h1 class="page-title">Insurance</h1>
+    <p class="lede">Juniper Landscaping carries comprehensive commercial insurance coverage to protect our clients, their properties, and our employees. All policies are current and certificates are available upon request.</p>
+    <div class="insurance-block">
+      <p class="col-label" style="margin-top:0;color:var(--jn-green);">Coverage Summary</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
+        <div>
+          <p style="font-weight:700;font-size:11px;color:var(--jn-ink);">General Liability</p>
+          <p style="font-size:10.5px;">$2,000,000 per occurrence / $4,000,000 aggregate</p>
+        </div>
+        <div>
+          <p style="font-weight:700;font-size:11px;color:var(--jn-ink);">Workers' Compensation</p>
+          <p style="font-size:10.5px;">Statutory limits — all employees and field crew</p>
+        </div>
+        <div>
+          <p style="font-weight:700;font-size:11px;color:var(--jn-ink);">Commercial Auto</p>
+          <p style="font-size:10.5px;">$1,000,000 combined single limit — all fleet vehicles</p>
+        </div>
+        <div>
+          <p style="font-weight:700;font-size:11px;color:var(--jn-ink);">Umbrella / Excess Liability</p>
+          <p style="font-size:10.5px;">$5,000,000 excess over primary policies</p>
+        </div>
+      </div>
+    </div>
+    <p style="margin-top:20px;font-size:10px;color:#666;">Coral Bay HOA will be named as an Additional Insured on the General Liability and Commercial Auto policies. A certificate of insurance naming the HOA will be provided within 5 business days of contract execution.</p>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">13</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 14 — LICENSES & CERTIFICATIONS                                    -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond">
+  <div class="well">
+    <h1 class="page-title">Licenses &amp; Certifications</h1>
+    <p class="lede">All Juniper services are performed by licensed professionals in compliance with Florida Department of Agriculture and Consumer Services requirements.</p>
+    <div class="license-grid">
+      <div class="license-card">
+        <div class="lic-name">Landscape Contractor</div>
+        <div class="lic-number">License #LC27000123</div>
+        <div class="lic-holder">Marco Rivera — Branch Manager</div>
+      </div>
+      <div class="license-card">
+        <div class="lic-name">Certified Pesticide Applicator</div>
+        <div class="lic-number">Cert. #JA40004567</div>
+        <div class="lic-holder">Lena Dubois — Horticulturist</div>
+      </div>
+      <div class="license-card">
+        <div class="lic-name">Irrigation Contractor</div>
+        <div class="lic-number">License #IC1700890</div>
+        <div class="lic-holder">Sandra Pham — Irrigation Spec.</div>
+      </div>
+      <div class="license-card">
+        <div class="lic-name">Certified Arborist</div>
+        <div class="lic-number">ISA Cert. #FL-7234A</div>
+        <div class="lic-holder">Derek Simmons — Lead Supervisor</div>
+      </div>
+      <div class="license-card">
+        <div class="lic-name">Pest Control Operator</div>
+        <div class="lic-number">License #PCO-2244</div>
+        <div class="lic-holder">Fort Lauderdale Branch</div>
+      </div>
+      <div class="license-card">
+        <div class="lic-name">FL Dept. Agriculture</div>
+        <div class="lic-number">Registration #FL-AGR-0088</div>
+        <div class="lic-holder">Juniper Landscaping, Inc.</div>
+      </div>
+    </div>
+    <div style="margin-top:20px;padding:12px 16px;background:#f0faf4;border-left:3px solid var(--jn-green);">
+      <p style="font-size:10px;color:#374151;margin:0;">All licenses are current and in good standing. Copies of individual license certificates are available upon request. Juniper maintains a compliance calendar with automated renewal reminders 90 days prior to expiration.</p>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">14</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 15 — CONTRACT: LANDSCAPE MAINTENANCE AGREEMENT — SCOPE           -->
+<!-- (data-testid="page-contract-scope")                                    -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond" data-testid="page-contract-scope">
+  <div class="well">
+    <h1 class="page-title" style="font-size:22px;">Landscape Maintenance Agreement</h1>
+
+    <div class="contract-meta">
+      <div class="contract-meta-item"><strong>Client:</strong> Coral Bay HOA</div>
+      <div class="contract-meta-item"><strong>Contract #:</strong> JN-1001</div>
+      <div class="contract-meta-item"><strong>Aspire #:</strong> CB-2026-001</div>
+      <div class="contract-meta-item"><strong>Service Start:</strong> January 1, 2027</div>
+    </div>
+
+    <p class="contract-intro">
+      This agreement outlines the scope of landscape maintenance services to be provided by Juniper Landscaping.
+      Services will be performed in a professional manner using commercial-grade equipment and trained personnel.
+    </p>
+
+    <table class="scope-table">
+      <thead>
+        <tr>
+          <th>Service</th>
+          <th>Scope of Work</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Section 1 -->
+        <tr class="section-hdr">
+          <td colspan="2">Section 1 — Main Property (342,000 sq ft)</td>
+        </tr>
+        <tr>
+          <td class="svc-label">Mowing &amp; Edging<br><span style="font-weight:400;font-size:8.5px;color:#666;">12×/yr</span></td>
+          <td>Juniper will mow all turf areas on the property from March through October. During the months of November through February, mowing will be performed on an as-needed basis to maintain a neat and professional appearance. All mowing will be performed with commercial-grade equipment, and clippings will be dispersed evenly to promote a healthy turf. String trimming and edging will be performed around all hardscape, landscape beds, and other obstacles to provide a clean, finished appearance.</td>
+        </tr>
+        <tr>
+          <td class="svc-label">Landscape Bed Maintenance<br><span style="font-weight:400;font-size:8.5px;color:#666;">12×/yr</span></td>
+          <td>Juniper will maintain all landscape beds by removing weeds, edging bed borders, and cultivating mulch or groundcover as needed. Beds will be kept neat and free of debris to showcase plant materials and maintain a professional appearance.</td>
+        </tr>
+        <tr>
+          <td class="svc-label">Fertilization<br><span style="font-weight:400;font-size:8.5px;color:#666;">4×/yr</span></td>
+          <td>Juniper will apply a balanced, slow-release fertilizer to all turf areas to promote healthy, vigorous growth and a rich green color. Applications will be timed to align with the growing season and will be performed by licensed applicators in accordance with state regulations.</td>
+        </tr>
+        <tr>
+          <td class="svc-label">Weed Control<br><span style="font-weight:400;font-size:8.5px;color:#666;">6×/yr</span></td>
+          <td>Juniper will apply pre-emergent and post-emergent herbicides to control weeds in turf and landscape beds. Applications will be performed by licensed technicians using EPA-approved products, and all work will comply with state and local regulations.</td>
+        </tr>
+        <tr>
+          <td class="svc-label">Pest Control<br><span style="font-weight:400;font-size:8.5px;color:#666;">4×/yr</span></td>
+          <td>Juniper will monitor for and treat common landscape pests, including insects, fungi, and diseases. Treatments will be applied by licensed technicians using integrated pest management (IPM) principles to minimize environmental impact while protecting plant health.</td>
+        </tr>
+        <!-- Section 2 -->
+        <tr class="section-hdr">
+          <td colspan="2">Section 2 — Entrance &amp; Amenity Areas (28,500 sq ft)</td>
+        </tr>
+        <tr>
+          <td class="svc-label">Shrub &amp; Hedge Trimming<br><span style="font-weight:400;font-size:8.5px;color:#666;">6×/yr</span></td>
+          <td>Juniper will prune and shape all shrubs and hedges to maintain their natural form, promote healthy growth, and ensure proper clearance from buildings and walkways. Pruning will be performed by trained technicians using industry best practices, and all debris will be removed from the property.</td>
+        </tr>
+        <tr>
+          <td class="svc-label">Irrigation System Maintenance<br><span style="font-weight:400;font-size:8.5px;color:#666;">12×/yr</span></td>
+          <td>Juniper will inspect and maintain the irrigation system to ensure proper operation and efficient water use. Services include adjusting spray heads, repairing leaks, replacing broken components, and programming controllers for optimal watering schedules. Monthly walk-throughs will identify issues before they impact plant health.</td>
+        </tr>
+        <tr>
+          <td class="svc-label" style="color:#8a6a3a;">Mulch Application<br><span style="font-weight:400;font-size:8.5px;color:#999;">One-time</span></td>
+          <td>Juniper will install premium mulch in all landscape beds to a depth of 2–3 inches. Mulch conserves soil moisture, suppresses weed growth, and provides a finished appearance. Existing mulch will be cultivated prior to application. <em style="font-size:8.5px;color:#888;">(Invoiced separately — not included in monthly base.)</em></td>
+        </tr>
+        <tr>
+          <td class="svc-label" style="color:#8a6a3a;">Annual Flower Installation<br><span style="font-weight:400;font-size:8.5px;color:#999;">One-time</span></td>
+          <td>Juniper will install seasonal annual flowers in designated beds and planters. Plant material selected for color, bloom time, and climate performance. Beds will be prepared with soil amendments and all installations will be watered-in upon completion. <em style="font-size:8.5px;color:#888;">(Invoiced separately — not included in monthly base.)</em></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">15</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 16 — CONTRACT: SUMMARY + PAYMENT SCHEDULE                        -->
+<!-- (data-testid="page-contract-summary")                                  -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page frond" data-testid="page-contract-summary">
+  <div class="well">
+    <h1 class="page-title" style="font-size:22px;margin-bottom:20px;">Contract Summary &amp; Payment Schedule</h1>
+
+    <!-- Service line breakdown -->
+    <div class="sec-title-bar" style="margin-bottom:0;">SERVICE LINE BREAKDOWN</div>
+    <table class="line-table">
+      <thead>
+        <tr>
+          <th>Service</th>
+          <th>Property Section</th>
+          <th class="right">Sq Ft</th>
+          <th class="right">Occurs/yr</th>
+          <th class="right">Price/Occ</th>
+          <th class="right">Extended</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Mowing &amp; Edging</td><td>Main</td>
+          <td class="right">342,000</td><td class="right">12</td>
+          <td class="right">$1,197.00</td><td class="right">$14,364.00</td>
+        </tr>
+        <tr>
+          <td>Landscape Bed Maint.</td><td>Main</td>
+          <td class="right">342,000</td><td class="right">12</td>
+          <td class="right">$684.00</td><td class="right">$8,208.00</td>
+        </tr>
+        <tr>
+          <td>Fertilization</td><td>Main</td>
+          <td class="right">342,000</td><td class="right">4</td>
+          <td class="right">$1,026.00</td><td class="right">$4,104.00</td>
+        </tr>
+        <tr>
+          <td>Weed Control</td><td>Main</td>
+          <td class="right">342,000</td><td class="right">6</td>
+          <td class="right">$684.00</td><td class="right">$4,104.00</td>
+        </tr>
+        <tr>
+          <td>Pest Control</td><td>Main</td>
+          <td class="right">342,000</td><td class="right">4</td>
+          <td class="right">$855.00</td><td class="right">$3,420.00</td>
+        </tr>
+        <tr>
+          <td>Shrub &amp; Hedge Trimming</td><td>Entrance</td>
+          <td class="right">28,500</td><td class="right">6</td>
+          <td class="right">$398.00</td><td class="right">$2,388.00</td>
+        </tr>
+        <tr>
+          <td>Irrigation Maintenance</td><td>Entrance</td>
+          <td class="right">28,500</td><td class="right">12</td>
+          <td class="right">$285.00</td><td class="right">$3,420.00</td>
+        </tr>
+        <tr style="color:#8a6a3a;">
+          <td><em>Mulch Application</em></td><td><em>Entrance</em></td>
+          <td class="right"><em>28,500</em></td><td class="right"><em>1</em></td>
+          <td class="right"><em>$4,200.00</em></td><td class="right"><em>$4,200.00</em></td>
+        </tr>
+        <tr style="color:#8a6a3a;">
+          <td><em>Annual Flower Install.</em></td><td><em>Entrance</em></td>
+          <td class="right"><em>28,500</em></td><td class="right"><em>1</em></td>
+          <td class="right"><em>$8,600.00</em></td><td class="right"><em>$8,600.00</em></td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="5">Recurring Annual Total</td>
+          <td class="right">$40,008.00</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <!-- CONTRACT SUMMARY -->
+    <div class="sec-title-bar" style="margin-bottom:0;">CONTRACT SUMMARY</div>
+    <table class="totals-table">
+      <tbody>
+        <tr>
+          <td class="t-label">Extended Price (Recurring Services — Annual):</td>
+          <td class="t-amount">$40,008.00</td>
+        </tr>
+        <tr>
+          <td class="t-label">One-Time Services (Mulch + Annuals — invoiced separately):</td>
+          <td class="t-amount">$12,800.00</td>
+        </tr>
+        <tr>
+          <td class="t-label">Sales Tax:</td>
+          <td class="t-amount">$0.00</td>
+        </tr>
+        <tr class="t-total">
+          <td class="t-label">Total Contract Value (Annual):</td>
+          <td class="t-amount">$52,808.00</td>
+        </tr>
+        <tr class="t-monthly">
+          <td class="t-label">Monthly Base Amount (Recurring Services ÷ 12):</td>
+          <td class="t-amount">$3,334.00</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- PAYMENT SCHEDULE -->
+    <div class="sec-title-bar" style="margin-bottom:0;">PAYMENT SCHEDULE — 12-Month Recurring Base (Starting January 2027)</div>
+    <div class="schedule-grid">
+      <div class="sched-cell"><div class="m-name">January</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">February</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">March</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">April</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">May</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">June</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">July</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">August</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">September</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">October</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">November</div><div class="m-amt">$3,334.00</div></div>
+      <div class="sched-cell"><div class="m-name">December</div><div class="m-amt">$3,334.00</div></div>
+    </div>
+    <p class="sched-note">* One-time services (Mulch Application and Annual Flower Installation — $12,800 total) will be invoiced separately upon completion and are not reflected in the monthly schedule above. Monthly amounts may vary by $0.01 due to cent-rounding distribution.</p>
+
+    <!-- Signature block -->
+    <div class="sig-grid">
+      <div class="sig-party">
+        <div class="sig-party-label">Authorized by Client — Coral Bay HOA</div>
+        <div class="sig-line"></div>
+        <div class="sig-line-label">Signature</div>
+        <div class="sig-line"></div>
+        <div class="sig-line-label">Printed Name &amp; Title</div>
+        <div class="sig-line" style="height:20px;"></div>
+        <div class="sig-line-label">Date</div>
+      </div>
+      <div class="sig-party">
+        <div class="sig-party-label">Authorized by Juniper Landscaping</div>
+        <div class="sig-line"></div>
+        <div class="sig-line-label">Signature</div>
+        <div class="sig-line"></div>
+        <div class="sig-line-label">Printed Name &amp; Title</div>
+        <div class="sig-line" style="height:20px;"></div>
+        <div class="sig-line-label">Date</div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar">
+    <span class="footer-logo">Juniper</span>
+    <span class="footer-site">juniperlandscaping.com</span>
+    <span class="footer-pg">16</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 17 — CLOSING / THANK YOU                                          -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page closing-page">
+  <div class="well">
+    <div class="closing-logo">JUNIPER</div>
+    <div class="closing-tagline">Landscape &nbsp;·&nbsp; Horticulture &nbsp;·&nbsp; Technology</div>
+    <div class="closing-thank">Thank You</div>
+    <div class="closing-sub">We look forward to serving Coral Bay HOA.</div>
+    <div style="margin-top:40px;display:flex;flex-direction:column;gap:8px;align-items:center;">
+      <p style="color:rgba(255,255,255,.65);font-size:11px;">Carlos Hernandez · Business Development Manager</p>
+      <p style="color:rgba(255,255,255,.55);font-size:10px;">(561) 555-0142 · carlos.hernandez@juniperlandscaping.com</p>
+      <p style="color:rgba(255,255,255,.4);font-size:10px;margin-top:8px;">juniperlandscaping.com</p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -114,6 +114,15 @@ export interface LicenseCertificationGroups {
   certifications: LicenseCertification[]
 }
 
+/** The current certificate of insurance for a branch (or company-wide fallback). */
+export interface InsuranceCert {
+  id: string
+  objectKey: string
+  expiryDate: string
+  label: string | null
+  uploadedAt: string
+}
+
 export interface ClientReference {
   id: string
   aspireBranchId: number | null   // Amendment A.1: null = usable company-wide
@@ -158,6 +167,9 @@ export interface OrgChartInput {
 /** The 30-60-90 optional page: Day Zero/30 render from a static seed; the rest are free text per proposal. */
 export interface StartupPlanInput {
   included: boolean
+  /** Maximum day milestone to include. Controls which phase inputs appear in the form
+   *  and which cards render on the page. Day 120+ and Ongoing are always optional extras. */
+  planMaxDays: 30 | 60 | 90
   day60: string[]
   day90: string[]
   day120Plus: string[]

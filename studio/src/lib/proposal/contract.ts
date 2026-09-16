@@ -13,7 +13,7 @@ import type { Estimate } from '@/types/estimating'
 export interface ContractRow {
   /** Service label from section_services.label (verbatim, including units) */
   label: string
-  /** Number of occurrences per year, or null for one-time items */
+  /** Occurrences per year, or null for items explicitly marked one-time */
   occurs: number | null
   /** Price per occurrence in cents */
   priceEachCents: number
@@ -58,7 +58,15 @@ export function buildContractRows(estimate: Estimate): ContractRow[] {
     for (const svc of sortedServices) {
       const rate = svc.unitSellCents ?? 0
       const complexity = svc.complexityPct ?? 0
-      const isRecurring = svc.billingType === 'recurring'
+      // All maintenance work bundles into the contract cost and is broken into
+      // the 12-month payment schedule. One-time is the marked exception, not
+      // the default — so anything NOT explicitly one-time is recurring.
+      //
+      // Testing `=== 'recurring'` instead would drop every unresolved line
+      // (a hand-entered line has no catalog item to derive a billing type
+      // from, so it arrives as null) out of the payment-schedule base while
+      // still counting it in the contract total.
+      const isRecurring = svc.billingType !== 'one_time'
 
       // priceEachCents = maintServiceLine(..., qty=1, ...)
       const priceEach = priceEachCents(section.squareFeet, rate, complexity)
@@ -94,7 +102,8 @@ export function buildContractTotals(rows: ContractRow[]): ContractTotals {
 
 /**
  * Build 12-month payment schedule from contract rows and service start date.
- * Base is the sum of extPriceCents for recurring rows only.
+ * Base is the sum of extPriceCents for recurring rows — which is every row
+ * except those explicitly marked one-time.
  * Remainder is distributed: the first `rem` months get `per + 1`.
  */
 export function buildPaymentSchedule(

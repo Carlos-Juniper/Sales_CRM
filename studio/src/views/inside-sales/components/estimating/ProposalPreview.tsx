@@ -39,7 +39,7 @@ import { useEffect } from 'react'
 import '@/styles/proposal-print.css'
 import { COMPANY_INFO } from '@/lib/constants'
 import { nearestBranches } from '@/lib/proposal/proximity'
-import { useProposalConfig, useProposalLicenses } from '@/hooks/useProposals'
+import { useProposalConfig, useProposalLicenses, useProposalInsurance } from '@/hooks/useProposals'
 import { applyProposalAssetCssVars } from '@/lib/proposal/assets'
 import { naturalBodyChapterKeys, resolveChapterOrder, chapterTitle } from '@/lib/proposal/chapters'
 import { useProposalAppendedDocuments } from '@/hooks/useProposalDocument'
@@ -136,13 +136,16 @@ export function ProposalPreview({
     applyProposalAssetCssVars()
   }, [])
 
-  const { branches, branchCoverage, insurance } = useProposalConfig()
+  const { branches, branchCoverage } = useProposalConfig()
   // Branch scoping: the estimate carries aspireBranchId (Slice 8), same source
   // ProposalBuilder uses to scope team members and client references. Absent
   // for estimate-optional proposals (WS2), in which case the backend falls
   // back to company-wide (aspire_branch_id IS NULL) rows only.
   const aspireBranchId: number | undefined = estimate?.aspireBranchId ?? undefined
   const { data: credentials } = useProposalLicenses(
+    aspireBranchId !== undefined ? { aspireBranchId } : undefined,
+  )
+  const { data: insuranceCert } = useProposalInsurance(
     aspireBranchId !== undefined ? { aspireBranchId } : undefined,
   )
 
@@ -207,12 +210,14 @@ export function ProposalPreview({
     // Juniper Cares is its own section (§6), rendered after the service detail
     // pages and before Start Up Communication.
     'juniper-cares': [{ key: 'juniper-cares', node: <JuniperCaresPage /> }],
-    // Contract chapter (Landscape Maintenance Agreement): only for maintenance
-    // estimates with lifecycle approved or won.
+    // Contract chapter (Landscape Maintenance Agreement): once an estimate
+    // reaches approved status (ready for client signature) or is won.
+    // Gates on status, not lifecycle — 'approved' is a status value; lifecycle
+    // only has 'bidding' | 'won' and approved never appears there.
     'contract':
       estimate && estimate.estimateType === 'maintenance' &&
-      (estimate.lifecycle === 'approved' || estimate.lifecycle === 'won')
-        ? [{ key: 'contract', node: <ContractPage estimate={estimate} /> }]
+      (estimate.status === 'approved' || estimate.lifecycle === 'won')
+        ? [{ key: 'contract', node: <ContractPage estimate={estimate} lead={lead} /> }]
         : [],
     'startup-communication': [{ key: 'startup-comm', node: <StartupCommunication /> }],
     'customer-care': [{ key: 'customer-care', node: <CustomerCare /> }],
@@ -247,7 +252,7 @@ export function ProposalPreview({
       node: <MeetOurTeam members={group} pageIndex={i} totalPages={all.length} />,
     })),
     'references': [{ key: 'references', node: <ClientReferencesPage refs={clientReferences} /> }],
-    'insurance': [{ key: 'insurance', node: <InsurancePage cert={insurance} /> }],
+    'insurance': [{ key: 'insurance', node: <InsurancePage cert={insuranceCert ?? null} /> }],
     'licenses': [{
       key: 'licenses',
       node: (
@@ -275,7 +280,7 @@ export function ProposalPreview({
     hasContract:
       estimate != null &&
       estimate.estimateType === 'maintenance' &&
-      (estimate.lifecycle === 'approved' || estimate.lifecycle === 'won'),
+      (estimate.status === 'approved' || estimate.lifecycle === 'won'),
   })
   const orderedChapterKeys = resolveChapterOrder(naturalChapterKeys, chapterOrder)
 

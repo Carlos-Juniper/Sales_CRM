@@ -139,6 +139,7 @@ function makeDefaultFormState(signerUserId: string): ProposalFormState {
     },
     startupPlan: {
       included: false,
+      planMaxDays: 30,
       day60: [],
       day90: [],
       day120Plus: [],
@@ -499,30 +500,52 @@ function ProposalFormStep({
           >
             Start Up Plan — free-text entries
           </h3>
-          <p className="mb-3 text-[11px] text-[hsl(var(--muted-fg))]">
-            Day Zero and Day 30 are static. Fill in Day 60, 90, 120+, and Ongoing below.
+          <p className="mb-2 text-[11px] text-[hsl(var(--muted-fg))]">
+            Day Zero and Day 30 are always included (static copy). Select how far out to plan:
           </p>
+          <fieldset className="mb-4">
+            <legend className="mb-1.5 text-[11px] font-semibold text-[hsl(var(--fg))]">Include phases up to</legend>
+            <div className="flex gap-4">
+              {([30, 60, 90] as const).map((days) => (
+                <label key={days} className="flex cursor-pointer items-center gap-1.5 text-[12px]">
+                  <input
+                    type="radio"
+                    name="planMaxDays"
+                    value={days}
+                    checked={(formState.startupPlan.planMaxDays ?? 30) === days}
+                    onChange={() => patchStartupPlan({ planMaxDays: days })}
+                    data-testid={`startup-max-days-${days}`}
+                  />
+                  Day {days}
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <div className="flex flex-col gap-4">
+            {(formState.startupPlan.planMaxDays ?? 30) >= 60 && (
+              <BulletListInput
+                label="Day 60"
+                items={formState.startupPlan.day60}
+                onChange={(day60) => patchStartupPlan({ day60 })}
+                data-testid="startup-day60"
+              />
+            )}
+            {(formState.startupPlan.planMaxDays ?? 30) >= 90 && (
+              <BulletListInput
+                label="Day 90"
+                items={formState.startupPlan.day90}
+                onChange={(day90) => patchStartupPlan({ day90 })}
+                data-testid="startup-day90"
+              />
+            )}
             <BulletListInput
-              label="Day 60"
-              items={formState.startupPlan.day60}
-              onChange={(day60) => patchStartupPlan({ day60 })}
-              data-testid="startup-day60"
-            />
-            <BulletListInput
-              label="Day 90"
-              items={formState.startupPlan.day90}
-              onChange={(day90) => patchStartupPlan({ day90 })}
-              data-testid="startup-day90"
-            />
-            <BulletListInput
-              label="Day 120+"
+              label="Day 120+ (optional)"
               items={formState.startupPlan.day120Plus}
               onChange={(day120Plus) => patchStartupPlan({ day120Plus })}
               data-testid="startup-day120plus"
             />
             <BulletListInput
-              label="Ongoing"
+              label="Ongoing (optional)"
               items={formState.startupPlan.ongoing}
               onChange={(ongoing) => patchStartupPlan({ ongoing })}
               data-testid="startup-ongoing"

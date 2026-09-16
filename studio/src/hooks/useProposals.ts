@@ -6,8 +6,9 @@
 // all accept filter params (aspireBranchId, teamType, regionId), so they
 // cannot be collapsed into a single parameterless Promise.all the way
 // useEstimatingConfig does. Instead:
-//   - useProposalConfig()  →  branches + insurance (parameter-free, combined)
-//   - useTeamMembers(params?) / useClientReferences(params?) / usePortfolio(params?)
+//   - useProposalConfig()  →  branches (parameter-free, combined)
+//   - useTeamMembers(params?) / useClientReferences(params?) / usePortfolio(params?) /
+//     useProposalLicenses(params?) / useProposalInsurance(params?)
 //     →  individual parameterized hooks so callers can scope by branch/region
 // ---------------------------------------------------------------------------
 
@@ -27,6 +28,7 @@ import type {
   BranchCoverageGroup,
   BranchProfile,
   ClientReference,
+  InsuranceCert,
   LicenseCertificationGroups,
   PortfolioProperty,
   ProposalRender,
@@ -50,42 +52,31 @@ export const PROPOSAL_CONFIG_KEY = 'proposals-config'
 export interface ProposalStaticConfig {
   branches: BranchProfile[]
   branchCoverage: BranchCoverageGroup[]
-  insurance: {
-    id: string
-    objectKey: string
-    expiryDate: string
-    label: string | null
-    uploadedAt: string
-  } | null
   loaded: boolean
 }
 
 const FALLBACK_PROPOSAL_CONFIG: ProposalStaticConfig = {
   branches: [],
   branchCoverage: [],
-  insurance: null,
   loaded: false,
 }
 
 async function fetchStaticConfig(): Promise<ProposalStaticConfig> {
   // Each endpoint catches independently — one failing call cannot blank the other.
-  const [branches, branchCoverage, insurance] = await Promise.all([
+  const [branches, branchCoverage] = await Promise.all([
     proposalConfigApi.branches().catch(() => null),
     proposalConfigApi.branchCoverage().catch(() => null),
-    proposalConfigApi.insurance().catch(() => null),
   ])
   return {
     branches: branches ?? [],
     branchCoverage: branchCoverage ?? [],
-    // insurance() returns null when no cert has been uploaded yet — treat
-    // a fetch error the same way so the UI degrades gracefully.
-    insurance: insurance ?? null,
-    loaded: branches !== null || branchCoverage !== null || insurance !== null,
+    loaded: branches !== null || branchCoverage !== null,
   }
 }
 
 /**
- * Branches + insurance certificate — no filter params, app-wide cached.
+ * Branches — no filter params, app-wide cached. Insurance moved to its own
+ * branch-aware hook (useProposalInsurance) since it now varies per estimate.
  * Follows the same placeholderData + staleTime pattern as useEstimatingConfig.
  * Invalidate with queryClient.invalidateQueries({ queryKey: [PROPOSAL_CONFIG_KEY] }).
  */
@@ -155,6 +146,19 @@ export function useProposalLicenses(params?: { aspireBranchId?: number }) {
   return useQuery<LicenseCertificationGroups>({
     queryKey: ['proposals', 'config', 'licenses', params?.aspireBranchId ?? null],
     queryFn: () => proposalConfigApi.licenses(params),
+    staleTime: 5 * 60_000,
+  })
+}
+
+/**
+ * Current certificate of insurance for a branch. A branch-scoped cert wins
+ * over the company-wide fallback when both exist (server-side priority).
+ * Query key: ['proposals', 'config', 'insurance', aspireBranchId]
+ */
+export function useProposalInsurance(params?: { aspireBranchId?: number }) {
+  return useQuery<InsuranceCert | null>({
+    queryKey: ['proposals', 'config', 'insurance', params?.aspireBranchId ?? null],
+    queryFn: () => proposalConfigApi.insurance(params),
     staleTime: 5 * 60_000,
   })
 }

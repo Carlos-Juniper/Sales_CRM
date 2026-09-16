@@ -385,6 +385,11 @@ def detect_013(conn) -> bool:
     return column_exists(conn, "section_services", "discipline")
 
 
+def detect_046(conn) -> bool:
+    """046 applied ↔ section_services.billing_type column exists."""
+    return column_exists(conn, "section_services", "billing_type")
+
+
 def detect_025(conn) -> bool:
     """
     025 applied ↔ estimates.takeoff_changed_at exists.
@@ -792,6 +797,7 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "044_contract_generator":                     detect_044,
+    "046_section_services_billing_type":          detect_046,
 }
 
 

@@ -61,6 +61,10 @@ function makeSeededQueryClient(fixture: ReturnType<typeof makeDevProposalFixture
     ['proposals', 'config', 'licenses', DEV_ASPIRE_BRANCH_ID],
     fixture.licenses,
   )
+  client.setQueryData(
+    ['proposals', 'config', 'insurance', DEV_ASPIRE_BRANCH_ID],
+    fixture.insurance,
+  )
   return client
 }
 

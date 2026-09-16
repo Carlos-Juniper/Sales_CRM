@@ -25,6 +25,7 @@ import type {
   BranchCoverageGroup,
   BranchProfile,
   ClientReference,
+  InsuranceCert,
   LicenseCertification,
   LicenseCertificationGroups,
   OrgChartInput,
@@ -61,6 +62,8 @@ export interface DevProposalFixture {
   config: ProposalStaticConfig
   /** Seeds ['proposals','config','licenses', DEV_ASPIRE_BRANCH_ID]. */
   licenses: LicenseCertificationGroups
+  /** Seeds ['proposals','config','insurance', DEV_ASPIRE_BRANCH_ID]. */
+  insurance: InsuranceCert | null
 }
 
 // ---------------------------------------------------------------------------
@@ -404,6 +407,7 @@ const ORG_CHART: OrgChartInput = {
 
 const STARTUP_PLAN: StartupPlanInput = {
   included: true,
+  planMaxDays: 90,
   day60: [
     'Complete full site walk with the board and document existing conditions.',
     'Audit every irrigation zone and log controller programming.',
@@ -489,16 +493,16 @@ export function makeDevProposalFixture(): DevProposalFixture {
     config: {
       branches: [...BRANCHES],
       branchCoverage: [...BRANCH_COVERAGE],
-      insurance: {
-        id: 'ins-dev-001',
-        // Empty key keeps useProposalMediaUrl disabled (enabled: !!objectKey),
-        // so the insurance page shows its prose fallback and fires no request.
-        objectKey: '',
-        expiryDate: '2027-03-31',
-        label: 'General Liability',
-        uploadedAt: '2026-01-01T00:00:00Z',
-      },
       loaded: true,
+    },
+    insurance: {
+      id: 'ins-dev-001',
+      // Empty key keeps useProposalMediaUrl disabled (enabled: !!objectKey),
+      // so the insurance page shows its prose fallback and fires no request.
+      objectKey: '',
+      expiryDate: '2027-03-31',
+      label: 'General Liability',
+      uploadedAt: '2026-01-01T00:00:00Z',
     },
     licenses: {
       licenses: [...LICENSES.licenses],

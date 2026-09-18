@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { LEAD_TYPES } from '@/types'
 import type { Lead } from '@/types'
+import { LEAD_TYPE_LABELS } from '@/lib/constants'
 
 interface EditLeadModalProps {
   lead: Lead
@@ -99,7 +100,7 @@ export function EditLeadModal({ lead, open, onClose }: EditLeadModalProps) {
                       : 'border-[hsl(var(--border))] text-[hsl(var(--muted-fg))] hover:border-[#2E7D52]/50'
                   )}
                 >
-                  {t}
+                  {LEAD_TYPE_LABELS[t]}
                 </button>
               ))}
             </div>

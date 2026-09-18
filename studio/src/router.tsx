@@ -11,7 +11,7 @@ import AccountsPage from '@/views/inside-sales/AccountsPage'
 import CommissionsPage from '@/views/inside-sales/CommissionsPage'
 import SalesPerformancePage from '@/views/inside-sales/SalesPerformancePage'
 import { SettingsPage } from '@/views/settings/SettingsPage'
-import { InsideSalesGuard } from '@/guards'
+import { SalesWorkspaceGuard, PublicLeadsGuard, EstimatingGuard } from '@/guards'
 import ProposalPrintRoute from '@/views/inside-sales/components/estimating/ProposalPrintRoute'
 import ProposalPreviewRoute from '@/views/inside-sales/components/estimating/ProposalPreviewRoute'
 
@@ -73,27 +73,27 @@ export const router = createBrowserRouter([
       // Inside Sales
       {
         path: 'inside-sales',
-        element: <InsideSalesGuard><DashboardPage /></InsideSalesGuard>,
+        element: <SalesWorkspaceGuard><DashboardPage /></SalesWorkspaceGuard>,
       },
       {
         path: 'inside-sales/leads',
-        element: <InsideSalesGuard><LeadFeedPage /></InsideSalesGuard>,
+        element: <PublicLeadsGuard><LeadFeedPage /></PublicLeadsGuard>,
       },
       {
         path: 'inside-sales/my-leads',
-        element: <InsideSalesGuard><MyLeadsPage /></InsideSalesGuard>,
+        element: <SalesWorkspaceGuard><MyLeadsPage /></SalesWorkspaceGuard>,
       },
       {
         path: 'inside-sales/bids',
-        element: <InsideSalesGuard><BidTrackerPage /></InsideSalesGuard>,
+        element: <SalesWorkspaceGuard><BidTrackerPage /></SalesWorkspaceGuard>,
       },
       {
         path: 'inside-sales/pipeline',
-        element: <InsideSalesGuard><PipelinePage /></InsideSalesGuard>,
+        element: <SalesWorkspaceGuard><PipelinePage /></SalesWorkspaceGuard>,
       },
       {
         path: 'inside-sales/map',
-        element: <InsideSalesGuard><MapPage /></InsideSalesGuard>,
+        element: <SalesWorkspaceGuard><MapPage /></SalesWorkspaceGuard>,
       },
       // The open estimate + active tab are real URL segments (not local
       // state) so a deep link / refresh / back-navigation never loses them —
@@ -105,35 +105,35 @@ export const router = createBrowserRouter([
       // its default tab, and an open estimate at a specific tab.
       {
         path: 'inside-sales/estimating',
-        element: <InsideSalesGuard><EstimatingPage /></InsideSalesGuard>,
+        element: <EstimatingGuard><EstimatingPage /></EstimatingGuard>,
       },
       {
         path: 'inside-sales/estimating/tab/:tab',
-        element: <InsideSalesGuard><EstimatingPage /></InsideSalesGuard>,
+        element: <EstimatingGuard><EstimatingPage /></EstimatingGuard>,
       },
       {
         path: 'inside-sales/estimating/:estimateId',
-        element: <InsideSalesGuard><EstimatingPage /></InsideSalesGuard>,
+        element: <EstimatingGuard><EstimatingPage /></EstimatingGuard>,
       },
       {
         path: 'inside-sales/estimating/:estimateId/:tab',
-        element: <InsideSalesGuard><EstimatingPage /></InsideSalesGuard>,
+        element: <EstimatingGuard><EstimatingPage /></EstimatingGuard>,
       },
       {
         path: 'inside-sales/accounts',
-        element: <InsideSalesGuard><AccountsPage /></InsideSalesGuard>,
+        element: <SalesWorkspaceGuard><AccountsPage /></SalesWorkspaceGuard>,
       },
       {
         path: 'inside-sales/calendar',
-        element: <InsideSalesGuard><CalendarPage /></InsideSalesGuard>,
+        element: <SalesWorkspaceGuard><CalendarPage /></SalesWorkspaceGuard>,
       },
       {
         path: 'inside-sales/commissions',
-        element: <InsideSalesGuard><CommissionsPage /></InsideSalesGuard>,
+        element: <SalesWorkspaceGuard><CommissionsPage /></SalesWorkspaceGuard>,
       },
       {
         path: 'inside-sales/sales-performance',
-        element: <InsideSalesGuard><SalesPerformancePage /></InsideSalesGuard>,
+        element: <SalesWorkspaceGuard><SalesPerformancePage /></SalesWorkspaceGuard>,
       },
       // Branch Manager (Slice 12: BranchManagerPage deleted; old bookmarks redirect to settings)
       {

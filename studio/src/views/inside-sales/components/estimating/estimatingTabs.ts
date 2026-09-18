@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import type { EstimateType } from '@/types/estimating'
 import type { UserRole } from '@/types'
+import { ESTIMATOR_ROLES, ESTIMATING_NAV_ROLES } from '@/lib/roles'
 
 export type EstimatingTabKey =
   | 'queue' // Estimate Queue
@@ -57,27 +58,21 @@ export interface EstimatingTabConfig {
    * boundary (api/authz.py require_estimate_viewer / require_estimator); this
    * only shapes the tab bar.
    */
-  visibleForRoles: UserRole[]
+  visibleForRoles: readonly UserRole[]
 }
 
 const BOTH: EstimateType[] = ['maintenance', 'install']
 
 // The estimating personas: both estimator disciplines plus the manager-tier
-// approvers who may also edit (Handoff 28), and admin. Mirrors the backend
-// LINE_ITEM_EDIT_ROLES set that gates the estimate-detail surface.
-const ESTIMATING_ROLES: UserRole[] = [
-  'maintenance_estimating',
-  'install_estimating',
-  'manager',
-  'regional_director',
-  'vice_president',
-  'ceo',
-  'admin',
-]
+// approvers who may also edit (Handoff 28), and admin. Reuses the canonical
+// ESTIMATOR_ROLES from lib/roles.ts (mirrors the backend LINE_ITEM_EDIT_ROLES
+// set that gates the estimate-detail surface).
+const ESTIMATING_ROLES = ESTIMATOR_ROLES
 
-// The queue is the ONLY estimating tab a sales user reaches; intake forms are
-// modals launched from it, so sales needs no other tab.
-const QUEUE_ROLES: UserRole[] = [...ESTIMATING_ROLES, 'sales']
+// Everyone who can reach the Estimating page (ESTIMATING_NAV_ROLES) sees at
+// least the queue. This structurally eliminates the empty-tabs fallback bug:
+// no role in ESTIMATING_NAV_ROLES can ever get zero visible tabs.
+const QUEUE_ROLES = ESTIMATING_NAV_ROLES
 
 export const ESTIMATING_TABS: EstimatingTabConfig[] = [
   { key: 'queue', label: 'Estimate Queue', shortLabel: 'Queue', icon: ClipboardList, visibleForTypes: BOTH, visibleForRoles: QUEUE_ROLES },

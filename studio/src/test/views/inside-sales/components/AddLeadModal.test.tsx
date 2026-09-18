@@ -88,33 +88,47 @@ function renderModal(onClose = vi.fn()) {
 // ── Tests ─────────────────────────────────────────────────────────
 
 describe('AddLeadModal — lead type buttons', () => {
-  it('renders HOA, commercial, deathcare, and resort type buttons', () => {
+  it('renders all five lead type buttons with display labels', () => {
     renderModal()
     expect(screen.getByRole('button', { name: 'HOA' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'commercial' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'deathcare' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'resort' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Commercial' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Deathcare' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Resorts' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Healthcare' })).toBeInTheDocument()
   })
 
-  it('renders exactly four lead type buttons (no duplicate commercial)', () => {
+  it('renders exactly five lead type buttons (no duplicates)', () => {
     renderModal()
-    const commercialButtons = screen.getAllByRole('button', { name: 'commercial' })
+    const commercialButtons = screen.getAllByRole('button', { name: 'Commercial' })
     expect(commercialButtons).toHaveLength(1)
   })
 
-  it('selecting deathcare includes it in the submit payload', async () => {
+  it('selecting Deathcare includes it in the submit payload', async () => {
     const user = userEvent.setup()
     renderModal()
 
-    // Select property and branch to enable submission
     await user.click(screen.getByTestId('mock-select-property'))
     await user.selectOptions(screen.getByRole('combobox', { name: /branch/i }), '1')
-    await user.click(screen.getByRole('button', { name: 'deathcare' }))
+    await user.click(screen.getByRole('button', { name: 'Deathcare' }))
     await user.click(screen.getByRole('button', { name: /add lead/i }))
 
     await waitFor(() => expect(mockCreateLead).toHaveBeenCalledTimes(1))
     const payload = mockCreateLead.mock.calls[0][0] as Record<string, unknown>
     expect(payload.lead_type).toBe('deathcare')
+  })
+
+  it('selecting Healthcare stores the raw "healthcare" value in the payload', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    await user.click(screen.getByTestId('mock-select-property'))
+    await user.selectOptions(screen.getByRole('combobox', { name: /branch/i }), '1')
+    await user.click(screen.getByRole('button', { name: 'Healthcare' }))
+    await user.click(screen.getByRole('button', { name: /add lead/i }))
+
+    await waitFor(() => expect(mockCreateLead).toHaveBeenCalledTimes(1))
+    const payload = mockCreateLead.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.lead_type).toBe('healthcare')
   })
 })
 

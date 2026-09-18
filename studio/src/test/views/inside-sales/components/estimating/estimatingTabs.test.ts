@@ -100,6 +100,12 @@ describe('visibleTabs (role-aware visibility — Handoff 50 §2)', () => {
     expect(keys).not.toContain('takeoff')
   })
 
+  it('procurement sees ONLY the queue tab, same as sales', () => {
+    expect(visibleTabs(null, 'procurement').map((t) => t.key)).toEqual(['queue'])
+    expect(visibleTabs('maintenance', 'procurement').map((t) => t.key)).toEqual(['queue'])
+    expect(visibleTabs('install', 'procurement').map((t) => t.key)).toEqual(['queue'])
+  })
+
   it('stays a pure function of config — every returned tab is a config row', () => {
     for (const role of ['sales', 'maintenance_estimating', 'manager'] as const) {
       for (const tab of visibleTabs(null, role)) {

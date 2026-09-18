@@ -10,19 +10,11 @@ import { useUIStore } from '@/store/uiStore'
 import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { LEAD_TYPES } from '@/types'
-import { LEAD_TYPE_LABELS } from '@/lib/constants'
+import { LEAD_TYPE_LABELS, LEAD_TYPE_COLORS } from '@/lib/constants'
 import type { Lead } from '@/types'
 
 const PHOENIX_CENTER: [number, number] = [33.45, -112.07]
 const DEFAULT_ZOOM = 10
-
-const TYPE_COLORS: Record<string, string> = {
-  HOA: '#2E7D52',
-  commercial: '#f59e0b',
-  deathcare: '#64748b',
-  resort: '#3b82f6',
-  healthcare: '#f43f5e',
-}
 
 const STATUS_OPACITY: Record<string, number> = {
   new: 1, contacted: 1, qualified: 1, proposal_sent: 1,
@@ -91,7 +83,7 @@ export default function MapPage() {
                   ? 'text-white border-transparent filter-btn-active'
                   : 'border-[hsl(var(--border))] text-[hsl(var(--muted-fg))] hover:border-[hsl(var(--fg))]'
               )}
-              style={{ '--btn-color': TYPE_COLORS[type] } as React.CSSProperties}
+              style={{ '--btn-color': LEAD_TYPE_COLORS[type].hex } as React.CSSProperties}
             >
               {LEAD_TYPE_LABELS[type]}
             </button>
@@ -125,7 +117,7 @@ export default function MapPage() {
           />
 
           {filteredLeads.map((lead) => {
-            const color = TYPE_COLORS[lead.lead_type] ?? '#6b7280'
+            const color = LEAD_TYPE_COLORS[lead.lead_type].hex
             const r = markerRadius(lead.estimated_contract_value)
             const fillOpacity = STATUS_OPACITY[lead.status] ?? 1
             const isSelected = selectedLeadId === lead.id
@@ -154,10 +146,10 @@ export default function MapPage() {
 
         {/* Legend */}
         <div className="absolute bottom-6 left-3 z-[1000] bg-white/90 backdrop-blur-sm rounded-lg shadow border border-[hsl(var(--border))] px-3 py-2 flex flex-wrap items-center gap-3">
-          {Object.entries(TYPE_COLORS).map(([type, color]) => (
+          {LEAD_TYPES.map((type) => (
             <div key={type} className="flex items-center gap-1.5">
-              <div className="h-3 w-3 rounded-full border border-white/50 map-legend-dot" style={{ '--dot-color': color } as React.CSSProperties} />
-              <span className="text-xs text-[hsl(var(--muted-fg))] font-medium">{LEAD_TYPE_LABELS[type as LeadType]}</span>
+              <div className="h-3 w-3 rounded-full border border-white/50 map-legend-dot" style={{ '--dot-color': LEAD_TYPE_COLORS[type].hex } as React.CSSProperties} />
+              <span className="text-xs text-[hsl(var(--muted-fg))] font-medium">{LEAD_TYPE_LABELS[type]}</span>
             </div>
           ))}
           <div className="w-px h-3 bg-[hsl(var(--border))]" />

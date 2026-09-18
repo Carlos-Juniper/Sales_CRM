@@ -12,8 +12,8 @@
 -- ── 1. Commission rates ────────────────────────────────────────────────────
 
 CREATE TABLE commission_rates (
-  id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
-  user_id CHAR(36) NOT NULL,
+  id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  user_id VARCHAR(36) NOT NULL,
   
   -- The commission rate as a decimal (0.05 = 5%, 0.075 = 7.5%)
   commission_rate DECIMAL(6,5) NOT NULL,
@@ -38,15 +38,15 @@ CREATE TABLE commission_rates (
 -- ── 2. Commission records (inserted by _create_commission_on_won) ─────────
 
 CREATE TABLE commissions (
-  id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
-  estimate_id CHAR(36) NOT NULL,
-  lead_id CHAR(36) NOT NULL,
-  user_id CHAR(36) NOT NULL,  -- the crm_rep who earned this commission
-  
+  id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  estimate_id VARCHAR(36) NOT NULL,
+  lead_id VARCHAR(36) NOT NULL,
+  user_id VARCHAR(36) NOT NULL,  -- the crm_rep who earned this commission
+
   -- Money fields (integer cents)
-  contract_value_cents INT NOT NULL,
+  contract_value_cents BIGINT NOT NULL,
   commission_rate DECIMAL(6,5) NOT NULL,  -- snapshot of rate at time of sale
-  commission_amount_cents INT NOT NULL,   -- contract_value * rate
+  commission_amount_cents BIGINT NOT NULL,   -- contract_value * rate
   
   -- Status workflow
   -- 'approved' = auto-set when created (estimate won)

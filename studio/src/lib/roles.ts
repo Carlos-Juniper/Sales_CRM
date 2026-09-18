@@ -39,3 +39,44 @@ export const REP_SELECTOR_ROLES: readonly UserRole[] = [
   'manager',
   'regional_director',
 ]
+
+// ── Workspace navigation role-groups ───────────────────────────────────────
+//
+// These are the single source of truth for which roles may reach which
+// inside-sales routes. The Sidebar, the router guards, and the Estimating tab
+// registry all import from here — do NOT redeclare inline.
+//
+// admin is the super-role: useRole().canAccess() bypasses any check for admin,
+// so listing admin explicitly in FULL_ACCESS_ROLES is belt-and-suspenders.
+
+/** manager / regional_director / vice_president / ceo / admin — see every tab, everywhere. */
+export const FULL_ACCESS_ROLES: readonly UserRole[] = [
+  'manager', 'regional_director', 'vice_president', 'ceo', 'admin',
+]
+
+/** Analytics + the 6 shared sales tabs (leads / pipeline / bids / calendar / accounts / map / commissions). */
+export const SALES_NAV_ROLES: readonly UserRole[] = ['sales', ...FULL_ACCESS_ROLES]
+
+/** Public Leads (the inside-sales qualification queue). */
+export const PUBLIC_LEADS_NAV_ROLES: readonly UserRole[] = ['inside_sales', ...FULL_ACCESS_ROLES]
+
+/** Anyone who can land on the Estimating page at all (sees at least the queue). */
+export const ESTIMATING_NAV_ROLES: readonly UserRole[] = [
+  'sales', 'procurement', 'maintenance_estimating', 'install_estimating', ...FULL_ACCESS_ROLES,
+]
+
+/**
+ * Each role's own reachable landing page — used as RoleGate's `redirectTo`
+ * so a denied role bounces to a page it *can* see instead of /login or a loop.
+ */
+export function defaultRouteForRole(role: UserRole | null): string {
+  if (role === 'inside_sales') return '/inside-sales/leads'
+  if (role === 'maintenance_estimating' || role === 'install_estimating' || role === 'procurement')
+    return '/inside-sales/estimating'
+  // sales and the full-access tier all have Analytics at /inside-sales.
+  // Any other role (marketing, null, unknown) has no inside-sales access —
+  // redirect to /settings, which is open to every authenticated user, to
+  // avoid an infinite redirect loop.
+  if (role !== null && SALES_NAV_ROLES.includes(role)) return '/inside-sales'
+  return '/settings'
+}

@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, CheckCircle } from 'lucide-react'
+import { ChevronDown, ChevronUp, CheckCircle, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TableRowSkeleton } from '@/components/shared/LoadingSkeleton'
 import { useMarkCommissionPaid } from '@/hooks/useCommissions'
@@ -35,6 +36,7 @@ export function CommissionDetailTable({
 }: CommissionDetailTableProps) {
   const [sortField, setSortField] = useState<SortField>('created_at')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const [searchQuery, setSearchQuery] = useState('')
   const markPaid = useMarkCommissionPaid()
 
   const handleSort = (field: SortField) => {
@@ -46,7 +48,11 @@ export function CommissionDetailTable({
     }
   }
 
-  const sortedCommissions = [...commissions].sort((a, b) => {
+  const filteredCommissions = commissions.filter((c) =>
+    (c.property_name ?? '').toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const sortedCommissions = [...filteredCommissions].sort((a, b) => {
     const dir = sortDirection === 'asc' ? 1 : -1
     switch (sortField) {
       case 'created_at':
@@ -71,12 +77,22 @@ export function CommissionDetailTable({
       : <ChevronDown className="h-3.5 w-3.5 inline ml-1" />
   }
 
-  const colCount = isAdmin ? 8 : 7
+  const colCount = isAdmin ? 9 : 7
 
   return (
     <div>
       {/* Filters */}
       <div className="flex gap-3 px-4 py-3 border-b bg-[hsl(var(--muted))]">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[hsl(var(--muted-fg))]" />
+          <Input
+            placeholder="Search by property..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-8 h-9 w-[220px] text-sm"
+          />
+        </div>
+
         <Select
           value={filters.status ?? 'all'}
           onValueChange={(value) =>
@@ -142,6 +158,9 @@ export function CommissionDetailTable({
               </th>
               <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Status</th>
               {isAdmin && (
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Rep</th>
+              )}
+              {isAdmin && (
                 <th className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Actions</th>
               )}
             </tr>
@@ -173,7 +192,24 @@ export function CommissionDetailTable({
                       year: 'numeric',
                     })}
                   </td>
-                  <td className="px-4 py-3 text-xs">{commission.property_name}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {commission.property_name}
+                        {commission.estimate_type === 'maintenance' && (
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] px-1.5 py-0 font-medium">Maintenance</Badge>
+                        )}
+                        {commission.estimate_type === 'install' && (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] px-1.5 py-0 font-medium">Install</Badge>
+                        )}
+                      </div>
+                      {commission.notes && (
+                        <p className="text-[11px] text-[hsl(var(--muted-fg))] truncate max-w-[240px] mt-0.5">
+                          {commission.notes}
+                        </p>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs">{formatContractNumber(commission.aspire_number, commission.estimate_number)}</td>
                   <td className="px-4 py-3 text-right font-mono text-xs">{formatCents(commission.contract_value_cents)}</td>
                   <td className="px-4 py-3 text-right font-mono text-xs">{formatRate(commission.commission_rate)}</td>
@@ -181,6 +217,15 @@ export function CommissionDetailTable({
                   <td className="px-4 py-3">
                     <Badge variant="outline" className={badge.className}>{badge.label}</Badge>
                   </td>
+                  {isAdmin && (
+                    <td className="px-4 py-3">
+                      {commission.rep_name && (
+                        <span className="inline-flex items-center rounded-full bg-[hsl(var(--muted))] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--fg))]">
+                          {commission.rep_name}
+                        </span>
+                      )}
+                    </td>
+                  )}
                   {isAdmin && (
                     <td className="px-4 py-3 text-right">
                       {commission.status === 'approved' && (

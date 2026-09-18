@@ -26,7 +26,7 @@ export interface Commission {
   property_name?: string
   estimate_number?: number
   aspire_number?: string
-  estimate_type?: string
+  estimate_type?: 'maintenance' | 'install'
 }
 
 export interface CommissionSummary {
@@ -38,6 +38,8 @@ export interface CommissionRep {
   id: string
   name: string
   email: string
+  commission_rate?: number   // null/undefined = no active rate on file
+  effective_date?: string
 }
 
 export interface CommissionFilters {

@@ -464,6 +464,16 @@ def detect_054(conn) -> bool:
     return table_exists(conn, "commissions")
 
 
+def detect_055(conn) -> bool:
+    """055 applied ↔ uq_commission_rates_user_effective unique index exists."""
+    rows = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM information_schema.statistics "
+        "WHERE table_schema = DATABASE() "
+        "  AND table_name = 'commission_rates' "
+        "  AND index_name = 'uq_commission_rates_user_effective'"
+    ).fetchall()
+    return (rows[0]["cnt"] if rows else 0) > 0
+
 
 def detect_044(conn) -> bool:
     """044 applied ↔ catalog_items.scope_text column exists.
@@ -804,6 +814,7 @@ _DETECT: dict = {
     "042_signer_contact_and_render_overflow":     detect_042,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
+    "055_commission_rates_unique_constraint":      detect_055,
     "046_section_services_billing_type":          detect_046,
 }
 

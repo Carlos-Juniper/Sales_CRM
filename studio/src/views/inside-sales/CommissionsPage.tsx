@@ -8,9 +8,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCommissionSummary, useCommissionsList, useCommissionReps } from '@/hooks/useCommissions'
 import { useRole } from '@/hooks/useRole'
 import { formatCents } from '@/lib/estimating/maintenance'
+import { formatRate, getPeriodDates } from '@/lib/commissions'
+import type { Period } from '@/lib/commissions'
 import type { CommissionFilters } from '@/types/commissions'
 import { CommissionDetailTable } from './components/commissions/CommissionDetailTable'
+import { CommissionAttainmentBar } from './components/commissions/CommissionAttainmentBar'
 import { cn } from '@/lib/utils'
+
+const PERIOD_LABELS: Record<Period, string> = {
+  this_year: 'This Year',
+  this_quarter: 'This Quarter',
+  last_quarter: 'Last Quarter',
+  this_month: 'This Month',
+  last_month: 'Last Month',
+  all_time: 'All Time',
+}
+
 
 interface KpiCardProps {
   label: string
@@ -41,21 +54,30 @@ export default function CommissionsPage() {
   const { seesAllBranches } = useRole()
 
   const [selectedUserId, setSelectedUserId] = useState<string | undefined>(undefined)
+  const [period, setPeriod] = useState<Period>('this_year')
   const [filters, setFilters] = useState<CommissionFilters>({
     status: undefined,
     estimate_type: undefined,
   })
 
-  // Admins/execs can view any rep; sales reps are scoped to their own
-  // (the backend enforces this too — this just picks the right query param).
   const queryFilters: CommissionFilters = {
     ...filters,
+    ...getPeriodDates(period),
     user_id: seesAllBranches ? selectedUserId : undefined,
   }
 
   const { data: summary, isLoading: summaryLoading } = useCommissionSummary(queryFilters)
   const { data: commissions, isLoading: commissionsLoading } = useCommissionsList(queryFilters)
   const { data: reps } = useCommissionReps()
+
+  const approvedCount = (commissions ?? []).filter(c => c.status === 'approved').length
+  const paidCount = (commissions ?? []).filter(c => c.status === 'paid').length
+
+  const attainmentMax = Math.max(summary?.scheduled_ytd_cents ?? 0, summary?.paid_ytd_cents ?? 0, 1)
+
+  const selectedRep = seesAllBranches && selectedUserId
+    ? reps?.find(r => r.id === selectedUserId)
+    : undefined
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -64,41 +86,78 @@ export default function CommissionsPage() {
       <ScrollArea className="flex-1">
         <div className="p-5 space-y-5">
 
-          {/* Header with rep selector for admins */}
+          {/* Header with rep selector + period dropdown */}
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-2xl font-semibold text-[hsl(var(--fg))]">
-                {seesAllBranches && selectedUserId
-                  ? `${reps?.find((r) => r.id === selectedUserId)?.name ?? ''}'s Commissions`
+                {seesAllBranches && selectedRep
+                  ? `${selectedRep.name}'s Commissions`
                   : 'Your Commissions'}
               </h1>
               <p className="text-sm text-[hsl(var(--muted-fg))] mt-0.5">
-                Year-to-date commission summary
+                {PERIOD_LABELS[period].toLowerCase()} commission summary
               </p>
             </div>
 
-            {seesAllBranches && reps && reps.length > 0 && (
-              <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                <SelectTrigger className="w-[280px]">
-                  <SelectValue placeholder="Select a sales rep..." />
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {seesAllBranches && reps && reps.length > 0 && (
+                <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="All Reps" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {reps.map((rep) => (
+                      <SelectItem key={rep.id} value={rep.id}>
+                        {rep.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {reps.map((rep) => (
-                    <SelectItem key={rep.id} value={rep.id}>
-                      {rep.name}
+                  {(Object.keys(PERIOD_LABELS) as Period[]).map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {PERIOD_LABELS[p]}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            )}
+            </div>
           </div>
 
+          {/* Rep rate chip — admin only, shown when a rep is selected and has a rate on file */}
+          {selectedRep?.commission_rate != null && (
+            <div className="flex items-center gap-2 text-sm text-[hsl(var(--muted-fg))] -mt-3">
+              <span className="font-medium text-[hsl(var(--fg))]">{selectedRep.name}</span>
+              <span>·</span>
+              <span>{formatRate(selectedRep.commission_rate)} commission rate</span>
+              {selectedRep.effective_date && (
+                <>
+                  <span>·</span>
+                  <span>
+                    effective{' '}
+                    {new Date(selectedRep.effective_date + 'T00:00:00').toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+
           {/* KPI Cards */}
-          <div className="flex gap-4">
+          <div className="flex gap-4 flex-wrap">
             {summaryLoading ? (
               <>
-                <Skeleton className="h-28 flex-1" />
-                <Skeleton className="h-28 flex-1" />
+                <Skeleton className="h-28 flex-1 min-w-[140px]" />
+                <Skeleton className="h-28 flex-1 min-w-[140px]" />
               </>
             ) : (
               <>
@@ -114,7 +173,49 @@ export default function CommissionsPage() {
                 />
               </>
             )}
+            {commissionsLoading ? (
+              <>
+                <Skeleton className="h-28 flex-1 min-w-[140px]" />
+                <Skeleton className="h-28 flex-1 min-w-[140px]" />
+              </>
+            ) : (
+              <>
+                <KpiCard
+                  label="Approved"
+                  value={`${approvedCount} deal${approvedCount !== 1 ? 's' : ''}`}
+                  dotColor="bg-blue-300"
+                />
+                <KpiCard
+                  label="Paid"
+                  value={`${paidCount} deal${paidCount !== 1 ? 's' : ''}`}
+                  dotColor="bg-green-300"
+                />
+              </>
+            )}
           </div>
+
+          {/* Attainment bars — Path A (proportional, no target) */}
+          {!summaryLoading && (
+            <Card>
+              <CardContent className="p-4 space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-widest text-[hsl(var(--muted-fg))] mb-4">
+                  Commission Attainment — {PERIOD_LABELS[period]}
+                </p>
+                <CommissionAttainmentBar
+                  label="Paid YTD"
+                  valueCents={summary?.paid_ytd_cents ?? 0}
+                  maxCents={attainmentMax}
+                  barColor="bg-green-500"
+                />
+                <CommissionAttainmentBar
+                  label="Scheduled YTD"
+                  valueCents={summary?.scheduled_ytd_cents ?? 0}
+                  maxCents={attainmentMax}
+                  barColor="bg-blue-500"
+                />
+              </CardContent>
+            </Card>
+          )}
 
           {/* Commission Detail Table */}
           <Card>

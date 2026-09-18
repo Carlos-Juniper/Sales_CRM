@@ -168,12 +168,33 @@ def register(app, require_auth) -> None:
 
         # Include legacy role aliases (outside_sales → sales) so reps stored
         # under old role values still appear.
+        # v_current_commission_rates (mig 054) owns the active-rate predicate;
+        # use it here instead of re-implementing the date filter inline.
+        # Correlated subqueries return one rate per user (latest effective_date)
+        # as a defensive tie-break; mig 055 adds the UNIQUE constraint that
+        # makes multiple active rows structurally impossible.
         rows = await query(
             """
-            SELECT DISTINCT u.id, u.name, u.email
-            FROM users u
-            JOIN commissions c ON u.id = c.user_id
-            WHERE u.role IN ('sales', 'inside_sales', 'outside_sales')
+            SELECT
+                u.id,
+                u.name,
+                u.email,
+                (SELECT v.commission_rate
+                 FROM v_current_commission_rates v
+                 WHERE v.user_id = u.id
+                 ORDER BY v.effective_date DESC
+                 LIMIT 1) AS commission_rate,
+                (SELECT v.effective_date
+                 FROM v_current_commission_rates v
+                 WHERE v.user_id = u.id
+                 ORDER BY v.effective_date DESC
+                 LIMIT 1) AS effective_date
+            FROM (
+                SELECT DISTINCT u2.id, u2.name, u2.email
+                FROM users u2
+                JOIN commissions c ON u2.id = c.user_id
+                WHERE u2.role IN ('sales', 'inside_sales', 'outside_sales')
+            ) u
             ORDER BY u.name
             """
         )

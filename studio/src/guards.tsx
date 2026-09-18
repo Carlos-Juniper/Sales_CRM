@@ -19,7 +19,7 @@ export function SalesWorkspaceGuard({ children }: { children: React.ReactNode })
   const { role } = useRole()
   return (
     <RequireAuth>
-      <RoleGate roles={[...SALES_NAV_ROLES]} redirectTo={defaultRouteForRole(role)}>
+      <RoleGate roles={SALES_NAV_ROLES} redirectTo={defaultRouteForRole(role)}>
         {children}
       </RoleGate>
     </RequireAuth>
@@ -30,7 +30,7 @@ export function PublicLeadsGuard({ children }: { children: React.ReactNode }) {
   const { role } = useRole()
   return (
     <RequireAuth>
-      <RoleGate roles={[...PUBLIC_LEADS_NAV_ROLES]} redirectTo={defaultRouteForRole(role)}>
+      <RoleGate roles={PUBLIC_LEADS_NAV_ROLES} redirectTo={defaultRouteForRole(role)}>
         {children}
       </RoleGate>
     </RequireAuth>
@@ -41,7 +41,7 @@ export function EstimatingGuard({ children }: { children: React.ReactNode }) {
   const { role } = useRole()
   return (
     <RequireAuth>
-      <RoleGate roles={[...ESTIMATING_NAV_ROLES]} redirectTo={defaultRouteForRole(role)}>
+      <RoleGate roles={ESTIMATING_NAV_ROLES} redirectTo={defaultRouteForRole(role)}>
         {children}
       </RoleGate>
     </RequireAuth>

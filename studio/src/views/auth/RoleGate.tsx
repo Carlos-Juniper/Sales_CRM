@@ -5,7 +5,7 @@ import type { UserRole } from '@/types'
 
 interface RoleGateProps {
   children: React.ReactNode
-  roles: UserRole[]
+  roles: readonly UserRole[]
   redirectTo?: string
 }
 

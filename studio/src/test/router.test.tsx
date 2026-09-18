@@ -28,6 +28,7 @@ function renderRoute(initialEntries: string[], user: AuthUser | null = null) {
         <Routes>
           <Route path="/login" element={<div>Login Page</div>} />
           <Route path="/inside-sales" element={<SalesWorkspaceGuard><div>Analytics Dashboard</div></SalesWorkspaceGuard>} />
+          <Route path="/settings" element={<div>Settings Page</div>} />
           <Route path="/inside-sales/leads" element={<PublicLeadsGuard><div>Public Leads</div></PublicLeadsGuard>} />
           <Route path="/inside-sales/pipeline" element={<SalesWorkspaceGuard><div>Pipeline</div></SalesWorkspaceGuard>} />
           <Route path="/inside-sales/estimating" element={<EstimatingGuard><div>Estimating</div></EstimatingGuard>} />
@@ -244,5 +245,21 @@ describe('Per-route workspace guards (role-scoped navigation)', () => {
     renderRoute(['/inside-sales/leads'], makeUser({ role: 'sales' }))
     expect(screen.queryByText('Public Leads')).not.toBeInTheDocument()
     expect(screen.getByText('Analytics Dashboard')).toBeInTheDocument()
+  })
+
+  // ── inside_sales: blocked from Estimating entirely ─────────────────────
+
+  it('inside_sales is redirected from Estimating to Public Leads (not the queue)', () => {
+    renderRoute(['/inside-sales/estimating'], makeUser({ role: 'inside_sales' }))
+    expect(screen.queryByText('Estimating')).not.toBeInTheDocument()
+    expect(screen.getByText('Public Leads')).toBeInTheDocument()
+  })
+
+  // ── Marketing: no inside-sales access at all ──────────────────────────
+
+  it('marketing is redirected from /inside-sales to /settings (no loop)', () => {
+    renderRoute(['/inside-sales'], makeUser({ role: 'marketing' }))
+    expect(screen.queryByText('Analytics Dashboard')).not.toBeInTheDocument()
+    expect(screen.getByText('Settings Page')).toBeInTheDocument()
   })
 })

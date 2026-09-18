@@ -2,7 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Inbox, FileText, GitBranch,
   ChevronLeft, ChevronRight, LogOut, Leaf, Settings,
-  Map, Calculator, Building, Calendar, Globe, DollarSign,
+  Map, Calculator, Building, Calendar, Globe, DollarSign, TrendingUp,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
@@ -40,6 +40,7 @@ const ESTIMATING_NAV: UserRole[] = [
 
 const navItems: NavItem[] = [
   { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: SALES_NAV },
+  { label: 'Sales Performance', icon: TrendingUp, href: '/inside-sales/sales-performance', roles: SALES_NAV },
   { label: 'Public Leads', icon: Globe, href: '/inside-sales/leads', roles: PUBLIC_LEADS_NAV },
   { label: 'Leads', icon: Inbox, href: '/inside-sales/my-leads', roles: SALES_NAV },
   { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: SALES_NAV },

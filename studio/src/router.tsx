@@ -9,6 +9,7 @@ import {
 } from '@/views/inside-sales'
 import AccountsPage from '@/views/inside-sales/AccountsPage'
 import CommissionsPage from '@/views/inside-sales/CommissionsPage'
+import SalesPerformancePage from '@/views/inside-sales/SalesPerformancePage'
 import { SettingsPage } from '@/views/settings/SettingsPage'
 import { InsideSalesGuard } from '@/guards'
 import ProposalPrintRoute from '@/views/inside-sales/components/estimating/ProposalPrintRoute'
@@ -129,6 +130,10 @@ export const router = createBrowserRouter([
       {
         path: 'inside-sales/commissions',
         element: <InsideSalesGuard><CommissionsPage /></InsideSalesGuard>,
+      },
+      {
+        path: 'inside-sales/sales-performance',
+        element: <InsideSalesGuard><SalesPerformancePage /></InsideSalesGuard>,
       },
       // Branch Manager (Slice 12: BranchManagerPage deleted; old bookmarks redirect to settings)
       {

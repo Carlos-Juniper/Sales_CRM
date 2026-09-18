@@ -4,6 +4,14 @@ import type { SalesPerformanceFilters } from '@/types/sales-performance'
 
 export const SALES_PERFORMANCE_KEY = 'sales-performance'
 
+export function useSalesPerformanceReps() {
+  return useQuery({
+    queryKey: [SALES_PERFORMANCE_KEY, 'reps'],
+    queryFn: () => salesPerformanceApi.getReps(),
+    staleTime: 300_000,
+  })
+}
+
 export function useSalesPerformanceSummary(filters?: SalesPerformanceFilters) {
   return useQuery({
     queryKey: [SALES_PERFORMANCE_KEY, 'summary', filters],

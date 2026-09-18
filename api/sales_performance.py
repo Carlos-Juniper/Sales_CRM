@@ -53,6 +53,29 @@ def _default_date_range(start_date: Optional[str], end_date: Optional[str]) -> t
 def register(app, require_auth) -> None:
     """Attach all sales-performance routes to the FastAPI app with the shared auth dep."""
 
+    @app.get("/api/sales-performance/reps")
+    async def get_sales_performance_reps(
+        user: dict = Depends(require_auth),
+    ) -> list:
+        """Return all active sales users for the rep selector dropdown.
+
+        Unlike /api/commissions/reps this does NOT require existing commission
+        records — it returns every user in a sales role so the dropdown populates
+        even on a fresh DB or when a rep hasn't closed any deals yet.
+        """
+        if not _can_view_all(user):
+            raise HTTPException(status_code=403)
+
+        rows = await query(
+            """
+            SELECT id, name, email
+            FROM users
+            WHERE role IN ('sales', 'inside_sales', 'outside_sales')
+            ORDER BY name
+            """
+        )
+        return [_coerce_row(row) for row in rows]
+
     @app.get("/api/sales-performance/summary")
     async def get_sales_performance_summary(
         user_id: Optional[str] = Query(default=None),

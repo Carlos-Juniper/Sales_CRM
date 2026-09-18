@@ -16,6 +16,9 @@ function buildQuery(filters?: SalesPerformanceFilters): string {
 }
 
 export const salesPerformanceApi = {
+  getReps: () =>
+    apiClient.get<{ id: string; name: string; email: string }[]>('/sales-performance/reps'),
+
   getSummary: (filters?: SalesPerformanceFilters) =>
     apiClient.get<SalesPerformanceSummary>(`/sales-performance/summary${buildQuery(filters)}`),
 

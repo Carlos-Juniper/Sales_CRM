@@ -7,8 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
-import { useSalesPerformanceSummary, useWonDeals, useLostDeals } from '@/hooks/useSalesPerformance'
-import { useCommissionReps } from '@/hooks/useCommissions'
+import { useSalesPerformanceSummary, useWonDeals, useLostDeals, useSalesPerformanceReps } from '@/hooks/useSalesPerformance'
 import { useRole } from '@/hooks/useRole'
 import { formatCents } from '@/lib/estimating/maintenance'
 import { getPeriodDates } from '@/lib/commissions'
@@ -178,7 +177,7 @@ export default function SalesPerformancePage() {
   const { data: summary, isLoading: summaryLoading } = useSalesPerformanceSummary(queryFilters)
   const { data: wonDeals = [], isLoading: wonLoading } = useWonDeals(queryFilters)
   const { data: lostDeals = [], isLoading: lostLoading } = useLostDeals(queryFilters)
-  const { data: reps } = useCommissionReps()
+  const { data: reps } = useSalesPerformanceReps()
 
   const filteredWon = searchQuery
     ? wonDeals.filter(d => (d.property_name ?? '').toLowerCase().includes(searchQuery.toLowerCase()))

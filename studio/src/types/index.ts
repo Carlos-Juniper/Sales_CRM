@@ -1,4 +1,4 @@
-export const LEAD_TYPES = ['HOA', 'commercial', 'deathcare', 'resort'] as const
+export const LEAD_TYPES = ['HOA', 'commercial', 'deathcare', 'resort', 'healthcare'] as const
 export type LeadType = (typeof LEAD_TYPES)[number]
 
 // Unified communication channel type (calendar/notes only)

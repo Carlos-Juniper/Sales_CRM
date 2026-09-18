@@ -7,7 +7,7 @@ import { useLeadsStore } from '@/store/leadsStore'
 import { cn } from '@/lib/utils'
 import { LEAD_TYPES } from '@/types'
 import type { LeadType } from '@/types'
-const LEAD_TYPE_LABELS: Record<LeadType, string> = { HOA: 'HOA', commercial: 'Commercial', deathcare: 'Deathcare', resort: 'Resort' }
+import { LEAD_TYPE_LABELS } from '@/lib/constants'
 const STATES = ['FL', 'TX', 'PA', 'NC', 'SC']
 
 const typeColors: Record<LeadType, string> = {
@@ -15,6 +15,7 @@ const typeColors: Record<LeadType, string> = {
   commercial: 'border-amber-300 text-amber-700 dark:border-amber-600 dark:text-amber-300',
   deathcare: 'border-purple-300 text-purple-700 dark:border-purple-600 dark:text-purple-300',
   resort: 'border-blue-300 text-blue-700 dark:border-blue-600 dark:text-blue-300',
+  healthcare: 'border-rose-300 text-rose-700 dark:border-rose-600 dark:text-rose-300',
 }
 
 export function LeadFilters() {

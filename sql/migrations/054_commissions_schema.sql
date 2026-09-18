@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- Migration 046 — Commissions schema
+-- Migration 054 — Commissions schema
 --
 -- Tables to track sales rep commission rates and earned commissions.
 -- Commission rates are entered manually via the CRM by administrators.

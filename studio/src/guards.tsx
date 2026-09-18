@@ -48,12 +48,3 @@ export function EstimatingGuard({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function ManagerGuard({ children }: { children: React.ReactNode }) {
-  return (
-    <RequireAuth>
-      <RoleGate roles={['manager']} redirectTo="/inside-sales">
-        {children}
-      </RoleGate>
-    </RequireAuth>
-  )
-}

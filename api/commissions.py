@@ -10,7 +10,8 @@ pattern used by api/estimating.py and api/proposals.py.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Optional
 
 from fastapi import Depends, HTTPException, Query
@@ -27,10 +28,12 @@ class MarkPaidBody(BaseModel):
 
 
 def _coerce_row(row: dict) -> dict:
-    """Convert DB row types to JSON-serializable (camelCase keys)."""
+    """Convert DB row types to JSON-serializable values (keys remain snake_case)."""
     out: dict[str, Any] = {}
     for k, v in row.items():
-        if hasattr(v, "isoformat"):
+        if isinstance(v, Decimal):
+            out[k] = float(v)
+        elif hasattr(v, "isoformat"):
             out[k] = v.isoformat()
         else:
             out[k] = v
@@ -57,10 +60,11 @@ def register(app, require_auth) -> None:
         if not _can_view_all(user) and target_user_id != user["id"]:
             raise HTTPException(status_code=403, detail="You can only view your own commissions")
 
+        now = datetime.now(tz=timezone.utc)
         if not start_date:
-            start_date = f"{datetime.now().year}-01-01"
+            start_date = f"{now.year}-01-01"
         if not end_date:
-            end_date = datetime.now().isoformat().split("T")[0]
+            end_date = now.date().isoformat()
 
         rows = await query(
             """
@@ -77,8 +81,8 @@ def register(app, require_auth) -> None:
         )
         result = rows[0] if rows else {}
         return {
-            "scheduledYtdCents": int(result.get("scheduled_ytd_cents") or 0),
-            "paidYtdCents": int(result.get("paid_ytd_cents") or 0),
+            "scheduled_ytd_cents": int(result.get("scheduled_ytd_cents") or 0),
+            "paid_ytd_cents": int(result.get("paid_ytd_cents") or 0),
         }
 
     @app.get("/api/commissions/list")
@@ -140,8 +144,8 @@ def register(app, require_auth) -> None:
         body: MarkPaidBody,
         user: dict = Depends(require_auth),
     ) -> dict:
-        if authz.normalize_role(user.get("role")) != "admin":
-            raise HTTPException(status_code=403, detail="Only admin can mark commissions as paid")
+        if authz.normalize_role(user.get("role")) not in authz.CROSS_BRANCH_ROLES:
+            raise HTTPException(status_code=403, detail="Only admin, VP, or CEO can mark commissions as paid")
 
         result = await execute(
             """
@@ -162,12 +166,14 @@ def register(app, require_auth) -> None:
         if not _can_view_all(user):
             raise HTTPException(status_code=403)
 
+        # Include legacy role aliases (outside_sales → sales) so reps stored
+        # under old role values still appear.
         rows = await query(
             """
             SELECT DISTINCT u.id, u.name, u.email
             FROM users u
             JOIN commissions c ON u.id = c.user_id
-            WHERE u.role IN ('sales', 'inside_sales')
+            WHERE u.role IN ('sales', 'inside_sales', 'outside_sales')
             ORDER BY u.name
             """
         )

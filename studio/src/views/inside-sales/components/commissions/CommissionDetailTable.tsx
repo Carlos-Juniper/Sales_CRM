@@ -13,7 +13,8 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { useMarkCommissionPaid } from '@/hooks/useCommissions'
-import { formatCommission, formatRate, formatPaymentPeriod } from '@/lib/commissions'
+import { formatCents } from '@/lib/estimating/maintenance'
+import { formatRate, formatPaymentPeriod, formatContractNumber } from '@/lib/commissions'
 import type { Commission, CommissionFilters } from '@/types/commissions'
 
 interface CommissionDetailTableProps {
@@ -183,16 +184,16 @@ export function CommissionDetailTable({
                 </TableCell>
                 <TableCell>{commission.property_name}</TableCell>
                 <TableCell className="font-mono text-sm">
-                  {commission.aspire_number ?? `JN-${commission.estimate_number}`}
+                  {formatContractNumber(commission.aspire_number, commission.estimate_number)}
                 </TableCell>
                 <TableCell className="text-right font-mono">
-                  {formatCommission(commission.contract_value_cents)}
+                  {formatCents(commission.contract_value_cents)}
                 </TableCell>
                 <TableCell className="text-right font-mono">
                   {formatRate(commission.commission_rate)}
                 </TableCell>
                 <TableCell className="text-right font-mono font-semibold">
-                  {formatCommission(commission.commission_amount_cents)}
+                  {formatCents(commission.commission_amount_cents)}
                 </TableCell>
                 <TableCell>{getStatusBadge(commission.status)}</TableCell>
                 {isAdmin && (

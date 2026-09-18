@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCommissionSummary, useCommissionsList, useCommissionReps } from '@/hooks/useCommissions'
 import { useRole } from '@/hooks/useRole'
-import { formatCommission } from '@/lib/commissions'
+import { formatCents } from '@/lib/estimating/maintenance'
 import type { CommissionFilters } from '@/types/commissions'
 import { CommissionDetailTable } from './components/commissions/CommissionDetailTable'
 import { cn } from '@/lib/utils'
@@ -104,12 +104,12 @@ export default function CommissionsPage() {
               <>
                 <KpiCard
                   label="Scheduled YTD"
-                  value={formatCommission(summary?.scheduled_ytd_cents ?? 0)}
+                  value={formatCents(summary?.scheduled_ytd_cents ?? 0)}
                   dotColor="bg-blue-500"
                 />
                 <KpiCard
                   label="Paid YTD"
-                  value={formatCommission(summary?.paid_ytd_cents ?? 0)}
+                  value={formatCents(summary?.paid_ytd_cents ?? 0)}
                   dotColor="bg-green-500"
                 />
               </>

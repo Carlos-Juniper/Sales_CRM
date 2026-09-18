@@ -192,13 +192,18 @@ export const PAGE_PHOTOS = {
   juniperMappingHighRes: 'juniper-mapping-highres.jpg',
   juniperMappingBefore: 'juniper-mapping-before.jpg',
   juniperMappingAfter: 'juniper-mapping-after.jpg',
-  // 30-60-90 Day Start Up Plan hero. Coral Bay/Pointe Jupiter carry no such
-  // page (the reference for this page is "30-60-90 plan example.pdf", a
-  // separate generic doc with no extractable brand photography of its own),
-  // so this reuses the bundled maintenance hero — a crew member on a
-  // landscaped path beside community homes, the same kind of shot as the
-  // reference's own hero.
-  startupPlan306090: 'hero-services_maintenance.jpg',
+  // 30-60-90 Day Start Up Plan hero — the literal photo from the reference
+  // (Pointe Jupiter p.18, xref 168), extracted directly with pymupdf rather
+  // than approximated with a similar Juniper stock frame. Its placement in the
+  // source PDF (transform (618, 0, 0, 409.5, -3, -121.5) over the page's 0-288pt
+  // hero band) is a pure width-scaled object-fit: cover bottom-anchored crop —
+  // exactly `object-position: 50% 100%`, already what startup-plan-page's CSS
+  // uses — so this crops identically to the reference and needs no
+  // recalibration. White type sits straight on it with no scrim, which reads
+  // because the visible 70% of the frame is mostly canopy/lawn, not sky.
+  // If this photo ever changes, re-measure the title's contrast zone. Do NOT
+  // add a scrim back.
+  startupPlan306090: 'hero-startup-plan.jpg',
   // The two sample report screenshots for the Irrigation Reporting Sample
   // page, extracted directly from a real (redacted) Beach Life Community
   // proposal — "Weekly updates and irrigation.pdf" p2, xrefs 8 and 10.

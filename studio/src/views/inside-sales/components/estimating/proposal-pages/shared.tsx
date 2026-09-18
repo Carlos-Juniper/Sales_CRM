@@ -79,7 +79,7 @@ export const PRINT_STYLES = `
   .reference-entry,
   .org-row,
   .org-peers,
-  .day-column,
+  .startup-plan-row,
   .insurance-block {
     break-inside: avoid;
     page-break-inside: avoid;

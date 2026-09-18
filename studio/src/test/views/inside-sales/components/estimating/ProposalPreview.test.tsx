@@ -47,6 +47,7 @@ import type { ProposalFormState } from '@/views/inside-sales/components/estimati
 
 vi.mock('@/hooks/useProposals', () => ({
   useProposalConfig: vi.fn(),
+  useProposalRepBranches: vi.fn(),
   useProposalLicenses: vi.fn(),
   useProposalInsurance: vi.fn(),
   useProposalMediaUrl: vi.fn(),
@@ -96,12 +97,17 @@ vi.mock('@/lib/proposal/staticContent', async (importActual) => {
   }
 })
 
-import { useProposalConfig, useProposalLicenses, useProposalInsurance, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
-import { SERVICES_CONTENT, SERVICE_OVERVIEW_CATEGORIES } from '@/lib/proposal/staticContent'
+import { useProposalConfig, useProposalRepBranches, useProposalLicenses, useProposalInsurance, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
+import {
+  SERVICES_CONTENT,
+  SERVICE_OVERVIEW_CATEGORIES,
+  STARTUP_PLAN_SEED,
+} from '@/lib/proposal/staticContent'
 import { overviewCategoryPhotoUrl } from '@/lib/proposal/photos'
 import { measureProposalOverflow } from '@/hooks/useProposalOverflow'
 
 const mockUseProposalConfig = useProposalConfig as MockedFunction<typeof useProposalConfig>
+const mockUseProposalRepBranches = useProposalRepBranches as MockedFunction<typeof useProposalRepBranches>
 const mockUseProposalLicenses = useProposalLicenses as MockedFunction<typeof useProposalLicenses>
 const mockUseProposalInsurance = useProposalInsurance as MockedFunction<typeof useProposalInsurance>
 const mockUseProposalMediaUrl = useProposalMediaUrl as MockedFunction<typeof useProposalMediaUrl>
@@ -385,6 +391,12 @@ function setupDefaultMocks() {
     branchCoverage: mockBranchCoverage,
     loaded: true,
   })
+  // Empty is the default: no signer/branch assignment resolved, so
+  // localBranchPicks falls back to plain nearestBranches proximity — matches
+  // every existing proximity-footer test, which was written for that path.
+  mockUseProposalRepBranches.mockReturnValue({
+    data: [],
+  } as unknown as ReturnType<typeof useProposalRepBranches>)
   // Empty is the live state: every credential on file is currently expired, and
   // the backend filters those out. Tests that need rows override this.
   mockUseProposalLicenses.mockReturnValue({
@@ -857,14 +869,75 @@ describe('ProposalPreview — static content from constants', () => {
     expect(within(page).getByText('Every week, in your inbox:')).toBeInTheDocument()
   })
 
-  it('startup plan page renders Day Zero and Day 30 from STARTUP_PLAN_SEED', () => {
+  // The reference (Pointe Jupiter p.18) always prints six boxes in two fixed
+  // rows of three, so this page does too regardless of plan length — a 30-day
+  // plan still shows all six titles/tabs, it just leaves Day 60/90/120+ empty
+  // rather than dropping their box (which would shrink the grid and reopen
+  // the dead-green-space problem the page was rebuilt to remove).
+  it('startup plan page always renders all six box titles, even on a 30-day plan', () => {
     renderPreview({
       sections: ['startup_plan_30_60_90'],
-      startupPlan: makeStartupPlan({ included: true }),
+      startupPlan: makeStartupPlan({ included: true, planMaxDays: 30 }),
     })
     const page = screen.getByTestId('page-startup-plan')
-    expect(within(page).getByText(/day zero/i)).toBeInTheDocument()
-    expect(within(page).getByText(/day 30/i)).toBeInTheDocument()
+    for (const title of [/day zero/i, /^day 30$/i, /^day 60$/i, /^day 90$/i, /^day 120\+$/i, /^ongoing$/i]) {
+      expect(within(page).getByText(title)).toBeInTheDocument()
+    }
+    // But Day 60/90/120+ are outside a 30-day plan, so their seed bullets
+    // must not print — the box is there, its content is not.
+    expect(within(page).queryByText(STARTUP_PLAN_SEED.day60[0].text)).not.toBeInTheDocument()
+    expect(within(page).queryByText(STARTUP_PLAN_SEED.day90[0].text)).not.toBeInTheDocument()
+    expect(within(page).queryByText(STARTUP_PLAN_SEED.day120Plus[0].text)).not.toBeInTheDocument()
+    // Ongoing always prints regardless of plan length.
+    expect(within(page).getByText(STARTUP_PLAN_SEED.ongoing[0].text)).toBeInTheDocument()
+  })
+
+  it('phase outside the chosen plan length prints its box empty even if the rep entered bullets', () => {
+    renderPreview({
+      sections: ['startup_plan_30_60_90'],
+      startupPlan: makeStartupPlan({
+        included: true,
+        planMaxDays: 60,
+        day120Plus: ['Should not print — outside plan length'],
+      }),
+    })
+    const page = screen.getByTestId('page-startup-plan')
+    expect(within(page).getByText(/^day 120\+$/i)).toBeInTheDocument()
+    expect(
+      within(page).queryByText('Should not print — outside plan length'),
+    ).not.toBeInTheDocument()
+  })
+
+  // A 120-day plan is the one planMaxDays value that reaches all six phases'
+  // content — Day 120+ is otherwise always excluded.
+  it('startup plan page fills in all six phases on a 120-day plan', () => {
+    renderPreview({
+      sections: ['startup_plan_30_60_90'],
+      startupPlan: makeStartupPlan({ included: true, planMaxDays: 120 }),
+    })
+    const page = screen.getByTestId('page-startup-plan')
+    for (const seedList of [
+      STARTUP_PLAN_SEED.day60,
+      STARTUP_PLAN_SEED.day90,
+      STARTUP_PLAN_SEED.day120Plus,
+      STARTUP_PLAN_SEED.ongoing,
+    ]) {
+      expect(within(page).getByText(seedList[0].text)).toBeInTheDocument()
+    }
+  })
+
+  it('startup plan page falls back to seed copy for a phase the rep left empty', () => {
+    renderPreview({
+      sections: ['startup_plan_30_60_90'],
+      startupPlan: makeStartupPlan({ included: true, planMaxDays: 90 }),
+    })
+    const page = screen.getByTestId('page-startup-plan')
+    expect(
+      within(page).getByText(STARTUP_PLAN_SEED.day90[0].text),
+    ).toBeInTheDocument()
+    expect(
+      within(page).getByText(STARTUP_PLAN_SEED.ongoing[0].text),
+    ).toBeInTheDocument()
   })
 
   it('startup plan page renders free-text day60 entries from startupPlan', () => {
@@ -872,12 +945,29 @@ describe('ProposalPreview — static content from constants', () => {
       sections: ['startup_plan_30_60_90'],
       startupPlan: makeStartupPlan({
         included: true,
+        planMaxDays: 60,
         day60: ['Audit current schedule', 'Review pesticide program'],
       }),
     })
     const page = screen.getByTestId('page-startup-plan')
     expect(within(page).getByText('Audit current schedule')).toBeInTheDocument()
     expect(within(page).getByText('Review pesticide program')).toBeInTheDocument()
+  })
+
+  it('rep-entered bullets replace the seed for that phase, not append to it', () => {
+    renderPreview({
+      sections: ['startup_plan_30_60_90'],
+      startupPlan: makeStartupPlan({
+        included: true,
+        planMaxDays: 60,
+        day60: ['Audit current schedule'],
+      }),
+    })
+    const page = screen.getByTestId('page-startup-plan')
+    expect(within(page).getByText('Audit current schedule')).toBeInTheDocument()
+    expect(
+      within(page).queryByText(STARTUP_PLAN_SEED.day60[0].text),
+    ).not.toBeInTheDocument()
   })
 
   it('insurance page renders INSURANCE_PAGE_COPY heading', () => {
@@ -947,6 +1037,16 @@ describe('ProposalPreview — static content from constants', () => {
   it('requests company-wide licenses only when the proposal has no estimate (WS2)', () => {
     renderPreview({}, { estimate: null })
     expect(mockUseProposalLicenses).toHaveBeenCalledWith(undefined)
+  })
+
+  it('requests insurance with no args even when the estimate carries aspireBranchId (insurance is always global)', () => {
+    renderPreview({}, { estimate: { ...mockEstimate, aspireBranchId: 1403 } })
+    expect(mockUseProposalInsurance).toHaveBeenCalledWith()
+  })
+
+  it('requests insurance with no args when the proposal has no estimate', () => {
+    renderPreview({}, { estimate: null })
+    expect(mockUseProposalInsurance).toHaveBeenCalledWith()
   })
 
   it('the empty licenses page never hints that something is missing', () => {

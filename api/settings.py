@@ -35,7 +35,7 @@ from typing import Any, Literal, Optional
 log = logging.getLogger(__name__)
 
 from fastapi import Depends, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from db import execute, query
 import api.attachments as _att_mod
@@ -410,6 +410,12 @@ class MyProfilePatch(BaseModel):
 
 # ── Slice 13a: H37 config table bodies ───────────────────────────────────────
 
+# Mirrors studio/src/types/proposal.ts TEAM_MEMBER_BIO_MAX_LENGTH — keeps a
+# rep-authored bio inside the Meet Our Team page's 12-line clamp
+# (proposal-print.css .team-card .bi) so it can't render cut off mid-sentence.
+TEAM_MEMBER_BIO_MAX_LENGTH = 700
+
+
 class TeamMemberCreate(BaseModel):
     """Create body for a team_members row (branch-scoped or company-wide).
 
@@ -424,7 +430,7 @@ class TeamMemberCreate(BaseModel):
     aspireBranchId: Optional[int] = None
     userId: Optional[str] = None
     location: Optional[str] = None
-    bio: str = ""
+    bio: str = Field(default="", max_length=TEAM_MEMBER_BIO_MAX_LENGTH)
     headshotObjectKey: Optional[str] = None
     sortOrder: int = 0
 
@@ -436,7 +442,7 @@ class TeamMemberPatch(BaseModel):
     teamType: Optional[str] = None
     userId: Optional[str] = None
     location: Optional[str] = None
-    bio: Optional[str] = None
+    bio: Optional[str] = Field(default=None, max_length=TEAM_MEMBER_BIO_MAX_LENGTH)
     headshotObjectKey: Optional[str] = None
     sortOrder: Optional[int] = None
 
@@ -566,8 +572,12 @@ class LicensePatch(BaseModel):
 
 
 # Updatable columns for LicensePatch (camelCase body key -> DB column).
+# NOTE: "kind" is intentionally excluded — kind is immutable after creation.
+# Allowing a PATCH to change kind would bypass the insurance single-global
+# invariant (a BM could convert their branch license into an insurance row,
+# or an admin could create a second active insurance doc by re-typing an
+# inactive one). Create a new row with the correct kind instead.
 _LC_UPDATABLE: dict[str, str] = {
-    "kind": "kind",
     "name": "name",
     "issuingBody": "issuing_body",
     "identifier": "identifier",
@@ -2062,6 +2072,17 @@ def register(app, require_auth) -> None:
                 detail=f"kind must be one of: {', '.join(sorted(_VALID_KINDS))}",
             )
 
+        # Insurance is always a single company-wide document — branch scoping is
+        # not permitted. Reject before auth so the structural rule is clear.
+        if body.kind == "insurance" and body.aspireBranchId is not None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Insurance documents must be company-wide "
+                    "(aspireBranchId must be null)"
+                ),
+            )
+
         actor = _actor(user)
 
         if body.aspireBranchId is None:
@@ -2072,6 +2093,23 @@ def register(app, require_auth) -> None:
             await _require_branch_write_scope(user, body.aspireBranchId)
             scope_type = "branch"
             scope_id = str(body.aspireBranchId)
+
+        # For insurance, enforce the single-global-document invariant after auth
+        # so only authorised callers can even trigger this check.
+        if body.kind == "insurance":
+            existing = await query(
+                "SELECT id FROM licenses_certifications "
+                "WHERE kind = 'insurance' AND active = 1 AND aspire_branch_id IS NULL "
+                "LIMIT 1",
+            )
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "An active insurance document already exists. "
+                        "Edit or replace the existing one."
+                    ),
+                )
 
         row_id = str(uuid.uuid4())
         await execute(
@@ -2261,7 +2299,7 @@ def register(app, require_auth) -> None:
 
         # Build a deterministic key using the row id (path-traversal-safe — never
         # the user-supplied filename). Reuses the extension map from attachments.py.
-        from api.attachments import upload_bytes as _upload_bytes
+        from api.attachments import upload_bytes as _upload_bytes, GCS_CREDENTIALS_BUCKET
         _EXT_MAP = {
             "application/pdf": "pdf",
             "image/png": "png",
@@ -2273,8 +2311,9 @@ def register(app, require_auth) -> None:
         object_key = f"credentials/licenses/{license_id}.{ext}"
 
         data = await file.read()
-        # Upload via the ONLY upload path — no second GCS client or signing route.
-        _upload_bytes(object_key, data, content_type)
+        # Credentials always land in GCS_CREDENTIALS_BUCKET (prod bucket in all
+        # deployed envs) so documents only need updating once, not per environment.
+        _upload_bytes(object_key, data, content_type, bucket=GCS_CREDENTIALS_BUCKET)
 
         prior_key = current.get("object_key")
         await execute(

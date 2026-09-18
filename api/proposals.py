@@ -105,18 +105,24 @@ def _iso(v: Any) -> Any:
 def _branch_profile_out(r: dict) -> dict:
     """Project a crm.branches + crm.regions JOIN row into BranchProfile.
 
-    Returns only rows that have lat/lng populated — the proximity footer needs
-    real coordinates. Callers should filter on lat IS NOT NULL before mapping.
+    The default /config/branches query filters on lat/lng IS NOT NULL before
+    mapping (the distance-based proximity footer needs real coordinates), so
+    lat/lng are floats there. The proposalId-scoped query does not filter on
+    coordinates — an office like Corporate may have none — so lat/lng pass
+    through as None (BranchProfile.lat/lng are `number | null` on the
+    frontend) rather than crashing float(None).
     regionId and branchName are from branches; regionId comes from the join.
     """
+    lat = _num(r["lat"])
+    lng = _num(r["lng"])
     return {
         "aspireBranchId": r["aspire_branch_id"],
         "branchName": r["branch_name"],
         "city": r.get("city") or "",
         "regionId": r.get("region_id") or "",
         "address": _build_address(r),
-        "lat": float(_num(r["lat"])),
-        "lng": float(_num(r["lng"])),
+        "lat": float(lat) if lat is not None else None,
+        "lng": float(lng) if lng is not None else None,
     }
 
 
@@ -395,30 +401,78 @@ def register(app, require_auth) -> None:
     # Operating-roster filter applied (active = 1 AND name NOT LIKE '%DO NOT USE%').
     # Only rows with lat/lng populated are returned — the proximity footer
     # (§2 page 3) needs real coordinates; null-lat rows are skipped.
+    #
+    # proposalId (optional): the "Local Branches" footer on that same page is
+    # meant to show the rep's own offices, not whichever branches happen to be
+    # nearest by lat/lng — a lead with bad/missing coordinates could otherwise
+    # surface an out-of-state office that has nothing to do with the deal. When
+    # the proposal's signer (proposal_requests.signer_user_id, same source
+    # _resolve_signer_office uses for the letter's return address) holds
+    # branches in user_branches, this returns exactly those — lat/lng NOT
+    # required, since an office like Corporate may not be geocoded at all.
+    # Falls back to the full geocoded roster when there's no signer yet or the
+    # signer holds no branches, rather than leaving the footer empty.
 
     @app.get("/api/proposals/config/branches")
     async def get_proposal_branches(
+        proposal_id: Optional[str] = Query(default=None),
         _user: dict = Depends(require_auth),
     ) -> list:
-        rows = await query(
-            f"""
-            SELECT
-                b.aspire_branch_id,
-                b.branch_name,
-                b.address1,
-                b.city,
-                b.state,
-                b.zip,
-                b.lat,
-                b.lng,
-                b.region_id
-            FROM branches b
-            WHERE {_BRANCH_ROSTER_FILTER}
-              AND b.lat IS NOT NULL
-              AND b.lng IS NOT NULL
-            ORDER BY b.branch_name
-            """,
-        )
+        held_branch_ids: list[int] = []
+        if proposal_id:
+            proposal_rows = await query(
+                "SELECT signer_user_id FROM proposal_requests WHERE id = %s",
+                [proposal_id],
+            )
+            signer_user_id = proposal_rows[0].get("signer_user_id") if proposal_rows else None
+            if signer_user_id:
+                branch_rows = await query(
+                    "SELECT aspire_branch_id FROM user_branches WHERE user_id = %s",
+                    [signer_user_id],
+                )
+                held_branch_ids = [int(r["aspire_branch_id"]) for r in branch_rows]
+
+        if held_branch_ids:
+            placeholders = ", ".join(["%s"] * len(held_branch_ids))
+            rows = await query(
+                f"""
+                SELECT
+                    b.aspire_branch_id,
+                    b.branch_name,
+                    b.address1,
+                    b.city,
+                    b.state,
+                    b.zip,
+                    b.lat,
+                    b.lng,
+                    b.region_id
+                FROM branches b
+                WHERE {_BRANCH_ROSTER_FILTER}
+                  AND b.aspire_branch_id IN ({placeholders})
+                ORDER BY b.branch_name
+                """,
+                held_branch_ids,
+            )
+        else:
+            rows = await query(
+                f"""
+                SELECT
+                    b.aspire_branch_id,
+                    b.branch_name,
+                    b.address1,
+                    b.city,
+                    b.state,
+                    b.zip,
+                    b.lat,
+                    b.lng,
+                    b.region_id
+                FROM branches b
+                WHERE {_BRANCH_ROSTER_FILTER}
+                  AND b.lat IS NOT NULL
+                  AND b.lng IS NOT NULL
+                ORDER BY b.branch_name
+                """,
+            )
         return [_branch_profile_out(r) for r in rows]
 
     # ── GET /api/proposals/config/branch-coverage ──────────────────────────
@@ -583,33 +637,21 @@ def register(app, require_auth) -> None:
         return [_portfolio_property_out(r) for r in rows]
 
     # ── GET /api/proposals/config/insurance ─────────────────────────────────
-    # Returns the current insurance certificate for a branch. A branch-scoped
-    # row (aspire_branch_id matches) wins over the company-wide fallback
-    # (aspire_branch_id IS NULL) when both exist, same null-branch-inclusion
-    # rule as licenses (Amendment A.6) but collapsed to a single "current cert"
-    # instead of a list. Returns null when no cert has been seeded — the
-    # frontend should handle this gracefully (shows a placeholder on the
-    # Insurance page).
+    # Returns the single active company-wide insurance certificate. Insurance
+    # is always global — no branch-scoped certs are permitted. Returns null
+    # when no cert has been seeded; the frontend handles this gracefully with
+    # a placeholder on the Insurance page.
 
     @app.get("/api/proposals/config/insurance")
     async def get_proposal_insurance(
-        aspire_branch_id: Optional[int] = Query(None),
         _user: dict = Depends(require_auth),
     ) -> Optional[dict]:
-        if aspire_branch_id is not None:
-            rows = await query(
-                "SELECT * FROM licenses_certifications "
-                "WHERE kind = 'insurance' AND active = 1 "
-                "AND (aspire_branch_id IS NULL OR aspire_branch_id = %s) "
-                "ORDER BY (aspire_branch_id = %s) DESC, updated_at DESC LIMIT 1",
-                (aspire_branch_id, aspire_branch_id),
-            )
-        else:
-            rows = await query(
-                "SELECT * FROM licenses_certifications "
-                "WHERE kind = 'insurance' AND active = 1 AND aspire_branch_id IS NULL "
-                "ORDER BY updated_at DESC LIMIT 1",
-            )
+        # Insurance is always a single company-wide document — no branch scoping.
+        rows = await query(
+            "SELECT * FROM licenses_certifications "
+            "WHERE kind = 'insurance' AND active = 1 AND aspire_branch_id IS NULL "
+            "ORDER BY updated_at DESC LIMIT 1",
+        )
         if not rows:
             return None
         return _insurance_cert_out(rows[0])
@@ -926,11 +968,14 @@ def register(app, require_auth) -> None:
         if not key:
             raise HTTPException(status_code=400, detail="key is required")
         try:
-            from api.attachments import signed_get_url
+            from api.attachments import signed_get_url, GCS_CREDENTIALS_BUCKET
             # Use the object key as both the GCS key and the display filename
             # (the signer accepts the last path segment as the filename).
             filename = key.rsplit("/", 1)[-1] if "/" in key else key
-            url = signed_get_url(key, filename)
+            # Credential documents live in GCS_CREDENTIALS_BUCKET; all other
+            # assets (headshots, portfolio, etc.) stay in GCS_ATTACHMENTS_BUCKET.
+            cred_bucket = GCS_CREDENTIALS_BUCKET if key.startswith("credentials/") else None
+            url = signed_get_url(key, filename, bucket=cred_bucket)
             return {"url": url}
         except Exception as exc:
             logger.warning("Failed to sign proposal media URL for key=%s: %s", key, exc)

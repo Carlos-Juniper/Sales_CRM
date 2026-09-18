@@ -357,6 +357,13 @@
   color: var(--jn-orange-alt);
 }
 
+/* Start Up Communication — the intro paragraph directly under the lede reads
+   as one voice with it, so it carries the same display font instead of the
+   default body font (the right-column lists keep the standard body font). */
+.proposal-root .lede-body {
+  font-family: var(--jn-display);
+}
+
 /* Arboriculture only — the ISA badge sits in the page-head row opposite the
    eyebrow/title block (reference: top-right, level with "ARBORICULTURE"),
    not stacked below it — stacking it below pushed the badge past the title
@@ -400,10 +407,11 @@
   padding: 0;
 }
 
-/* Inherits body type on purpose. The only consumer is the 30-60-90 page, whose
-   source document ("business docs/30-60-90 plan example.pdf") was NOT audited —
-   Coral Bay HOA.pdf contains no 30-60-90 layout. Applying the page-7 service-card
-   values here would be styling one document's page to another's measurements. */
+/* Inherits body type on purpose. The only consumer is the 30-60-90 page, which
+   overrides size, indent and spacing with values measured off its own source
+   document ("business docs/Pointe Jupiter Yacht Club.pdf" page 18 — Coral Bay
+   HOA.pdf contains no 30-60-90 layout). Applying the page-7 service-card values
+   here would be styling one document's page to another's measurements. */
 .proposal-root ul.dot > li {
   position: relative;
   padding-left: 0.19in;
@@ -971,20 +979,26 @@
   margin-top: 0.06in;
 }
 
+/* Photos are cropped tight to the phone (251×500 / 252×500, ~0.50:1) with no
+   internal padding, so — unlike the old 320×500 crop — they must NOT be
+   stretched to fill a fixed-width column: a grid of 1fr columns plus
+   object-fit:contain would just re-introduce letterboxing at the new aspect
+   ratio. Instead each image keeps its native aspect (height fixed, width
+   auto) and the row centers them, so the full 4.0in height budget (the page
+   has ~0in of slack left below this block) renders as phone, not padding.
+   Gap is kept at 0 — at ~2in wide each, any real gap pushes the pair
+   apart enough that they crowd the sidebar/page edge instead of sitting
+   together, centered in the sync-main column. */
 .proposal-root .sync-app-photos {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.06in;
+  display: flex;
+  justify-content: center;
+  gap: 0;
   margin-top: 0.2in;
 }
 
 .proposal-root .sync-app-photos > img {
-  width: 100%;
-  /* Cropped images are 320×500 portrait (0.64:1). With sync-main at ~5.14in
-     and each column ~2.54in wide, width-constrained height = 2.54/0.64 ≈
-     3.97in — set container to 4.0in so the phone fills the column fully. */
   height: 4.0in;
-  object-fit: contain;
+  width: auto;
   display: block;
 }
 
@@ -2289,31 +2303,37 @@
   display: block;
 }
 
-/* --- Start Up Plan (30-60-90 Day) redesign ----------------------------------
-   Reference layout ("business docs/30-60-90 plan example.pdf"): a full-bleed
-   hero photo with the title block reversed out over it, then a green band
-   running to the footer carrying white phase cards under orange chevron
-   banners. Deliberately shares NOTHING with `.sched*` / `.comm-sched`, which
-   own Start Up Communication's pill-and-connector treatment.
+/* --- Start Up Plan (30-60-90 Day) -------------------------------------------
+   Every value here was measured off the reference, "business docs/Pointe
+   Jupiter Yacht Club.pdf" page 18, with pymupdf — text spans (size/font/rgb),
+   fill rects and image bboxes — then converted from points to inches (/72).
+   Reference figures are quoted in points beside each rule.
 
-   The well becomes a column flex container so the band can flex-grow into
-   whatever the hero leaves, and a negative bottom margin lets it run under the
-   footer bar rather than stopping short of it with a white seam.
+   The design: a 4in full-bleed hero starting at the paper edge, then a green
+   band carrying two white panels. A panel is ONE box per row split into three
+   equal columns by hairlines — not three separate cards — which is what makes
+   the columns inescapably the same size whatever their bullets. The first
+   panel is lifted onto the photo, and the chevron banners stand above their
+   panel, over the photo.
+
+   Deliberately shares NOTHING with `.sched*` / `.comm-sched`, which own Start
+   Up Communication's pill-and-connector treatment.
    --------------------------------------------------------------------------- */
 
+/* The hero starts at the paper edge (ref image bbox covers y=0), so this page
+   zeroes the well padding outright rather than cancelling it per-child with
+   the usual negative-margin bleed calc. */
 .proposal-root .print-page.startup-plan-page > .well {
   display: flex;
   flex-direction: column;
-  padding-top: 0.34in;
+  padding: 0;
 }
 
-/* Horizontal bleed is the same calc pair .photo-hero uses. */
 .proposal-root .startup-plan-hero {
   position: relative;
   flex: 0 0 auto;
-  margin: 0 calc(-1 * var(--jn-gutter));
-  width: calc(100% + 2 * var(--jn-gutter));
-  height: 2.24in;
+  width: 100%;
+  height: 4in; /* ref: 288pt */
   overflow: hidden;
 }
 
@@ -2322,44 +2342,46 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* hero-startup-plan.jpg IS the reference's own hero photo (extracted from
+     Pointe Jupiter p.18, xref 168), and 50% 100% reproduces its exact crop:
+     the source PDF places this image at transform (618, 0, 0, 409.5, -3,
+     -121.5) over the 288pt-tall hero band — a pure width-scaled cover, bottom-
+     anchored, cropping only off the top. So this page's title sits on exactly
+     the same canopy/lawn the reference's does, with no scrim, by construction
+     rather than by re-measuring a stand-in photo. If this photo ever changes,
+     confirm the brightest tenth (p90, not the mean — a mean hides a sky band
+     running through two lines) of the copy zone still reads against white;
+     do not add a scrim back. */
+  object-position: 50% 100%;
 }
 
-/* Darkest where the copy sits, easing off to the right so the photo still
-   reads as a photo rather than a flat grey panel. */
-.proposal-root .startup-plan-scrim {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    rgba(0, 0, 0, 0.66) 0%,
-    rgba(0, 0, 0, 0.52) 48%,
-    rgba(0, 0, 0, 0.22) 100%
-  );
-}
+/* No scrim. The reference sets white type straight onto the photograph; its
+   own hero happens to carry dark foliage under the title block. If a hero
+   photo ever leaves the title unreadable, change the photo in photos.ts —
+   do not reintroduce an overlay. */
 
 .proposal-root .startup-plan-hero-copy {
   position: absolute;
-  top: 0.3in;
-  left: var(--jn-gutter);
-  right: var(--jn-gutter);
-  max-width: 5.15in;
+  top: 0.66in; /* ref: eyebrow top 47.5pt */
+  left: var(--jn-gutter); /* 0.58in ≈ ref 41.2pt */
+  max-width: 4.2in; /* ref: intro wraps at ~341pt */
 }
 
 /* .eyebrow / .page-title values, recoloured for the photo. Not a modifier on
    those classes: both are colour-only overrides and a `.white` modifier on
    .page-title would invite use on pages with no dark backdrop behind it. */
 .proposal-root .startup-plan-eyebrow {
-  margin: 0 0 0.06in;
+  margin: 0 0 0.065in;
   font-family: var(--jn-display);
   font-size: 12.75pt;
   font-weight: 700;
   line-height: 1.2;
   text-transform: uppercase;
-  color: #fff;
+  color: var(--jn-orange); /* ref: #e87825, not white */
 }
 
 .proposal-root .startup-plan-title {
-  margin: 0 0 0.11in;
+  margin: 0 0 0.15in; /* lands the intro at ref 114.5pt */
   font-family: var(--jn-display);
   font-size: 30pt;
   font-weight: 700;
@@ -2370,103 +2392,108 @@
 
 .proposal-root .startup-plan-intro {
   margin: 0;
-  font-size: 9.5pt;
-  line-height: 1.45;
+  font-size: 9.75pt;
+  line-height: 1.46; /* ref: 14.2pt leading */
   color: #fff;
 }
 
-/* Bleeds horizontally like the hero and vertically past the well's footer
-   padding, so the green meets the footer bar with no white seam. The footer is
-   z-index 5 and the well 2, so the bar still paints over the band's tail. */
+/* Runs from the hero's bottom edge to the paper's. The footer is z-index 5 and
+   the well 2, so the footer bar still paints over the band's tail. */
 .proposal-root .startup-plan-band {
   flex: 1 1 auto;
-  margin: 0 calc(-1 * var(--jn-gutter))
-    calc(-1 * (var(--jn-footer-h) + 0.18in));
-  width: calc(100% + 2 * var(--jn-gutter));
-  padding: 0.3in 0.42in calc(var(--jn-footer-h) + 0.24in);
-  background: var(--jn-green);
-  display: flex;
-}
-
-/* Flexbox rather than grid so a partial last row (5 phases, or 4) centres
-   instead of pinning left or stretching its cards wider than the full rows. */
-.proposal-root .startup-plan-grid {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  /* Rows pack under the hero rather than centring in the band. Centring was
-     tried and reads worse: with short later phases it opens a dead green gap
-     between the photo and the first row, and it detaches the cards from the
-     title block they belong to. Packing top also keeps any overflow at the
-     bottom edge, where the page's overflow guard sees it. */
-  align-content: flex-start;
-  /* Cards hug their own bullets rather than stretching to the row's tallest —
-     a short phase (Day 60 is often two lines) beside the seven-bullet Day Zero
-     otherwise renders as a mostly-empty white rectangle. */
-  align-items: flex-start;
-  gap: 0.2in 0.2in;
   width: 100%;
+  background: var(--jn-green);
 }
 
-.proposal-root .startup-plan-card {
-  flex: 0 0 2.38in;
-  max-width: 2.38in;
-  display: flex;
-  flex-direction: column;
+/* The equal-height guarantee. `1fr 1fr` over a min-height makes both panels
+   exactly as tall as each other whatever their bullets — the grid is always
+   two rows of three boxes, whether or not every box has bullets in it (a
+   phase outside the rep's chosen plan length still renders its box and tab,
+   just with an empty list; see startup-plan-30-60-90.tsx). If a rep's copy
+   needs more than 3.208in, BOTH rows grow together and the page's overflow
+   guard sees the spill at the bottom edge. They cannot drift apart.
+
+   The negative top margin lifts row 1 onto the photo (ref: panel top 219pt vs
+   hero bottom 288pt = 0.958in of overlap). */
+.proposal-root .startup-plan-rows {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  grid-auto-rows: 1fr;
+  gap: 0.4375in; /* ref: 31.5pt */
+  min-height: 6.854in; /* 2 × 3.208in + gap */
+  margin: -0.958in 0.354in 0; /* ref: panel x 25.5→583.5pt */
 }
 
-/* 2-phase (up-to-30): two wide cards centered in the band */
-.proposal-root .startup-plan-grid--2 .startup-plan-card {
-  flex: 0 0 3.3in;
-  max-width: 3.3in;
-}
-
-/* 4-phase (up-to-90): 2×2 grid with wider cards */
-.proposal-root .startup-plan-grid--4 .startup-plan-card {
-  flex: 0 0 3.3in;
-  max-width: 3.3in;
-}
-
-/* Chevron banner. The clip-path eats the right edge, so the right padding is
-   heavier than the left to keep the label optically centred in what remains. */
-.proposal-root .startup-plan-card-head {
-  padding: 0.075in 0.24in 0.075in 0.1in;
-  background: var(--jn-orange);
-  color: #fff;
-  font-family: var(--jn-display);
-  font-size: 9.5pt;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  text-align: center;
-  clip-path: polygon(0 0, 88% 0, 100% 50%, 88% 100%, 0 100%);
-}
-
-.proposal-root .startup-plan-card-body {
-  flex: 1 1 auto;
-  padding: 0.14in 0.13in;
+/* position: relative is load-bearing, not a convenience. The first row overlaps
+   the hero, and .startup-plan-hero is itself positioned — so it paints in the
+   positioned phase, above any NON-positioned sibling's background. Leave this
+   static and the panel's white disappears behind the photograph while its tabs
+   (absolutely positioned, later in DOM order) still show, which looks like a
+   z-index bug but is plain CSS painting order. */
+.proposal-root .startup-plan-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   background: #fff;
   box-shadow: 0 0.02in 0.05in rgba(0, 0, 0, 0.16);
 }
 
-/* Tighter than the base .dot: six cards of seed copy have to share one sheet. */
-.proposal-root .startup-plan-card-body ul.dot > li {
-  padding-left: 0.155in;
-  margin-bottom: 0.055in;
-  font-size: 7.8pt;
-  line-height: 1.32;
+.proposal-root .startup-plan-col {
+  position: relative;
+  padding: 0.456in 0.247in 0.318in; /* ref: first bullet 32.8pt below panel top */
 }
 
-.proposal-root .startup-plan-card-body ul.dot > li:last-child {
+/* Hairline between columns, inset top and bottom rather than running the full
+   panel height (ref: divider spans 238.1→427.1pt inside a 219→450pt panel). */
+.proposal-root .startup-plan-col + .startup-plan-col::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.265in;
+  bottom: 0.318in;
+  width: 1px;
+  background: #f0f0f0; /* ref fill 0.9411 grey */
+}
+
+/* Double chevron: the right edge points out AND the left edge is notched in.
+   Percentages read off the reference banner at 2% / 50% / 98% of its height.
+   Absolutely positioned so it stands above the panel, over the photo. */
+.proposal-root .startup-plan-tab {
+  position: absolute;
+  top: -0.229in; /* ref: tab top 202.5pt vs panel top 219pt */
+  left: 0.0625in;
+  right: 0.125in; /* ref: 172.5pt tab inside a 186pt column */
+  height: 0.448in; /* ref: 32.25pt */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--startup-tab, var(--jn-orange));
+  color: #fff;
+  font-family: var(--jn-display);
+  font-size: 12.75pt;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  clip-path: polygon(0 0, 92.5% 0, 100% 50%, 92.5% 100%, 0 100%, 7.7% 50%);
+}
+
+.proposal-root .startup-plan-col > ul.dot > li {
+  padding-left: 0.19in; /* ref: 13.7pt bullet→text */
+  margin-bottom: 0.067in; /* ref: 17.6pt pitch − 12.8pt line box */
+  font-size: 9.75pt;
+  line-height: 1.31;
+}
+
+.proposal-root .startup-plan-col > ul.dot > li:last-child {
   margin-bottom: 0;
 }
 
-.proposal-root .startup-plan-card-body ul.dot > li::before {
-  left: 0.02in;
-  top: 0.043in;
-  width: 0.045in;
-  height: 0.045in;
+.proposal-root .startup-plan-col > ul.dot > li::before {
+  left: 0.04in;
+  top: 0.052in;
+  width: 0.042in;
+  height: 0.042in;
 }
 
 /* --- Contract generator (Landscape Maintenance Agreement) ------------------

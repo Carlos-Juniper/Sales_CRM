@@ -6,7 +6,11 @@ Download uses v4 signed GET URL via IAM signBlob because Cloud Run ADC has no
 private key for local signing.
 
 Env vars:
-  GCS_ATTACHMENTS_BUCKET   — bucket name (required in production)
+  GCS_ATTACHMENTS_BUCKET   — bucket name for estimating/proposal assets (required in production)
+  GCS_CREDENTIALS_BUCKET   — bucket for credentials/licenses/* keys; defaults to
+                             GCS_ATTACHMENTS_BUCKET when unset. Set to the prod bucket
+                             in all deployed environments so credential documents only
+                             need updating once (not per-environment).
   GCS_SIGNER_SA_EMAIL      — runtime SA email; set explicitly because
                              Compute ADC sometimes reports "default"
   GCS_MAX_UPLOAD_BYTES     — hard cap per file (default 2 GiB)
@@ -24,6 +28,10 @@ import google.auth.transport.requests
 from google.cloud import storage
 
 GCS_ATTACHMENTS_BUCKET: str = os.environ.get("GCS_ATTACHMENTS_BUCKET", "")
+# Bucket for credentials/licenses/* keys. Defaults to GCS_ATTACHMENTS_BUCKET so
+# local dev and unset environments are unaffected. Set to the prod bucket in all
+# deployed environments so credential documents only need updating in one place.
+GCS_CREDENTIALS_BUCKET: str = os.environ.get("GCS_CREDENTIALS_BUCKET", "") or GCS_ATTACHMENTS_BUCKET
 GCS_SIGNER_SA_EMAIL: str = os.environ.get("GCS_SIGNER_SA_EMAIL", "")
 GCS_MAX_UPLOAD_BYTES: int = int(
     os.environ.get("GCS_MAX_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024))
@@ -81,13 +89,14 @@ def begin_resumable_session(key: str, content_type: str, origin: str) -> str:
     return blob.create_resumable_upload_session(content_type=content_type, origin=origin)
 
 
-def upload_bytes(key: str, data: bytes, content_type: str) -> None:
+def upload_bytes(key: str, data: bytes, content_type: str, bucket: str | None = None) -> None:
     """Upload raw bytes to GCS — used by server-side PDF rendering.
 
     Unlike begin_resumable_session (which hands a URI to the browser), this
-    uploads directly from the API server. Same bucket, same signing pattern.
+    uploads directly from the API server. Pass `bucket` to target a non-default
+    bucket (e.g. GCS_CREDENTIALS_BUCKET for credential documents).
     """
-    blob = _gcs().bucket(GCS_ATTACHMENTS_BUCKET).blob(key)
+    blob = _gcs().bucket(bucket or GCS_ATTACHMENTS_BUCKET).blob(key)
     blob.upload_from_string(data, content_type=content_type)
 
 
@@ -114,17 +123,18 @@ def content_disposition(original_name: str) -> str:
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
-def signed_get_url(key: str, original_name: str) -> str:
+def signed_get_url(key: str, original_name: str, bucket: str | None = None) -> str:
     """Return a short-lived v4 signed GET URL that forces Save-As with the original filename.
 
     Uses IAM signBlob because Cloud Run ADC has no private key for local RSA signing.
     Requires roles/iam.serviceAccountTokenCreator on the runtime SA (on itself) and
-    iamcredentials.googleapis.com enabled.
+    iamcredentials.googleapis.com enabled. Pass `bucket` to sign from a non-default
+    bucket (e.g. GCS_CREDENTIALS_BUCKET for credential documents).
     """
     creds, _ = google.auth.default()
     creds.refresh(google.auth.transport.requests.Request())
 
-    blob = _gcs().bucket(GCS_ATTACHMENTS_BUCKET).blob(key)
+    blob = _gcs().bucket(bucket or GCS_ATTACHMENTS_BUCKET).blob(key)
     return blob.generate_signed_url(
         version="v4",
         expiration=timedelta(minutes=GCS_SIGNED_URL_TTL_MIN),

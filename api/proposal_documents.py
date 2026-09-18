@@ -268,5 +268,11 @@ def download_bytes(object_key: str) -> bytes:
     """
     from api import attachments
 
-    blob = attachments._gcs().bucket(attachments.GCS_ATTACHMENTS_BUCKET).blob(object_key)
+    # Credential documents live in GCS_CREDENTIALS_BUCKET; everything else in the default bucket.
+    bucket = (
+        attachments.GCS_CREDENTIALS_BUCKET
+        if object_key.startswith("credentials/")
+        else attachments.GCS_ATTACHMENTS_BUCKET
+    )
+    blob = attachments._gcs().bucket(bucket).blob(object_key)
     return blob.download_as_bytes()

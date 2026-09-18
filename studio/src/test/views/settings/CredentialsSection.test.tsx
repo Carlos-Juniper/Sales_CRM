@@ -114,11 +114,14 @@ function renderComp(
       mutations: { retry: false },
     },
   })
+  // Use BRANCH_ID as the default only when aspireBranchId was NOT provided at
+  // all. An explicit null must pass through so company-wide scope can be tested.
+  const aspireBranchId = 'aspireBranchId' in props ? props.aspireBranchId ?? null : BRANCH_ID
   return rtlRender(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
         <TooltipProvider>
-          <CredentialsSection aspireBranchId={props.aspireBranchId ?? BRANCH_ID} />
+          <CredentialsSection aspireBranchId={aspireBranchId} />
         </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -207,17 +210,27 @@ describe('CredentialsSection — unified documents section', () => {
     expect(screen.queryByTestId('credentials-expiry-banner')).not.toBeInTheDocument()
   })
 
-  it('shows expiry banner when an insurance document row has a past expiryDate', async () => {
+  it('does NOT show the expiry banner for insurance based on client-side date comparison', async () => {
+    // Blocker 2: hasExpiredInsuranceRow was removed. The banner must only fire
+    // from server-computed isExpired on the /proposals/config/licenses endpoint.
+    // An insurance doc with a past expiryDate but no server isExpired flag must NOT
+    // trigger the banner.
     const expiredInsuranceDoc: LicenseSettingsRow = {
       ...INSURANCE_DOC,
-      expiryDate: '2020-01-01', // past — banner fires on expired insurance rows
+      expiryDate: '2020-01-01', // past date — must NOT cause banner via client clock
     }
     mockDocuments([expiredInsuranceDoc])
+    // proposals/config/licenses returns no expired flags
+    server.use(
+      http.get('*/api/proposals/config/licenses', () =>
+        HttpResponse.json({ licenses: [], certifications: [] }),
+      ),
+    )
 
     renderComp({}, 'admin')
 
-    const banner = await screen.findByTestId('credentials-expiry-banner')
-    expect(banner).toBeInTheDocument()
+    await screen.findByText('General Liability')
+    expect(screen.queryByTestId('credentials-expiry-banner')).not.toBeInTheDocument()
   })
 })
 
@@ -235,12 +248,28 @@ describe('CredentialsSection — document creation', () => {
     expect(screen.getByRole('button', { name: /add document/i })).toBeInTheDocument()
   })
 
-  it('kind selector includes License, Certification, and Insurance options', async () => {
+  it('kind selector includes License and Certification but NOT Insurance when at branch scope', async () => {
     mockDocuments([])
 
-    renderComp({}, 'admin')
+    // Branch scope (aspireBranchId=BRANCH_ID): insurance must not be offered
+    renderComp({ aspireBranchId: BRANCH_ID }, 'admin')
 
-    // Wait for loading to finish
+    await screen.findByText(/no documents yet/i)
+    fireEvent.click(screen.getByRole('button', { name: /add document/i }))
+
+    const kindSelect = screen.getByRole('combobox')
+    const options = Array.from(kindSelect.querySelectorAll('option')).map((o) => o.value)
+    expect(options).toContain('license')
+    expect(options).toContain('certification')
+    expect(options).not.toContain('insurance')
+  })
+
+  it('kind selector includes Insurance when at company-wide scope and no active insurance exists', async () => {
+    mockDocuments([])
+
+    // Company-wide scope (aspireBranchId=null): insurance IS offered when none exists
+    renderComp({ aspireBranchId: null }, 'admin')
+
     await screen.findByText(/no documents yet/i)
     fireEvent.click(screen.getByRole('button', { name: /add document/i }))
 
@@ -251,7 +280,27 @@ describe('CredentialsSection — document creation', () => {
     expect(options).toContain('insurance')
   })
 
-  it('POSTs to /api/settings/licenses with kind, name, and expiryDate', async () => {
+  it('kind selector hides Insurance at company-wide scope when an active insurance row already exists', async () => {
+    // One active insurance row already on file — the option must be suppressed
+    const COMPANY_INSURANCE: LicenseSettingsRow = {
+      ...INSURANCE_DOC,
+      aspireBranchId: null,
+    }
+    mockDocuments([COMPANY_INSURANCE])
+
+    renderComp({ aspireBranchId: null }, 'admin')
+
+    await screen.findByText('General Liability')
+    fireEvent.click(screen.getByRole('button', { name: /add document/i }))
+
+    const kindSelect = screen.getByRole('combobox')
+    const options = Array.from(kindSelect.querySelectorAll('option')).map((o) => o.value)
+    expect(options).toContain('license')
+    expect(options).toContain('certification')
+    expect(options).not.toContain('insurance')
+  })
+
+  it('POSTs to /api/settings/licenses with kind, name, and expiryDate (company-wide scope)', async () => {
     mockDocuments([])
 
     let postedBody: Record<string, unknown> | null = null
@@ -262,7 +311,8 @@ describe('CredentialsSection — document creation', () => {
       }),
     )
 
-    renderComp({}, 'admin')
+    // Company-wide scope so Insurance is available in the dropdown
+    renderComp({ aspireBranchId: null }, 'admin')
 
     // Wait for loading to finish
     await screen.findByText(/no documents yet/i)
@@ -281,6 +331,61 @@ describe('CredentialsSection — document creation', () => {
     expect(postedBody?.kind).toBe('insurance')
     expect(postedBody?.name).toBe('General Liability')
     expect(postedBody?.expiryDate).toBe('2027-12-31')
+  })
+})
+
+// ── AC-2b: Kind immutability in edit form (Blocker 1) ────────────────────────
+
+describe('CredentialsSection — kind select mutability', () => {
+  it('kind select is disabled when editing an existing document', async () => {
+    mockDocuments([BRANCH_LICENSE])
+
+    renderComp({ aspireBranchId: BRANCH_ID }, 'admin')
+
+    await screen.findByText('General Contractor License')
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+
+    // The Type / kind select must be disabled in edit mode
+    const kindSelect = screen.getByRole('combobox')
+    expect(kindSelect).toBeDisabled()
+  })
+
+  it('kind select is enabled when creating a new document', async () => {
+    mockDocuments([])
+
+    renderComp({ aspireBranchId: BRANCH_ID }, 'admin')
+
+    await screen.findByText(/no documents yet/i)
+    fireEvent.click(screen.getByRole('button', { name: /add document/i }))
+
+    const kindSelect = screen.getByRole('combobox')
+    expect(kindSelect).not.toBeDisabled()
+  })
+
+  it('PATCH body does NOT include kind when editing (kind is immutable)', async () => {
+    mockDocuments([BRANCH_LICENSE])
+
+    let patchedBody: Record<string, unknown> | null = null
+    server.use(
+      http.patch('*/api/settings/licenses/:id', async ({ request }) => {
+        patchedBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ ...BRANCH_LICENSE, ...patchedBody })
+      }),
+    )
+
+    renderComp({ aspireBranchId: BRANCH_ID }, 'admin')
+
+    await screen.findByText('General Contractor License')
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }))
+
+    // Change the name to force a real PATCH
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: 'Updated Name' } })
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(patchedBody).not.toBeNull())
+    // kind must NOT appear in the PATCH body
+    expect(patchedBody).not.toHaveProperty('kind')
+    expect(patchedBody?.name).toBe('Updated Name')
   })
 })
 

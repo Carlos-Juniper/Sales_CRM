@@ -466,13 +466,14 @@ def detect_054(conn) -> bool:
 
 def detect_055(conn) -> bool:
     """055 applied ↔ uq_commission_rates_user_effective unique index exists."""
-    rows = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM information_schema.statistics "
-        "WHERE table_schema = DATABASE() "
-        "  AND table_name = 'commission_rates' "
-        "  AND index_name = 'uq_commission_rates_user_effective'"
-    ).fetchall()
-    return (rows[0]["cnt"] if rows else 0) > 0
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = DATABASE() "
+        "  AND TABLE_NAME = 'commission_rates' "
+        "  AND INDEX_NAME = 'uq_commission_rates_user_effective'",
+    )
+    return bool(row and row["cnt"])
 
 
 def detect_044(conn) -> bool:

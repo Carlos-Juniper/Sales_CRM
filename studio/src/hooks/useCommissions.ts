@@ -1,0 +1,45 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { commissionsApi } from '@/api/commissions'
+import { useUIStore } from '@/store/uiStore'
+import type { CommissionFilters } from '@/types/commissions'
+
+export const COMMISSIONS_KEY = 'commissions'
+
+export function useCommissionSummary(filters?: CommissionFilters) {
+  return useQuery({
+    queryKey: [COMMISSIONS_KEY, 'summary', filters],
+    queryFn: () => commissionsApi.getSummary(filters),
+    staleTime: 30_000,
+  })
+}
+
+export function useCommissionsList(filters?: CommissionFilters) {
+  return useQuery({
+    queryKey: [COMMISSIONS_KEY, 'list', filters],
+    queryFn: () => commissionsApi.list(filters),
+    staleTime: 30_000,
+  })
+}
+
+export function useCommissionReps() {
+  return useQuery({
+    queryKey: [COMMISSIONS_KEY, 'reps'],
+    queryFn: () => commissionsApi.getReps(),
+    staleTime: 300_000,
+  })
+}
+
+export function useMarkCommissionPaid() {
+  const qc = useQueryClient()
+  const toast = useUIStore((s) => s.toast)
+
+  return useMutation({
+    mutationFn: ({ commissionId, paymentPeriod }: { commissionId: string; paymentPeriod: string }) =>
+      commissionsApi.markPaid(commissionId, paymentPeriod),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [COMMISSIONS_KEY] })
+      toast('Commission marked as paid', { variant: 'success' })
+    },
+    onError: () => toast('Failed to mark commission as paid', { variant: 'error' }),
+  })
+}

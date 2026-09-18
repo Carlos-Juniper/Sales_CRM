@@ -73,5 +73,10 @@ export function defaultRouteForRole(role: UserRole | null): string {
   if (role === 'inside_sales') return '/inside-sales/leads'
   if (role === 'maintenance_estimating' || role === 'install_estimating' || role === 'procurement')
     return '/inside-sales/estimating'
-  return '/inside-sales' // sales + full-access tier all have Analytics
+  // sales and the full-access tier all have Analytics at /inside-sales.
+  // Any other role (marketing, null, unknown) has no inside-sales access —
+  // redirect to /settings, which is open to every authenticated user, to
+  // avoid an infinite redirect loop.
+  if (role !== null && SALES_NAV_ROLES.includes(role)) return '/inside-sales'
+  return '/settings'
 }

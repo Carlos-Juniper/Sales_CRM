@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { LEAD_TYPES } from '@/types'
 import type { LeadStatus, LeadType } from '@/types'
+import { LEAD_TYPE_LABELS } from '@/lib/constants'
 import type { Property } from '@/types/estimating'
 import { stageForStatus } from '@/lib/pipelineStages'
 import { PropertySelector } from './estimating/PropertySelector'
@@ -141,7 +142,7 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
                       : 'border-[hsl(var(--border))] text-[hsl(var(--muted-fg))] hover:border-[#2E7D52]/50'
                   )}
                 >
-                  {t}
+                  {LEAD_TYPE_LABELS[t]}
                 </button>
               ))}
             </div>

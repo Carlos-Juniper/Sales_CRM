@@ -1,4 +1,5 @@
 import { PIPELINE_STAGES } from './pipelineStages'
+import type { LeadType } from '@/types'
 
 export const BRAND_GREEN = '#2E7D52'
 
@@ -33,7 +34,21 @@ export const LEAD_TYPE_COLORS = {
   commercial: { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-700 dark:text-amber-300', border: 'border-amber-200 dark:border-amber-700' },
   deathcare: { bg: 'bg-slate-100 dark:bg-slate-900/30', text: 'text-slate-700 dark:text-slate-300', border: 'border-slate-200 dark:border-slate-700' },
   resort: { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-300', border: 'border-blue-200 dark:border-blue-700' },
+  healthcare: { bg: 'bg-rose-100 dark:bg-rose-900/30', text: 'text-rose-700 dark:text-rose-300', border: 'border-rose-200 dark:border-rose-700' },
 } as const
+
+/**
+ * Single source of truth for the user-facing display label of each lead type.
+ * The stored value stays lowercase (e.g. `resort`); only the label changes
+ * (e.g. "Resorts"). Import from here; do NOT redeclare inline.
+ */
+export const LEAD_TYPE_LABELS: Record<LeadType, string> = {
+  HOA: 'HOA',
+  commercial: 'Commercial',
+  deathcare: 'Deathcare',
+  resort: 'Resorts',
+  healthcare: 'Healthcare',
+}
 
 export const STATUS_COLORS = {
   new: { bg: 'bg-sky-100 dark:bg-sky-900/30', text: 'text-sky-700 dark:text-sky-300' },

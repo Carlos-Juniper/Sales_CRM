@@ -41,4 +41,18 @@ describe('LeadTypeBadge', () => {
   it('unknown type renders without crash', () => {
     expect(() => render(<LeadTypeBadge type={'unknown' as LeadType} />)).not.toThrow()
   })
+
+  it('renders healthcare badge with the rose color scheme', () => {
+    const { container } = render(<LeadTypeBadge type="healthcare" />)
+    expect(screen.getByText('Healthcare')).toBeInTheDocument()
+    const badge = container.firstChild as HTMLElement
+    expect(badge.className).toContain('bg-rose-100')
+    expect(badge.className).toContain('text-rose-700')
+  })
+
+  it('resort renders as "Resorts" (display-only rename, stored value unchanged)', () => {
+    render(<LeadTypeBadge type="resort" />)
+    expect(screen.getByText('Resorts')).toBeInTheDocument()
+    expect(screen.queryByText('Resort')).not.toBeInTheDocument()
+  })
 })

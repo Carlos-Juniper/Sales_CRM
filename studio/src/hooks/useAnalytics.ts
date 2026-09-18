@@ -10,3 +10,12 @@ export function useRevenueAnalytics() {
     staleTime: 60_000,
   })
 }
+
+export function useCrmAnalytics(crmId: string) {
+  return useQuery({
+    queryKey: [ANALYTICS_KEY, 'crm', crmId],
+    queryFn: () => analyticsApi.getCrmAnalytics(crmId),
+    enabled: !!crmId,
+    staleTime: 60_000,
+  })
+}

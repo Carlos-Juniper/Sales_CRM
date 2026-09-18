@@ -5,6 +5,11 @@ import { render as rtlRender } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
 import { RequireAuth, RoleGate } from '@/views/auth/RoleGate'
+import {
+  SalesWorkspaceGuard,
+  PublicLeadsGuard,
+  EstimatingGuard,
+} from '@/guards'
 import { makeUser } from '@/test/utils'
 import type { AuthUser } from '@/types'
 
@@ -22,7 +27,12 @@ function renderRoute(initialEntries: string[], user: AuthUser | null = null) {
       <MemoryRouter initialEntries={initialEntries}>
         <Routes>
           <Route path="/login" element={<div>Login Page</div>} />
-          <Route path="/inside-sales" element={<RequireAuth><div>Inside Sales Dashboard</div></RequireAuth>} />
+          <Route path="/inside-sales" element={<SalesWorkspaceGuard><div>Analytics Dashboard</div></SalesWorkspaceGuard>} />
+          <Route path="/inside-sales/leads" element={<PublicLeadsGuard><div>Public Leads</div></PublicLeadsGuard>} />
+          <Route path="/inside-sales/pipeline" element={<SalesWorkspaceGuard><div>Pipeline</div></SalesWorkspaceGuard>} />
+          <Route path="/inside-sales/estimating" element={<EstimatingGuard><div>Estimating</div></EstimatingGuard>} />
+          <Route path="/inside-sales/commissions" element={<SalesWorkspaceGuard><div>Commissions</div></SalesWorkspaceGuard>} />
+          {/* Legacy routes kept for existing test coverage */}
           <Route
             path="/sales-role"
             element={
@@ -56,7 +66,7 @@ function renderRoute(initialEntries: string[], user: AuthUser | null = null) {
           <Route path="/" element={<RequireAuth><Navigate to="/inside-sales" replace /></RequireAuth>} />
         </Routes>
       </MemoryRouter>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   )
 }
 
@@ -75,10 +85,10 @@ describe('Router - Auth & Role Guards (canonical 10-role model)', () => {
     expect(screen.getByText('Login Page')).toBeInTheDocument()
   })
 
-  it('authenticated user can access /inside-sales', () => {
+  it('authenticated sales user can access /inside-sales', () => {
     const user = makeUser({ role: 'sales' })
     renderRoute(['/inside-sales'], user)
-    expect(screen.getByText('Inside Sales Dashboard')).toBeInTheDocument()
+    expect(screen.getByText('Analytics Dashboard')).toBeInTheDocument()
   })
 
   it('sales role can access the sales role-gated route', () => {
@@ -106,7 +116,7 @@ describe('Router - Auth & Role Guards (canonical 10-role model)', () => {
 
     renderRoute(['/estimating-role'], makeUser({ role: 'sales' }))
     expect(screen.queryByText('Estimating Role Content')).not.toBeInTheDocument()
-    expect(screen.getByText('Inside Sales Dashboard')).toBeInTheDocument()
+    expect(screen.getByText('Analytics Dashboard')).toBeInTheDocument()
   })
 
   it('manager can access manager-only route', () => {
@@ -125,6 +135,114 @@ describe('Router - Auth & Role Guards (canonical 10-role model)', () => {
     const user = makeUser({ role: 'sales' })
     renderRoute(['/manager-only'], user)
     expect(screen.queryByText('Manager Only Content')).not.toBeInTheDocument()
-    expect(screen.getByText('Inside Sales Dashboard')).toBeInTheDocument()
+    expect(screen.getByText('Analytics Dashboard')).toBeInTheDocument()
+  })
+})
+
+describe('Per-route workspace guards (role-scoped navigation)', () => {
+  beforeEach(() => {
+    useAuthStore.setState({ user: null })
+  })
+
+  // ── inside_sales: Public Leads only ──────────────────────────────────────
+
+  it('inside_sales can access Public Leads', () => {
+    renderRoute(['/inside-sales/leads'], makeUser({ role: 'inside_sales' }))
+    expect(screen.getByText('Public Leads')).toBeInTheDocument()
+  })
+
+  it('inside_sales is redirected from Analytics (sales workspace) to Public Leads', () => {
+    renderRoute(['/inside-sales'], makeUser({ role: 'inside_sales' }))
+    expect(screen.queryByText('Analytics Dashboard')).not.toBeInTheDocument()
+    expect(screen.getByText('Public Leads')).toBeInTheDocument()
+  })
+
+  it('inside_sales is redirected from Pipeline to Public Leads', () => {
+    renderRoute(['/inside-sales/pipeline'], makeUser({ role: 'inside_sales' }))
+    expect(screen.queryByText('Pipeline')).not.toBeInTheDocument()
+    expect(screen.getByText('Public Leads')).toBeInTheDocument()
+  })
+
+  it('inside_sales is redirected from Commissions to Public Leads', () => {
+    renderRoute(['/inside-sales/commissions'], makeUser({ role: 'inside_sales' }))
+    expect(screen.queryByText('Commissions')).not.toBeInTheDocument()
+    expect(screen.getByText('Public Leads')).toBeInTheDocument()
+  })
+
+  // ── Estimators: Estimating only ──────────────────────────────────────────
+
+  it('maintenance_estimating can access Estimating', () => {
+    renderRoute(['/inside-sales/estimating'], makeUser({ role: 'maintenance_estimating' }))
+    expect(screen.getByText('Estimating')).toBeInTheDocument()
+  })
+
+  it('maintenance_estimating is redirected from Pipeline to Estimating', () => {
+    renderRoute(['/inside-sales/pipeline'], makeUser({ role: 'maintenance_estimating' }))
+    expect(screen.queryByText('Pipeline')).not.toBeInTheDocument()
+    expect(screen.getByText('Estimating')).toBeInTheDocument()
+  })
+
+  it('install_estimating is redirected from Analytics to Estimating', () => {
+    renderRoute(['/inside-sales'], makeUser({ role: 'install_estimating' }))
+    expect(screen.queryByText('Analytics Dashboard')).not.toBeInTheDocument()
+    expect(screen.getByText('Estimating')).toBeInTheDocument()
+  })
+
+  // ── Procurement: Estimating (queue only) ──────────────────────────────────
+
+  it('procurement can access Estimating', () => {
+    renderRoute(['/inside-sales/estimating'], makeUser({ role: 'procurement' }))
+    expect(screen.getByText('Estimating')).toBeInTheDocument()
+  })
+
+  it('procurement is redirected from Pipeline to Estimating', () => {
+    renderRoute(['/inside-sales/pipeline'], makeUser({ role: 'procurement' }))
+    expect(screen.queryByText('Pipeline')).not.toBeInTheDocument()
+    expect(screen.getByText('Estimating')).toBeInTheDocument()
+  })
+
+  // ── Full-access tier: everything ──────────────────────────────────────────
+
+  it('manager can access Public Leads (full-access tier)', () => {
+    renderRoute(['/inside-sales/leads'], makeUser({ role: 'manager' }))
+    expect(screen.getByText('Public Leads')).toBeInTheDocument()
+  })
+
+  it('regional_director can access Analytics (full-access tier)', () => {
+    renderRoute(['/inside-sales'], makeUser({ role: 'regional_director' }))
+    expect(screen.getByText('Analytics Dashboard')).toBeInTheDocument()
+  })
+
+  it('vice_president can access Pipeline (full-access tier)', () => {
+    renderRoute(['/inside-sales/pipeline'], makeUser({ role: 'vice_president' }))
+    expect(screen.getByText('Pipeline')).toBeInTheDocument()
+  })
+
+  it('ceo can access Commissions (full-access tier)', () => {
+    renderRoute(['/inside-sales/commissions'], makeUser({ role: 'ceo' }))
+    expect(screen.getByText('Commissions')).toBeInTheDocument()
+  })
+
+  it('admin can access Estimating (full-access tier)', () => {
+    renderRoute(['/inside-sales/estimating'], makeUser({ role: 'admin' }))
+    expect(screen.getByText('Estimating')).toBeInTheDocument()
+  })
+
+  // ── Sales: sales workspace + estimating (queue only) ──────────────────────
+
+  it('sales can access Commissions', () => {
+    renderRoute(['/inside-sales/commissions'], makeUser({ role: 'sales' }))
+    expect(screen.getByText('Commissions')).toBeInTheDocument()
+  })
+
+  it('sales can access Estimating (queue only)', () => {
+    renderRoute(['/inside-sales/estimating'], makeUser({ role: 'sales' }))
+    expect(screen.getByText('Estimating')).toBeInTheDocument()
+  })
+
+  it('sales is redirected from Public Leads to Analytics', () => {
+    renderRoute(['/inside-sales/leads'], makeUser({ role: 'sales' }))
+    expect(screen.queryByText('Public Leads')).not.toBeInTheDocument()
+    expect(screen.getByText('Analytics Dashboard')).toBeInTheDocument()
   })
 })

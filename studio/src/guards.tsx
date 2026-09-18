@@ -1,27 +1,47 @@
 import { RequireAuth, RoleGate } from '@/views/auth/RoleGate'
-import type { UserRole } from '@/types'
+import { useRole } from '@/hooks/useRole'
+import {
+  SALES_NAV_ROLES,
+  PUBLIC_LEADS_NAV_ROLES,
+  ESTIMATING_NAV_ROLES,
+  defaultRouteForRole,
+} from '@/lib/roles'
 
-// The inside-sales workspace hosts the lead/bid views AND the estimating tab
-// (queue, editors, approvals), so every business role that participates in
-// that flow may enter. Real permissions (estimator-owned vs approver-owned,
-// branch scope, approval tiers) are enforced SERVER-side;
-// `admin` passes every gate via useRole's canAccess super-role.
-const INSIDE_SALES_ROLES: UserRole[] = [
-  'sales',
-  'inside_sales',
-  'manager',
-  'maintenance_estimating',
-  'install_estimating',
-  'regional_director',
-  'vice_president',
-  'ceo',
-  'procurement',
-]
+// ── Per-route workspace guards ──────────────────────────────────────────────
+//
+// Replaces the former blanket InsideSalesGuard. Each guard gates a specific
+// area of the inside-sales workspace on the shared role-group arrays from
+// lib/roles.ts, so direct URL navigation is blocked (not just hidden from
+// nav). A denied role redirects to its own landing page via
+// defaultRouteForRole() instead of /login.
 
-export function InsideSalesGuard({ children }: { children: React.ReactNode }) {
+export function SalesWorkspaceGuard({ children }: { children: React.ReactNode }) {
+  const { role } = useRole()
   return (
     <RequireAuth>
-      <RoleGate roles={INSIDE_SALES_ROLES} redirectTo="/login">
+      <RoleGate roles={[...SALES_NAV_ROLES]} redirectTo={defaultRouteForRole(role)}>
+        {children}
+      </RoleGate>
+    </RequireAuth>
+  )
+}
+
+export function PublicLeadsGuard({ children }: { children: React.ReactNode }) {
+  const { role } = useRole()
+  return (
+    <RequireAuth>
+      <RoleGate roles={[...PUBLIC_LEADS_NAV_ROLES]} redirectTo={defaultRouteForRole(role)}>
+        {children}
+      </RoleGate>
+    </RequireAuth>
+  )
+}
+
+export function EstimatingGuard({ children }: { children: React.ReactNode }) {
+  const { role } = useRole()
+  return (
+    <RequireAuth>
+      <RoleGate roles={[...ESTIMATING_NAV_ROLES]} redirectTo={defaultRouteForRole(role)}>
         {children}
       </RoleGate>
     </RequireAuth>

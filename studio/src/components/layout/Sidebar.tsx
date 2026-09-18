@@ -2,7 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Inbox, FileText, GitBranch,
   ChevronLeft, ChevronRight, LogOut, Leaf, Settings,
-  Map, Calculator, Building, Calendar, Globe,
+  Map, Calculator, Building, Calendar, Globe, DollarSign,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
@@ -48,6 +48,7 @@ const navItems: NavItem[] = [
   { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: SALES_NAV },
   { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: SALES_NAV },
   { label: 'Estimating', icon: Calculator, href: '/inside-sales/estimating', roles: ESTIMATING_NAV },
+  { label: 'Commissions', icon: DollarSign, href: '/inside-sales/commissions', roles: SALES_NAV },
 ]
 
 function NavItemComp({ item, collapsed, overdueBadge }: { item: NavItem; collapsed: boolean; overdueBadge?: number }) {

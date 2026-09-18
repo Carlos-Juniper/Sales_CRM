@@ -459,6 +459,12 @@ def detect_028(conn) -> bool:
     return not table_exists(conn, "insurance_certificates")
 
 
+def detect_054(conn) -> bool:
+    """054 applied ↔ commissions table exists."""
+    return table_exists(conn, "commissions")
+
+
+
 def detect_044(conn) -> bool:
     """044 applied ↔ catalog_items.scope_text column exists.
 
@@ -797,6 +803,7 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "044_contract_generator":                     detect_044,
+    "054_commissions_schema":                     detect_054,
     "046_section_services_billing_type":          detect_046,
 }
 

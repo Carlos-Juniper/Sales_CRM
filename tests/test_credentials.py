@@ -530,11 +530,11 @@ def _ins_lc_row(**over) -> dict:
 
 
 class TestInsuranceViaUnifiedEndpoint:
-    """POST /api/settings/licenses with kind='insurance' — Handoff 42 AC.
+    """POST /api/settings/licenses with kind='insurance' — global-only policy.
 
-    Insurance documents are now branch-scoped like licenses. Company-wide
-    (aspireBranchId=None) rows still require admin; branch rows can be
-    created by BM/RD with scope for that branch.
+    Insurance is a single company-wide document. Branch-scoped insurance rows
+    are rejected (422). Creating a second active company-wide row is rejected
+    (409). Company-wide rows require admin.
     """
 
     _VALID_BODY = {
@@ -548,18 +548,22 @@ class TestInsuranceViaUnifiedEndpoint:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_admin_creates_insurance_company_wide_201(
+    async def test_create_insurance_company_wide_succeeds_when_none_exists(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
-        """Admin can create a company-wide insurance document (aspireBranchId=None)."""
+        """Happy path: admin can create the single global insurance document when
+        no active company-wide insurance row exists yet."""
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
+        # No existing active insurance row.
+        mock_query.return_value = []
         r = client.post("/api/settings/licenses", json=self._VALID_BODY)
         assert r.status_code == 201
         body = r.json()
         assert body["kind"] == "insurance"
         assert body["name"] == "General Liability"
         assert body["expiryDate"] == "2027-06-30"
+        assert body["aspireBranchId"] is None
 
         inserts = [
             c for c in mock_exec.await_args_list
@@ -589,24 +593,37 @@ class TestInsuranceViaUnifiedEndpoint:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_bm_creates_branch_scoped_insurance_201(
+    async def test_create_insurance_with_branch_id_returns_422(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
-        """Handoff 42 AC: BM can create branch-scoped insurance (no longer admin-only)."""
-        as_role("manager")
-        mock_authz_query.return_value = _scoped_to(1403)
+        """Insurance documents must be company-wide — any aspireBranchId value
+        must be rejected with 422 before touching the DB."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
         body = {**self._VALID_BODY, "aspireBranchId": 1403}
         r = client.post("/api/settings/licenses", json=body)
-        assert r.status_code == 201
-        result = r.json()
-        assert result["kind"] == "insurance"
-        assert result["aspireBranchId"] == 1403
+        assert r.status_code == 422
+        detail = r.json().get("detail", "")
+        assert "company-wide" in detail or "aspireBranchId" in detail
+        mock_exec.assert_not_awaited()
 
-        audits = _audit_calls(mock_exec)
-        assert len(audits) == 1
-        flat = _flat_audit(audits[0])
-        assert "branch" in flat
-        assert "1403" in flat
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_create_insurance_when_active_exists_returns_409(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """Creating a second active company-wide insurance row must be rejected
+        with 409 — edit or replace the existing one instead."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        # Simulate an existing active company-wide insurance row.
+        mock_query.return_value = [_ins_lc_row()]
+        r = client.post("/api/settings/licenses", json=self._VALID_BODY)
+        assert r.status_code == 409
+        detail = r.json().get("detail", "")
+        assert "already exists" in detail or "insurance" in detail.lower()
+        mock_exec.assert_not_awaited()
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
@@ -666,6 +683,58 @@ class TestInsuranceViaUnifiedEndpoint:
         mock_authz_query.return_value = _live("admin")
         r = client.post("/api/settings/insurance", json=self._VALID_BODY)
         assert r.status_code == 404
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_patch_cannot_change_kind_to_insurance(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """PATCH with kind='insurance' must be rejected with 400 — kind is immutable after
+        creation. This blocks a BM from converting their branch license into an insurance
+        row, bypassing the single-global invariant.
+
+        Because 'kind' is excluded from _LC_UPDATABLE, the patch body produces no
+        updatable fields, which causes the endpoint to respond 400 (no fields to update)
+        before any DB write occurs.
+        """
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        # Existing row is a plain license.
+        mock_query.return_value = [_lc_row(aspire_branch_id=None, kind="license")]
+        r = client.patch("/api/settings/licenses/lc-001", json={"kind": "insurance"})
+        # kind is not in _LC_UPDATABLE, so no updatable fields → 400, no DB write.
+        assert r.status_code == 400
+        mock_exec.assert_not_awaited()
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_patch_on_insurance_row_succeeds(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        """Normal PATCH (name, expiryDate) on an existing insurance row still works.
+
+        Removing 'kind' from _LC_UPDATABLE must not break legitimate edits to
+        insurance documents — only the kind field itself is now immutable.
+        """
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        # Existing insurance row (company-wide, aspire_branch_id=None).
+        mock_query.return_value = [_ins_lc_row()]
+        r = client.patch(
+            "/api/settings/licenses/ins-001",
+            json={"name": "Updated GL Policy", "expiryDate": "2028-06-30"},
+        )
+        assert r.status_code == 200
+        updates = [
+            c for c in mock_exec.await_args_list
+            if "UPDATE" in c.args[0].upper() and "licenses_certifications" in c.args[0]
+        ]
+        assert len(updates) == 1
+        # Audit entries: one per changed field (name + expiryDate = 2).
+        audits = _audit_calls(mock_exec)
+        assert len(audits) == 2
 
 
 class TestInsuranceDeactivateViaUnified:

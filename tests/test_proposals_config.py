@@ -569,24 +569,29 @@ class TestInsurance:
         assert "aspire_branch_id IS NULL" in sql
         assert "aspire_branch_id = %s" not in sql
 
-    def test_branch_scope_falls_back_to_company_wide(self, authed):
-        """A branch with no cert of its own still sees the company-wide fallback."""
+    def test_get_insurance_ignores_aspire_branch_id_param(self, authed):
+        """aspire_branch_id is no longer a supported param — insurance is always
+        company-wide. Passing it must NOT trigger a branch-priority query; the
+        endpoint must still return the single global row."""
         with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
             mock_q.return_value = [_insurance_row()]
             res = client.get("/api/proposals/config/insurance?aspire_branch_id=3699")
-        sql, params = mock_q.call_args.args[0], mock_q.call_args.args[1]
-        assert "aspire_branch_id IS NULL OR aspire_branch_id = %s" in sql
-        assert params == (3699, 3699)
+        assert res.status_code == 200
         assert res.json()["id"] == "ins-cert-001"
-
-    def test_branch_specific_row_wins_over_company_wide(self, authed):
-        """When both a branch-scoped and a company-wide row exist, the branch
-        row must win — ORDER BY puts the aspire_branch_id match first."""
-        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
-            mock_q.return_value = [_insurance_row(id="ins-branch-001", aspire_branch_id=3699)]
-            client.get("/api/proposals/config/insurance?aspire_branch_id=3699")
+        # The SQL must NEVER include a branch-specific predicate.
         sql = mock_q.call_args.args[0]
-        assert "ORDER BY (aspire_branch_id = %s) DESC, updated_at DESC LIMIT 1" in sql
+        assert "aspire_branch_id = %s" not in sql
+        assert "ORDER BY (aspire_branch_id = %s)" not in sql
+
+    def test_always_queries_company_wide_only(self, authed):
+        """Regardless of any query params, the SQL must always scope to
+        aspire_branch_id IS NULL — no branch-scoped insurance rows permitted."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            client.get("/api/proposals/config/insurance")
+        sql = mock_q.call_args.args[0]
+        assert "aspire_branch_id IS NULL" in sql
+        assert "aspire_branch_id = %s" not in sql
 
 
 # ── Read-only guard: no write methods on config paths ────────────────────────

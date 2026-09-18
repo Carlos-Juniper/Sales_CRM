@@ -28,12 +28,23 @@ import type {
 
 export const proposalConfigApi = {
   /**
-   * GET /api/proposals/config/branches
+   * GET /api/proposals/config/branches?proposal_id=
    * Returns active non-"DO NOT USE" branches from crm.branches, projected as
    * BranchProfile read-models (includes lat/lng added by migration 014).
-   * Only rows with lat/lng populated are returned (proximity footer requires them).
+   * Without proposalId: only rows with lat/lng populated (proximity calc needs them).
+   *
+   * With proposalId: scoped to the proposal's signer's own branches
+   * (proposal_requests.signer_user_id → user_branches) instead, lat/lng not
+   * required — an unscoped branch like Corporate has no coordinates but must
+   * still be able to appear once it's the rep's own office. Falls back to the
+   * full geocoded roster if the signer holds no branches.
    */
-  branches: () => apiClient.get<BranchProfile[]>('/proposals/config/branches'),
+  branches: (params?: { proposalId?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.proposalId) qs.set('proposal_id', params.proposalId)
+    const q = qs.toString()
+    return apiClient.get<BranchProfile[]>(`/proposals/config/branches${q ? `?${q}` : ''}`)
+  },
 
   /**
    * GET /api/proposals/config/branch-coverage
@@ -79,16 +90,13 @@ export const proposalConfigApi = {
   },
 
   /**
-   * GET /api/proposals/config/insurance?aspire_branch_id=
+   * GET /api/proposals/config/insurance
    * Returns the current insurance certificate metadata (object key + expiry),
-   * or null when no certificate has been uploaded yet. When aspire_branch_id
-   * is supplied, a branch-scoped cert wins over the company-wide fallback.
+   * or null when no certificate has been uploaded yet. Insurance is always
+   * company-wide — no branch scoping.
    */
-  insurance: (params?: { aspireBranchId?: number }) => {
-    const qs = new URLSearchParams()
-    if (params?.aspireBranchId !== undefined) qs.set('aspire_branch_id', String(params.aspireBranchId))
-    const q = qs.toString()
-    return apiClient.get<InsuranceCert | null>(`/proposals/config/insurance${q ? `?${q}` : ''}`)
+  insurance: () => {
+    return apiClient.get<InsuranceCert | null>('/proposals/config/insurance')
   },
 
   /**

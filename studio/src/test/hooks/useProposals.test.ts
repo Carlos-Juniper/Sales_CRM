@@ -160,28 +160,22 @@ describe('useProposalConfig — query key and combined fetch', () => {
 })
 
 // ---------------------------------------------------------------------------
-// useProposalInsurance — branch-aware, separate from useProposalConfig
+// useProposalInsurance — company-wide, no branch scoping
 // ---------------------------------------------------------------------------
 
-describe('useProposalInsurance — query key scoping', () => {
-  it('requests aspire_branch_id when a branch is given', async () => {
+describe('useProposalInsurance — global certificate', () => {
+  it('fetches the company-wide certificate and returns its objectKey', async () => {
     const cert = { id: 'ins-001', objectKey: 'proposal/insurance/cert.pdf', expiryDate: '2027-03-31', label: null, uploadedAt: '2026-01-01T00:00:00Z' }
     server.use(
-      http.get('/api/proposals/config/insurance', ({ request }) => {
-        const url = new URL(request.url)
-        if (url.searchParams.get('aspire_branch_id') === '3699') {
-          return HttpResponse.json(cert)
-        }
-        return HttpResponse.json(null)
-      }),
+      http.get('/api/proposals/config/insurance', () => HttpResponse.json(cert)),
     )
     const { wrapper } = createWrapper()
-    const { result } = renderHook(() => useProposalInsurance({ aspireBranchId: 3699 }), { wrapper })
+    const { result } = renderHook(() => useProposalInsurance(), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data?.objectKey).toBe('proposal/insurance/cert.pdf')
   })
 
-  it('omits aspire_branch_id when no branch is given', async () => {
+  it('never sends aspire_branch_id — insurance is always company-wide', async () => {
     server.use(
       http.get('/api/proposals/config/insurance', ({ request }) => {
         const url = new URL(request.url)
@@ -200,7 +194,7 @@ describe('useProposalInsurance — query key scoping', () => {
       http.get('/api/proposals/config/insurance', () => HttpResponse.json(null)),
     )
     const { wrapper } = createWrapper()
-    const { result } = renderHook(() => useProposalInsurance({ aspireBranchId: 3699 }), { wrapper })
+    const { result } = renderHook(() => useProposalInsurance(), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toBeNull()
   })

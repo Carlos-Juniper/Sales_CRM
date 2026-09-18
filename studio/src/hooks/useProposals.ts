@@ -112,6 +112,23 @@ export function useTeamMembers(params?: {
 }
 
 /**
+ * Branches scoped to one proposal's signer's own assignments (falls back to
+ * the full geocoded roster when there's no signer yet or they hold none).
+ * Feeds the "Local Branches" footer via lib/proposal/proximity.ts
+ * localBranchPicks — separate from useProposalConfig().branches, which stays
+ * unscoped and is still needed there to fill remaining footer slots when the
+ * rep holds fewer than 3 branches.
+ * Query key: ['proposals', 'config', 'branches', 'rep', proposalId]
+ */
+export function useProposalRepBranches(proposalId?: string) {
+  return useQuery<BranchProfile[]>({
+    queryKey: ['proposals', 'config', 'branches', 'rep', proposalId ?? null],
+    queryFn: () => proposalConfigApi.branches({ proposalId }),
+    staleTime: 5 * 60_000,
+  })
+}
+
+/**
  * Client references for a branch.
  * null-branch (company-wide) rows always included when aspireBranchId is set.
  * Query key: ['proposals', 'config', 'client-references', aspireBranchId]
@@ -151,14 +168,13 @@ export function useProposalLicenses(params?: { aspireBranchId?: number }) {
 }
 
 /**
- * Current certificate of insurance for a branch. A branch-scoped cert wins
- * over the company-wide fallback when both exist (server-side priority).
- * Query key: ['proposals', 'config', 'insurance', aspireBranchId]
+ * Single company-wide certificate of insurance. Insurance is always global —
+ * no branch scoping. Query key: ['proposals', 'config', 'insurance']
  */
-export function useProposalInsurance(params?: { aspireBranchId?: number }) {
+export function useProposalInsurance() {
   return useQuery<InsuranceCert | null>({
-    queryKey: ['proposals', 'config', 'insurance', params?.aspireBranchId ?? null],
-    queryFn: () => proposalConfigApi.insurance(params),
+    queryKey: ['proposals', 'config', 'insurance'],
+    queryFn: () => proposalConfigApi.insurance(),
     staleTime: 5 * 60_000,
   })
 }

@@ -31,7 +31,8 @@ export type { LicenseSettingsRow }
  * Scope rules (Handoff 42):
  *   - Company-wide rows (row.aspireBranchId===null): BM sees read-only; admin may edit/deactivate.
  *   - Branch-scoped rows: BM can create/edit/deactivate within their branch.
- *   - Insurance is no longer admin-only — branch-scoped insurance can be created by BMs.
+ *   - Insurance: always company-wide, admin-managed only. Cannot be created at branch scope.
+ *     Only one active insurance row may exist; use Edit / Replace scan to update it.
  *
  * Expiry banner (C.3) uses server-computed isExpired from /proposals/config/licenses.
  * The frontend NEVER recomputes expiry from the date string.
@@ -53,18 +54,14 @@ export function CredentialsSection({
   const rows = docsQuery.data ?? []
   const expiryData = expiryQuery.data
 
-  // Banner: trust server isExpired, never recompute from date string
+  // Banner: server isExpired is the only source of truth — never recompute from date string.
+  // TODO: if the banner should also fire for an expired company-wide insurance doc,
+  // pull useProposalInsurance here and use its server-computed value.
   const hasExpiredDoc =
     expiryData !== undefined &&
     ([...expiryData.licenses, ...expiryData.certifications].some((l) => l.isExpired))
 
-  // Insurance rows from the unified list: check expiryDate verbatim (server value)
-  const hasExpiredInsuranceRow = rows.some((row) => {
-    if (row.kind !== 'insurance') return false
-    return row.expiryDate < new Date().toISOString().slice(0, 10)
-  })
-
-  const showExpiryBanner = hasExpiredDoc || hasExpiredInsuranceRow
+  const showExpiryBanner = hasExpiredDoc
 
   return (
     <SettingsFormShell
@@ -73,7 +70,7 @@ export function CredentialsSection({
       description={
         aspireBranchId === null
           ? 'Company-wide licenses, certifications, and insurance documents.'
-          : 'Branch licenses, certifications, and insurance documents.'
+          : 'Branch licenses and certifications.'
       }
     >
       {/* Shared expiry-warning banner covering all document kinds */}
@@ -133,6 +130,9 @@ function DocumentsArea({
   if (isLoading) return <p className="text-xs opacity-60">Loading…</p>
   if (isError) return <p role="alert" className="text-xs text-red-600">Could not load documents.</p>
 
+  // Compute once here so DocumentForm doesn't need to know about the full collection.
+  const hasActiveInsurance = rows.some((r) => r.kind === 'insurance' && r.active)
+
   return (
     <div>
       {rows.length === 0 && !showCreate && (
@@ -155,6 +155,7 @@ function DocumentsArea({
         showCreate ? (
           <DocumentForm
             aspireBranchId={aspireBranchId}
+            hasActiveInsurance={hasActiveInsurance}
             onDone={() => setShowCreate(false)}
           />
         ) : (
@@ -319,10 +320,13 @@ const KIND_LABELS: Record<DocumentKind, string> = {
 function DocumentForm({
   aspireBranchId,
   existing,
+  hasActiveInsurance,
   onDone,
 }: {
   aspireBranchId: number | null
   existing?: LicenseSettingsRow
+  /** Passed from DocumentsArea; only relevant for the create path. */
+  hasActiveInsurance?: boolean
   onDone: () => void
 }) {
   const [kind, setKind] = useState<DocumentKind>(existing?.kind ?? 'license')
@@ -344,13 +348,25 @@ function DocumentForm({
   // hide them when kind='insurance' to keep the form clean.
   const showLicenseFields = kind !== 'insurance'
 
+  // Kind is immutable after creation — only filter for the create path.
+  // In edit mode, always include the existing kind so the disabled select
+  // can display it (even if it wouldn't otherwise pass the create-path filter).
+  // Insurance is always company-wide and only allowed when none exists yet.
+  const availableKinds = (Object.keys(KIND_LABELS) as DocumentKind[]).filter((k) => {
+    if (existing) return k === existing.kind // show only current kind when editing
+    if (k === 'insurance') {
+      return aspireBranchId === null && !hasActiveInsurance
+    }
+    return true
+  })
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim() || !expiryDate) return
 
     if (existing) {
       const body: LicensePatchBody = {}
-      if (kind !== existing.kind) body.kind = kind
+      // kind is immutable — never send it in a PATCH
       if (name !== existing.name) body.name = name
       if (expiryDate !== existing.expiryDate) body.expiryDate = expiryDate
       if (issuingBody !== (existing.issuingBody ?? '')) body.issuingBody = issuingBody || null
@@ -384,9 +400,10 @@ function DocumentForm({
           id="doc-kind"
           value={kind}
           onChange={(e) => setKind(e.target.value as DocumentKind)}
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
+          disabled={!!existing}  // kind is immutable after creation
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs disabled:opacity-50"
         >
-          {(Object.keys(KIND_LABELS) as DocumentKind[]).map((k) => (
+          {availableKinds.map((k) => (
             <option key={k} value={k}>{KIND_LABELS[k]}</option>
           ))}
         </select>

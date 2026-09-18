@@ -5,7 +5,7 @@ import LoginPage from '@/views/auth/LoginPage'
 import AuthCallbackPage from '@/views/auth/AuthCallbackPage'
 import {
   DashboardPage, LeadFeedPage, BidTrackerPage,
-  PipelinePage, MapPage, EstimatingPage, CalendarPage,
+  PipelinePage, MapPage, EstimatingPage, CalendarPage, CRMAnalyticsPage,
 } from '@/views/inside-sales'
 import AccountsPage from '@/views/inside-sales/AccountsPage'
 import ConnectionsPage from '@/views/inside-sales/ConnectionsPage'
@@ -61,6 +61,10 @@ export const router = createBrowserRouter([
       {
         path: 'inside-sales/calendar',
         element: <InsideSalesGuard><CalendarPage /></InsideSalesGuard>,
+      },
+      {
+        path: 'inside-sales/crm-analytics',
+        element: <InsideSalesGuard><CRMAnalyticsPage /></InsideSalesGuard>,
       },
       // Branch Manager (redirected — analytics now lives on dashboard)
       {

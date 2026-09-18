@@ -35,6 +35,9 @@ export type UserRole =
   | 'inside_sales'
   | 'outside_sales'
   | 'manager'
+  | 'admin'
+  | 'vp'
+  | 'ceo'
 
 export type BidStatus =
   | 'pending'
@@ -128,6 +131,28 @@ export interface MonthlyRevenue {
   won: number
   forecast: number
   pipeline: number
+}
+export interface CrmDeal {
+  property_name: string
+  value: number
+  close_date?: string
+  lost_date?: string
+  reason?: string
+}
+
+export interface CrmAnalytics {
+  total_leads: number
+  won_deals: number
+  total_revenue: number
+  active_pipeline_count: number
+  active_pipeline_value: number
+  win_rate: number
+  leads_by_status: Record<string, number>
+  won_this_month: number
+  won_value_this_month: number
+  won_ytd: number
+  won_deals_list: CrmDeal[]
+  lost_deals_list: CrmDeal[]
 }
 
 export interface KanbanColumn {

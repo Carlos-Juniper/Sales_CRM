@@ -2,7 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Inbox, FileText, GitBranch,
   ChevronLeft, ChevronRight, LogOut, Leaf, Settings,
-  Map, Calculator, Building, Calendar,
+  Map, Calculator, Building, Calendar, TrendingUp,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
@@ -21,6 +21,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: ['inside_sales', 'manager'] },
+  { label: 'CRM Analytics', icon: TrendingUp, href: '/inside-sales/crm-analytics', roles: ['inside_sales', 'outside_sales', 'manager', 'admin', 'vp', 'ceo'] },
   { label: 'Lead Feed', icon: Inbox, href: '/inside-sales/leads', roles: ['inside_sales', 'manager'] },
   { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: ['inside_sales', 'manager'] },
   { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: ['inside_sales', 'manager'] },

@@ -1432,6 +1432,147 @@ async def dashboard_inside_sales(_user: dict = Depends(require_auth)) -> dict:
     }
 
 
+@app.get("/api/analytics/crm/{crm_id}")
+async def get_crm_analytics(
+    crm_id: str,
+    user: dict = Depends(require_auth),
+) -> dict:
+    """Get analytics for a specific CRM.
+
+    Admins, VPs, CEOs, and managers can view any CRM's analytics.
+    Other roles can only view their own analytics.
+    """
+    CROSS_BRANCH = {"admin", "vp", "ceo", "manager"}
+    user_role = user.get("role", "")
+    if user_role not in CROSS_BRANCH and user.get("id") != crm_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only view your own analytics.",
+        )
+
+    # Fetch CRM-specific metrics
+    total_leads, won_leads, active_pipeline, status_breakdown, this_month, won_ytd, won_deals_list, lost_deals_list = await asyncio.gather(
+        query(
+            "SELECT COUNT(*) AS cnt FROM leads WHERE assigned_to = %s AND deleted_at IS NULL",
+            [crm_id],
+        ),
+        query(
+            """
+            SELECT COUNT(*) AS cnt, SUM(estimated_contract_value) AS revenue
+            FROM leads
+            WHERE assigned_to = %s AND status = 'won' AND deleted_at IS NULL
+            """,
+            [crm_id],
+        ),
+        query(
+            """
+            SELECT COUNT(*) AS cnt, SUM(estimated_contract_value) AS value
+            FROM leads
+            WHERE assigned_to = %s
+              AND status NOT IN ('won', 'lost', 'disqualified')
+              AND deleted_at IS NULL
+            """,
+            [crm_id],
+        ),
+        query(
+            """
+            SELECT status, COUNT(*) AS cnt
+            FROM leads
+            WHERE assigned_to = %s AND deleted_at IS NULL
+            GROUP BY status
+            """,
+            [crm_id],
+        ),
+        query(
+            """
+            SELECT COUNT(*) AS cnt, SUM(estimated_contract_value) AS value
+            FROM leads
+            WHERE assigned_to = %s
+              AND status = 'won'
+              AND deleted_at IS NULL
+              AND MONTH(updated_at) = MONTH(CURRENT_DATE())
+              AND YEAR(updated_at) = YEAR(CURRENT_DATE())
+            """,
+            [crm_id],
+        ),
+        query(
+            """
+            SELECT SUM(estimated_contract_value) AS value
+            FROM leads
+            WHERE assigned_to = %s
+              AND status = 'won'
+              AND deleted_at IS NULL
+              AND YEAR(updated_at) = YEAR(CURRENT_DATE())
+            """,
+            [crm_id],
+        ),
+        query(
+            """
+            SELECT property_name, estimated_contract_value, updated_at
+            FROM leads
+            WHERE assigned_to = %s AND status = 'won' AND deleted_at IS NULL
+            ORDER BY updated_at DESC
+            LIMIT 10
+            """,
+            [crm_id],
+        ),
+        query(
+            """
+            SELECT property_name, estimated_contract_value, updated_at, notes
+            FROM leads
+            WHERE assigned_to = %s AND status = 'lost' AND deleted_at IS NULL
+            ORDER BY updated_at DESC
+            LIMIT 10
+            """,
+            [crm_id],
+        ),
+    )
+
+    total_leads_count = int(total_leads[0]["cnt"]) if total_leads else 0
+    won_count = int(won_leads[0]["cnt"]) if won_leads else 0
+    won_revenue = float(won_leads[0]["revenue"]) if won_leads and won_leads[0]["revenue"] else 0.0
+    pipeline_count = int(active_pipeline[0]["cnt"]) if active_pipeline else 0
+    pipeline_value = float(active_pipeline[0]["value"]) if active_pipeline and active_pipeline[0]["value"] else 0.0
+    won_this_month = int(this_month[0]["cnt"]) if this_month else 0
+    won_value_this_month = float(this_month[0]["value"]) if this_month and this_month[0]["value"] else 0.0
+    won_ytd_value = float(won_ytd[0]["value"]) if won_ytd and won_ytd[0]["value"] else 0.0
+
+    won_deals_formatted = [
+        {
+            "property_name": r["property_name"],
+            "value": float(r["estimated_contract_value"]),
+            "close_date": r["updated_at"].isoformat() if r["updated_at"] else None,
+        }
+        for r in won_deals_list
+    ]
+
+    lost_deals_formatted = [
+        {
+            "property_name": r["property_name"],
+            "value": float(r["estimated_contract_value"]),
+            "lost_date": r["updated_at"].isoformat() if r["updated_at"] else None,
+            "reason": r["notes"] or "No reason provided",
+        }
+        for r in lost_deals_list
+    ]
+
+    return {
+        "total_leads": total_leads_count,
+        "won_deals": won_count,
+        "total_revenue": won_revenue,
+        "active_pipeline_count": pipeline_count,
+        "active_pipeline_value": pipeline_value,
+        "win_rate": round((won_count / total_leads_count * 100), 1) if total_leads_count > 0 else 0.0,
+        "leads_by_status": {r["status"]: int(r["cnt"]) for r in status_breakdown},
+        "won_this_month": won_this_month,
+        "won_value_this_month": won_value_this_month,
+        "won_ytd": won_ytd_value,
+        "won_deals_list": won_deals_formatted,
+        "lost_deals_list": lost_deals_formatted,
+    }
+
+
+
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
 def _issue_jwt(user: dict, response: Response) -> dict:

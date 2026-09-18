@@ -1,17 +1,9 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronUp, CheckCircle } from 'lucide-react'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Skeleton } from '@/components/shared/LoadingSkeleton'
+import { TableRowSkeleton } from '@/components/shared/LoadingSkeleton'
 import { useMarkCommissionPaid } from '@/hooks/useCommissions'
 import { formatCents } from '@/lib/estimating/maintenance'
 import { formatRate, formatPaymentPeriod, formatContractNumber } from '@/lib/commissions'
@@ -27,6 +19,12 @@ interface CommissionDetailTableProps {
 
 type SortField = 'created_at' | 'commission_amount_cents' | 'property_name'
 type SortDirection = 'asc' | 'desc'
+
+const STATUS_BADGE: Record<Commission['status'], { label: string; className: string }> = {
+  approved: { label: 'Approved', className: 'bg-blue-50 text-blue-700 border-blue-200' },
+  paid:     { label: 'Paid',     className: 'bg-green-50 text-green-700 border-green-200' },
+  cancelled:{ label: 'Cancelled',className: 'bg-gray-50 text-gray-700 border-gray-200' },
+}
 
 export function CommissionDetailTable({
   commissions,
@@ -49,54 +47,31 @@ export function CommissionDetailTable({
   }
 
   const sortedCommissions = [...commissions].sort((a, b) => {
-    const direction = sortDirection === 'asc' ? 1 : -1
-
+    const dir = sortDirection === 'asc' ? 1 : -1
     switch (sortField) {
       case 'created_at':
-        return direction * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+        return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
       case 'commission_amount_cents':
-        return direction * (a.commission_amount_cents - b.commission_amount_cents)
+        return dir * (a.commission_amount_cents - b.commission_amount_cents)
       case 'property_name':
-        return direction * (a.property_name ?? '').localeCompare(b.property_name ?? '')
+        return dir * (a.property_name ?? '').localeCompare(b.property_name ?? '')
       default:
         return 0
     }
   })
 
   const handleMarkPaid = (commissionId: string) => {
-    const paymentPeriod = formatPaymentPeriod(new Date())
-    markPaid.mutate({ commissionId, paymentPeriod })
-  }
-
-  const getStatusBadge = (status: Commission['status']) => {
-    switch (status) {
-      case 'approved':
-        return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Approved</Badge>
-      case 'paid':
-        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Paid</Badge>
-      case 'cancelled':
-        return <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">Cancelled</Badge>
-    }
+    markPaid.mutate({ commissionId, paymentPeriod: formatPaymentPeriod(new Date()) })
   }
 
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field) return null
-    return sortDirection === 'asc' ? (
-      <ChevronUp className="h-4 w-4 inline ml-1" />
-    ) : (
-      <ChevronDown className="h-4 w-4 inline ml-1" />
-    )
+    return sortDirection === 'asc'
+      ? <ChevronUp className="h-3.5 w-3.5 inline ml-1" />
+      : <ChevronDown className="h-3.5 w-3.5 inline ml-1" />
   }
 
-  if (isLoading) {
-    return (
-      <div className="p-4 space-y-3">
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-      </div>
-    )
-  }
+  const colCount = isAdmin ? 8 : 7
 
   return (
     <div>
@@ -122,7 +97,10 @@ export function CommissionDetailTable({
         <Select
           value={filters.estimate_type ?? 'all'}
           onValueChange={(value) =>
-            onFiltersChange({ ...filters, estimate_type: value === 'all' ? undefined : value as Commission['estimate_type'] })
+            onFiltersChange({
+              ...filters,
+              estimate_type: value === 'all' ? undefined : value as CommissionFilters['estimate_type'],
+            })
           }
         >
           <SelectTrigger className="w-[180px]">
@@ -137,91 +115,97 @@ export function CommissionDetailTable({
       </div>
 
       {/* Table */}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead
-              className="cursor-pointer select-none"
-              onClick={() => handleSort('created_at')}
-            >
-              Date <SortIcon field="created_at" />
-            </TableHead>
-            <TableHead
-              className="cursor-pointer select-none"
-              onClick={() => handleSort('property_name')}
-            >
-              Property <SortIcon field="property_name" />
-            </TableHead>
-            <TableHead>Contract #</TableHead>
-            <TableHead className="text-right">Contract Value</TableHead>
-            <TableHead className="text-right">Rate</TableHead>
-            <TableHead
-              className="text-right cursor-pointer select-none"
-              onClick={() => handleSort('commission_amount_cents')}
-            >
-              Commission <SortIcon field="commission_amount_cents" />
-            </TableHead>
-            <TableHead>Status</TableHead>
-            {isAdmin && <TableHead className="text-right">Actions</TableHead>}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sortedCommissions.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={isAdmin ? 8 : 7} className="text-center text-[hsl(var(--muted-fg))] py-8">
-                No commissions found
-              </TableCell>
-            </TableRow>
-          ) : (
-            sortedCommissions.map((commission) => (
-              <TableRow key={commission.id}>
-                <TableCell className="font-medium">
-                  {new Date(commission.created_at).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
-                </TableCell>
-                <TableCell>{commission.property_name}</TableCell>
-                <TableCell className="font-mono text-sm">
-                  {formatContractNumber(commission.aspire_number, commission.estimate_number)}
-                </TableCell>
-                <TableCell className="text-right font-mono">
-                  {formatCents(commission.contract_value_cents)}
-                </TableCell>
-                <TableCell className="text-right font-mono">
-                  {formatRate(commission.commission_rate)}
-                </TableCell>
-                <TableCell className="text-right font-mono font-semibold">
-                  {formatCents(commission.commission_amount_cents)}
-                </TableCell>
-                <TableCell>{getStatusBadge(commission.status)}</TableCell>
-                {isAdmin && (
-                  <TableCell className="text-right">
-                    {commission.status === 'approved' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleMarkPaid(commission.id)}
-                        disabled={markPaid.isPending}
-                        className="gap-1.5"
-                      >
-                        <CheckCircle className="h-3.5 w-3.5" />
-                        Mark Paid
-                      </Button>
-                    )}
-                    {commission.status === 'paid' && commission.payment_period && (
-                      <span className="text-xs text-[hsl(var(--muted-fg))]">
-                        {commission.payment_period}
-                      </span>
-                    )}
-                  </TableCell>
-                )}
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]">
+              <th
+                className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none whitespace-nowrap"
+                onClick={() => handleSort('created_at')}
+              >
+                Date <SortIcon field="created_at" />
+              </th>
+              <th
+                className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none"
+                onClick={() => handleSort('property_name')}
+              >
+                Property <SortIcon field="property_name" />
+              </th>
+              <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] whitespace-nowrap">Contract #</th>
+              <th className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] whitespace-nowrap">Contract Value</th>
+              <th className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Rate</th>
+              <th
+                className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none"
+                onClick={() => handleSort('commission_amount_cents')}
+              >
+                Commission <SortIcon field="commission_amount_cents" />
+              </th>
+              <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Status</th>
+              {isAdmin && (
+                <th className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Actions</th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading && Array.from({ length: 5 }).map((_, i) => (
+              <TableRowSkeleton key={i} cols={colCount} />
+            ))}
+
+            {!isLoading && sortedCommissions.length === 0 && (
+              <tr>
+                <td colSpan={colCount} className="py-12 text-center text-sm text-[hsl(var(--muted-fg))]">
+                  No commissions found
+                </td>
+              </tr>
+            )}
+
+            {!isLoading && sortedCommissions.map((commission) => {
+              const badge = STATUS_BADGE[commission.status]
+              return (
+                <tr
+                  key={commission.id}
+                  className="border-b border-[hsl(var(--border))] last:border-0 hover:bg-[hsl(var(--muted))] transition-colors"
+                >
+                  <td className="px-4 py-3 text-xs whitespace-nowrap">
+                    {new Date(commission.created_at).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </td>
+                  <td className="px-4 py-3 text-xs">{commission.property_name}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{formatContractNumber(commission.aspire_number, commission.estimate_number)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-xs">{formatCents(commission.contract_value_cents)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-xs">{formatRate(commission.commission_rate)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-xs font-semibold">{formatCents(commission.commission_amount_cents)}</td>
+                  <td className="px-4 py-3">
+                    <Badge variant="outline" className={badge.className}>{badge.label}</Badge>
+                  </td>
+                  {isAdmin && (
+                    <td className="px-4 py-3 text-right">
+                      {commission.status === 'approved' && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleMarkPaid(commission.id)}
+                          disabled={markPaid.isPending}
+                          className="gap-1.5 h-7 text-xs"
+                        >
+                          <CheckCircle className="h-3.5 w-3.5" />
+                          Mark Paid
+                        </Button>
+                      )}
+                      {commission.status === 'paid' && commission.payment_period && (
+                        <span className="text-xs text-[hsl(var(--muted-fg))]">{commission.payment_period}</span>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

@@ -38,6 +38,17 @@ export type TeamMemberTitle =
   | 'regional_director' | 'manager' | 'account_manager'
   | 'agronomy_manager' | 'irrigation_manager' | 'production_manager' | 'executive'
 
+/**
+ * Bio character cap for the proposal's Meet Our Team page.
+ *
+ * The bio-box's `.bi` rule (proposal-print.css) clamps to 12 lines at
+ * 9.75pt/1.46 line-height across the ~5.5in column left after the 1.45in
+ * photo — text past this length gets cut off mid-sentence rather than
+ * ellipsized (line-clamp is webkit-only). 700 chars keeps a real bio inside
+ * that budget with margin for narrower-than-average glyphs.
+ */
+export const TEAM_MEMBER_BIO_MAX_LENGTH = 700
+
 /** Config row — one per person eligible to appear in a proposal. Seeded/admin-managed, never hardcoded. */
 export interface TeamMember {
   id: string
@@ -68,8 +79,11 @@ export interface BranchProfile {
   city: string
   regionId: string         // -> crm.regions
   address: string
-  lat: number
-  lng: number
+  // null for an ungeocoded office (e.g. Corporate) returned via the
+  // proposalId-scoped /config/branches request, which does not require
+  // coordinates the way the default proximity-calc roster does.
+  lat: number | null
+  lng: number | null
 }
 
 /**
@@ -164,12 +178,21 @@ export interface OrgChartInput {
   crewCounts: OrgChartCrewCounts
 }
 
-/** The 30-60-90 optional page: Day Zero/30 render from a static seed; the rest are free text per proposal. */
+/**
+ * The 30-60-90 optional page. Day Zero and Day 30 are static seed copy and
+ * always print; Day 60 / Day 90 / Day 120+ print cumulatively up to
+ * `planMaxDays`, and Ongoing always prints regardless of `planMaxDays` since
+ * it describes what continues indefinitely after the plan period. Each of the
+ * four below falls back to its own seed copy when the rep leaves it empty.
+ */
 export interface StartupPlanInput {
   included: boolean
-  /** Maximum day milestone to include. Controls which phase inputs appear in the form
-   *  and which cards render on the page. Day 120+ and Ongoing are always optional extras. */
-  planMaxDays: 30 | 60 | 90
+  /**
+   * How far out the phase list runs before falling to Ongoing. 120 is the
+   * only value that includes Day 120+; see startup-plan-30-60-90.tsx for the
+   * exact cumulative mapping.
+   */
+  planMaxDays: 30 | 60 | 90 | 120
   day60: string[]
   day90: string[]
   day120Plus: string[]

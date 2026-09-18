@@ -11,6 +11,7 @@ import {
 import { teamMemberTitleLabel } from '@/lib/proposal/titleLabels'
 import { ImageUploadField } from '@/components/settings/ImageUploadField'
 import type { TeamMember } from '@/types/proposal'
+import { TEAM_MEMBER_BIO_MAX_LENGTH } from '@/types/proposal'
 import type {
   TeamMemberCreateBody,
   TeamMemberPatchBody,
@@ -276,7 +277,13 @@ function TeamMemberForm({
       <Field id="tm-name" label="Name" value={name} onChange={setName} required />
       <Field id="tm-title" label="Title" value={title} onChange={setTitle} required />
       <Field id="tm-location" label="Location" value={location} onChange={setLocation} />
-      <TextareaField id="tm-bio" label="Bio" value={bio} onChange={setBio} />
+      <TextareaField
+        id="tm-bio"
+        label="Bio"
+        value={bio}
+        onChange={setBio}
+        maxLength={TEAM_MEMBER_BIO_MAX_LENGTH}
+      />
       {!existing && (
         <p className="text-[10px] text-[var(--fg)] opacity-50">
           Add the headshot after saving — the photo attaches to the created row.
@@ -344,24 +351,36 @@ function TextareaField({
   label,
   value,
   onChange,
+  maxLength,
 }: {
   id: string
   label: string
   value: string
   onChange: (v: string) => void
+  maxLength?: number
 }) {
   return (
     <div>
-      <label
-        htmlFor={id}
-        className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5"
-      >
-        {label}
-      </label>
+      <div className="flex items-baseline justify-between">
+        <label
+          htmlFor={id}
+          className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5"
+        >
+          {label}
+        </label>
+        {maxLength && (
+          <span
+            className={`text-[10px] ${value.length > maxLength ? 'text-red-500' : 'text-[var(--fg)] opacity-50'}`}
+          >
+            {value.length}/{maxLength}
+          </span>
+        )}
+      </div>
       <textarea
         id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        maxLength={maxLength}
         rows={3}
         className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
       />

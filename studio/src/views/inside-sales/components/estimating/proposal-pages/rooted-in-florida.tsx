@@ -16,7 +16,9 @@ export function RootedInFlorida({ coverage }: { coverage: BranchCoverageGroup[] 
     (n, g) => n + g.regions.reduce((m, r) => m + r.branches.length, 0),
     0,
   )
-  // Same source as the coverage table overleaf, so the two cannot disagree.
+  // Company-wide coverage (useProposalConfig, unscoped) — deliberately NOT the
+  // rep-scoped list the Local Landscape Experts page renders, since this stat
+  // is meant to read as the company's total footprint either way.
   const stats = officeCount
     ? [...COMPANY_STATS, {
         num: String(officeCount),

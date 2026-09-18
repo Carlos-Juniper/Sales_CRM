@@ -38,8 +38,8 @@
 import { useEffect } from 'react'
 import '@/styles/proposal-print.css'
 import { COMPANY_INFO } from '@/lib/constants'
-import { nearestBranches } from '@/lib/proposal/proximity'
-import { useProposalConfig, useProposalLicenses, useProposalInsurance } from '@/hooks/useProposals'
+import { localBranchPicks } from '@/lib/proposal/proximity'
+import { useProposalConfig, useProposalRepBranches, useProposalLicenses, useProposalInsurance } from '@/hooks/useProposals'
 import { applyProposalAssetCssVars } from '@/lib/proposal/assets'
 import { naturalBodyChapterKeys, resolveChapterOrder, chapterTitle } from '@/lib/proposal/chapters'
 import { useProposalAppendedDocuments } from '@/hooks/useProposalDocument'
@@ -137,6 +137,10 @@ export function ProposalPreview({
   }, [])
 
   const { branches, branchCoverage } = useProposalConfig()
+  // The rep's own assigned branches (Fort Myers/Bonita Springs/Corporate,
+  // etc.) — empty when the proposal has no signer yet or the signer holds
+  // none, in which case localBranchPicks below falls back to plain proximity.
+  const { data: repBranches } = useProposalRepBranches(proposalId ?? undefined)
   // Branch scoping: the estimate carries aspireBranchId (Slice 8), same source
   // ProposalBuilder uses to scope team members and client references. Absent
   // for estimate-optional proposals (WS2), in which case the backend falls
@@ -145,12 +149,11 @@ export function ProposalPreview({
   const { data: credentials } = useProposalLicenses(
     aspireBranchId !== undefined ? { aspireBranchId } : undefined,
   )
-  const { data: insuranceCert } = useProposalInsurance(
-    aspireBranchId !== undefined ? { aspireBranchId } : undefined,
-  )
+  const { data: insuranceCert } = useProposalInsurance()
 
-  // Proximity footer: 2–3 nearest branches to the lead's lat/lng
-  const nearbyBranches = nearestBranches(lead.lat, lead.lng, branches, 3)
+  // "Local Branches" footer: the rep's own assigned branches always shown,
+  // padded out to 3 with the nearest other offices when they hold fewer.
+  const nearbyBranches = localBranchPicks(lead.lat, lead.lng, repBranches ?? [], branches, 3)
 
   // Resolved upstream by useProposalDocument, which gates the print route's
   // readiness flag on the user list so a PDF cannot capture before the rep's

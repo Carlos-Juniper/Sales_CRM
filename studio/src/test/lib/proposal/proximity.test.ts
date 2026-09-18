@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect } from 'vitest'
-import { haversineDistanceMiles, nearestBranches } from '@/lib/proposal/proximity'
+import { haversineDistanceMiles, nearestBranches, localBranchPicks } from '@/lib/proposal/proximity'
 import type { BranchProfile } from '@/types/proposal'
 
 // ---------------------------------------------------------------------------
@@ -193,5 +193,97 @@ describe('nearestBranches', () => {
     const result = nearestBranches(26.6, -81.8, [NAPLES], 3)
     expect(result).toHaveLength(1)
     expect(result[0].aspireBranchId).toBe(2001)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// localBranchPicks
+// ---------------------------------------------------------------------------
+
+/** Corporate — no coordinates, like the real ungeocoded row. */
+const CORPORATE: BranchProfile = {
+  aspireBranchId: 9001,
+  branchName: 'Corporate',
+  city: 'Fort Myers',
+  regionId: 'corporate',
+  address: '100 Corporate Way, Fort Myers, FL 33912',
+  lat: null,
+  lng: null,
+}
+
+/** Bonita Springs — near Fort Myers. */
+const BONITA_SPRINGS: BranchProfile = {
+  aspireBranchId: 1500,
+  branchName: 'Bonita Springs',
+  city: 'Bonita Springs',
+  regionId: 'west-coast',
+  address: '200 Bonita Blvd, Bonita Springs, FL 34135',
+  lat: 26.34,
+  lng: -81.78,
+}
+
+describe('localBranchPicks', () => {
+  it('falls back to plain proximity when the rep has no assigned branches', () => {
+    const result = localBranchPicks(
+      PROPERTY_FORT_MYERS.lat,
+      PROPERTY_FORT_MYERS.lng,
+      [],
+      [ORLANDO, SARASOTA, NAPLES, FORT_MYERS_INSTALL],
+      3,
+    )
+    expect(result.map((b) => b.aspireBranchId)).toEqual([1403, 2001, 2002])
+  })
+
+  it("Angela G case: three assigned branches (incl. ungeocoded Corporate) all show, nearest-first, Corporate last", () => {
+    const result = localBranchPicks(
+      PROPERTY_FORT_MYERS.lat,
+      PROPERTY_FORT_MYERS.lng,
+      [CORPORATE, FORT_MYERS_INSTALL, BONITA_SPRINGS],
+      [ORLANDO, SARASOTA, NAPLES, FORT_MYERS_INSTALL, BONITA_SPRINGS, CORPORATE],
+      3,
+    )
+    expect(result.map((b) => b.aspireBranchId)).toEqual([1403, 1500, 9001])
+  })
+
+  it('pads out to n with the nearest other branches when the rep holds fewer', () => {
+    const result = localBranchPicks(
+      PROPERTY_FORT_MYERS.lat,
+      PROPERTY_FORT_MYERS.lng,
+      [FORT_MYERS_INSTALL],
+      [ORLANDO, SARASOTA, NAPLES, FORT_MYERS_INSTALL, BONITA_SPRINGS],
+      3,
+    )
+    expect(result).toHaveLength(3)
+    // The rep's own branch always leads, then nearest fill picks.
+    expect(result[0].aspireBranchId).toBe(1403)
+    const fillIds = result.slice(1).map((b) => b.aspireBranchId)
+    expect(fillIds).toEqual([1500, 2001]) // Bonita Springs, then Naples
+  })
+
+  it("doesn't duplicate an assigned branch when it also appears in the fill pool", () => {
+    const result = localBranchPicks(
+      PROPERTY_FORT_MYERS.lat,
+      PROPERTY_FORT_MYERS.lng,
+      [FORT_MYERS_INSTALL],
+      [FORT_MYERS_INSTALL, BONITA_SPRINGS, NAPLES],
+      3,
+    )
+    const ids = result.map((b) => b.aspireBranchId)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toContain(1403)
+  })
+
+  it('caps at n when the rep is assigned more branches than the footer shows', () => {
+    const result = localBranchPicks(
+      PROPERTY_FORT_MYERS.lat,
+      PROPERTY_FORT_MYERS.lng,
+      [ORLANDO, SARASOTA, NAPLES, FORT_MYERS_INSTALL, BONITA_SPRINGS, CORPORATE],
+      [],
+      3,
+    )
+    expect(result).toHaveLength(3)
+    // Nearest three of the rep's own branches win; the two furthest (Sarasota,
+    // Orlando) and Corporate (ungeocoded, sorted after all geocoded ones) drop.
+    expect(result.map((b) => b.aspireBranchId)).toEqual([1403, 1500, 2001])
   })
 })

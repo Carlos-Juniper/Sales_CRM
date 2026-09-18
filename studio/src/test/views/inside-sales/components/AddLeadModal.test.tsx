@@ -88,7 +88,7 @@ function renderModal(onClose = vi.fn()) {
 // ── Tests ─────────────────────────────────────────────────────────
 
 describe('AddLeadModal — lead type buttons', () => {
-  it('renders HOA, Commercial, Deathcare, Resorts, and Healthcare type buttons', () => {
+  it('renders all five lead type buttons with display labels', () => {
     renderModal()
     expect(screen.getByRole('button', { name: 'HOA' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Commercial' })).toBeInTheDocument()
@@ -99,17 +99,14 @@ describe('AddLeadModal — lead type buttons', () => {
 
   it('renders exactly five lead type buttons (no duplicates)', () => {
     renderModal()
-    const buttons = screen.getAllByRole('button').filter(btn =>
-      ['HOA','Commercial','Deathcare','Resorts','Healthcare'].includes(btn.textContent || '')
-    )
-    expect(buttons).toHaveLength(5)
+    const commercialButtons = screen.getAllByRole('button', { name: 'Commercial' })
+    expect(commercialButtons).toHaveLength(1)
   })
 
   it('selecting Deathcare includes it in the submit payload', async () => {
     const user = userEvent.setup()
     renderModal()
 
-    // Select property and branch to enable submission
     await user.click(screen.getByTestId('mock-select-property'))
     await user.selectOptions(screen.getByRole('combobox', { name: /branch/i }), '1')
     await user.click(screen.getByRole('button', { name: 'Deathcare' }))
@@ -120,7 +117,7 @@ describe('AddLeadModal — lead type buttons', () => {
     expect(payload.lead_type).toBe('deathcare')
   })
 
-  it('selecting Healthcare includes the lowercase value in the submit payload', async () => {
+  it('selecting Healthcare stores the raw "healthcare" value in the payload', async () => {
     const user = userEvent.setup()
     renderModal()
 

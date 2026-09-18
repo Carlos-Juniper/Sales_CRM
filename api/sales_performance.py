@@ -37,7 +37,7 @@ def _coerce_row(row: dict) -> dict:
 
 def _can_view_all(user: dict) -> bool:
     """True if the authenticated user may view any rep's sales performance data."""
-    return authz.normalize_role(user.get("role")) in authz.CROSS_BRANCH_ROLES
+    return authz.normalize_role(user.get("role")) in authz.REP_VIEWER_ROLES
 
 
 def _default_date_range(start_date: Optional[str], end_date: Optional[str]) -> tuple[str, str]:

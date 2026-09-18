@@ -63,6 +63,12 @@ LINE_ITEM_EDIT_ROLES = ESTIMATOR_ROLES | APPROVER_ROLES
 # to the marketing-asset tables (MARKETING_ROLES), NOT to estimate branch scope.
 CROSS_BRANCH_ROLES = frozenset({"admin", "vice_president", "ceo"})
 
+# Roles that may view sales performance / commission data for any rep.
+# Broader than CROSS_BRANCH_ROLES — adds manager and regional_director so
+# branch-level leaders can see their team's numbers without gaining full
+# cross-branch write privileges (mark-paid, etc. remain CROSS_BRANCH_ROLES).
+REP_VIEWER_ROLES = frozenset({"admin", "vice_president", "ceo", "manager", "regional_director"})
+
 # Handoff 50 §3: roles that may manage the company-wide proposal assets —
 # portfolio_properties, client_references, team_members, org-chart config.
 # Marketing owns these cross-branch; admin retains its super-role access.

@@ -42,7 +42,7 @@ def _coerce_row(row: dict) -> dict:
 
 def _can_view_all(user: dict) -> bool:
     """True if the authenticated user may view any rep's commissions."""
-    return authz.normalize_role(user.get("role")) in authz.CROSS_BRANCH_ROLES
+    return authz.normalize_role(user.get("role")) in authz.REP_VIEWER_ROLES
 
 
 def register(app, require_auth) -> None:

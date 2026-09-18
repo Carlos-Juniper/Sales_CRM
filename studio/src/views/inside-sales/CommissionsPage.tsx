@@ -51,7 +51,7 @@ function KpiCard({ label, value, dotColor }: KpiCardProps) {
 }
 
 export default function CommissionsPage() {
-  const { seesAllBranches } = useRole()
+  const { seesAllBranches, canViewRepSelector } = useRole()
 
   const [selectedUserId, setSelectedUserId] = useState<string | undefined>(undefined)
   const [period, setPeriod] = useState<Period>('this_year')
@@ -63,7 +63,7 @@ export default function CommissionsPage() {
   const queryFilters: CommissionFilters = {
     ...filters,
     ...getPeriodDates(period),
-    user_id: seesAllBranches ? selectedUserId : undefined,
+    user_id: canViewRepSelector ? selectedUserId : undefined,
   }
 
   const { data: summary, isLoading: summaryLoading } = useCommissionSummary(queryFilters)
@@ -75,7 +75,7 @@ export default function CommissionsPage() {
 
   const attainmentMax = Math.max(summary?.scheduled_ytd_cents ?? 0, summary?.paid_ytd_cents ?? 0, 1)
 
-  const selectedRep = seesAllBranches && selectedUserId
+  const selectedRep = canViewRepSelector && selectedUserId
     ? reps?.find(r => r.id === selectedUserId)
     : undefined
 
@@ -90,7 +90,7 @@ export default function CommissionsPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-2xl font-semibold text-[hsl(var(--fg))]">
-                {seesAllBranches && selectedRep
+                {canViewRepSelector && selectedRep
                   ? `${selectedRep.name}'s Commissions`
                   : 'Your Commissions'}
               </h1>
@@ -100,7 +100,7 @@ export default function CommissionsPage() {
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
-              {seesAllBranches && reps && reps.length > 0 && (
+              {canViewRepSelector && reps && reps.length > 0 && (
                 <Select value={selectedUserId} onValueChange={setSelectedUserId}>
                   <SelectTrigger className="w-[200px]">
                     <SelectValue placeholder="All Reps" />

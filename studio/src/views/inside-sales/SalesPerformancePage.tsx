@@ -164,7 +164,7 @@ function LostDealRow({ deal }: { deal: LostDeal }) {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SalesPerformancePage() {
-  const { seesAllBranches } = useRole()
+  const { canViewRepSelector } = useRole()
 
   const [selectedUserId, setSelectedUserId] = useState<string | undefined>(undefined)
   const [period, setPeriod] = useState<Period>('this_year')
@@ -172,7 +172,7 @@ export default function SalesPerformancePage() {
 
   const queryFilters = {
     ...getPeriodDates(period),
-    user_id: seesAllBranches ? selectedUserId : undefined,
+    user_id: canViewRepSelector ? selectedUserId : undefined,
   }
 
   const { data: summary, isLoading: summaryLoading } = useSalesPerformanceSummary(queryFilters)
@@ -217,7 +217,7 @@ export default function SalesPerformancePage() {
               />
             </div>
 
-            {seesAllBranches && reps && reps.length > 0 && (
+            {canViewRepSelector && reps && reps.length > 0 && (
               <Select value={selectedUserId ?? 'all'} onValueChange={v => setSelectedUserId(v === 'all' ? undefined : v)}>
                 <SelectTrigger className="w-[160px]">
                   <SelectValue placeholder="All Reps" />

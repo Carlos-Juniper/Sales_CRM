@@ -405,25 +405,28 @@ const ORG_CHART: OrgChartInput = {
   },
 }
 
+// planMaxDays: 60 deliberately exercises all four states at once: Day 60 is
+// rep-entered and prints it; Day 90 is empty AND excluded by plan length, so
+// its box prints with no bullets; Day 120+ has rep-entered text that plan
+// length excludes anyway — its box must also print empty, not the rep copy;
+// Ongoing is empty but always prints, so it falls through to the seed. All
+// six boxes must still render at the same fixed size regardless of which of
+// them are empty — that is the thing to eyeball on /dev/proposal-fidelity.
 const STARTUP_PLAN: StartupPlanInput = {
   included: true,
-  planMaxDays: 90,
+  planMaxDays: 60,
   day60: [
-    'Complete full site walk with the board and document existing conditions.',
-    'Audit every irrigation zone and log controller programming.',
+    'Full site walk with the board',
+    'Irrigation zone audit',
+    'Controller programming log',
   ],
-  day90: [
-    'Deliver the first agronomic program review and soil test results.',
-    'Begin scheduled pruning rotation on all street-facing beds.',
-  ],
+  day90: [],
   day120Plus: [
-    'Present the enhancement plan for the entry features and amenity center.',
-    'Establish quarterly board reporting cadence.',
+    'Entry feature enhancement plan',
+    'Amenity center enhancement plan',
+    'Quarterly board reporting cadence',
   ],
-  ongoing: [
-    'Weekly maintenance visits with photo-documented quality reports.',
-    'Monthly irrigation wet checks with written findings.',
-  ],
+  ongoing: [],
 }
 
 /** Every togglable section, so the route exercises all ~25 pages. */

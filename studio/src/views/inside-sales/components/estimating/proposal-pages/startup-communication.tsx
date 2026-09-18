@@ -18,7 +18,7 @@ export function StartupCommunication() {
           <h1 className="page-title">{content.heading}</h1>
           <p className="lede">{lede}</p>
           {rest.map((para, i) => (
-            <p key={i}>{para}</p>
+            <p className="lede-body" key={i}>{para}</p>
           ))}
           <CopyLists lists={purposeList ? [purposeList] : undefined} />
         </div>

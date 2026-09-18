@@ -32,6 +32,10 @@ function toRad(deg: number): number {
   return (deg * Math.PI) / 180
 }
 
+function addressKey(b: BranchProfile): string {
+  return b.address.trim().toLowerCase()
+}
+
 /**
  * Return the `n` nearest BranchProfile entries to a given lat/lng,
  * deduped by address (case-insensitive trim) so that install/maintenance
@@ -55,8 +59,13 @@ export function nearestBranches(
 ): BranchProfile[] {
   if (branches.length === 0) return []
 
-  // 1. Attach distance to each branch.
-  const withDistance = branches.map((b) => ({
+  // 1. Attach distance to each branch. Ungeocoded offices (lat/lng null, e.g.
+  //    a proposalId-scoped Corporate row) have no distance to rank by, so
+  //    they're excluded here rather than passed to haversineDistanceMiles.
+  const geocoded = branches.filter(
+    (b): b is BranchProfile & { lat: number; lng: number } => b.lat != null && b.lng != null,
+  )
+  const withDistance = geocoded.map((b) => ({
     branch: b,
     distanceMiles: haversineDistanceMiles(lat, lng, b.lat, b.lng),
   }))
@@ -74,7 +83,7 @@ export function nearestBranches(
   const seen = new Set<string>()
   const deduped: BranchProfile[] = []
   for (const { branch } of withDistance) {
-    const key = branch.address.trim().toLowerCase()
+    const key = addressKey(branch)
     if (!seen.has(key)) {
       seen.add(key)
       deduped.push(branch)
@@ -83,4 +92,65 @@ export function nearestBranches(
   }
 
   return deduped
+}
+
+/**
+ * "Local Branches" footer picks for a proposal whose signer holds their own
+ * assigned branches (via user_branches) — the footer should always show the
+ * rep's own offices, not just whichever happen to be nearest the property.
+ *
+ * The footer always shows `n` offices:
+ *  - The rep's assigned branches always appear, geocoded ones ordered
+ *    nearest-to-farthest and any ungeocoded one (e.g. Corporate, which has no
+ *    lat/lng) placed last since it has no distance to rank by.
+ *  - If the rep is assigned fewer than `n`, the remaining slots are filled
+ *    with the nearest other branches by distance to the property — e.g. a
+ *    rep assigned to just one branch still fills out to 3 with their
+ *    nearest neighboring offices, not a bare single-item footer.
+ *  - Assigned branches beyond `n` are capped (nearest ones win); a rep
+ *    covering eight branches still gets a 3-office footer, not eight.
+ *
+ * @param assignedBranches The signer's own branches (proposalId-scoped
+ *                          /config/branches). Empty when there's no signer
+ *                          yet or they hold none — the whole result then
+ *                          falls back to a plain nearestBranches search.
+ * @param allBranches      The full geocoded company roster, used only to
+ *                          fill remaining slots.
+ */
+export function localBranchPicks(
+  lat: number,
+  lng: number,
+  assignedBranches: BranchProfile[],
+  allBranches: BranchProfile[],
+  n = 3,
+): BranchProfile[] {
+  if (assignedBranches.length === 0) return nearestBranches(lat, lng, allBranches, n)
+
+  const byAddress = new Map<string, BranchProfile>()
+  for (const b of [...assignedBranches].sort((a, c) => a.aspireBranchId - c.aspireBranchId)) {
+    const key = addressKey(b)
+    if (!byAddress.has(key)) byAddress.set(key, b)
+  }
+  const geocoded: BranchProfile[] = []
+  const ungeocoded: BranchProfile[] = []
+  for (const b of byAddress.values()) {
+    if (b.lat != null && b.lng != null) {
+      geocoded.push(b)
+    } else {
+      ungeocoded.push(b)
+    }
+  }
+  geocoded.sort(
+    (a, b) =>
+      haversineDistanceMiles(lat, lng, a.lat as number, a.lng as number) -
+      haversineDistanceMiles(lat, lng, b.lat as number, b.lng as number),
+  )
+
+  const ordered = [...geocoded, ...ungeocoded].slice(0, n)
+  if (ordered.length >= n) return ordered
+
+  const shown = new Set(ordered.map(addressKey))
+  const fillPool = allBranches.filter((b) => !shown.has(addressKey(b)))
+  const fill = nearestBranches(lat, lng, fillPool, n - ordered.length)
+  return [...ordered, ...fill]
 }

@@ -102,10 +102,17 @@ export interface StartupPlanBullet {
   text: string
 }
 
-/** Static seed bullets for Day Zero and Day 30. Day 60+ are free-text per proposal. */
+/**
+ * Default bullets for all six phases. Every phase prints on every proposal; a
+ * rep's free-text list (StartupPlanInput) overrides its phase when non-empty.
+ */
 export interface StartupPlanSeed {
   dayZero: StartupPlanBullet[]
   day30: StartupPlanBullet[]
+  day60: StartupPlanBullet[]
+  day90: StartupPlanBullet[]
+  day120Plus: StartupPlanBullet[]
+  ongoing: StartupPlanBullet[]
 }
 
 /** Juniper Mapping is two pages; each has its own copy block. */
@@ -522,7 +529,7 @@ export const ROOTED_IN_FLORIDA_CONTENT: StaticPageCopy = {
   heading: 'Rooted in Florida',
   subheading: 'About Us',
   body: [
-    'From the very beginning, we started with the commitment to deliver the best value and on-time projects. This commitment has helped Juniper grow from a small custom landscape operation with just a few employees to multiple locations throughout Florida. Over the last 20 years, a lot has changed, and we take pride in the technology, service, and quality we continue to provide.',
+    'From the very beginning, we started with the commitment to deliver the best value and on-time projects. This commitment has helped Juniper grow from a small custom landscape operation with just a few employees to multiple locations throughout Florida. Over the last 25 years, a lot has changed, and we take pride in the technology, service, and quality we continue to provide.',
   ],
   lists: [
     {
@@ -750,36 +757,96 @@ export const JUNIPER_CARES_PAGE_CONTENT: StaticPageCopy = {
 }
 
 // ---------------------------------------------------------------------------
-// 30-60-90 Start Up Plan — static seed (Day Zero + Day 30 only)
-// Day 60 / Day 90 / 120+ / Ongoing are free-text per proposal (StartupPlanInput).
+// 30-60-90 Start Up Plan — default bullets for all six phases
+//
+// The reference (Pointe Jupiter Yacht Club.pdf p.18) always prints six columns.
+// Its unfilled ones literally read "Insert point here", which we will not ship,
+// so every phase carries real default copy here. A rep's free-text list in
+// StartupPlanInput overrides its phase when non-empty.
 // ---------------------------------------------------------------------------
 
-// NOTE: Day Zero / Day 30 bullets are not part of Handoff 45 §4's approved copy
-// deck; they remain the Slice-2 seed pending verification against the live
-// 30-60-90 example PDF (page 2). No §4 source exists to replace them here.
 export const STARTUP_PLAN_SEED: StartupPlanSeed = {
+  // Day Zero and Day 30 are verbatim from the reference (Pointe Jupiter p.18),
+  // the only two phases that document fills in. Terse noun phrases are the
+  // register the whole page is built around: at 9.75pt in a 2.58in column,
+  // full sentences wrap to three lines each and overrun the fixed panel.
   dayZero: [
-    { text: 'Conduct property walk-through with Account Manager and key client contacts' },
-    { text: 'Identify and document any existing damage, deferred maintenance, or safety concerns' },
-    { text: 'Confirm service schedule and point-of-contact information' },
-    { text: 'Review scope of services and establish communication cadence' },
-    { text: 'Set up client account in Juniper Sync portal' },
-    { text: 'Orient crew lead to property layout, gate codes, and access requirements' },
-    { text: 'Photograph property baseline conditions for shared documentation' },
+    { text: 'Service Request Meeting' },
+    { text: 'Juniper Advance Property Mapping' },
+    { text: 'Detailed property report' },
+    { text: 'Schedule of services map' },
+    { text: 'Property mowing techniques' },
+    { text: 'Proper pruning techniques' },
+    { text: 'Weed control' },
+    { text: 'Irrigation' },
   ],
   day30: [
-    { text: 'Complete first full maintenance cycle and submit work-order report' },
-    { text: 'Conduct 30-day check-in meeting with client to review service performance' },
-    { text: 'Identify and quote any enhancement opportunities observed during initial visits' },
-    { text: 'Confirm irrigation system coverage and schedule — adjust as needed' },
-    { text: 'Submit first monthly property health summary through Juniper Sync' },
-    { text: 'Confirm pest and disease scouting findings; initiate any recommended treatments' },
+    { text: 'Fertilization & Pest Control' },
+    { text: 'Address any immediate issues' },
+    { text: 'L&O Evaluation Report' },
+    { text: 'Soil Testing' },
+    { text: 'Corrective Plan' },
+    { text: 'Annual Flower Display' },
+    { text: 'Initial Irrigation Inspection' },
+    { text: 'Field inspections' },
+    { text: 'Programming & optimization' },
+  ],
+  // The reference leaves these four as "Insert point here" placeholders, so the
+  // copy below is ours — written in the same register for the same column width.
+  day60: [
+    { text: 'Second full maintenance cycle' },
+    { text: 'Turf fertilization & pest control' },
+    { text: 'Irrigation audit results' },
+    { text: 'Detail pruning rotation' },
+    { text: 'Enhancement proposals presented' },
+    { text: 'Soil test review' },
+    { text: '60-day check-in meeting' },
+  ],
+  day90: [
+    { text: 'Quarterly property walk-through' },
+    { text: 'Seasonal color rotation' },
+    { text: 'Tree & palm canopy assessment' },
+    { text: 'Irrigation wet-check' },
+    { text: 'Controller reprogramming' },
+    { text: '90-day performance review' },
+    { text: 'Enhancement recommendations' },
+  ],
+  day120Plus: [
+    { text: 'Monthly property health summaries' },
+    { text: 'Seasonal agronomic applications' },
+    { text: 'Storm-season readiness review' },
+    { text: 'Annual irrigation audit' },
+    { text: 'Budget planning support' },
+    { text: 'Ongoing enhancement proposals' },
+  ],
+  ongoing: [
+    { text: 'Scheduled maintenance visits' },
+    { text: 'Juniper Sync work orders' },
+    { text: 'Quarterly communication meetings' },
+    { text: 'Proactive enhancement recommendations' },
+    { text: '24/7 storm response' },
+    { text: 'Annual scope & budget review' },
   ],
 }
 
 /**
- * Intro paragraph printed over the page's hero photo, above the phase cards.
- * Verbatim from the reference ("business docs/30-60-90 plan example.pdf").
+ * Banner fill for each phase, in order. Sampled from the reference
+ * (Pointe Jupiter Yacht Club.pdf p.18): the six chevrons ramp from a pale
+ * salmon to full brand orange across the sequence rather than sitting flat.
+ */
+export const STARTUP_PLAN_TAB_COLORS = [
+  '#e0b4a2',
+  '#e79d77',
+  '#ea9267',
+  '#f08651',
+  '#ef7c3b',
+  '#f47321',
+] as const
+
+/**
+ * Intro paragraph printed over the page's hero photo, above the phase panels.
+ * Verbatim from the reference (Pointe Jupiter Yacht Club.pdf p.18), with the
+ * client contact's name generalised to "the community".
  */
 export const STARTUP_PLAN_INTRO =
   'This list will give you an overall guide to the initial services Juniper will ' +

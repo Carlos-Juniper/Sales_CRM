@@ -45,7 +45,7 @@ SET @widen_kind = IF(
        AND table_name   = 'licenses_certifications'
        AND column_name  = 'kind'
        AND column_type LIKE '%insurance%') > 0,
-    'SELECT 1 -- kind ENUM already includes insurance',
+    'SELECT 1',
     "ALTER TABLE `licenses_certifications`
        MODIFY COLUMN `kind` ENUM('license','certification','insurance') NOT NULL"
 );
@@ -101,7 +101,7 @@ SET @migrate_ins = IF(
          ic.uploaded_at
      FROM insurance_certificates ic
      WHERE ic.id NOT IN (SELECT id FROM licenses_certifications)",
-    'SELECT 1 -- insurance_certificates table does not exist; data migration skipped'
+    'SELECT 1'
 );
 PREPARE stmt_migrate FROM @migrate_ins;
 EXECUTE stmt_migrate;
@@ -115,7 +115,7 @@ SET @drop_ins = IF(
      WHERE table_schema = DATABASE()
        AND table_name   = 'insurance_certificates') > 0,
     'DROP TABLE `insurance_certificates`',
-    'SELECT 1 -- insurance_certificates already dropped'
+    'SELECT 1'
 );
 PREPARE stmt_drop FROM @drop_ins;
 EXECUTE stmt_drop;

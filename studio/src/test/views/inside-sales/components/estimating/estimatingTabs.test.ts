@@ -94,10 +94,15 @@ describe('visibleTabs (role-aware visibility — Handoff 50 §2)', () => {
   })
 
   it('marketing does not reach estimator tabs — sees only the queue at most', () => {
-    // Marketing is not an estimating persona; it must not gain the editor.
     const keys = visibleTabs(null, 'marketing').map((t) => t.key)
     expect(keys).not.toContain('editor')
     expect(keys).not.toContain('takeoff')
+  })
+
+  it('procurement sees ONLY the queue tab, same as sales', () => {
+    expect(visibleTabs(null, 'procurement').map((t) => t.key)).toEqual(['queue'])
+    expect(visibleTabs('maintenance', 'procurement').map((t) => t.key)).toEqual(['queue'])
+    expect(visibleTabs('install', 'procurement').map((t) => t.key)).toEqual(['queue'])
   })
 
   it('stays a pure function of config — every returned tab is a config row', () => {
@@ -109,7 +114,6 @@ describe('visibleTabs (role-aware visibility — Handoff 50 §2)', () => {
   })
 
   it('applies role and type filters together', () => {
-    // Sales is queue-only regardless of type; type filter cannot re-add tabs.
     expect(visibleTabs('install', 'sales').map((t) => t.key)).toEqual(['queue'])
   })
 })

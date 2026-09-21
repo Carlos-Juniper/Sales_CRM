@@ -107,8 +107,8 @@ _DEFAULT_GRAPH_SCOPES = ["Mail.Send", "Mail.Read", "Calendars.ReadWrite"]
 
 def _refresh_scopes(stored_scope: str) -> list[str]:
     """Graph resource scopes for MSAL refresh (never OIDC / offline_access)."""
-    scopes = [s for s in (stored_scope or "").split() if s and s not in _OIDC_SCOPES]
-    return scopes or list(_DEFAULT_GRAPH_SCOPES)
+    stored = {s for s in (stored_scope or "").split() if s and s not in _OIDC_SCOPES}
+    return list(stored | set(_DEFAULT_GRAPH_SCOPES))
 
 
 def _msal_app():
@@ -156,7 +156,11 @@ async def find_token_row(user_id: str, email: Optional[str] = None) -> Optional[
         for row in rows:
             if str(row.get("user_id")) == str(user_id):
                 return row
-    return rows[0]
+    if email:
+        for row in rows:
+            if str(row.get("user_id")) == email:
+                return row
+    return None
 
 
 async def has_graph_connection(user_id: str, email: Optional[str] = None) -> bool:

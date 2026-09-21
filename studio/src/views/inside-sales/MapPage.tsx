@@ -117,7 +117,7 @@ export default function MapPage() {
           />
 
           {filteredLeads.map((lead) => {
-            const color = LEAD_TYPE_COLORS[lead.lead_type].hex
+            const color = LEAD_TYPE_COLORS[lead.lead_type]?.hex ?? '#6b7280'
             const r = markerRadius(lead.estimated_contract_value)
             const fillOpacity = STATUS_OPACITY[lead.status] ?? 1
             const isSelected = selectedLeadId === lead.id

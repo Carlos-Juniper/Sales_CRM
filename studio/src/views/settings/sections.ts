@@ -35,14 +35,13 @@ export interface SettingsGroup {
 
 /**
  * Company:   admin-only, company-wide config.
- * Marketing: company-wide proposal assets — the `marketing` role (admin passes
- *            via the super-role). NOT branch-scoped: Handoff 50 §3's scope
- *            decision (Carlos, 2026-09-08) makes portfolio, client references
- *            and the team roster company-wide, role-gated resources. Sole
- *            owner of Portfolio, Client references and Team roster — these no
- *            longer duplicate into Company or Branch (2026-09-14). Licenses
- *            stays a Branch-only, per-branch tab (2026-09-14) — it isn't a
- *            company-wide proposal asset like the rest of this group.
+ * Marketing: company-wide proposal assets — sales, marketing, and manager-tier
+ *            roles (admin passes via super-role). NOT branch-scoped: Handoff 50
+ *            §3's scope decision (Carlos, 2026-09-08) makes portfolio, client
+ *            references and the team roster company-wide, role-gated resources.
+ *            Sole owner of Portfolio, Client references and Team roster — these
+ *            no longer duplicate into Company or Branch (2026-09-14). Licenses
+ *            stays a Branch-only, per-branch tab (2026-09-14).
  * Branch:    branch-scoped; a BM/RD sees its branches, admin sees all. Owns
  *            branch-specific config (crew rate, material factors, production
  *            rates, branch profile) plus Licenses, scoped per branch.
@@ -67,7 +66,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   {
     id: 'marketing',
     label: 'Sales',
-    roles: ['marketing'],
+    roles: ['sales', 'marketing', 'manager', 'regional_director', 'vice_president', 'ceo'],
     adminOnly: false,
     branchScoped: false,
     sections: [

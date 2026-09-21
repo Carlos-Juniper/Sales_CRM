@@ -102,17 +102,24 @@ class GraphTokenRefreshFailed(ValueError):
 # OIDC scopes are requested at login but must not be sent to MSAL refresh.
 # Passing offline_access here is a common cause of AADSTS refresh failures;
 # MSAL adds it itself when a refresh token is used.
-_GRAPH_REFRESH_SCOPES = ["Mail.Send", "Mail.Read", "Calendars.ReadWrite"]
+_OIDC_SCOPES = frozenset({“openid”, “profile”, “email”, “offline_access”})
+_DEFAULT_GRAPH_SCOPES = [“Mail.Send”, “Mail.Read”, “Calendars.ReadWrite”]
+
+
+def _refresh_scopes(stored_scope: str) -> list[str]:
+    “””Graph resource scopes for MSAL refresh (never OIDC / offline_access).”””
+    stored = {s for s in (stored_scope or “”).split() if s and s not in _OIDC_SCOPES}
+    return list(stored | set(_DEFAULT_GRAPH_SCOPES))
 
 
 def _msal_app() -> msal.ClientApplication:
-    """Return a confidential client when ENTRA_CLIENT_SECRET is set, public otherwise.
+    “””Return a confidential client when ENTRA_CLIENT_SECRET is set, public otherwise.
 
     Directory search already requires ENTRA_CLIENT_SECRET in production, so
     PublicClientApplication fails refresh with AADSTS7000218 once the access
     token expires (~1h). Always use the confidential client when the secret is
     available so the token lifecycle works end-to-end without re-prompting.
-    """
+    “””
     client_id = os.environ["ENTRA_CLIENT_ID"]
     tenant_id = os.environ["ENTRA_TENANT_ID"]
     authority = f"https://login.microsoftonline.com/{tenant_id}"
@@ -122,6 +129,42 @@ def _msal_app() -> msal.ClientApplication:
             client_id=client_id, authority=authority, client_credential=client_secret
         )
     return msal.PublicClientApplication(client_id=client_id, authority=authority)
+
+
+async def find_token_row(user_id: str, email: Optional[str] = None) -> Optional[dict]:
+    “””Return the user's ``user_graph_tokens`` row, if any.
+
+    Looks up by JWT ``id`` first, then email. Older rows may be keyed by email
+    (or a prior users.id) while Settings / Calendar receive a UUID in the JWT.
+    Using the same helper for both surfaces keeps “connected” in sync.
+    “””
+    keys: list[str] = []
+    for key in (user_id, email):
+        if key and key not in keys:
+            keys.append(key)
+    if not keys:
+        return None
+    placeholders = “, “.join([“%s”] * len(keys))
+    rows = await query(
+        f”SELECT * FROM user_graph_tokens WHERE user_id IN ({placeholders})”,
+        keys,
+    )
+    if not rows:
+        return None
+    if user_id:
+        for row in rows:
+            if str(row.get(“user_id”)) == str(user_id):
+                return row
+    if email:
+        for row in rows:
+            if str(row.get(“user_id”)) == email:
+                return row
+    return None
+
+
+async def has_graph_connection(user_id: str, email: Optional[str] = None) -> bool:
+    “””True when a Graph token row exists for this user (id or email).”””
+    return await find_token_row(user_id, email) is not None
 
 
 async def _upsert_tokens(
@@ -152,20 +195,17 @@ async def _upsert_tokens(
     )
 
 
-async def get_valid_token(user_id: str) -> str:
+async def get_valid_token(user_id: str, email: Optional[str] = None) -> str:
     """Return a non-expired access token, refreshing + persisting when needed."""
-    rows = await query(
-        "SELECT * FROM user_graph_tokens WHERE user_id = %s LIMIT 1",
-        [user_id],
-    )
-    if not rows:
+    row = await find_token_row(user_id, email)
+    if not row:
         raise GraphNotConnected(
             f"no Graph token stored for user {user_id!r} — user must grant Microsoft permissions"
         )
 
-    row = rows[0]
     access_token = _decrypt(row["access_token"])
     refresh_token = _decrypt(row["refresh_token"])
+    stored_user_id = str(row.get("user_id") or user_id)
 
     expires_at: datetime = row["expires_at"]
     if expires_at.tzinfo is None:
@@ -177,7 +217,7 @@ async def get_valid_token(user_id: str) -> str:
     # Token is expired or close to expiry — refresh via MSAL
     result = _msal_app().acquire_token_by_refresh_token(
         refresh_token,
-        scopes=_GRAPH_REFRESH_SCOPES,
+        scopes=_refresh_scopes(row.get("scope") or ""),
     )
 
     if "error" in result:
@@ -191,7 +231,7 @@ async def get_valid_token(user_id: str) -> str:
     new_expires = datetime.now(tz=timezone.utc) + timedelta(seconds=result.get("expires_in", 3600))
 
     await _upsert_tokens(
-        user_id,
+        stored_user_id,
         access_token=new_access,
         refresh_token=new_refresh,
         expires_at=new_expires,
@@ -337,7 +377,9 @@ async def get_app_token() -> str:
 
 # ── Calendar ─────────────────────────────────────────────────────────────────
 
-async def list_events(user_id: str, start_iso: str, end_iso: str) -> list[dict]:
+async def list_events(
+    user_id: str, start_iso: str, end_iso: str, email: Optional[str] = None
+) -> list[dict]:
     """GET /me/calendarView for the given time window, following pagination.
 
     Fixes applied:
@@ -347,7 +389,7 @@ async def list_events(user_id: str, start_iso: str, end_iso: str) -> list[dict]:
       so events beyond the first 50 are not silently dropped.  A warning is
       logged if the safety cap is reached.
     """
-    token = await get_valid_token(user_id)
+    token = await get_valid_token(user_id, email)
 
     request_headers = {
         "Authorization": f"Bearer {token}",
@@ -425,9 +467,10 @@ async def create_event(
     attendees: list[str],
     body: Optional[str] = None,
     online_meeting: bool = True,
+    email: Optional[str] = None,
 ) -> dict:
     """POST /me/events to create a calendar event."""
-    token = await get_valid_token(user_id)
+    token = await get_valid_token(user_id, email)
 
     payload: dict = {
         "subject": subject,
@@ -471,9 +514,10 @@ async def update_event(
     end_iso: Optional[str] = None,
     attendees: Optional[list[str]] = None,
     body: Optional[str] = None,
+    email: Optional[str] = None,
 ) -> dict:
     """PATCH /me/events/{event_id} to update a calendar event. Only provided fields are sent."""
-    token = await get_valid_token(user_id)
+    token = await get_valid_token(user_id, email)
 
     payload: dict = {}
     if subject is not None:
@@ -509,9 +553,9 @@ async def update_event(
     return resp.json()
 
 
-async def delete_event(user_id: str, event_id: str) -> None:
+async def delete_event(user_id: str, event_id: str, email: Optional[str] = None) -> None:
     """DELETE /me/events/{event_id} to delete a calendar event."""
-    token = await get_valid_token(user_id)
+    token = await get_valid_token(user_id, email)
 
     try:
         async with httpx.AsyncClient() as client:

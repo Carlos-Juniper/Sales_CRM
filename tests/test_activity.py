@@ -134,7 +134,7 @@ def test_activity_performed_at_is_iso_string():
 
 
 def test_connections_returns_graph_key():
-    with patch("api.server.query", AsyncMock(return_value=[])):
+    with patch("api.graph.has_graph_connection", AsyncMock(return_value=False)):
         resp = client.get("/api/settings/connections")
     assert resp.status_code == 200
     body = resp.json()
@@ -144,19 +144,27 @@ def test_connections_returns_graph_key():
 
 
 def test_connections_graph_connected_true_when_token_row_exists():
-    with patch("api.server.query", AsyncMock(return_value=[{"user_id": "u1"}])):
+    with patch("api.graph.has_graph_connection", AsyncMock(return_value=True)):
         resp = client.get("/api/settings/connections")
     assert resp.json()["graph"]["connected"] is True
 
 
 def test_connections_graph_connected_false_when_no_token():
-    with patch("api.server.query", AsyncMock(return_value=[])):
+    with patch("api.graph.has_graph_connection", AsyncMock(return_value=False)):
         resp = client.get("/api/settings/connections")
     assert resp.json()["graph"]["connected"] is False
 
 
 def test_connections_graph_connected_false_when_query_fails():
-    with patch("api.server.query", AsyncMock(side_effect=Exception("table not found"))):
+    with patch("api.graph.has_graph_connection", AsyncMock(side_effect=Exception("table not found"))):
         resp = client.get("/api/settings/connections")
     assert resp.status_code == 200
     assert resp.json()["graph"]["connected"] is False
+
+
+def test_connections_lookup_uses_jwt_id_and_email():
+    """Settings must use the same id+email lookup Calendar uses."""
+    with patch("api.graph.has_graph_connection", AsyncMock(return_value=True)) as mock_has:
+        resp = client.get("/api/settings/connections")
+    assert resp.json()["graph"]["connected"] is True
+    mock_has.assert_awaited_once_with(_AUTHED_USER["id"], _AUTHED_USER["email"])

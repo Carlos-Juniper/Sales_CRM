@@ -741,14 +741,18 @@ async def get_lead_activity(lead_id: str, _user: dict = Depends(require_auth)) -
 
 @app.get("/api/settings/connections")
 async def get_connections(_user: dict = Depends(require_auth)) -> dict:
-    """Returns Microsoft Graph connection status."""
-    user_id = _user.get("id", "")
+    """Returns Microsoft Graph connection status.
+
+    Uses the same token-row lookup as calendar Graph calls (JWT id, then email)
+    so Settings and Calendar cannot disagree about whether Graph is connected.
+    """
+    from api import graph as _graph
+
     try:
-        graph_rows = await query(
-            "SELECT user_id FROM user_graph_tokens WHERE user_id = %s LIMIT 1",
-            [user_id],
+        graph_connected = await _graph.has_graph_connection(
+            _user.get("id", ""),
+            _user.get("email"),
         )
-        graph_connected = bool(graph_rows)
     except Exception:
         graph_connected = False
 
@@ -1784,14 +1788,26 @@ async def me(user: dict = Depends(require_auth)) -> dict:
 # ── Calendar ─────────────────────────────────────────────────────────────────
 
 async def _graph_call(coro):
-    """Await a Microsoft Graph coroutine, mapping ValueError → HTTP 400.
+    """Await a Microsoft Graph coroutine with connection-aware error mapping.
 
-    Local helper (not a global exception handler) so only ValueErrors raised
-    inside these Graph calls become 400s — unrelated ValueErrors elsewhere in
-    the app keep their existing handling.
+    ``GraphNotConnected`` (no token row) → HTTP 400, which Calendar treats as
+    the “connect your account” empty state.
+
+    ``GraphTokenRefreshFailed`` is also a ValueError subclass, but a token row
+    *does* exist — Settings correctly shows Connected. Mapping that to 400 made
+    Calendar ask the user to connect in a loop. Surface it as 502 instead so
+    the UI shows retry, not a reconnect prompt.
+
+    Other ValueErrors stay 400 for backward compatibility.
     """
+    from api.graph import GraphNotConnected, GraphTokenRefreshFailed
+
     try:
         return await coro
+    except GraphNotConnected as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except GraphTokenRefreshFailed as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -1803,7 +1819,9 @@ async def calendar_list_events(
     user: dict = Depends(require_auth),
 ) -> list:
     from api import graph as _graph
-    return await _graph_call(_graph.list_events(user["id"], start, end))
+    return await _graph_call(
+        _graph.list_events(user["id"], start, end, user.get("email"))
+    )
 
 
 @app.post("/api/calendar/events")
@@ -1821,6 +1839,7 @@ async def calendar_create_event(
             attendees=body.attendees,
             body=body.body,
             online_meeting=body.online_meeting,
+            email=user.get("email"),
         )
     )
 
@@ -1841,6 +1860,7 @@ async def calendar_update_event(
             end_iso=body.end_iso,
             attendees=body.attendees,
             body=body.body,
+            email=user.get("email"),
         )
     )
 
@@ -1851,7 +1871,7 @@ async def calendar_delete_event(
     user: dict = Depends(require_auth),
 ) -> None:
     from api import graph as _graph
-    await _graph_call(_graph.delete_event(user["id"], event_id))
+    await _graph_call(_graph.delete_event(user["id"], event_id, email=user.get("email")))
 
     rows = await query(
         """
@@ -1889,6 +1909,7 @@ async def schedule_lead_meeting(
             attendees=body.attendees,
             body=body.body,
             online_meeting=body.online_meeting,
+            email=user.get("email"),
         )
     )
 

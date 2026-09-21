@@ -1,8 +1,9 @@
 """Commissions API — /api/commissions/* routes.
 
 Tracks sales rep commission rates and earned commissions. Commission rates are
-populated from Paycom (external process). Commissions are auto-created by a
-database trigger when an estimate's status transitions to 'won'.
+entered manually by administrators. Commissions are inserted by
+api/estimating.py (_create_commission_on_won) when an estimate transitions to
+'won' — no DB trigger.
 
 Backs the Commissions page in the inside-sales studio. Mirrors the module
 pattern used by api/estimating.py and api/proposals.py.
@@ -144,7 +145,7 @@ def register(app, require_auth) -> None:
         body: MarkPaidBody,
         user: dict = Depends(require_auth),
     ) -> dict:
-        if authz.normalize_role(user.get("role")) not in authz.CROSS_BRANCH_ROLES:
+        if not _can_view_all(user):
             raise HTTPException(status_code=403, detail="Only admin, VP, or CEO can mark commissions as paid")
 
         result = await execute(
@@ -164,7 +165,7 @@ def register(app, require_auth) -> None:
         user: dict = Depends(require_auth),
     ) -> list:
         if not _can_view_all(user):
-            raise HTTPException(status_code=403)
+            raise HTTPException(status_code=403, detail="Only admin, VP, or CEO can view all reps")
 
         # Include legacy role aliases (outside_sales → sales) so reps stored
         # under old role values still appear.

@@ -111,6 +111,35 @@ def test_calendar_list_events_returns_400_when_no_token():
     assert "no Graph token" in resp.json()["detail"]
 
 
+def test_calendar_list_events_returns_502_when_refresh_fails():
+    """A stored token that cannot be refreshed is not 'not connected' — 502, not 400."""
+    from api.graph import GraphTokenRefreshFailed
+
+    with patch(
+        "api.graph.list_events",
+        new_callable=AsyncMock,
+        side_effect=GraphTokenRefreshFailed("token refresh failed: invalid_grant"),
+    ):
+        resp = client.get("/api/calendar/events?start=2026-06-27T00:00:00Z&end=2026-06-28T00:00:00Z")
+
+    assert resp.status_code == 502
+    assert "token refresh failed" in resp.json()["detail"]
+
+
+def test_calendar_list_events_returns_400_for_graph_not_connected_type():
+    from api.graph import GraphNotConnected
+
+    with patch(
+        "api.graph.list_events",
+        new_callable=AsyncMock,
+        side_effect=GraphNotConnected("no Graph token stored for user 'u1'"),
+    ):
+        resp = client.get("/api/calendar/events?start=2026-06-27T00:00:00Z&end=2026-06-28T00:00:00Z")
+
+    assert resp.status_code == 400
+    assert "no Graph token" in resp.json()["detail"]
+
+
 # ---------------------------------------------------------------------------
 # POST /api/calendar/events
 # ---------------------------------------------------------------------------

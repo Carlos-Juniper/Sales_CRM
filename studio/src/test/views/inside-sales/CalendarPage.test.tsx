@@ -139,6 +139,9 @@ describe('CalendarPage — 400 (Graph not connected) empty state', () => {
       http.get('/api/calendar/events', () =>
         HttpResponse.json({ detail: 'Graph not connected' }, { status: 400 }),
       ),
+      http.get('/api/settings/connections', () =>
+        HttpResponse.json({ graph: { connected: false } }),
+      ),
     )
     const CalendarPage = await importCalendarPage()
     render(<CalendarPage />)
@@ -148,6 +151,23 @@ describe('CalendarPage — 400 (Graph not connected) empty state', () => {
     const link = screen.getByRole('link', { name: /connect/i })
     // Slice 12: link moved to /settings/connections (Mine section)
     expect(link).toHaveAttribute('href', '/settings/connections')
+  })
+
+  it('does not show connect-account when Settings already reports Graph connected', async () => {
+    server.use(
+      http.get('/api/calendar/events', () =>
+        HttpResponse.json({ detail: 'token refresh failed' }, { status: 400 }),
+      ),
+      http.get('/api/settings/connections', () =>
+        HttpResponse.json({ graph: { connected: true } }),
+      ),
+    )
+    const CalendarPage = await importCalendarPage()
+    render(<CalendarPage />)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/connect your microsoft account/i)).not.toBeInTheDocument()
   })
 })
 

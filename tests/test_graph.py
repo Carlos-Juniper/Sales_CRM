@@ -27,6 +27,10 @@ from api.graph import (  # noqa: E402
     create_event,
     _encrypt,
     _decrypt,
+    _refresh_scopes,
+    _msal_app,
+    find_token_row,
+    has_graph_connection,
     GraphNotConnected,
     GraphTokenRefreshFailed,
 )
@@ -263,7 +267,7 @@ async def test_get_valid_token_refreshes_expired_token():
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_EXPIRED_TOKEN_ROW]),
         patch("api.graph.execute", new_callable=AsyncMock) as mock_execute,
-        patch("api.graph.msal.PublicClientApplication", return_value=mock_msal_app),
+        patch("api.graph._msal_app", return_value=mock_msal_app),
         patch("api.graph._decrypt", side_effect=lambda x: x),
         patch("api.graph._encrypt", side_effect=lambda x: x),
     ):
@@ -271,6 +275,9 @@ async def test_get_valid_token_refreshes_expired_token():
 
     assert token == "new-access-token"
     mock_msal_app.acquire_token_by_refresh_token.assert_called_once()
+    refresh_scopes = mock_msal_app.acquire_token_by_refresh_token.call_args[1]["scopes"]
+    assert "offline_access" not in refresh_scopes
+    assert "Calendars.ReadWrite" in refresh_scopes
     mock_execute.assert_called_once()
 
 
@@ -285,7 +292,7 @@ async def test_get_valid_token_raises_when_refresh_fails():
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_EXPIRED_TOKEN_ROW]),
-        patch("api.graph.msal.PublicClientApplication", return_value=mock_msal_app),
+        patch("api.graph._msal_app", return_value=mock_msal_app),
         patch("api.graph._decrypt", side_effect=lambda x: x),
     ):
         with pytest.raises(GraphTokenRefreshFailed, match="token refresh failed"):
@@ -293,11 +300,90 @@ async def test_get_valid_token_raises_when_refresh_fails():
 
     with (
         patch("api.graph.query", new_callable=AsyncMock, return_value=[_EXPIRED_TOKEN_ROW]),
-        patch("api.graph.msal.PublicClientApplication", return_value=mock_msal_app),
+        patch("api.graph._msal_app", return_value=mock_msal_app),
         patch("api.graph._decrypt", side_effect=lambda x: x),
     ):
         with pytest.raises(ValueError, match="token refresh failed"):
             await get_valid_token("u1")
+
+
+def test_refresh_scopes_strips_oidc_and_offline_access():
+    """Refresh must not send offline_access / openid — MSAL adds those itself."""
+    assert _refresh_scopes("openid profile email offline_access Calendars.ReadWrite Mail.Send") == [
+        "Calendars.ReadWrite",
+        "Mail.Send",
+    ]
+    assert _refresh_scopes("") == ["Mail.Send", "Mail.Read", "Calendars.ReadWrite"]
+    assert "offline_access" not in _refresh_scopes("offline_access")
+
+
+def test_msal_app_uses_confidential_client_when_secret_set():
+    """Production has ENTRA_CLIENT_SECRET; refresh must send it or AAD rejects."""
+    mock_confidential = MagicMock()
+    with (
+        patch.dict(os.environ, {"ENTRA_CLIENT_SECRET": "super-secret"}, clear=False),
+        patch("api.graph.msal.ConfidentialClientApplication", return_value=mock_confidential) as ctor,
+        patch("api.graph.msal.PublicClientApplication") as public_ctor,
+    ):
+        app = _msal_app()
+    assert app is mock_confidential
+    ctor.assert_called_once()
+    assert ctor.call_args[1]["client_credential"] == "super-secret"
+    public_ctor.assert_not_called()
+
+
+def test_msal_app_uses_public_client_without_secret(monkeypatch):
+    monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
+    mock_public = MagicMock()
+    with (
+        patch("api.graph.msal.PublicClientApplication", return_value=mock_public) as ctor,
+        patch("api.graph.msal.ConfidentialClientApplication") as confidential_ctor,
+    ):
+        app = _msal_app()
+    assert app is mock_public
+    ctor.assert_called_once()
+    confidential_ctor.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_find_token_row_falls_back_to_email():
+    """Tokens keyed by email still count as connected for a UUID JWT id."""
+    email_row = {**_VALID_TOKEN_ROW, "user_id": "carlos@juniperlandscaping.com"}
+
+    with patch("api.graph.query", new_callable=AsyncMock, return_value=[email_row]) as mock_query:
+        row = await find_token_row("uuid-1", "carlos@juniperlandscaping.com")
+
+    assert row["user_id"] == "carlos@juniperlandscaping.com"
+    sql = mock_query.call_args[0][0]
+    assert "IN" in sql
+    assert mock_query.call_args[0][1] == ["uuid-1", "carlos@juniperlandscaping.com"]
+
+
+@pytest.mark.asyncio
+async def test_find_token_row_prefers_jwt_id_when_both_match():
+    id_row = {**_VALID_TOKEN_ROW, "user_id": "uuid-1"}
+    email_row = {**_VALID_TOKEN_ROW, "user_id": "carlos@juniperlandscaping.com"}
+    with patch("api.graph.query", new_callable=AsyncMock, return_value=[email_row, id_row]):
+        row = await find_token_row("uuid-1", "carlos@juniperlandscaping.com")
+    assert row["user_id"] == "uuid-1"
+
+
+@pytest.mark.asyncio
+async def test_get_valid_token_uses_row_keyed_by_email():
+    email_row = {**_VALID_TOKEN_ROW, "user_id": "carlos@juniperlandscaping.com"}
+    with (
+        patch("api.graph.query", new_callable=AsyncMock, return_value=[email_row]),
+        patch("api.graph._decrypt", side_effect=lambda x: x),
+    ):
+        token = await get_valid_token("uuid-1", "carlos@juniperlandscaping.com")
+    assert token == "valid-access-token"
+
+
+@pytest.mark.asyncio
+async def test_has_graph_connection_true_for_email_keyed_row():
+    email_row = {**_VALID_TOKEN_ROW, "user_id": "carlos@juniperlandscaping.com"}
+    with patch("api.graph.query", new_callable=AsyncMock, return_value=[email_row]):
+        assert await has_graph_connection("uuid-1", "carlos@juniperlandscaping.com") is True
 
 
 # ---------------------------------------------------------------------------

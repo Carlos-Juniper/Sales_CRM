@@ -32,7 +32,7 @@ export function useRole() {
     isApprover: role !== null && APPROVER_ROLES.includes(role),
     seesAllBranches: role !== null && CROSS_BRANCH_ROLES.includes(role),
     canViewRepSelector: role !== null && REP_SELECTOR_ROLES.includes(role),
-    canAccess: (requiredRole: UserRole | UserRole[]) => {
+    canAccess: (requiredRole: UserRole | readonly UserRole[]) => {
       if (!role) return false
       if (role === 'admin') return true
       const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole]

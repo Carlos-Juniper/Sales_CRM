@@ -16,7 +16,7 @@ describe('LeadTypeBadge', () => {
     expect(badge.className).toContain('bg-green-100')
   })
 
-  it('renders commercial badge', () => {
+  it('renders Commercial badge with title-case label', () => {
     render(<LeadTypeBadge type="commercial" />)
     expect(screen.getByText('Commercial')).toBeInTheDocument()
   })
@@ -27,18 +27,30 @@ describe('LeadTypeBadge', () => {
     expect(badge.className).toContain('bg-amber-100')
   })
 
-  it('renders Commercial badge', () => {
-    render(<LeadTypeBadge type={'commercial' as LeadType} />)
-    expect(screen.getByText('Commercial')).toBeInTheDocument()
-  })
-
-  it('Commercial badge has amber styling', () => {
-    const { container } = render(<LeadTypeBadge type={'commercial' as LeadType} />)
+  it('renders Deathcare badge with slate styling', () => {
+    const { container } = render(<LeadTypeBadge type="deathcare" />)
+    expect(screen.getByText('Deathcare')).toBeInTheDocument()
     const badge = container.firstChild as HTMLElement
-    expect(badge.className).toContain('bg-amber-100')
+    expect(badge.className).toContain('bg-slate-100')
+    expect(badge.className).not.toContain('bg-purple')
   })
 
-  it('unknown type renders without crash', () => {
-    expect(() => render(<LeadTypeBadge type={'unknown' as LeadType} />)).not.toThrow()
+  it('renders resort badge as "Resort"', () => {
+    render(<LeadTypeBadge type="resort" />)
+    expect(screen.getByText('Resort')).toBeInTheDocument()
+  })
+
+  it('renders Healthcare badge with rose styling', () => {
+    const { container } = render(<LeadTypeBadge type="healthcare" />)
+    expect(screen.getByText('Healthcare')).toBeInTheDocument()
+    const badge = container.firstChild as HTMLElement
+    expect(badge.className).toContain('bg-rose-100')
+  })
+
+  it('unknown type falls back to zinc styling and renders the raw value', () => {
+    const { container } = render(<LeadTypeBadge type={'unknown' as LeadType} />)
+    expect(screen.getByText('unknown')).toBeInTheDocument()
+    const badge = container.firstChild as HTMLElement
+    expect(badge.className).toContain('bg-zinc-100')
   })
 })

@@ -112,22 +112,17 @@ def _refresh_scopes(stored_scope: str) -> list[str]:
     return list(stored | set(_DEFAULT_GRAPH_SCOPES))
 
 
-def _msal_app() -> msal.ClientApplication:
-    """Return a confidential client when ENTRA_CLIENT_SECRET is set, public otherwise.
+def _msal_app() -> msal.PublicClientApplication:
+    """Return a public MSAL client for user-delegated token refresh.
 
-    Directory search already requires ENTRA_CLIENT_SECRET in production, so
-    PublicClientApplication fails refresh with AADSTS7000218 once the access
-    token expires (~1h). Always use the confidential client when the secret is
-    available so the token lifecycle works end-to-end without re-prompting.
+    User tokens are obtained via PKCE (public client flow in the browser).
+    Azure tracks the grant type, so refreshing a PKCE grant with a
+    ConfidentialClientApplication + client_secret triggers AADSTS700025.
+    ENTRA_CLIENT_SECRET is only used for app-only flows (get_app_token).
     """
     client_id = os.environ["ENTRA_CLIENT_ID"]
     tenant_id = os.environ["ENTRA_TENANT_ID"]
     authority = f"https://login.microsoftonline.com/{tenant_id}"
-    client_secret = os.environ.get("ENTRA_CLIENT_SECRET")
-    if client_secret:
-        return msal.ConfidentialClientApplication(
-            client_id=client_id, authority=authority, client_credential=client_secret
-        )
     return msal.PublicClientApplication(client_id=client_id, authority=authority)
 
 

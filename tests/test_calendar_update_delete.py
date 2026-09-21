@@ -173,6 +173,7 @@ def test_patch_event_sends_only_provided_fields():
         end_iso=None,
         attendees=None,
         body=None,
+        email="carlos.hernandez@juniperlandscaping.com",
     )
 
 
@@ -197,6 +198,7 @@ def test_patch_event_sends_multiple_fields():
         end_iso="2026-06-27T11:00:00Z",
         attendees=None,
         body=None,
+        email="carlos.hernandez@juniperlandscaping.com",
     )
 
 

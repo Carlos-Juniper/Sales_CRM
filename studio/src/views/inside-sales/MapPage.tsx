@@ -10,8 +10,8 @@ import { useUIStore } from '@/store/uiStore'
 import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { LEAD_TYPES } from '@/types'
-import { LEAD_TYPE_LABELS, LEAD_TYPE_COLORS } from '@/lib/constants'
 import type { Lead } from '@/types'
+import { LEAD_TYPE_LABELS, LEAD_TYPE_COLORS } from '@/lib/constants'
 
 const PHOENIX_CENTER: [number, number] = [33.45, -112.07]
 const DEFAULT_ZOOM = 10

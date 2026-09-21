@@ -37,16 +37,11 @@ export const LEAD_TYPE_COLORS = {
   healthcare: { bg: 'bg-rose-100 dark:bg-rose-900/30',    text: 'text-rose-700 dark:text-rose-300',     border: 'border-rose-200 dark:border-rose-700',    chip: 'border-rose-300 text-rose-700 dark:border-rose-600 dark:text-rose-300',       hex: '#f43f5e' },
 } as const
 
-/**
- * Single source of truth for the user-facing display label of each lead type.
- * The stored value stays lowercase (e.g. `resort`); only the label changes
- * (e.g. "Resorts"). Import from here; do NOT redeclare inline.
- */
 export const LEAD_TYPE_LABELS: Record<LeadType, string> = {
   HOA: 'HOA',
   commercial: 'Commercial',
   deathcare: 'Deathcare',
-  resort: 'Resorts',
+  resort: 'Resort',
   healthcare: 'Healthcare',
 }
 

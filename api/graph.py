@@ -6,8 +6,9 @@ Token lifecycle:
      resulting access_token + refresh_token to POST /api/auth/ms-graph-token.
   2. Backend stores them in user_graph_tokens (MySQL).
   3. Every outbound Graph call goes through get_valid_token(), which refreshes
-     via MSAL PublicClientApplication when the stored token is within 5 min of
-     expiry (or already expired).
+     via MSAL when the stored token is within 5 min of expiry (or already
+     expired). Uses ConfidentialClientApplication when ENTRA_CLIENT_SECRET is
+     set, PublicClientApplication otherwise.
 
 Env vars required:
   ENTRA_CLIENT_ID   — Azure app registration client ID (shared with SSO)
@@ -98,6 +99,31 @@ class GraphTokenRefreshFailed(ValueError):
 
 # ── Token management ─────────────────────────────────────────────────────────
 
+# OIDC scopes are requested at login but must not be sent to MSAL refresh.
+# Passing offline_access here is a common cause of AADSTS refresh failures;
+# MSAL adds it itself when a refresh token is used.
+_GRAPH_REFRESH_SCOPES = ["Mail.Send", "Mail.Read", "Calendars.ReadWrite"]
+
+
+def _msal_app() -> msal.ClientApplication:
+    """Return a confidential client when ENTRA_CLIENT_SECRET is set, public otherwise.
+
+    Directory search already requires ENTRA_CLIENT_SECRET in production, so
+    PublicClientApplication fails refresh with AADSTS7000218 once the access
+    token expires (~1h). Always use the confidential client when the secret is
+    available so the token lifecycle works end-to-end without re-prompting.
+    """
+    client_id = os.environ["ENTRA_CLIENT_ID"]
+    tenant_id = os.environ["ENTRA_TENANT_ID"]
+    authority = f"https://login.microsoftonline.com/{tenant_id}"
+    client_secret = os.environ.get("ENTRA_CLIENT_SECRET")
+    if client_secret:
+        return msal.ConfidentialClientApplication(
+            client_id=client_id, authority=authority, client_credential=client_secret
+        )
+    return msal.PublicClientApplication(client_id=client_id, authority=authority)
+
+
 async def _upsert_tokens(
     user_id: str,
     *,
@@ -149,14 +175,9 @@ async def get_valid_token(user_id: str) -> str:
         return access_token
 
     # Token is expired or close to expiry — refresh via MSAL
-    client_id = os.environ["ENTRA_CLIENT_ID"]
-    tenant_id = os.environ["ENTRA_TENANT_ID"]
-    authority = f"https://login.microsoftonline.com/{tenant_id}"
-
-    msal_app = msal.PublicClientApplication(client_id=client_id, authority=authority)
-    result = msal_app.acquire_token_by_refresh_token(
+    result = _msal_app().acquire_token_by_refresh_token(
         refresh_token,
-        scopes=["Mail.Send", "Mail.Read", "Calendars.ReadWrite", "offline_access"],
+        scopes=_GRAPH_REFRESH_SCOPES,
     )
 
     if "error" in result:

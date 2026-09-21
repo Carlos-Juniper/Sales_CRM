@@ -7,15 +7,8 @@ import { useLeadsStore } from '@/store/leadsStore'
 import { cn } from '@/lib/utils'
 import { LEAD_TYPES } from '@/types'
 import type { LeadType } from '@/types'
-const LEAD_TYPE_LABELS: Record<LeadType, string> = { HOA: 'HOA', commercial: 'Commercial', deathcare: 'Deathcare', resort: 'Resort' }
+import { LEAD_TYPE_LABELS, LEAD_TYPE_COLORS } from '@/lib/constants'
 const STATES = ['FL', 'TX', 'PA', 'NC', 'SC']
-
-const typeColors: Record<LeadType, string> = {
-  HOA: 'border-green-300 text-green-700 dark:border-green-600 dark:text-green-300',
-  commercial: 'border-amber-300 text-amber-700 dark:border-amber-600 dark:text-amber-300',
-  deathcare: 'border-purple-300 text-purple-700 dark:border-purple-600 dark:text-purple-300',
-  resort: 'border-blue-300 text-blue-700 dark:border-blue-600 dark:text-blue-300',
-}
 
 export function LeadFilters() {
   const { filters, setFilter, resetFilters } = useLeadsStore()
@@ -65,7 +58,7 @@ export function LeadFilters() {
                 className={cn(
                   'px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer',
                   filters.leadTypes.includes(t)
-                    ? `${typeColors[t]} bg-opacity-10 bg-current`
+                    ? `${LEAD_TYPE_COLORS[t].chip} bg-opacity-10 bg-current`
                     : 'border-[hsl(var(--border))] text-[hsl(var(--muted-fg))] hover:border-[hsl(var(--fg))]'
                 )}
               >

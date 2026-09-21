@@ -9,25 +9,18 @@ import { useAllLeads } from '@/hooks/useLeads'
 import { useUIStore } from '@/store/uiStore'
 import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { LEAD_TYPES } from '@/types'
 import type { Lead } from '@/types'
+import { LEAD_TYPE_LABELS, LEAD_TYPE_COLORS } from '@/lib/constants'
 
 const PHOENIX_CENTER: [number, number] = [33.45, -112.07]
 const DEFAULT_ZOOM = 10
-
-const TYPE_COLORS: Record<string, string> = {
-  HOA: '#2E7D52',
-  commercial: '#f59e0b',
-  deathcare: '#64748b',
-  resort: '#3b82f6',
-}
 
 const STATUS_OPACITY: Record<string, number> = {
   new: 1, contacted: 1, qualified: 1, proposal_sent: 1,
   won: 0.6, lost: 0.35, disqualified: 0.25,
   estimating: 0.5, op_review: 0.5, approved: 0.5,
 }
-
-const LEAD_TYPE_FILTERS = ['HOA', 'commercial', 'deathcare', 'resort'] as const
 
 function markerRadius(value: number) {
   return Math.max(9, Math.min(20, Math.sqrt(value / 8000)))
@@ -78,7 +71,7 @@ export default function MapPage() {
       {/* Filter bar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg))] flex-shrink-0 flex-wrap">
         <span className="text-xs text-[hsl(var(--muted-fg))] font-medium mr-1">Filter:</span>
-        {LEAD_TYPE_FILTERS.map((type) => {
+        {LEAD_TYPES.map((type) => {
           const active = filterTypes.has(type)
           return (
             <button
@@ -90,9 +83,9 @@ export default function MapPage() {
                   ? 'text-white border-transparent filter-btn-active'
                   : 'border-[hsl(var(--border))] text-[hsl(var(--muted-fg))] hover:border-[hsl(var(--fg))]'
               )}
-              style={{ '--btn-color': TYPE_COLORS[type] } as React.CSSProperties}
+              style={{ '--btn-color': LEAD_TYPE_COLORS[type].hex } as React.CSSProperties}
             >
-              {type}
+              {LEAD_TYPE_LABELS[type]}
             </button>
           )
         })}
@@ -124,7 +117,7 @@ export default function MapPage() {
           />
 
           {filteredLeads.map((lead) => {
-            const color = TYPE_COLORS[lead.lead_type] ?? '#6b7280'
+            const color = LEAD_TYPE_COLORS[lead.lead_type]?.hex ?? '#6b7280'
             const r = markerRadius(lead.estimated_contract_value)
             const fillOpacity = STATUS_OPACITY[lead.status] ?? 1
             const isSelected = selectedLeadId === lead.id
@@ -153,10 +146,10 @@ export default function MapPage() {
 
         {/* Legend */}
         <div className="absolute bottom-6 left-3 z-[1000] bg-white/90 backdrop-blur-sm rounded-lg shadow border border-[hsl(var(--border))] px-3 py-2 flex flex-wrap items-center gap-3">
-          {Object.entries(TYPE_COLORS).map(([type, color]) => (
+          {LEAD_TYPES.map((type) => (
             <div key={type} className="flex items-center gap-1.5">
-              <div className="h-3 w-3 rounded-full border border-white/50 map-legend-dot" style={{ '--dot-color': color } as React.CSSProperties} />
-              <span className="text-xs text-[hsl(var(--muted-fg))] font-medium">{type}</span>
+              <div className="h-3 w-3 rounded-full border border-white/50 map-legend-dot" style={{ '--dot-color': LEAD_TYPE_COLORS[type].hex } as React.CSSProperties} />
+              <span className="text-xs text-[hsl(var(--muted-fg))] font-medium">{LEAD_TYPE_LABELS[type]}</span>
             </div>
           ))}
           <div className="w-px h-3 bg-[hsl(var(--border))]" />
@@ -166,12 +159,12 @@ export default function MapPage() {
         {/* Stats overlay */}
         <div className="absolute top-3 right-3 z-[1000] bg-white/90 backdrop-blur-sm rounded-lg shadow border border-[hsl(var(--border))] px-3 py-2 hidden sm:block">
           <div className="flex gap-4">
-            {LEAD_TYPE_FILTERS.map((type) => {
+            {LEAD_TYPES.map((type) => {
               const count = filteredLeads.filter((l) => l.lead_type === type).length
               return (
                 <div key={type} className="text-center">
                   <p className="text-xs font-bold text-[hsl(var(--fg))]">{count}</p>
-                  <p className="text-[10px] text-[hsl(var(--muted-fg))]">{type}</p>
+                  <p className="text-[10px] text-[hsl(var(--muted-fg))]">{LEAD_TYPE_LABELS[type]}</p>
                 </div>
               )
             })}

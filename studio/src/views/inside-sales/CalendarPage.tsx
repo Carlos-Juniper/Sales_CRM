@@ -6,6 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { useCalendarEvents } from '@/hooks/useCalendar'
+import { useConnections } from '@/hooks/useConnections'
 import { ApiError } from '@/api/client'
 import { getBrowserTimezone, TIMEZONE_OPTIONS } from '@/lib/timezones'
 import { CalendarGrid } from './components/calendar/CalendarGrid'
@@ -59,6 +60,7 @@ export default function CalendarPage() {
     rangeEnd,
     rangeStart !== '' && rangeEnd !== '',
   )
+  const { data: connections, isLoading: connectionsLoading } = useConnections()
 
   const tzLabel = getBrowserTimezoneLabel()
 
@@ -99,6 +101,16 @@ export default function CalendarPage() {
 
   const is400 = isError && error instanceof ApiError && (error as ApiError).status === 400
   const is5xx = isError && !(is400)
+  // Settings → Connections reports Connected whenever a Graph token *row*
+  // exists. Calendar used to treat every events-API 400 as “not connected”,
+  // including refresh failures for an existing row — so the page sent users to
+  // Settings (already Connected) and back into the same prompt. Only show the
+  // connect empty state when Connections agrees Graph is disconnected.
+  const graphConnected = connections?.graph.connected === true
+  const showConnect = is400 && !connectionsLoading && !graphConnected
+  const showRetry = is5xx || (is400 && graphConnected)
+  const showSkeleton = isLoading || (is400 && connectionsLoading)
+  const showGrid = !showSkeleton && !showConnect && !showRetry
 
   const activeEvents = events ?? []
 
@@ -121,19 +133,19 @@ export default function CalendarPage() {
       />
 
       <div className="flex-1 overflow-hidden relative">
-        {isLoading && (
+        {showSkeleton && (
           <CalendarLoadingSkeleton />
         )}
 
-        {is400 && (
+        {showConnect && (
           <CalendarNotConnectedState />
         )}
 
-        {is5xx && (
+        {showRetry && (
           <CalendarErrorState onRetry={() => refetch()} />
         )}
 
-        {!isLoading && !is400 && (
+        {showGrid && (
           <div className="h-full p-4">
             <CalendarGrid
               events={activeEvents}

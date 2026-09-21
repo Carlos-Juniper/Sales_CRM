@@ -216,7 +216,17 @@ async def get_valid_token(user_id: str, email: Optional[str] = None) -> str:
     )
 
     if "error" in result:
-        logger.error("MSAL refresh failed: %s — %s", result.get("error"), result.get("error_description"))
+        desc = result.get("error_description", "") or ""
+        logger.error("MSAL refresh failed: %s — %s", result.get("error"), desc)
+        # SPA-restricted refresh tokens (AADSTS9002327) can never be redeemed
+        # server-side — the redirect URI is registered as "Single-page application"
+        # in Azure AD, which binds refresh tokens to browser cross-origin requests.
+        # Treat as NotConnected so the frontend shows reconnect instead of retry.
+        if "AADSTS9002327" in desc:
+            raise GraphNotConnected(
+                "Microsoft account must be reconnected — please disconnect and reconnect "
+                "in Settings to resolve a token compatibility issue."
+            )
         raise GraphTokenRefreshFailed(
             f"token refresh failed: {result.get('error_description', result.get('error'))}"
         )

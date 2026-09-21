@@ -459,6 +459,23 @@ def detect_028(conn) -> bool:
     return not table_exists(conn, "insurance_certificates")
 
 
+def detect_054(conn) -> bool:
+    """054 applied ↔ commissions table exists."""
+    return table_exists(conn, "commissions")
+
+
+def detect_055(conn) -> bool:
+    """055 applied ↔ uq_commission_rates_user_effective unique index exists."""
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = DATABASE() "
+        "  AND TABLE_NAME = 'commission_rates' "
+        "  AND INDEX_NAME = 'uq_commission_rates_user_effective'",
+    )
+    return bool(row and row["cnt"])
+
+
 def detect_044(conn) -> bool:
     """044 applied ↔ catalog_items.scope_text column exists.
 
@@ -797,6 +814,8 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "044_contract_generator":                     detect_044,
+    "054_commissions_schema":                     detect_054,
+    "055_commission_rates_unique_constraint":      detect_055,
     "046_section_services_billing_type":          detect_046,
 }
 

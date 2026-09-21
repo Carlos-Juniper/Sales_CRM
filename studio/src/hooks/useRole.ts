@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/authStore'
 import type { LegacyUserRole, UserRole } from '@/types'
-import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES } from '@/lib/roles'
+import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES, REP_SELECTOR_ROLES } from '@/lib/roles'
 
 // ── Canonical role model (mirrors api/authz.py) ─────────────────
 
@@ -31,7 +31,8 @@ export function useRole() {
     isEstimator: role !== null && ESTIMATOR_ROLES.includes(role),
     isApprover: role !== null && APPROVER_ROLES.includes(role),
     seesAllBranches: role !== null && CROSS_BRANCH_ROLES.includes(role),
-    canAccess: (requiredRole: UserRole | UserRole[]) => {
+    canViewRepSelector: role !== null && REP_SELECTOR_ROLES.includes(role),
+    canAccess: (requiredRole: UserRole | readonly UserRole[]) => {
       if (!role) return false
       if (role === 'admin') return true
       const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole]

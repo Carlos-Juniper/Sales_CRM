@@ -24,12 +24,13 @@ describe('LeadFilters', () => {
     expect(screen.getByPlaceholderText(/search properties/i)).toBeInTheDocument()
   })
 
-  it('renders lead type buttons: HOA, Commercial, Deathcare, Resort', () => {
+  it('renders all five lead type buttons', () => {
     render(<LeadFilters />)
     expect(screen.getByRole('button', { name: 'HOA' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Commercial' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Deathcare' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Resort' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Healthcare' })).toBeInTheDocument()
   })
 
   it('renders all state buttons: FL, TX, PA, NC, SC', () => {
@@ -98,5 +99,20 @@ describe('LeadFilters', () => {
     useLeadsStore.setState({ filters: { ...defaultFilters, leadTypes: ['HOA'] } })
     render(<LeadFilters />)
     expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument()
+  })
+
+  it('clicking Healthcare adds it to leadTypes', async () => {
+    const user = userEvent.setup()
+    render(<LeadFilters />)
+    await user.click(screen.getByRole('button', { name: 'Healthcare' }))
+    expect(useLeadsStore.getState().filters.leadTypes).toContain('healthcare')
+  })
+
+  it('active Deathcare chip uses slate styling, not purple', () => {
+    useLeadsStore.setState({ filters: { ...defaultFilters, leadTypes: ['deathcare'] } })
+    render(<LeadFilters />)
+    const btn = screen.getByRole('button', { name: 'Deathcare' })
+    expect(btn.className).toContain('border-slate-300')
+    expect(btn.className).not.toContain('border-purple')
   })
 })

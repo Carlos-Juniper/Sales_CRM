@@ -2,13 +2,18 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Inbox, FileText, GitBranch,
   ChevronLeft, ChevronRight, LogOut, Leaf, Settings,
-  Map, Calculator, Building, Calendar, Globe,
+  Map, Calculator, Building, Calendar, Globe, DollarSign, TrendingUp,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
 import { useRole } from '@/hooks/useRole'
 import { cn } from '@/lib/utils'
 import { AssigneeAvatar } from '@/components/shared/AssigneeAvatar'
+import {
+  SALES_NAV_ROLES,
+  PUBLIC_LEADS_NAV_ROLES,
+  ESTIMATING_NAV_ROLES,
+} from '@/lib/roles'
 import type { User, UserRole } from '@/types'
 
 interface NavItem {
@@ -16,38 +21,21 @@ interface NavItem {
   icon: React.ElementType
   href: string
   badge?: number
-  roles: UserRole[]
+  roles: readonly UserRole[]
 }
 
-// Canonical roles. `admin` sees everything via canAccess. `vice_president` and
-// `ceo` are cross-branch roles (see CROSS_BRANCH_ROLES in lib/roles.ts) that
-// should see the same nav as admin, not just Estimating.
-const SALES_NAV: UserRole[] = ['sales', 'inside_sales', 'manager', 'vice_president', 'ceo']
-// The public/government feed is the inside-sales qualification queue; CRMs work
-// their own assigned leads on the Leads tab instead. admin/vice_president/ceo
-// get oversight access too (admin via canAccess's super-role bypass).
-const PUBLIC_LEADS_NAV: UserRole[] = ['inside_sales', 'vice_president', 'ceo']
-const ESTIMATING_NAV: UserRole[] = [
-  'sales',
-  'manager',
-  'maintenance_estimating',
-  'install_estimating',
-  'regional_director',
-  'vice_president',
-  'ceo',
-  'procurement',
-]
-
 const navItems: NavItem[] = [
-  { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: SALES_NAV },
-  { label: 'Public Leads', icon: Globe, href: '/inside-sales/leads', roles: PUBLIC_LEADS_NAV },
-  { label: 'Leads', icon: Inbox, href: '/inside-sales/my-leads', roles: SALES_NAV },
-  { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: SALES_NAV },
-  { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: SALES_NAV },
-  { label: 'Calendar', icon: Calendar, href: '/inside-sales/calendar', roles: SALES_NAV },
-  { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: SALES_NAV },
-  { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: SALES_NAV },
-  { label: 'Estimating', icon: Calculator, href: '/inside-sales/estimating', roles: ESTIMATING_NAV },
+  { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: SALES_NAV_ROLES },
+  { label: 'Sales Performance', icon: TrendingUp, href: '/inside-sales/sales-performance', roles: SALES_NAV_ROLES },
+  { label: 'Public Leads', icon: Globe, href: '/inside-sales/leads', roles: PUBLIC_LEADS_NAV_ROLES },
+  { label: 'Leads', icon: Inbox, href: '/inside-sales/my-leads', roles: SALES_NAV_ROLES },
+  { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: SALES_NAV_ROLES },
+  { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: SALES_NAV_ROLES },
+  { label: 'Calendar', icon: Calendar, href: '/inside-sales/calendar', roles: SALES_NAV_ROLES },
+  { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: SALES_NAV_ROLES },
+  { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: SALES_NAV_ROLES },
+  { label: 'Estimating', icon: Calculator, href: '/inside-sales/estimating', roles: ESTIMATING_NAV_ROLES },
+  { label: 'Commissions', icon: DollarSign, href: '/inside-sales/commissions', roles: SALES_NAV_ROLES },
 ]
 
 function NavItemComp({ item, collapsed, overdueBadge }: { item: NavItem; collapsed: boolean; overdueBadge?: number }) {

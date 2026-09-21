@@ -1,17 +1,10 @@
-import { LEAD_TYPE_COLORS } from '@/lib/constants'
+import { LEAD_TYPE_COLORS, LEAD_TYPE_LABELS } from '@/lib/constants'
 import type { LeadType } from '@/types'
 import { cn } from '@/lib/utils'
 
 interface LeadTypeBadgeProps {
   type: LeadType
   className?: string
-}
-
-const LEAD_TYPE_LABELS: Record<LeadType, string> = {
-  HOA: 'HOA',
-  commercial: 'Commercial',
-  deathcare: 'Deathcare',
-  resort: 'Resort',
 }
 
 export function LeadTypeBadge({ type, className }: LeadTypeBadgeProps) {

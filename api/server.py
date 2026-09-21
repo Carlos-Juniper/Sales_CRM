@@ -393,6 +393,8 @@ from api import properties as _properties  # noqa: E402
 from api import beam_routes as _beam_routes  # noqa: E402
 from api import proposals as _proposals    # noqa: E402
 from api import settings as _settings      # noqa: E402
+from api import commissions as _commissions  # noqa: E402
+from api import sales_performance as _sales_performance  # noqa: E402
 
 _estimating.register(app, require_auth)
 _properties.register(app, require_auth)
@@ -401,6 +403,8 @@ _properties.register(app, require_auth)
 _beam_routes.register(app, require_auth)
 _proposals.register(app, require_auth)
 _settings.register(app, require_auth)
+_commissions.register(app, require_auth)
+_sales_performance.register(app, require_auth)
 
 
 # ── Leads ────────────────────────────────────────────────────────────────────

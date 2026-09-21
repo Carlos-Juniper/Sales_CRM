@@ -27,15 +27,15 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: SALES_NAV_ROLES },
   { label: 'Sales Performance', icon: TrendingUp, href: '/inside-sales/sales-performance', roles: SALES_NAV_ROLES },
+  { label: 'Commissions', icon: DollarSign, href: '/inside-sales/commissions', roles: SALES_NAV_ROLES },
+  { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: SALES_NAV_ROLES },
   { label: 'Public Leads', icon: Globe, href: '/inside-sales/leads', roles: PUBLIC_LEADS_NAV_ROLES },
   { label: 'Leads', icon: Inbox, href: '/inside-sales/my-leads', roles: SALES_NAV_ROLES },
   { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: SALES_NAV_ROLES },
-  { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: SALES_NAV_ROLES },
   { label: 'Calendar', icon: Calendar, href: '/inside-sales/calendar', roles: SALES_NAV_ROLES },
   { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: SALES_NAV_ROLES },
   { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: SALES_NAV_ROLES },
   { label: 'Estimating', icon: Calculator, href: '/inside-sales/estimating', roles: ESTIMATING_NAV_ROLES },
-  { label: 'Commissions', icon: DollarSign, href: '/inside-sales/commissions', roles: SALES_NAV_ROLES },
 ]
 
 function NavItemComp({ item, collapsed, overdueBadge }: { item: NavItem; collapsed: boolean; overdueBadge?: number }) {

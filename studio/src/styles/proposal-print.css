@@ -992,7 +992,7 @@
 .proposal-root .sync-app-photos {
   display: flex;
   justify-content: center;
-  gap: 0;
+  gap: 0.30in;
   margin-top: 0.2in;
 }
 

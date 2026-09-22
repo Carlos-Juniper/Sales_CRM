@@ -1774,6 +1774,17 @@ async def store_ms_graph_token(body: MsGraphTokenBody, user: dict = Depends(requ
     return {"ok": True}
 
 
+@app.delete("/api/auth/ms-graph-token")
+async def delete_ms_graph_token(user: dict = Depends(require_auth)) -> dict:
+    """Remove the user's Microsoft Graph tokens, disconnecting their account."""
+    from db import execute as _execute
+    await _execute(
+        "DELETE FROM user_graph_tokens WHERE user_id = %s",
+        [user["id"]],
+    )
+    return {"ok": True}
+
+
 @app.post("/api/auth/logout")
 async def logout(response: Response) -> dict:
     response.delete_cookie(key="session")

@@ -1556,12 +1556,12 @@
 
 /* --- Insurance -------------------------------------------------------------- */
 
-.proposal-root .insurance-cert-img {
+.proposal-root .insurance-cert-embed {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
-  margin: 0.26in auto 0;
-  object-fit: contain;
+  width: 100%;
+  height: 9in;
+  margin-top: 0.26in;
+  border: none;
 }
 
 .proposal-root .footnote {

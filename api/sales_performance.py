@@ -134,7 +134,8 @@ def register(app, require_auth) -> None:
         lost_params: list[Any] = [start_date, end_date]
         lost_user_clause = ""
         if target_user_id:
-            lost_user_clause = "AND e.user_id = %s"
+            # estimates has no user_id; the salesperson is crm_rep (users.id).
+            lost_user_clause = "AND e.crm_rep = %s"
             lost_params.append(target_user_id)
 
         lost_rows = await query(
@@ -299,7 +300,8 @@ def register(app, require_auth) -> None:
         params: list[Any] = [start_date, end_date]
         user_clause = ""
         if target_user_id:
-            user_clause = "AND e.user_id = %s"
+            # estimates has no user_id; the salesperson is crm_rep (users.id).
+            user_clause = "AND e.crm_rep = %s"
             params.append(target_user_id)
 
         rows = await query(
@@ -317,7 +319,8 @@ def register(app, require_auth) -> None:
                 MAX(t.`at`) AS lost_at
             FROM estimates e
             JOIN leads l ON e.lead_id = l.id
-            JOIN users u ON e.user_id = u.id
+            -- crm_rep is nullable, so keep lost deals that have no salesperson.
+            LEFT JOIN users u ON e.crm_rep = u.id
             JOIN estimate_status_transitions t
                 ON t.estimate_id = e.id AND t.to_status = 'lost'
             WHERE e.status = 'lost'

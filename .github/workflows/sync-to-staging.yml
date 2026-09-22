@@ -1,0 +1,18 @@
+name: Sync to staging
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to juniper staging
+        run: |
+          git remote add juniper https://x-access-token:${{ secrets.JUNIPER_STAGING_PAT }}@github.com/juniperlandscaping/juniper-crm-app.git
+          git push juniper HEAD:staging

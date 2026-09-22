@@ -5,6 +5,9 @@ estimates has no user_id column. The salesperson is estimates.crm_rep
 (Unknown column 'e.user_id') and 500 the Sales Performance page.
 
 DB is fully mocked — these tests assert the SQL that would be sent.
+The routes are mounted on a tiny app so the test does not import the
+rest of the API.
+
 Run with:  PYTHONPATH=. pytest tests/test_sales_performance.py -v
 """
 from __future__ import annotations
@@ -15,6 +18,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("MYSQL_HOST", "localhost")
@@ -22,13 +26,9 @@ os.environ.setdefault("MYSQL_PORT", "3306")
 os.environ.setdefault("MYSQL_USER", "crm_user")
 os.environ.setdefault("MYSQL_PASSWORD", "secret")
 os.environ.setdefault("MYSQL_DB", "crm")
-os.environ.setdefault("ENTRA_CLIENT_ID", "test-client-id")
-os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 
-from api.server import app, require_auth  # noqa: E402
-
-client = TestClient(app)
+from api.sales_performance import register  # noqa: E402
 
 _ADMIN = {
     "id": "admin-1",
@@ -62,6 +62,15 @@ _LOST_ROW = {
 }
 
 
+def _require_auth():
+    raise RuntimeError("auth override missing")
+
+
+app = FastAPI()
+register(app, _require_auth)
+client = TestClient(app)
+
+
 def _assert_no_estimate_user_id(sql: str) -> None:
     assert "e.user_id" not in sql, sql
     assert "e.crm_rep" in sql, sql
@@ -70,7 +79,7 @@ def _assert_no_estimate_user_id(sql: str) -> None:
 @pytest.fixture
 def as_user():
     def _set(user: dict):
-        app.dependency_overrides[require_auth] = lambda: user
+        app.dependency_overrides[_require_auth] = lambda: user
 
     yield _set
     app.dependency_overrides.clear()

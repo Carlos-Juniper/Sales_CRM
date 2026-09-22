@@ -21,3 +21,7 @@ export function storeMsGraphToken(payload: {
 }) {
   return apiClient.post<{ ok: boolean }>('/auth/ms-graph-token', payload)
 }
+
+export function disconnectMsGraph() {
+  return apiClient.delete<{ ok: boolean }>('/auth/ms-graph-token')
+}

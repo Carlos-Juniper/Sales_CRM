@@ -102,68 +102,63 @@ class GraphTokenRefreshFailed(ValueError):
 # OIDC scopes are requested at login but must not be sent to MSAL refresh.
 # Passing offline_access here is a common cause of AADSTS refresh failures;
 # MSAL adds it itself when a refresh token is used.
-_OIDC_SCOPES = frozenset({“openid”, “profile”, “email”, “offline_access”})
-_DEFAULT_GRAPH_SCOPES = [“Mail.Send”, “Mail.Read”, “Calendars.ReadWrite”]
+_OIDC_SCOPES = frozenset({"openid", "profile", "email", "offline_access"})
+_DEFAULT_GRAPH_SCOPES = ["Mail.Send", "Mail.Read", "Calendars.ReadWrite"]
 
 
 def _refresh_scopes(stored_scope: str) -> list[str]:
-    “””Graph resource scopes for MSAL refresh (never OIDC / offline_access).”””
-    stored = {s for s in (stored_scope or “”).split() if s and s not in _OIDC_SCOPES}
+    """Graph resource scopes for MSAL refresh (never OIDC / offline_access)."""
+    stored = {s for s in (stored_scope or "").split() if s and s not in _OIDC_SCOPES}
     return list(stored | set(_DEFAULT_GRAPH_SCOPES))
 
 
-def _msal_app() -> msal.ClientApplication:
-    “””Return a confidential client when ENTRA_CLIENT_SECRET is set, public otherwise.
+def _msal_app() -> msal.PublicClientApplication:
+    """Return a public MSAL client for user-delegated token refresh.
 
-    Directory search already requires ENTRA_CLIENT_SECRET in production, so
-    PublicClientApplication fails refresh with AADSTS7000218 once the access
-    token expires (~1h). Always use the confidential client when the secret is
-    available so the token lifecycle works end-to-end without re-prompting.
-    “””
+    User tokens are obtained via PKCE (public client flow in the browser).
+    Azure tracks the grant type, so refreshing a PKCE grant with a
+    ConfidentialClientApplication + client_secret triggers AADSTS700025.
+    ENTRA_CLIENT_SECRET is only used for app-only flows (get_app_token).
+    """
     client_id = os.environ["ENTRA_CLIENT_ID"]
     tenant_id = os.environ["ENTRA_TENANT_ID"]
     authority = f"https://login.microsoftonline.com/{tenant_id}"
-    client_secret = os.environ.get("ENTRA_CLIENT_SECRET")
-    if client_secret:
-        return msal.ConfidentialClientApplication(
-            client_id=client_id, authority=authority, client_credential=client_secret
-        )
     return msal.PublicClientApplication(client_id=client_id, authority=authority)
 
 
 async def find_token_row(user_id: str, email: Optional[str] = None) -> Optional[dict]:
-    “””Return the user's ``user_graph_tokens`` row, if any.
+    """Return the user's ``user_graph_tokens`` row, if any.
 
     Looks up by JWT ``id`` first, then email. Older rows may be keyed by email
     (or a prior users.id) while Settings / Calendar receive a UUID in the JWT.
-    Using the same helper for both surfaces keeps “connected” in sync.
-    “””
+    Using the same helper for both surfaces keeps "connected" in sync.
+    """
     keys: list[str] = []
     for key in (user_id, email):
         if key and key not in keys:
             keys.append(key)
     if not keys:
         return None
-    placeholders = “, “.join([“%s”] * len(keys))
+    placeholders = ", ".join(["%s"] * len(keys))
     rows = await query(
-        f”SELECT * FROM user_graph_tokens WHERE user_id IN ({placeholders})”,
+        f"SELECT * FROM user_graph_tokens WHERE user_id IN ({placeholders})",
         keys,
     )
     if not rows:
         return None
     if user_id:
         for row in rows:
-            if str(row.get(“user_id”)) == str(user_id):
+            if str(row.get("user_id")) == str(user_id):
                 return row
     if email:
         for row in rows:
-            if str(row.get(“user_id”)) == email:
+            if str(row.get("user_id")) == email:
                 return row
     return None
 
 
 async def has_graph_connection(user_id: str, email: Optional[str] = None) -> bool:
-    “””True when a Graph token row exists for this user (id or email).”””
+    """True when a Graph token row exists for this user (id or email)."""
     return await find_token_row(user_id, email) is not None
 
 
@@ -221,7 +216,17 @@ async def get_valid_token(user_id: str, email: Optional[str] = None) -> str:
     )
 
     if "error" in result:
-        logger.error("MSAL refresh failed: %s — %s", result.get("error"), result.get("error_description"))
+        desc = result.get("error_description", "") or ""
+        logger.error("MSAL refresh failed: %s — %s", result.get("error"), desc)
+        # SPA-restricted refresh tokens (AADSTS9002327) can never be redeemed
+        # server-side — the redirect URI is registered as "Single-page application"
+        # in Azure AD, which binds refresh tokens to browser cross-origin requests.
+        # Treat as NotConnected so the frontend shows reconnect instead of retry.
+        if "AADSTS9002327" in desc:
+            raise GraphNotConnected(
+                "Microsoft account must be reconnected — please disconnect and reconnect "
+                "in Settings to resolve a token compatibility issue."
+            )
         raise GraphTokenRefreshFailed(
             f"token refresh failed: {result.get('error_description', result.get('error'))}"
         )

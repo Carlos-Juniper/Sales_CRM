@@ -1,16 +1,29 @@
+import { useState } from 'react'
 import { CheckCircle, XCircle } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useConnections } from '@/hooks/useConnections'
 import { redirectToAzureLogin } from '@/lib/azureAuth'
+import { disconnectMsGraph } from '@/api/auth'
 import { useUIStore } from '@/store/uiStore'
 
-/**
- * M365 connections body — absorbed from the standalone ConnectionsPage (Slice 12).
- * The outer shell is removed; this component is the new home for Graph connection
- * status + the connect button.
- */
 export function ConnectionsSection() {
   const { data, isLoading } = useConnections()
   const toast = useUIStore((s) => s.toast)
+  const queryClient = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
+
+  const disconnect = useMutation({
+    mutationFn: disconnectMsGraph,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['connections'] })
+      toast('Microsoft account disconnected.', { variant: 'success' })
+      setConfirming(false)
+    },
+    onError: () => {
+      toast('Could not disconnect. Try again.', { variant: 'error' })
+      setConfirming(false)
+    },
+  })
 
   async function handleConnectClick() {
     try {
@@ -44,7 +57,39 @@ export function ConnectionsSection() {
               {data?.graph.connected ? 'Connected' : 'Not connected'}
             </span>
           </div>
-          {!data?.graph.connected && (
+
+          {data?.graph.connected ? (
+            <div className="mt-2 flex items-center gap-3">
+              {confirming ? (
+                <>
+                  <span className="text-xs text-[var(--fg)] opacity-70">Disconnect Microsoft 365?</span>
+                  <button
+                    type="button"
+                    onClick={() => disconnect.mutate()}
+                    disabled={disconnect.isPending}
+                    className="text-xs text-red-600 hover:underline disabled:opacity-50"
+                  >
+                    {disconnect.isPending ? 'Disconnecting…' : 'Yes, disconnect'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(false)}
+                    className="text-xs text-[var(--fg)] opacity-60 hover:opacity-100"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirming(true)}
+                  className="text-xs text-[var(--fg)] opacity-50 hover:opacity-80 hover:text-red-600 transition-colors"
+                >
+                  Disconnect
+                </button>
+              )}
+            </div>
+          ) : (
             <button
               type="button"
               onClick={handleConnectClick}

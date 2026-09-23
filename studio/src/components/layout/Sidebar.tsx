@@ -31,7 +31,7 @@ const navItems: NavItem[] = [
   { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: SALES_NAV_ROLES },
   { label: 'Public Leads', icon: Globe, href: '/inside-sales/leads', roles: PUBLIC_LEADS_NAV_ROLES },
   { label: 'Leads', icon: Inbox, href: '/inside-sales/my-leads', roles: SALES_NAV_ROLES },
-  { label: 'Bid Tracker', icon: FileText, href: '/inside-sales/bids', roles: SALES_NAV_ROLES },
+  { label: 'Proposals', icon: FileText, href: '/inside-sales/proposals', roles: SALES_NAV_ROLES },
   { label: 'Calendar', icon: Calendar, href: '/inside-sales/calendar', roles: SALES_NAV_ROLES },
   { label: 'Accounts', icon: Building, href: '/inside-sales/accounts', roles: SALES_NAV_ROLES },
   { label: 'Map View', icon: Map, href: '/inside-sales/map', roles: SALES_NAV_ROLES },

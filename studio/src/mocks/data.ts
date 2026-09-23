@@ -1,4 +1,5 @@
 import type { Lead, Bid, User, InsideSalesSummary, MonthlyRevenue, ConnectionsStatus } from '@/types'
+import type { ProposalPackageSummary } from '@/types/proposal'
 
 export const mockUsers: User[] = [
   { id: 'u1', name: 'Alex Rivera', email: 'alex.rivera@example.com', role: 'inside_sales', branch_id: 'b1', avatar_initials: 'AR' },
@@ -42,7 +43,7 @@ export const mockLeads: Lead[] = [
     assigned_to: 'u2', handoff_notes: null,
     notes: null,
     ai_linkedin_draft: null,
-    branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 5.2, created_at: new Date(Date.now() - 18 * 3600000).toISOString(), updated_at: new Date().toISOString(),
+    branch_id: 'b1', property_id: 'prop-l2', aspire_opportunity_id: null, division_id: null, distance_miles: 5.2, created_at: new Date(Date.now() - 18 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
   {
     id: 'l3', property_name: 'Kierland Commons', address: '15205 N Kierland Blvd', city: 'Scottsdale', state: 'AZ', zip: '85254',
@@ -64,7 +65,7 @@ export const mockLeads: Lead[] = [
     bid_deadline: null, status: 'qualified', assigned_to: 'u2', handoff_notes: null,
     notes: null,
     ai_linkedin_draft: null,
-    branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 14.7, created_at: new Date(Date.now() - 5 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
+    branch_id: 'b1', property_id: 'prop-l4', aspire_opportunity_id: null, division_id: null, distance_miles: 14.7, created_at: new Date(Date.now() - 5 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
   {
     id: 'l5', property_name: 'Chandler Corporate Park', address: '2600 W Frye Rd', city: 'Chandler', state: 'AZ', zip: '85224',
@@ -87,7 +88,7 @@ export const mockLeads: Lead[] = [
     assigned_to: 'u5', handoff_notes: 'Estimator assigned. Proposal prepared for school grounds maintenance across 12 campuses.',
     notes: null,
     ai_linkedin_draft: null,
-    branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 6.8, created_at: new Date(Date.now() - 12 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
+    branch_id: 'b1', property_id: 'prop-l6', aspire_opportunity_id: null, division_id: null, distance_miles: 6.8, created_at: new Date(Date.now() - 12 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
   {
     id: 'l7', property_name: 'Desert Ridge Marketplace', address: '21001 N Tatum Blvd', city: 'Phoenix', state: 'AZ', zip: '85050',
@@ -110,7 +111,7 @@ export const mockLeads: Lead[] = [
     assigned_to: null, handoff_notes: null,
     notes: null,
     ai_linkedin_draft: null,
-    branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 3.1, created_at: new Date(Date.now() - 4 * 3600000).toISOString(), updated_at: new Date().toISOString(),
+    branch_id: 'b1', property_id: 'prop-l8', aspire_opportunity_id: null, division_id: null, distance_miles: 3.1, created_at: new Date(Date.now() - 4 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
   {
     id: 'l9', property_name: 'Ocotillo Lakes HOA', address: '4000 W Ocotillo Rd', city: 'Chandler', state: 'AZ', zip: '85226',
@@ -156,7 +157,7 @@ export const mockLeads: Lead[] = [
     assigned_to: 'u3', handoff_notes: 'Awarded contract. Kick-off scheduled for next month.',
     notes: null,
     ai_linkedin_draft: null,
-    branch_id: 'b1', aspire_opportunity_id: null, division_id: null, distance_miles: 16.3, created_at: new Date(Date.now() - 45 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
+    branch_id: 'b1', property_id: 'prop-l12', aspire_opportunity_id: null, division_id: null, distance_miles: 16.3, created_at: new Date(Date.now() - 45 * 24 * 3600000).toISOString(), updated_at: new Date().toISOString(),
   },
   {
     id: 'l13', property_name: 'Surprise Farms HOA', address: '15000 W Bell Rd', city: 'Surprise', state: 'AZ', zip: '85374',
@@ -257,3 +258,86 @@ export const mockSummary: InsideSalesSummary = {
 export const mockConnections: ConnectionsStatus = {
   graph: { connected: false },
 }
+
+const assignee = (user: User): ProposalPackageSummary['assignee'] => ({
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  branchId: user.branch_id,
+  avatarInitials: user.avatar_initials,
+})
+
+/** List rows for the Proposals page. Section chips are intentionally absent. */
+export const mockProposalPackages: ProposalPackageSummary[] = [
+  {
+    id: 'prop-tempe',
+    leadId: 'l2',
+    propertyId: 'prop-l2',
+    title: 'City of Tempe — Parks RFP',
+    subtitle: 'Tempe, AZ',
+    amount: 420000,
+    status: 'contacted',
+    updatedAt: '2026-06-16T15:00:00Z',
+    code: 'P-2026-TEMP01',
+    version: 2,
+    pageCount: 18,
+    assignee: assignee(mockUsers[1]),
+  },
+  {
+    id: 'prop-susd',
+    leadId: 'l6',
+    propertyId: 'prop-l6',
+    title: 'Scottsdale Unified School District RFP',
+    subtitle: 'Estimator assigned. Proposal prepared for school grounds maintenance across 12 campuses.',
+    amount: 310000,
+    status: 'proposal_sent',
+    updatedAt: '2026-06-12T15:00:00Z',
+    code: 'P-2026-SUSD01',
+    version: 1,
+    pageCount: 14,
+    assignee: assignee(mockUsers[4]),
+  },
+  {
+    id: 'prop-dobson',
+    leadId: 'l4',
+    propertyId: 'prop-l4',
+    title: 'Dobson Ranch HOA',
+    subtitle: 'Mesa, AZ',
+    amount: 240000,
+    status: 'qualified',
+    updatedAt: '2026-06-04T15:00:00Z',
+    code: 'P-2026-DOBS01',
+    version: 1,
+    pageCount: 12,
+    assignee: assignee(mockUsers[1]),
+  },
+  {
+    id: 'prop-maricopa',
+    leadId: 'l8',
+    propertyId: 'prop-l8',
+    title: 'Maricopa County — Facilities RFP',
+    subtitle: 'Phoenix, AZ',
+    amount: 780000,
+    status: 'new',
+    updatedAt: '2026-05-20T15:00:00Z',
+    code: 'P-2026-MARI01',
+    version: null,
+    pageCount: null,
+    assignee: null,
+  },
+  {
+    id: 'prop-gilbert',
+    leadId: 'l12',
+    propertyId: 'prop-l12',
+    title: 'Town of Gilbert Parks RFP',
+    subtitle: 'Awarded contract. Kick-off scheduled for next month.',
+    amount: 355000,
+    status: 'won',
+    updatedAt: '2026-05-02T15:00:00Z',
+    code: 'P-2026-GILB01',
+    version: 3,
+    pageCount: 22,
+    assignee: assignee(mockUsers[2]),
+  },
+]

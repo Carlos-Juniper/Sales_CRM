@@ -6,6 +6,7 @@ import type {
   InsuranceCert,
   LicenseCertificationGroups,
   PortfolioProperty,
+  ProposalPackageSummary,
   ProposalRender,
   ProposalRequest,
   ProposalSignerFacts,
@@ -170,6 +171,12 @@ export const proposalsApi = {
     const qs = new URLSearchParams({ leadId: params.leadId })
     return apiClient.get<ProposalRequest[]>(`/proposals?${qs.toString()}`)
   },
+
+  /**
+   * GET /api/proposals/packages
+   * Every saved proposal joined to its lead, for the Proposals list.
+   */
+  packages: () => apiClient.get<ProposalPackageSummary[]>('/proposals/packages'),
 
   /**
    * POST /api/proposals/:id/render

@@ -33,6 +33,7 @@ import { ProposalBuilder } from '@/views/inside-sales/components/estimating/Prop
 // ---------------------------------------------------------------------------
 
 vi.mock('@/hooks/useProposals', () => ({
+  PROPOSAL_PACKAGES_KEY: 'proposals',
   useTeamMembers: vi.fn(),
   useClientReferences: vi.fn(),
   usePortfolio: vi.fn(),
@@ -119,6 +120,7 @@ const mockLead: Lead = {
   distance_miles: 5.2,
   aspire_opportunity_id: null,
   division_id: null,
+  property_id: 'prop-coral-bay',
   created_at: '2026-08-01T10:00:00Z',
   updated_at: '2026-08-26T10:00:00Z',
 }
@@ -250,6 +252,7 @@ const mockSavedProposal: ProposalRequest = {
   },
   startupPlan: {
     included: true,
+    planMaxDays: 90,
     day60: ['Establish mowing schedule'],
     day90: ['Review fertilization program'],
     day120Plus: [],
@@ -388,10 +391,14 @@ describe('ProposalBuilder — 30-60-90 day inputs', () => {
 
     await user.click(screen.getByTestId('section-checkbox-startup_plan_30_60_90'))
     expect(screen.getByTestId('startup-plan-section')).toBeInTheDocument()
+    // The plan length defaults to 30 days, so only Ongoing is editable until a longer plan is chosen.
+    expect(screen.getByTestId('startup-ongoing')).toBeInTheDocument()
+    expect(screen.queryByTestId('startup-day60')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('startup-max-days-120'))
     expect(screen.getByTestId('startup-day60')).toBeInTheDocument()
     expect(screen.getByTestId('startup-day90')).toBeInTheDocument()
     expect(screen.getByTestId('startup-day120plus')).toBeInTheDocument()
-    expect(screen.getByTestId('startup-ongoing')).toBeInTheDocument()
   })
 
   it('can add Day 60 bullet points', async () => {
@@ -399,6 +406,7 @@ describe('ProposalBuilder — 30-60-90 day inputs', () => {
     render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} />)
 
     await user.click(screen.getByTestId('section-checkbox-startup_plan_30_60_90'))
+    await user.click(screen.getByTestId('startup-max-days-60'))
     const addBtn = within(screen.getByTestId('startup-day60')).getByRole('button', {
       name: /add bullet/i,
     })
@@ -562,6 +570,7 @@ describe('ProposalBuilder — submit builds payload', () => {
     render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} />)
 
     await user.click(screen.getByTestId('section-checkbox-startup_plan_30_60_90'))
+    await user.click(screen.getByTestId('startup-max-days-60'))
     // Add a Day 60 bullet
     const addBtn = within(screen.getByTestId('startup-day60')).getByRole('button', { name: /add bullet/i })
     await user.click(addBtn)
@@ -715,6 +724,28 @@ describe('ProposalBuilder — reopen from proposalId', () => {
     render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} proposalId="prop-existing" />)
 
     // Loading state — form is not yet rendered
+    expect(screen.queryByTestId('submit-proposal')).not.toBeInTheDocument()
+  })
+
+  it('blocks generate when the lead has no property attached', async () => {
+    const mutateAsync = vi.fn()
+    mockUseCreateProposal.mockReturnValue(makeMutation({ mutateAsync }))
+    render(
+      <ProposalBuilder
+        lead={{ ...mockLead, property_id: null }}
+        estimate={mockEstimate}
+      />,
+    )
+
+    expect(screen.getByTestId('property-required')).toBeInTheDocument()
+    expect(screen.getByTestId('submit-proposal')).toBeDisabled()
+    expect(mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('asks for a lead before showing the generator when opened from Proposals', () => {
+    render(<ProposalBuilder lead={null} pickLead showHeader={false} />)
+    expect(screen.getByLabelText('Search leads')).toBeInTheDocument()
+    expect(screen.getByTestId('proposal-lead-prompt')).toBeInTheDocument()
     expect(screen.queryByTestId('submit-proposal')).not.toBeInTheDocument()
   })
 })

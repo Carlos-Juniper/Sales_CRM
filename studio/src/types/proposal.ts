@@ -284,3 +284,38 @@ export interface ProposalRequest {
   createdAt: string
   updatedAt: string
 }
+
+/** Person shown on a proposal-package row. Mirrors the users columns the list join returns. */
+export interface ProposalPackageAssignee {
+  id: string
+  name: string
+  email: string
+  role: string
+  branchId: string
+  avatarInitials: string
+}
+
+/**
+ * One row on the Proposals list. Joined from the saved proposal, its lead,
+ * and the latest complete render. Section keys are not included — the list
+ * does not render chapter chips.
+ */
+export interface ProposalPackageSummary {
+  id: string
+  leadId: string
+  propertyId: string | null
+  title: string
+  subtitle: string | null
+  /** Lead estimated contract value, dollars. */
+  amount: number | null
+  /** Lead status, when the lead is still on file. */
+  status: string | null
+  updatedAt: string
+  /** Display code such as P-2026-ABC123. */
+  code: string
+  /** Latest complete render version, when one exists. */
+  version: number | null
+  /** Latest complete render page count, when one exists. */
+  pageCount: number | null
+  assignee: ProposalPackageAssignee | null
+}

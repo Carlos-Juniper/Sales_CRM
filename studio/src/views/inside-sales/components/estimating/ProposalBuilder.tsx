@@ -30,6 +30,7 @@ import { ChevronRight, Loader2, X } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { teamMemberTitleLabel } from '@/lib/proposal/titleLabels'
 import { ProposalDocumentsSection } from './ProposalDocumentsSection'
+import { ProposalAnchorFields } from './ProposalAnchorFields'
 import {
   useTeamMembers,
   useClientReferences,
@@ -38,6 +39,7 @@ import {
   useCreateProposal,
   useUpdateProposal,
 } from '@/hooks/useProposals'
+import { useApprovedEstimate } from '@/hooks/useApprovedEstimate'
 import type { Lead } from '@/types'
 import type { Estimate } from '@/types/estimating'
 import type {
@@ -84,11 +86,16 @@ export interface ProposalFormState {
 // ---------------------------------------------------------------------------
 
 export interface ProposalBuilderProps {
-  /** The Lead to generate a proposal for. */
-  lead: Lead
+  /**
+   * The lead this proposal belongs to. Null when the Proposals page opens the
+   * generator and the rep still has to attach one (`pickLead`).
+   */
+  lead: Lead | null
   /**
    * The approved Estimate for this lead (WS2: optional).
    * When absent, estimate-derived fields render blank/TBD.
+   * Ignored while `pickLead` is set — the builder loads the estimate for the
+   * lead the rep attaches.
    */
   estimate?: Estimate | null
   /**
@@ -98,6 +105,13 @@ export interface ProposalBuilderProps {
   proposalId?: string | null
   /** Called when the user dismisses/closes the builder. */
   onClose?: () => void
+  /**
+   * Proposals-page entry: the form includes a lead search. The lead panel
+   * leaves this false and passes the open lead.
+   */
+  pickLead?: boolean
+  /** Hide the in-form title when a parent dialog already titles the form. */
+  showHeader?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +383,7 @@ function ProposalFormStep({
   submitting,
   submitError,
   isEditing,
+  submitDisabled = false,
 }: {
   lead: Lead
   estimate?: Estimate | null
@@ -378,6 +393,7 @@ function ProposalFormStep({
   submitting: boolean
   submitError: string | null
   isEditing: boolean
+  submitDisabled?: boolean
 }) {
   // ---------------------------------------------------------------------------
   // Branch scoping: the estimate carries aspireBranchId (Slice 8), captured at
@@ -812,7 +828,7 @@ function ProposalFormStep({
       <div className="flex justify-end">
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || submitDisabled}
           className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#2E7D52] px-5 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           data-testid="submit-proposal"
         >
@@ -828,15 +844,44 @@ function ProposalFormStep({
 // ProposalBuilder (container)
 // ---------------------------------------------------------------------------
 
-export function ProposalBuilder({ lead, estimate, proposalId, onClose }: ProposalBuilderProps) {
+export function ProposalBuilder({
+  lead,
+  estimate,
+  proposalId,
+  onClose,
+  pickLead = false,
+  showHeader = true,
+}: ProposalBuilderProps) {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const signerUserId = user?.id ?? ''
 
+  const [attachedLead, setAttachedLead] = useState<Lead | null>(lead)
+
+  useEffect(() => {
+    // The Proposals page owns the attached lead locally (pickLead). The lead
+    // panel passes the open lead and we follow that object when it reloads.
+    if (pickLead) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync the panel's lead into the form
+    setAttachedLead(lead)
+  }, [lead, pickLead])
   const [formState, setFormState] = useState<ProposalFormState>(() =>
     makeDefaultFormState(signerUserId),
   )
   const [submitError, setSubmitError] = useState<string | null>(null)
+
+  // The Proposals page picks the lead inside this form, so the estimate has
+  // to follow that choice. The lead panel already resolved it and passes it in.
+  const { estimate: fetchedEstimate } = useApprovedEstimate(pickLead ? attachedLead : null)
+  const effectiveEstimate = pickLead ? (fetchedEstimate ?? null) : (estimate ?? null)
+
+  function handleLeadChange(next: Lead | null) {
+    if (attachedLead?.id !== next?.id) {
+      setFormState(makeDefaultFormState(signerUserId))
+      setSubmitError(null)
+    }
+    setAttachedLead(next)
+  }
 
   // Reopen flow: load an existing proposal and hydrate the form.
   const { data: savedProposal, isLoading: loadingProposal } = useProposal(proposalId ?? null)
@@ -871,13 +916,13 @@ export function ProposalBuilder({ lead, estimate, proposalId, onClose }: Proposa
     setFormState((prev) => ({ ...prev, ...patch }))
   }, [])
 
-  function buildPayload() {
+  function buildPayload(forLead: Lead) {
     // The required pages are always present; only the form's optional selections
     // are stored in `sections` (the backend / Slice 8 knows which pages are required).
     // WS2: estimateId is nullable — null when no estimate exists.
     return {
-      leadId: lead.id,
-      estimateId: estimate?.id ?? null,
+      leadId: forLead.id,
+      estimateId: effectiveEstimate?.id ?? null,
       createdBy: signerUserId,
       sections: formState.sections as ProposalSectionKey[],
       orgChart: formState.orgChart,
@@ -901,6 +946,15 @@ export function ProposalBuilder({ lead, estimate, proposalId, onClose }: Proposa
 
   async function handleSubmit() {
     setSubmitError(null)
+    if (!attachedLead?.id) {
+      setSubmitError('Attach this proposal to a lead.')
+      return
+    }
+    if (!attachedLead.property_id) {
+      setSubmitError('Attach a property before generating a proposal.')
+      return
+    }
+    const payload = buildPayload(attachedLead)
     try {
       // The preview is a full-screen route, not a second step in this panel —
       // a .print-page is a fixed 8.5in (816px) and this builder renders inside
@@ -908,9 +962,9 @@ export function ProposalBuilder({ lead, estimate, proposalId, onClose }: Proposa
       // page rather than scaling it down.
       let id = proposalId ?? null
       if (isEditing && proposalId) {
-        await updateMutation.mutateAsync({ id: proposalId, patch: buildPayload() })
+        await updateMutation.mutateAsync({ id: proposalId, patch: payload })
       } else {
-        const created = await createMutation.mutateAsync(buildPayload())
+        const created = await createMutation.mutateAsync(payload)
         id = created.id
       }
       if (!id) {
@@ -931,43 +985,59 @@ export function ProposalBuilder({ lead, estimate, proposalId, onClose }: Proposa
     )
   }
 
+  const anchorReady = !!attachedLead?.id && !!attachedLead.property_id
+
   return (
     <div className="flex flex-col gap-4 overflow-y-auto pb-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-semibold text-[hsl(var(--fg))]">
-            {isEditing ? 'Edit proposal' : 'Generate proposal'}
-          </h2>
-          <p className="mt-0.5 text-xs text-[hsl(var(--muted-fg))]">
-            {lead.property_name}
-          </p>
+      {showHeader && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-[hsl(var(--fg))]">
+              {isEditing ? 'Edit proposal' : 'Generate proposal'}
+            </h2>
+            <p className="mt-0.5 text-xs text-[hsl(var(--muted-fg))]">
+              {attachedLead?.property_name ?? 'Select a lead'}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <StepIndicator />
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close proposal builder"
+                className="rounded-md p-1.5 text-[hsl(var(--muted-fg))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--fg))]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <StepIndicator />
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close proposal builder"
-              className="rounded-md p-1.5 text-[hsl(var(--muted-fg))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--fg))]"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-      </div>
+      )}
 
-      <ProposalFormStep
-        lead={lead}
-        estimate={estimate}
-        formState={formState}
-        onFormChange={handleFormChange}
-        onSubmit={handleSubmit}
-        submitting={submitting}
-        submitError={submitError}
-        isEditing={isEditing}
+      <ProposalAnchorFields
+        lead={attachedLead}
+        pickLead={pickLead}
+        onLeadChange={handleLeadChange}
       />
+
+      {attachedLead ? (
+        <ProposalFormStep
+          lead={attachedLead}
+          estimate={effectiveEstimate}
+          formState={formState}
+          onFormChange={handleFormChange}
+          onSubmit={handleSubmit}
+          submitting={submitting}
+          submitError={submitError}
+          isEditing={isEditing}
+          submitDisabled={!anchorReady}
+        />
+      ) : (
+        <p className="text-xs text-[hsl(var(--muted-fg))]" data-testid="proposal-lead-prompt">
+          Select a lead to configure this proposal.
+        </p>
+      )}
     </div>
   )
 }

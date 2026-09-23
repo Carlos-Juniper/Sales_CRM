@@ -118,6 +118,7 @@ _LEAD_TYPES: dict[str, str] = {
     "bid_deadline": "DATE", "estimated_acreage": "FLOAT64", "units": "INT64",
     "estimated_contract_value": "FLOAT64", "contact_name": "STRING",
     "contact_email": "STRING", "handoff_notes": "STRING", "division_id": "INT64",
+    "property_id": "STRING",
 }
 
 
@@ -191,6 +192,8 @@ class PatchLeadBody(BaseModel):
     contact_email: Optional[str] = None
     handoff_notes: Optional[str] = None
     division_id: Optional[int] = None
+    # Canonical properties.id. The proposal generator requires this to be set.
+    property_id: Optional[str] = None
     performed_by: Optional[str] = None
 
 
@@ -590,6 +593,7 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
         "property_name", "lead_type", "address", "city", "state", "zip", "bid_deadline",
         "estimated_acreage", "units", "estimated_contract_value",
         "contact_name", "contact_email", "handoff_notes", "division_id",
+        "property_id",
     })
     data = body.model_dump(exclude_none=True)
     performed_by = data.pop("performed_by", None)

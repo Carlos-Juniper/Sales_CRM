@@ -143,6 +143,7 @@ class TestAuthRequired:
         ("GET",   "/api/proposals/prop-abc123def456"),
         ("PATCH", "/api/proposals/prop-abc123def456"),
         ("GET",   "/api/proposals"),
+        ("GET",   "/api/proposals/packages"),
     ])
     def test_unauthenticated_is_rejected(self, method, path):
         res = client.request(method, path, json={})
@@ -152,16 +153,28 @@ class TestAuthRequired:
 # ── POST /api/proposals — validation ─────────────────────────────────────────
 
 class TestCreateProposalValidation:
-    def test_estimate_not_found_returns_404(self, authed):
-        """When estimateId does not exist, reject with 404."""
+    def test_unknown_lead_returns_422(self, authed):
+        """A proposal cannot be created without an existing lead."""
         with (
             patch("api.proposals.query", new_callable=AsyncMock) as mock_q,
             patch("api.proposals.execute", new_callable=AsyncMock),
         ):
-            mock_q.return_value = []   # estimate not found
+            mock_q.return_value = []
             res = client.post("/api/proposals", json=_valid_create_body())
-        assert res.status_code == 404
-        assert "not found" in res.json()["detail"].lower()
+        assert res.status_code == 422
+        assert "lead" in res.json()["detail"].lower()
+
+    def test_lead_without_property_returns_422(self, authed):
+        """The lead must have a canonical property attached."""
+        with (
+            patch("api.proposals.query", new_callable=AsyncMock) as mock_q,
+            patch("api.proposals.execute", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_q.return_value = [{"id": "lead-001", "property_id": None}]
+            res = client.post("/api/proposals", json=_valid_create_body())
+        assert res.status_code == 422
+        assert "property" in res.json()["detail"].lower()
+        mock_exec.assert_not_called()
 
     def test_estimate_wrong_lead_returns_422(self, authed):
         """When estimate.lead_id != leadId, reject with 422."""
@@ -170,24 +183,31 @@ class TestCreateProposalValidation:
             patch("api.proposals.query", new_callable=AsyncMock) as mock_q,
             patch("api.proposals.execute", new_callable=AsyncMock),
         ):
-            mock_q.return_value = [est]
+            mock_q.side_effect = [
+                [{"id": "lead-001", "property_id": "prop-1"}],
+                [est],
+            ]
             res = client.post("/api/proposals", json=_valid_create_body())
         assert res.status_code == 422
         assert "lead" in res.json()["detail"].lower()
 
-    def test_estimate_not_approved_returns_422(self, authed):
-        """When estimate.status != 'approved', reject with 422."""
+    def test_unapproved_estimate_is_allowed_when_lead_has_property(self, authed):
+        """WS2 dropped the approved-status gate. Lead + property are the constraint."""
         est = _estimate_row(status="in_progress")
+        persisted = _proposal_row()
         with (
             patch("api.proposals.query", new_callable=AsyncMock) as mock_q,
             patch("api.proposals.execute", new_callable=AsyncMock),
         ):
-            mock_q.return_value = [est]
+            mock_q.side_effect = [
+                [{"id": "lead-001", "property_id": "prop-1"}],
+                [est],
+                [persisted],
+            ]
             res = client.post("/api/proposals", json=_valid_create_body())
-        assert res.status_code == 422
-        assert "approved" in res.json()["detail"].lower()
+        assert res.status_code == 201
 
-    @pytest.mark.parametrize("missing_field", ["leadId", "estimateId", "createdBy", "signerUserId"])
+    @pytest.mark.parametrize("missing_field", ["leadId", "createdBy", "signerUserId"])
     def test_missing_required_field_returns_400(self, authed, missing_field):
         body = _valid_create_body()
         del body[missing_field]
@@ -209,11 +229,11 @@ class TestCreateProposalSuccess:
         est = _estimate_row()
         persisted = _proposal_row()
 
-        # query() is called twice: once to validate the estimate, once to fetch
-        # the freshly-inserted row.
+        # query() order: lead+property guard, estimate validation, reload.
         call_responses = [
-            [est],       # SELECT estimate for validation
-            [persisted], # SELECT after INSERT
+            [{"id": "lead-001", "property_id": "prop-1"}],
+            [est],
+            [persisted],
         ]
 
         with (
@@ -242,10 +262,13 @@ class TestCreateProposalSuccess:
         assert "createdAt" in body
         assert "updatedAt" in body
 
-        # INSERT must have been called once.
-        mock_exec.assert_called_once()
-        insert_sql: str = mock_exec.call_args.args[0]
-        assert "INSERT INTO proposal_requests" in insert_sql
+        # The proposal row is inserted once. When an estimate is attached, a
+        # second statement re-anchors lead-scoped uploads onto that estimate.
+        insert_calls = [
+            call for call in mock_exec.call_args_list
+            if "INSERT INTO proposal_requests" in call.args[0]
+        ]
+        assert len(insert_calls) == 1
 
     def test_json_columns_serialised_to_strings_on_insert(self, authed):
         """JSON columns (sections, orgChart, etc.) are serialised before persisting."""
@@ -256,10 +279,19 @@ class TestCreateProposalSuccess:
             patch("api.proposals.query", new_callable=AsyncMock) as mock_q,
             patch("api.proposals.execute", new_callable=AsyncMock) as mock_exec,
         ):
-            mock_q.side_effect = [[est], [persisted]]
+            mock_q.side_effect = [
+                [{"id": "lead-001", "property_id": "prop-1"}],
+                [est],
+                [persisted],
+            ]
             client.post("/api/proposals", json=_valid_create_body())
 
-        insert_params: list[Any] = mock_exec.call_args.args[1]
+        insert_calls = [
+            call for call in mock_exec.call_args_list
+            if "INSERT INTO proposal_requests" in call.args[0]
+        ]
+        assert len(insert_calls) == 1
+        insert_params: list[Any] = insert_calls[0].args[1]
         # Params index 4 = sections (first JSON col after scalar fields).
         # It must be a JSON string, not a Python list.
         assert isinstance(insert_params[4], str)
@@ -275,7 +307,11 @@ class TestCreateProposalSuccess:
             patch("api.proposals.query", new_callable=AsyncMock) as mock_q,
             patch("api.proposals.execute", new_callable=AsyncMock),
         ):
-            mock_q.side_effect = [[est], [persisted]]
+            mock_q.side_effect = [
+                [{"id": "lead-001", "property_id": "prop-1"}],
+                [est],
+                [persisted],
+            ]
             res = client.post("/api/proposals", json=_valid_create_body())
 
         body = res.json()
@@ -537,3 +573,68 @@ class TestListEstimatesLeadIdFilter:
         assert res.status_code == 200
         assert res.json() == []
         mock_q.assert_not_called()
+
+
+# ── GET /api/proposals/packages ──────────────────────────────────────────────
+
+class TestListProposalPackages:
+    def test_returns_lead_joined_summary_without_sections(self, authed):
+        row = {
+            "id": "prop-abc123def456",
+            "lead_id": "lead-001",
+            "created_at": datetime(2026, 6, 16, 12, 0, 0),
+            "updated_at": datetime(2026, 6, 16, 15, 0, 0),
+            "property_name": "Lakewood Pines HOA",
+            "property_id": "prop-1",
+            "city": "Tampa",
+            "state": "FL",
+            "notes": "Full landscape maintenance",
+            "handoff_notes": None,
+            "lead_status": "proposal_sent",
+            "estimated_contract_value": 94200,
+            "assignee_id": "u2",
+            "assignee_name": "Marcus T.",
+            "assignee_email": "marcus@example.com",
+            "assignee_role": "sales",
+            "assignee_branch_id": "b1",
+            "assignee_initials": "MT",
+            "render_version": 2,
+            "page_count": 18,
+        }
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = [row]
+            res = client.get("/api/proposals/packages")
+
+        assert res.status_code == 200
+        body = res.json()
+        assert len(body) == 1
+        item = body[0]
+        assert item["title"] == "Lakewood Pines HOA"
+        assert item["subtitle"] == "Full landscape maintenance"
+        assert item["leadId"] == "lead-001"
+        assert item["propertyId"] == "prop-1"
+        assert item["amount"] == 94200
+        assert item["status"] == "proposal_sent"
+        assert item["version"] == 2
+        assert item["pageCount"] == 18
+        assert item["code"].startswith("P-2026-")
+        assert item["assignee"]["name"] == "Marcus T."
+        assert "sections" not in item
+        sql = mock_q.call_args.args[0]
+        assert "proposal_requests" in sql
+        assert "INNER JOIN leads" in sql
+        assert "sections" not in sql.lower()
+        assert "NOT IN" not in sql
+
+    def test_exclude_status_drops_won_and_lost_in_sql(self, authed):
+        """The queue request excludes closed leads in SQL, not after the response."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            res = client.get("/api/proposals/packages?exclude_status=won,lost")
+
+        assert res.status_code == 200
+        assert res.json() == []
+        sql = mock_q.call_args.args[0]
+        params = mock_q.call_args.args[1]
+        assert "l.status NOT IN" in sql
+        assert params == ["won", "lost"]

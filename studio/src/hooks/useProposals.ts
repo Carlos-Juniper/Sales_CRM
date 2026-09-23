@@ -31,6 +31,7 @@ import type {
   InsuranceCert,
   LicenseCertificationGroups,
   PortfolioProperty,
+  ProposalPackageSummary,
   ProposalRender,
   ProposalRequest,
   ProposalSignerFacts,
@@ -44,6 +45,7 @@ import type { CreateProposalPayload } from '@/api/proposals'
 // ---------------------------------------------------------------------------
 
 export const PROPOSAL_CONFIG_KEY = 'proposals-config'
+export const PROPOSAL_PACKAGES_KEY = 'proposals'
 
 // ---------------------------------------------------------------------------
 // Config — static (no params)
@@ -226,6 +228,18 @@ export function useProposalsByLead(leadId: string | null) {
 }
 
 /**
+ * Every saved proposal package for the Proposals list.
+ * Query key: ['proposals', 'packages']
+ */
+export function useProposalPackages() {
+  return useQuery<ProposalPackageSummary[]>({
+    queryKey: [PROPOSAL_PACKAGES_KEY, 'packages'],
+    queryFn: () => proposalsApi.packages(),
+    staleTime: 30_000,
+  })
+}
+
+/**
  * Create a new proposal. On success invalidates the lead's proposal list.
  * Callers must supply leadId for targeted invalidation.
  */
@@ -236,8 +250,10 @@ export function useCreateProposal() {
   return useMutation({
     mutationFn: (body: CreateProposalPayload) => proposalsApi.create(body),
     onSuccess: (created) => {
-      // Invalidate the lead-scoped list so BidTab picks up the new row.
+      // Invalidate the lead-scoped list so BidTab picks up the new row,
+      // and the Proposals page so the new package shows up there too.
       qc.invalidateQueries({ queryKey: ['proposals', 'list', created.leadId] })
+      qc.invalidateQueries({ queryKey: [PROPOSAL_PACKAGES_KEY, 'packages'] })
       toast('Proposal generated', { variant: 'success' })
     },
     onError: () => toast('Failed to generate proposal', { variant: 'error' }),

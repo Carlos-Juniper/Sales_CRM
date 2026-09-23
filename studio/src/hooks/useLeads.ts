@@ -3,6 +3,7 @@ import { leadsApi, type CreateLeadPayload } from '@/api/leads'
 import { useLeadsStore } from '@/store/leadsStore'
 import { useUIStore } from '@/store/uiStore'
 import { PAGE_SIZE } from '@/lib/constants'
+import { PROPOSAL_PACKAGES_KEY } from '@/hooks/useProposals'
 import type { Lead } from '@/types'
 
 export const LEADS_KEY = 'leads'
@@ -90,6 +91,8 @@ export function useUpdateLead() {
     onSuccess: (updated) => {
       qc.setQueryData([LEAD_KEY, updated.id], updated)
       qc.invalidateQueries({ queryKey: [LEADS_KEY] })
+      // Package rows show lead status, value, and property — keep them in step.
+      qc.invalidateQueries({ queryKey: [PROPOSAL_PACKAGES_KEY, 'packages'] })
     },
     onError: (e) => toast('Update failed', {
       variant: 'error',

@@ -6,6 +6,7 @@ import type {
   InsuranceCert,
   LicenseCertificationGroups,
   PortfolioProperty,
+  ProposalPackageSummary,
   ProposalRender,
   ProposalRequest,
   ProposalSignerFacts,
@@ -169,6 +170,16 @@ export const proposalsApi = {
   list: (params: { leadId: string }) => {
     const qs = new URLSearchParams({ leadId: params.leadId })
     return apiClient.get<ProposalRequest[]>(`/proposals?${qs.toString()}`)
+  },
+
+  /**
+   * GET /api/proposals/packages?exclude_status=won,lost
+   * Saved proposals for the Proposals list. Closed leads (won, lost) are
+   * excluded by the server from this request, not after the response arrives.
+   */
+  packages: () => {
+    const qs = new URLSearchParams({ exclude_status: 'won,lost' })
+    return apiClient.get<ProposalPackageSummary[]>(`/proposals/packages?${qs.toString()}`)
   },
 
   /**

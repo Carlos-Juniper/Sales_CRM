@@ -102,6 +102,70 @@ def _iso(v: Any) -> Any:
     return v
 
 
+def _package_code(proposal_id: str, created_at: Any) -> str:
+    """Stable display code for the proposals list. Not a stored column."""
+    if isinstance(created_at, datetime):
+        year: Any = created_at.year
+    elif isinstance(created_at, str) and len(created_at) >= 4 and created_at[:4].isdigit():
+        year = created_at[:4]
+    else:
+        year = "0000"
+    suffix = re.sub(r"[^A-Za-z0-9]", "", proposal_id)[:6].upper() or "000000"
+    return f"P-{year}-{suffix}"
+
+
+def _package_subtitle(row: dict) -> Optional[str]:
+    notes = (row.get("notes") or "").strip()
+    if notes:
+        return notes
+    handoff = (row.get("handoff_notes") or "").strip()
+    if handoff:
+        return handoff
+    place = ", ".join(part for part in ((row.get("city") or "").strip(), (row.get("state") or "").strip()) if part)
+    return place or None
+
+
+def _proposal_package_out(row: dict) -> dict:
+    """List-row read model: proposal joined to its lead, assignee, and latest render.
+
+    Section keys are intentionally omitted — the proposals list does not show
+    the document's chapter chips.
+    """
+    amount = row.get("estimated_contract_value")
+    if isinstance(amount, Decimal):
+        amount = float(amount)
+    elif amount is not None:
+        amount = float(amount)
+
+    version = row.get("render_version")
+    page_count = row.get("page_count")
+    assignee = None
+    if row.get("assignee_id"):
+        assignee = {
+            "id": row["assignee_id"],
+            "name": row.get("assignee_name") or "Unknown",
+            "email": row.get("assignee_email") or "",
+            "role": row.get("assignee_role") or "sales",
+            "branchId": row.get("assignee_branch_id") or "",
+            "avatarInitials": row.get("assignee_initials") or "?",
+        }
+
+    return {
+        "id": row["id"],
+        "leadId": row.get("lead_id") or "",
+        "propertyId": row.get("property_id"),
+        "title": (row.get("property_name") or "").strip() or "Untitled proposal",
+        "subtitle": _package_subtitle(row),
+        "amount": amount,
+        "status": row.get("lead_status"),
+        "updatedAt": _iso(row.get("updated_at")),
+        "code": _package_code(row["id"], row.get("created_at")),
+        "version": int(version) if version is not None else None,
+        "pageCount": int(page_count) if page_count is not None else None,
+        "assignee": assignee,
+    }
+
+
 def _branch_profile_out(r: dict) -> dict:
     """Project a crm.branches + crm.regions JOIN row into BranchProfile.
 
@@ -733,6 +797,30 @@ def register(app, require_auth) -> None:
                 detail=f"Missing required fields: {', '.join(missing)}",
             )
 
+        # A proposal is always owned by a lead, and that lead must already
+        # point at a canonical property. Orphan packages (no lead, or a lead
+        # with a null property_id) are rejected.
+        lead_rows = await query(
+            "SELECT id, property_id FROM leads WHERE id = %s",
+            [lead_id],
+        )
+        if not lead_rows:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Lead '{lead_id}' was not found. "
+                    "Attach this proposal to an existing lead."
+                ),
+            )
+        if not lead_rows[0].get("property_id"):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "A property must be attached to the lead before a proposal "
+                    "can be created."
+                ),
+            )
+
         # ── When estimate_id is supplied, validate it belongs to leadId ──
         if estimate_id:
             est_rows = await query(
@@ -798,6 +886,68 @@ def register(app, require_auth) -> None:
             "SELECT * FROM proposal_requests WHERE id = %s", [proposal_id]
         )
         return _proposal_request_out(rows[0])
+
+    # ── GET /api/proposals/packages ────────────────────────────────────────
+    # Registered before /api/proposals/{proposal_id} so "packages" is not
+    # captured as a proposal id. One row per saved proposal, joined to the
+    # lead (title, value, status, property) and the latest complete render.
+
+    @app.get("/api/proposals/packages")
+    async def list_proposal_packages(
+        exclude_status: Optional[str] = Query(default=None),
+        _user: dict = Depends(require_auth),
+    ) -> list:
+        # The Proposals queue asks to omit closed leads. Status values match
+        # leads.status (won, lost). Applied here so those rows are never fetched.
+        excluded = [s.strip() for s in (exclude_status or "").split(",") if s.strip()]
+        where = ""
+        params: list[Any] = []
+        if excluded:
+            placeholders = ", ".join(["%s"] * len(excluded))
+            where = f"WHERE l.status NOT IN ({placeholders})"
+            params = excluded
+        rows = await query(
+            f"""
+            SELECT
+                pr.id,
+                pr.lead_id,
+                pr.created_at,
+                pr.updated_at,
+                l.property_name,
+                l.property_id,
+                l.city,
+                l.state,
+                l.notes,
+                l.handoff_notes,
+                l.status AS lead_status,
+                l.estimated_contract_value,
+                u.id AS assignee_id,
+                u.name AS assignee_name,
+                u.email AS assignee_email,
+                u.role AS assignee_role,
+                u.branch_id AS assignee_branch_id,
+                u.avatar_initials AS assignee_initials,
+                rend.version AS render_version,
+                rend.page_count
+            FROM proposal_requests pr
+            INNER JOIN leads l
+                ON l.id = pr.lead_id AND l.deleted_at IS NULL
+            LEFT JOIN users u
+                ON u.id = COALESCE(NULLIF(l.assigned_to, ''), pr.created_by)
+            LEFT JOIN proposal_renders rend
+                ON rend.proposal_id = pr.id
+               AND rend.status = 'complete'
+               AND rend.version = (
+                    SELECT MAX(r2.version)
+                    FROM proposal_renders r2
+                    WHERE r2.proposal_id = pr.id AND r2.status = 'complete'
+               )
+            {where}
+            ORDER BY pr.updated_at DESC
+            """,
+            params,
+        )
+        return [_proposal_package_out(r) for r in rows]
 
     # ── GET /api/proposals/:id ─────────────────────────────────────────────
     # Reopen / re-edit a persisted proposal.

@@ -1,0 +1,16 @@
+{
+  "name": "Juniper Sales CRM",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "API (FastAPI :8000)",
+      "command": "set -a && . .cursor/dev.env && set +a && . .venv/bin/activate && uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload"
+    },
+    {
+      "name": "Studio (Vite :5174)",
+      "command": "cd studio && VITE_MOCK=true npm run dev -- --host 0.0.0.0"
+    }
+  ],
+  "ports": [8000, 5174]
+}

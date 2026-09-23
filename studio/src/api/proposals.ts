@@ -173,10 +173,14 @@ export const proposalsApi = {
   },
 
   /**
-   * GET /api/proposals/packages
-   * Every saved proposal joined to its lead, for the Proposals list.
+   * GET /api/proposals/packages?exclude_status=won,lost
+   * Saved proposals for the Proposals list. Closed leads (won, lost) are
+   * excluded by the server from this request, not after the response arrives.
    */
-  packages: () => apiClient.get<ProposalPackageSummary[]>('/proposals/packages'),
+  packages: () => {
+    const qs = new URLSearchParams({ exclude_status: 'won,lost' })
+    return apiClient.get<ProposalPackageSummary[]>(`/proposals/packages?${qs.toString()}`)
+  },
 
   /**
    * POST /api/proposals/:id/render

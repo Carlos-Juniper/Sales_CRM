@@ -8,11 +8,13 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOCK=/var/run/mysqld/mysqld.sock
+# MariaDB's packaged config pins pid-file/socket under /run/mysqld. On some VMs
+# /var/run is a real directory rather than a symlink to /run, so create the
+# canonical /run/mysqld path (and /var/run/mysqld for good measure).
+SOCK=/run/mysqld/mysqld.sock
 
 echo "==> [start] Ensuring MariaDB directories"
-sudo mkdir -p /var/lib/mysql /var/run/mysqld /var/log/mysql
-sudo chown -R mysql:mysql /var/lib/mysql /var/run/mysqld /var/log/mysql
+sudo install -d -o mysql -g mysql /run/mysqld /var/run/mysqld /var/lib/mysql /var/log/mysql
 
 if [ ! -d /var/lib/mysql/mysql ]; then
   echo "==> [start] Initializing MariaDB data directory"

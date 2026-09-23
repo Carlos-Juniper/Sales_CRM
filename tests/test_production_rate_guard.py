@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import pytest  # noqa: F401  (asyncio_mode=auto)
 
+from conftest import FakeDb  # the one shared copy
 from test_estimating_line_items import (  # same-dir import (pytest rootdir)
-    FakeDb,
     _ESTIMATOR,
     _install_payload,
     _maintenance_payload,

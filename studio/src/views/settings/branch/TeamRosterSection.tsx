@@ -260,7 +260,7 @@ function TeamMemberForm({
         title,
         // A company-wide row (null branch) is a leadership/executive entry;
         // a branch row keeps the branch teamType.
-        teamType: aspireBranchId === null ? 'leadership' : 'branch',
+        teamType: aspireBranchId === null ? 'executive' : 'branch',
         aspireBranchId,
         bio,
         location: location || null,

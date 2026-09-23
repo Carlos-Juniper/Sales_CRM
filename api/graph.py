@@ -112,18 +112,84 @@ def _refresh_scopes(stored_scope: str) -> list[str]:
     return list(stored | set(_DEFAULT_GRAPH_SCOPES))
 
 
-def _msal_app() -> msal.PublicClientApplication:
-    """Return a public MSAL client for user-delegated token refresh.
+def _client_secret() -> str:
+    """ENTRA_CLIENT_SECRET, or a 503 naming the missing config.
 
-    User tokens are obtained via PKCE (public client flow in the browser).
-    Azure tracks the grant type, so refreshing a PKCE grant with a
-    ConfidentialClientApplication + client_secret triggers AADSTS700025.
-    ENTRA_CLIENT_SECRET is only used for app-only flows (get_app_token).
+    Shared by every confidential-client flow (code exchange, user token refresh,
+    app-only directory reads) so a missing secret surfaces the same actionable
+    error instead of a KeyError 500 in one place and a silent fallback in another.
     """
-    client_id = os.environ["ENTRA_CLIENT_ID"]
+    secret = os.environ.get("ENTRA_CLIENT_SECRET")
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Microsoft integration is not configured — ENTRA_CLIENT_SECRET is not set on the server.",
+        )
+    return secret
+
+
+def _confidential_app() -> msal.ConfidentialClientApplication:
+    """MSAL confidential client for this app registration."""
     tenant_id = os.environ["ENTRA_TENANT_ID"]
-    authority = f"https://login.microsoftonline.com/{tenant_id}"
-    return msal.PublicClientApplication(client_id=client_id, authority=authority)
+    return msal.ConfidentialClientApplication(
+        client_id=os.environ["ENTRA_CLIENT_ID"],
+        authority=f"https://login.microsoftonline.com/{tenant_id}",
+        client_credential=_client_secret(),
+    )
+
+
+def _msal_app() -> msal.ConfidentialClientApplication:
+    """Return the MSAL client used to refresh user-delegated tokens.
+
+    Must be the same client type that redeemed the authorization code, because
+    Azure binds a grant to the client type that obtained it. exchange_code()
+    redeems server-side as a confidential client, so refreshing here as the same
+    confidential client is what keeps both mismatch errors from firing:
+
+      AADSTS700025  — public-client grant redeemed with a client secret
+      AADSTS9002327 — SPA-issued token redeemed outside the browser
+
+    Tokens stored before the server-side exchange shipped were redeemed by
+    browser JavaScript and are permanently SPA-bound. They fail with
+    AADSTS9002327 no matter what client refreshes them; get_valid_token maps
+    that to GraphNotConnected so the user is prompted to reconnect once.
+    """
+    return _confidential_app()
+
+
+def exchange_code(
+    code: str, code_verifier: str, redirect_uri: str, scopes: Optional[list[str]] = None
+) -> dict:
+    """Redeem an authorization code server-side; returns the raw MSAL result.
+
+    Runs as a confidential client (secret + PKCE verifier — Azure accepts and
+    prefers both together), so the refresh token Azure returns is redeemable by
+    this server on a 90-day sliding window. Redeeming the same code in the
+    browser instead yields a SPA-bound token that no server can refresh, which
+    is the failure this function exists to avoid.
+
+    ``scopes`` are Graph resource scopes only. MSAL adds openid/profile/
+    offline_access itself; passing them explicitly is a common cause of
+    AADSTS errors on redemption.
+
+    The verifier goes inside ``data=`` deliberately. MSAL's
+    acquire_token_by_authorization_code() accepts **kwargs but only its ``data``
+    dict is merged into the token request body — a bare ``code_verifier=``
+    argument is silently dropped, and Azure then rejects the redemption with
+    AADSTS501481 (code_verifier does not match code_challenge) with nothing in
+    the traceback to say why.
+    """
+    result = _confidential_app().acquire_token_by_authorization_code(
+        code,
+        scopes=list(scopes) if scopes else list(_DEFAULT_GRAPH_SCOPES),
+        redirect_uri=redirect_uri,
+        data={"code_verifier": code_verifier},
+    )
+    if "error" in result or "access_token" not in result:
+        desc = result.get("error_description", "") or result.get("error", "")
+        logger.error("MSAL code exchange failed: %s — %s", result.get("error"), desc)
+        raise HTTPException(status_code=401, detail=f"Microsoft sign-in failed: {desc[:200]}")
+    return result
 
 
 async def find_token_row(user_id: str, email: Optional[str] = None) -> Optional[dict]:
@@ -345,27 +411,15 @@ async def get_app_token() -> str:
     delegated token. Requires ``ENTRA_CLIENT_SECRET`` alongside the client/tenant
     ids the SSO app registration already carries.
 
-    Raises ``HTTPException(503)`` with an actionable message if
-    ``ENTRA_CLIENT_SECRET`` is absent from the environment, rather than letting
-    a ``KeyError`` bubble up as a generic 500.
-    """
-    client_id = os.environ["ENTRA_CLIENT_ID"]
-    tenant_id = os.environ["ENTRA_TENANT_ID"]
-    client_secret = os.environ.get("ENTRA_CLIENT_SECRET")
-    if not client_secret:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Directory search is not configured — "
-                "ENTRA_CLIENT_SECRET is not set on the server."
-            ),
-        )
-    authority = f"https://login.microsoftonline.com/{tenant_id}"
+    Requires ``User.Read.All`` as an *Application* permission with tenant admin
+    consent — ``.default`` on a client-credentials call resolves only to app
+    roles and ignores delegated permissions, so a delegated-only grant yields a
+    token with no roles and Graph answers 403 Authorization_RequestDenied.
 
-    app = msal.ConfidentialClientApplication(
-        client_id=client_id, authority=authority, client_credential=client_secret
-    )
-    result = app.acquire_token_for_client(
+    Raises ``HTTPException(503)`` via ``_client_secret()`` when
+    ``ENTRA_CLIENT_SECRET`` is absent, rather than a generic 500.
+    """
+    result = _confidential_app().acquire_token_for_client(
         scopes=["https://graph.microsoft.com/.default"]
     )
     if "access_token" not in result:

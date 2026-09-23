@@ -202,7 +202,10 @@ def _portfolio_property_out(r: dict) -> dict:
         except (json.JSONDecodeError, TypeError):
             photo_keys = []
     else:
-        photo_keys = []
+        # Already a list (a driver that parses JSON columns itself). Pass it
+        # through rather than discarding it — the isinstance guard below still
+        # rejects anything that is not a list, so this cannot widen the shape.
+        photo_keys = photo_keys_raw
 
     return {
         "id": r["id"],

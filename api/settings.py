@@ -426,7 +426,7 @@ class TeamMemberCreate(BaseModel):
     """
     name: str
     title: str
-    teamType: Literal["branch", "leadership"]
+    teamType: Literal["branch", "executive"]
     aspireBranchId: Optional[int] = None
     userId: Optional[str] = None
     location: Optional[str] = None

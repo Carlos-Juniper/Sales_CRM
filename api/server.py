@@ -1747,16 +1747,77 @@ async def entra_callback(body: EntraCallbackBody, response: Response) -> dict:
     if not email:
         raise HTTPException(status_code=401, detail="No email in Entra ID token")
 
-    # Match case-insensitively: Entra token casing isn't under our control.
-    user_rows = await query(
+    return _issue_jwt(await _user_for_email(email), response)
+
+
+async def _user_for_email(email: str) -> dict:
+    """Resolve a provisioned CRM user by email, or 403.
+
+    Matched case-insensitively — the casing Entra puts in the token is not under
+    our control, and Slice 6 provisions users from a directory pick that may
+    differ in case from what the token carries.
+    """
+    rows = await query(
         "SELECT id, name, email, role, branch_id, avatar_initials FROM users WHERE LOWER(email) = %s",
         [email],
     )
-
-    if not user_rows:
+    if not rows:
         raise HTTPException(status_code=403, detail="User not provisioned. Contact your administrator.")
+    return rows[0]
 
-    user = user_rows[0]
+
+class EntraCompleteBody(BaseModel):
+    code: str
+    code_verifier: str
+    redirect_uri: str
+
+
+@app.post("/api/auth/entra-complete")
+async def entra_complete(body: EntraCompleteBody, response: Response) -> dict:
+    """Redeem the Entra authorization code server-side and open a session.
+
+    Replaces the browser-side token exchange. The redemption has to happen here
+    for Graph to work at all: a code redeemed by browser JavaScript yields a
+    SPA-bound refresh token that no server can redeem (AADSTS9002327), which is
+    why Calendar and Mail could never refresh and looped on "reconnect".
+
+    One round trip does both jobs — opens the CRM session and stores the Graph
+    tokens — so there is no separate /auth/ms-graph-token call during sign-in.
+    That endpoint stays for the Settings reconnect flow.
+    """
+    from api import graph as _graph
+
+    result = _graph.exchange_code(body.code, body.code_verifier, body.redirect_uri)
+
+    # MSAL validates the id_token signature, issuer and audience against the
+    # authority before populating id_token_claims, and the response arrives over
+    # TLS straight from Microsoft, so no second JWKS round trip is needed here.
+    claims = result.get("id_token_claims") or {}
+    email = (claims.get("email") or claims.get("preferred_username") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="No email in Entra ID token")
+
+    user = await _user_for_email(email)
+
+    # Graph storage is best-effort: a KMS or DB failure must not cost the user
+    # their sign-in. They land in the app and hit the reconnect prompt instead.
+    refresh_token = result.get("refresh_token")
+    if refresh_token:
+        try:
+            await _graph.store_tokens(
+                user["id"],
+                access_token=result["access_token"],
+                refresh_token=refresh_token,
+                expires_in=result.get("expires_in", 3600),
+                scope=result.get("scope", ""),
+            )
+        except Exception:
+            logger.error("Graph token storage failed for user %s", user["id"], exc_info=True)
+    else:
+        # offline_access was not consented, so Graph works until the access
+        # token expires and then prompts a reconnect. Sign-in is unaffected.
+        logger.warning("Entra returned no refresh_token for %s", email)
+
     return _issue_jwt(user, response)
 
 

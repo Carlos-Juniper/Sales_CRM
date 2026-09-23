@@ -906,6 +906,10 @@ class TestMarketingPortfolioManagement:
         assert r.status_code == 403
 
 
+# team_type is ENUM('branch','executive') — sql/migrations/014:84, the only
+# definition of the column. These tests were written against 437c508's
+# Literal["branch", "leadership"], a value that exists nowhere else in the
+# system; because they mock the DB they passed while the real INSERT could not.
 class TestMarketingTeamMembers:
     """team_members: marketing edits any branch; managers keep their own branch."""
 
@@ -919,7 +923,7 @@ class TestMarketingTeamMembers:
         mock_authz_query.return_value = _live("marketing")
         r = client.post(
             "/api/settings/team-members",
-            json={"name": "Caitlyn F.", "title": "Marketing", "teamType": "leadership"},
+            json={"name": "Caitlyn F.", "title": "Marketing", "teamType": "executive"},
         )
         assert r.status_code == 201
 
@@ -950,7 +954,7 @@ class TestMarketingTeamMembers:
         mock_authz_query.return_value = _live("sales")
         r = client.post(
             "/api/settings/team-members",
-            json={"name": "X", "title": "Y", "teamType": "leadership"},
+            json={"name": "X", "title": "Y", "teamType": "executive"},
         )
         assert r.status_code == 403
 

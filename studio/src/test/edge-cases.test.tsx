@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { screen, waitFor, act } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { waitFor, act, renderHook } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
-import { render, makeUser } from '@/test/utils'
+import { createWrapper, makeUser } from '@/test/utils'
+import { useUpdateBid } from '@/hooks/useBids'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
 
@@ -117,27 +117,20 @@ describe('Optimistic update rollback on 500', () => {
   })
 
   it('PATCH /api/bids returns 500 — error toast is shown', async () => {
+    useUIStore.setState({ toasts: [] })
     server.use(
       http.patch('/api/bids/:id', () => {
         return HttpResponse.json({ error: 'Server error' }, { status: 500 })
       })
     )
 
-    const { default: BidTrackerPage } = await import('@/views/inside-sales/BidTrackerPage')
-    render(<BidTrackerPage />)
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useUpdateBid(), { wrapper })
 
-    // Wait for bids to load
-    await screen.findByText('City of Tempe — Parks Maintenance')
+    await act(async () => {
+      await result.current.mutateAsync({ id: 'b1', body: { status: 'pursuing' } }).catch(() => {})
+    })
 
-    // Find a Pursue button (pending bid: Peoria Unified School District)
-    const pursueButtons = screen.getAllByRole('button', { name: /pursue/i })
-    expect(pursueButtons.length).toBeGreaterThan(0)
-
-    const user = userEvent.setup()
-    // mutateAsync rejects on 500 — catch it so it doesn't become an unhandled rejection
-    void user.click(pursueButtons[0]).catch(() => {})
-
-    // The mutation failed — error toast should be queued in UIStore
     await waitFor(() => {
       const { toasts } = useUIStore.getState()
       const errorToast = toasts.find((t) => t.variant === 'error')

@@ -370,10 +370,16 @@ const allHandlers = [
     return HttpResponse.json(bids[idx])
   }),
 
-  // GET /api/proposals/packages — Proposals list (no section chips)
-  http.get(`${API}/proposals/packages`, async () => {
+  // GET /api/proposals/packages — Proposals list (no section chips).
+  // exclude_status is applied before the response, matching the API.
+  http.get(`${API}/proposals/packages`, async ({ request }) => {
     await delay(200)
-    return HttpResponse.json(proposalPackages)
+    const exclude = new URL(request.url).searchParams.get('exclude_status') ?? ''
+    const excluded = new Set(exclude.split(',').map((s) => s.trim()).filter(Boolean))
+    const rows = excluded.size
+      ? proposalPackages.filter((pkg) => !pkg.status || !excluded.has(pkg.status))
+      : proposalPackages
+    return HttpResponse.json(rows)
   }),
 
   // POST /api/proposals — same lead + property constraint as the API

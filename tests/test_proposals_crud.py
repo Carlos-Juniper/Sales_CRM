@@ -624,3 +624,17 @@ class TestListProposalPackages:
         assert "proposal_requests" in sql
         assert "INNER JOIN leads" in sql
         assert "sections" not in sql.lower()
+        assert "NOT IN" not in sql
+
+    def test_exclude_status_drops_won_and_lost_in_sql(self, authed):
+        """The queue request excludes closed leads in SQL, not after the response."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            res = client.get("/api/proposals/packages?exclude_status=won,lost")
+
+        assert res.status_code == 200
+        assert res.json() == []
+        sql = mock_q.call_args.args[0]
+        params = mock_q.call_args.args[1]
+        assert "l.status NOT IN" in sql
+        assert params == ["won", "lost"]

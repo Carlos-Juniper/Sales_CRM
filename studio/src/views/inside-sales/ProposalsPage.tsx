@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AssigneeAvatar } from '@/components/shared/AssigneeAvatar'
-import { StatusBadge } from '@/components/shared/StatusBadge'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -22,10 +21,6 @@ import type { ProposalPackageAssignee, ProposalPackageSummary } from '@/types/pr
 import { filterProposalPackages } from './proposalPackageFilters'
 
 const STATUS_KEYS = Object.keys(LEAD_STATUS_LABELS) as LeadStatus[]
-
-function isLeadStatus(status: string | null): status is LeadStatus {
-  return !!status && status in LEAD_STATUS_LABELS
-}
 
 function toUser(assignee: ProposalPackageAssignee | null): User | null {
   if (!assignee) return null
@@ -161,7 +156,6 @@ export default function ProposalsPage() {
             )}
 
             {!isLoading && !isError && filtered.map((pkg) => {
-              const leadStatus = isLeadStatus(pkg.status) ? pkg.status : null
               const selected = pkg.leadId !== '' && pkg.leadId === selectedLeadId
               return (
                 <button
@@ -190,7 +184,6 @@ export default function ProposalsPage() {
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
                     <span className="text-sm font-semibold text-[#2E7D52]">{formatCurrency(pkg.amount)}</span>
-                    {leadStatus && <StatusBadge status={leadStatus} />}
                     {pkg.updatedAt && (
                       <span className="text-[11px] text-[hsl(var(--muted-fg))]">{formatDate(pkg.updatedAt)}</span>
                     )}

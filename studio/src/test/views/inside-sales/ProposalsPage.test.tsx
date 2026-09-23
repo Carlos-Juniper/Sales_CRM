@@ -46,12 +46,18 @@ describe('ProposalsPage', () => {
 
     expect(await screen.findByText('City of Tempe — Parks RFP')).toBeInTheDocument()
     expect(screen.getByText('Dobson Ranch HOA')).toBeInTheDocument()
-    expect(screen.getByText('Town of Gilbert Parks RFP')).toBeInTheDocument()
+    expect(screen.queryByText('Town of Gilbert Parks RFP')).not.toBeInTheDocument()
     expect(screen.getByText('$420K')).toBeInTheDocument()
     expect(screen.getByText('$780K')).toBeInTheDocument()
     expect(screen.getByText('P-2026-TEMP01 · v2.0 · 18 pg')).toBeInTheDocument()
-    expect(screen.getByText('Proposal Sent')).toBeInTheDocument()
-    expect(screen.getAllByText('Won').length).toBeGreaterThan(0)
+
+    const rows = screen.getAllByTestId('proposal-row')
+    for (const row of rows) {
+      expect(row).not.toHaveTextContent('Proposal Sent')
+      expect(row).not.toHaveTextContent('Won')
+      expect(row).not.toHaveTextContent('Lost')
+      expect(row).not.toHaveTextContent('Contacted')
+    }
 
     const maricopa = screen.getByRole('button', { name: /Maricopa County/ })
     expect(maricopa).toHaveTextContent('Unassigned')

@@ -894,10 +894,20 @@ def register(app, require_auth) -> None:
 
     @app.get("/api/proposals/packages")
     async def list_proposal_packages(
+        exclude_status: Optional[str] = Query(default=None),
         _user: dict = Depends(require_auth),
     ) -> list:
+        # The Proposals queue asks to omit closed leads. Status values match
+        # leads.status (won, lost). Applied here so those rows are never fetched.
+        excluded = [s.strip() for s in (exclude_status or "").split(",") if s.strip()]
+        where = ""
+        params: list[Any] = []
+        if excluded:
+            placeholders = ", ".join(["%s"] * len(excluded))
+            where = f"WHERE l.status NOT IN ({placeholders})"
+            params = excluded
         rows = await query(
-            """
+            f"""
             SELECT
                 pr.id,
                 pr.lead_id,
@@ -932,8 +942,10 @@ def register(app, require_auth) -> None:
                     FROM proposal_renders r2
                     WHERE r2.proposal_id = pr.id AND r2.status = 'complete'
                )
+            {where}
             ORDER BY pr.updated_at DESC
-            """
+            """,
+            params,
         )
         return [_proposal_package_out(r) for r in rows]
 

@@ -6,7 +6,7 @@
     {
       "name": "API (FastAPI :8000)",
       "description": "FastAPI backend served against the local MariaDB.",
-      "command": "set -a && . .cursor/dev.env && set +a && . .venv/bin/activate && uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload"
+      "command": "bash .cursor/start.sh && set -a && . .cursor/dev.env && set +a && . .venv/bin/activate && uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload"
     },
     {
       "name": "Studio (Vite :5174)",

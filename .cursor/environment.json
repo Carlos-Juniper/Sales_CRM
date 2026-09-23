@@ -5,12 +5,17 @@
   "terminals": [
     {
       "name": "API (FastAPI :8000)",
+      "description": "FastAPI backend served against the local MariaDB.",
       "command": "set -a && . .cursor/dev.env && set +a && . .venv/bin/activate && uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload"
     },
     {
       "name": "Studio (Vite :5174)",
+      "description": "React/Vite dev server; runs against MSW mocks (VITE_MOCK=true), no backend required.",
       "command": "cd studio && VITE_MOCK=true npm run dev -- --host 0.0.0.0"
     }
   ],
-  "ports": [8000, 5174]
+  "ports": [
+    { "name": "api", "port": 8000 },
+    { "name": "studio", "port": 5174 }
+  ]
 }

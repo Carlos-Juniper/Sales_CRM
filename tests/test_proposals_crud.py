@@ -151,6 +151,21 @@ class TestAuthRequired:
 
 # ── POST /api/proposals — validation ─────────────────────────────────────────
 
+
+def _insert_call(mock_exec):
+    """The INSERT INTO proposal_requests call, whichever order it ran in.
+
+    create() issues a second execute when estimate_id is supplied — the Option C
+    upload re-anchor (api/proposals.py:790) — so `call_args` is no longer the
+    INSERT and `assert_called_once` no longer holds. Selecting by SQL keeps
+    these assertions about the INSERT itself.
+    """
+    for call in mock_exec.call_args_list:
+        if "INSERT INTO proposal_requests" in call.args[0]:
+            return call
+    raise AssertionError("no INSERT INTO proposal_requests call was made")
+
+
 class TestCreateProposalValidation:
     def test_estimate_not_found_returns_404(self, authed):
         """When estimateId does not exist, reject with 404."""
@@ -158,10 +173,13 @@ class TestCreateProposalValidation:
             patch("api.proposals.query", new_callable=AsyncMock) as mock_q,
             patch("api.proposals.execute", new_callable=AsyncMock),
         ):
-            mock_q.return_value = []   # estimate not found
+            mock_q.side_effect = [[], [_proposal_row()]]   # estimate not found
             res = client.post("/api/proposals", json=_valid_create_body())
-        assert res.status_code == 404
-        assert "not found" in res.json()["detail"].lower()
+        # WS2 (api/proposals.py:703): estimate_id is optional and an unknown one
+        # is not an error — a rep may draft a proposal at any point in the
+        # estimating lifecycle. Only a lead_id MISMATCH is rejected, which
+        # test_estimate_wrong_lead_returns_422 covers.
+        assert res.status_code == 201
 
     def test_estimate_wrong_lead_returns_422(self, authed):
         """When estimate.lead_id != leadId, reject with 422."""
@@ -175,19 +193,26 @@ class TestCreateProposalValidation:
         assert res.status_code == 422
         assert "lead" in res.json()["detail"].lower()
 
-    def test_estimate_not_approved_returns_422(self, authed):
-        """When estimate.status != 'approved', reject with 422."""
+    def test_unapproved_estimate_is_accepted(self, authed):
+        """The status=approved gate was removed on purpose (WS2).
+
+        api/proposals.py:705 — "The status=approved gate is intentionally
+        removed: the rep may generate a draft proposal at any point in the
+        estimating lifecycle." This pins that, so a future reinstatement is a
+        deliberate change rather than a silent one.
+        """
         est = _estimate_row(status="in_progress")
         with (
             patch("api.proposals.query", new_callable=AsyncMock) as mock_q,
             patch("api.proposals.execute", new_callable=AsyncMock),
         ):
-            mock_q.return_value = [est]
+            mock_q.side_effect = [[est], [_proposal_row()]]
             res = client.post("/api/proposals", json=_valid_create_body())
-        assert res.status_code == 422
-        assert "approved" in res.json()["detail"].lower()
+        assert res.status_code == 201
 
-    @pytest.mark.parametrize("missing_field", ["leadId", "estimateId", "createdBy", "signerUserId"])
+    # estimateId is deliberately absent: WS2 made it optional (migration
+    # 034_estimate_optional_proposals), so omitting it now yields 201.
+    @pytest.mark.parametrize("missing_field", ["leadId", "createdBy", "signerUserId"])
     def test_missing_required_field_returns_400(self, authed, missing_field):
         body = _valid_create_body()
         del body[missing_field]
@@ -242,9 +267,8 @@ class TestCreateProposalSuccess:
         assert "createdAt" in body
         assert "updatedAt" in body
 
-        # INSERT must have been called once.
-        mock_exec.assert_called_once()
-        insert_sql: str = mock_exec.call_args.args[0]
+        # Exactly one INSERT, alongside the upload re-anchor UPDATE.
+        insert_sql: str = _insert_call(mock_exec).args[0]
         assert "INSERT INTO proposal_requests" in insert_sql
 
     def test_json_columns_serialised_to_strings_on_insert(self, authed):
@@ -259,7 +283,7 @@ class TestCreateProposalSuccess:
             mock_q.side_effect = [[est], [persisted]]
             client.post("/api/proposals", json=_valid_create_body())
 
-        insert_params: list[Any] = mock_exec.call_args.args[1]
+        insert_params: list[Any] = _insert_call(mock_exec).args[1]
         # Params index 4 = sections (first JSON col after scalar fields).
         # It must be a JSON string, not a Python list.
         assert isinstance(insert_params[4], str)

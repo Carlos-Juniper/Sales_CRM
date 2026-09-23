@@ -96,6 +96,25 @@ def _project_row(**over) -> dict:
 
 # ── Auto-generation on estimate create (both intake types) ───────────────────
 
+
+def _query_rows(rows):
+    """Serve `rows` positionally, but answer the estimate-number query by SQL.
+
+    create() gained a ``SELECT ... AS next_num`` lookup (api/estimating.py:1539)
+    that these positional lists predate, so every one of them fell a row short
+    and surfaced as StopIteration. Matching that statement out of band keeps the
+    lists positional for everything else.
+    """
+    it = iter(rows)
+
+    def _side_effect(sql, params=None):
+        if "AS next_num" in sql:
+            return [{"next_num": 1}]
+        return next(it)
+
+    return _side_effect
+
+
 class TestAutoGeneration:
     @pytest.mark.parametrize("est_type", ["maintenance", "install"])
     @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
@@ -106,7 +125,7 @@ class TestAutoGeneration:
         self, mock_query, mock_exec, mock_load, mock_bg, authed, est_type
     ):
         # [] → estimate_sections (no lines → fallback total,0); _scope_id_rows → itb_scopes
-        mock_query.side_effect = [[], _scope_id_rows()]
+        mock_query.side_effect = _query_rows([[], _scope_id_rows()])
         mock_load.return_value = {"id": "est-1", "estimateType": est_type}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": est_type, "name": "Greenfield", "clientName": "LLC",
@@ -126,7 +145,7 @@ class TestAutoGeneration:
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
         # [] → estimate_sections (no lines → fallback total,0); _scope_id_rows → itb_scopes
-        mock_query.side_effect = [[], _scope_id_rows()]
+        mock_query.side_effect = _query_rows([[], _scope_id_rows()])
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield Estate",
@@ -159,7 +178,7 @@ class TestAutoGeneration:
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
         # [] → estimate_sections (no lines → fallback total,0); _scope_id_rows → itb_scopes
-        mock_query.side_effect = [[], _scope_id_rows()]
+        mock_query.side_effect = _query_rows([[], _scope_id_rows()])
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "HOA", "clientName": "HOA LLC",
@@ -185,7 +204,7 @@ class TestAutoGeneration:
         """Adding a row to itb_scopes yields one more status row at creation
         with NO code edit (BRD §2.1)."""
         # [] → estimate_sections (no lines → fallback total,0); extended list → itb_scopes
-        mock_query.side_effect = [[], _scope_id_rows() + [{"id": "scope-brand-new"}]]
+        mock_query.side_effect = _query_rows([[], _scope_id_rows() + [{"id": "scope-brand-new"}]])
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "X", "clientName": "Y",
@@ -207,11 +226,11 @@ class TestListItbProjects:
     def test_returns_projects_shaped_to_ts_type_with_embedded_statuses(
         self, mock_query, authed_admin
     ):
-        mock_query.side_effect = [
+        mock_query.side_effect = _query_rows([
             [_project_row()],
             [{"project_id": "itb-1", "scope_id": "scope-landscape", "status_code": "X"},
              {"project_id": "itb-1", "scope_id": "scope-irrigation", "status_code": "P"}],
-        ]
+        ])
         resp = client.get("/api/estimating/itb/projects")
         assert resp.status_code == 200
         body = resp.json()
@@ -243,7 +262,7 @@ class TestListItbProjects:
 
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_active_filter_excludes_won_and_lost(self, mock_query, authed_admin):
-        mock_query.side_effect = [[], []]
+        mock_query.side_effect = _query_rows([[], []])
         resp = client.get("/api/estimating/itb/projects")
         assert resp.status_code == 200
         sql = mock_query.call_args_list[0].args[0]
@@ -257,7 +276,7 @@ class TestListItbProjects:
         mock_authz_query.return_value = [
             {"aspire_branch_id": 1403}, {"aspire_branch_id": 3696}
         ]
-        mock_query.side_effect = [[], []]
+        mock_query.side_effect = _query_rows([[], []])
         resp = client.get("/api/estimating/itb/projects")
         assert resp.status_code == 200
         sql, params = mock_query.call_args_list[0].args
@@ -266,7 +285,7 @@ class TestListItbProjects:
 
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_cross_branch_role_sees_all(self, mock_query, authed_admin):
-        mock_query.side_effect = [[], []]
+        mock_query.side_effect = _query_rows([[], []])
         resp = client.get("/api/estimating/itb/projects")
         assert resp.status_code == 200
         sql = mock_query.call_args_list[0].args[0]
@@ -300,7 +319,7 @@ class TestUpdateScopeStatus:
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_upserts_status_and_returns_it(self, mock_query, mock_exec, authed):
-        mock_query.side_effect = [[{"id": "itb-1"}], [{"id": "scope-landscape"}]]
+        mock_query.side_effect = _query_rows([[{"id": "itb-1"}], [{"id": "scope-landscape"}]])
         resp = client.patch(
             "/api/estimating/itb/projects/itb-1/scopes/scope-landscape",
             json={"statusCode": "X"},
@@ -328,7 +347,7 @@ class TestUpdateScopeStatus:
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_404_when_project_missing(self, mock_query, mock_exec, authed):
-        mock_query.side_effect = [[]]
+        mock_query.side_effect = _query_rows([[]])
         resp = client.patch(
             "/api/estimating/itb/projects/nope/scopes/scope-landscape",
             json={"statusCode": "X"},
@@ -339,7 +358,7 @@ class TestUpdateScopeStatus:
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_404_when_scope_missing(self, mock_query, mock_exec, authed):
-        mock_query.side_effect = [[{"id": "itb-1"}], []]
+        mock_query.side_effect = _query_rows([[{"id": "itb-1"}], []])
         resp = client.patch(
             "/api/estimating/itb/projects/itb-1/scopes/nope",
             json={"statusCode": "X"},
@@ -351,7 +370,7 @@ class TestUpdateScopeStatus:
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_accepts_every_legend_code(self, mock_query, mock_exec, authed, code):
-        mock_query.side_effect = [[{"id": "itb-1"}], [{"id": "scope-landscape"}]]
+        mock_query.side_effect = _query_rows([[{"id": "itb-1"}], [{"id": "scope-landscape"}]])
         resp = client.patch(
             "/api/estimating/itb/projects/itb-1/scopes/scope-landscape",
             json={"statusCode": code},

@@ -23,13 +23,20 @@ os.environ.setdefault("ENTRA_TENANT_ID", "x")
 
 from api.server import app, require_auth  # noqa: E402
 import api.estimating as est  # noqa: E402
-from tests.test_estimating_line_items import FakeDb, db, estimator  # noqa: E402,F401
 
 client = TestClient(app)
 
 _ESTIMATOR = {"id": "u1", "name": "Carlos", "email": "c@x.com",
               "role": "maintenance_estimating", "branch_id": "Orlando, FL",
               "avatar_initials": "CH"}
+
+
+@pytest.fixture
+def estimator():
+    """Signed-in estimator for the split tests; `db` comes from conftest."""
+    app.dependency_overrides[require_auth] = lambda: _ESTIMATOR
+    yield
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -60,6 +67,42 @@ def _create_body(**over) -> dict:
 
 # ── Unit tests for the pure classifier ────────────────────────────────────────
 
+
+def _query_rows(rows):
+    """Serve `rows` positionally, but answer the estimate-number query by SQL.
+
+    A bare positional ``side_effect`` list breaks whenever production adds a
+    query — which is exactly what happened when create() began assigning
+    ``estimate_number`` (api/estimating.py:1539). Every list in this module then
+    fell one short and surfaced as ``KeyError: 'next_num'`` or a bare
+    ``StopIteration``. Matching that one statement out of band keeps the rest
+    positional without re-counting every list here on the next schema change.
+    """
+    it = iter(rows)
+
+    def _side_effect(sql, params=None):
+        if "AS next_num" in sql:
+            return [{"next_num": 1}]
+        return next(it)
+
+    return _side_effect
+
+
+
+def _split_query_count(mock_query):
+    """How many split-related lookups ran, ignoring the estimate-number query.
+
+    These assertions exist to pin down that the split does not issue a query
+    per line. Counting raw calls conflates that with unrelated statements
+    create() happens to make, so the estimate-number lookup is filtered out
+    rather than absorbed into a bumped expected count.
+    """
+    return sum(
+        1 for call in mock_query.call_args_list
+        if "AS next_num" not in (call.args[0] if call.args else "")
+    )
+
+
 class TestLineDiscipline:
     def test_override_wins_over_service_type(self):
         assert est._line_discipline("landscape", "Irrigation") == "landscape"
@@ -89,13 +132,13 @@ class TestAutoSplitOnCreate:
     def test_all_landscape_lines_produce_zero_ir(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        mock_query.side_effect = [
+        mock_query.side_effect = _query_rows([
             [{"id": "sec-1", "square_feet": 1000}],
             [{"section_id": "sec-1", "qty": 10, "unit_sell_cents": 10000,
               "complexity_pct": 0, "discipline": None, "catalog_item_id": "cat-turf"}],
             [{"id": "cat-turf", "service_type": "Turf Area"}],
             _scope_id_rows(),
-        ]
+        ])
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json=_create_body(contractValueCents=100000))
         assert resp.status_code == 201
@@ -110,7 +153,7 @@ class TestAutoSplitOnCreate:
     def test_mixed_lines_split_reconciles_exactly_to_total(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        mock_query.side_effect = [
+        mock_query.side_effect = _query_rows([
             [{"id": "sec-1", "square_feet": 1000}],
             [
                 {"section_id": "sec-1", "qty": 10, "unit_sell_cents": 10000,
@@ -123,7 +166,7 @@ class TestAutoSplitOnCreate:
                 {"id": "cat-irr", "service_type": "Irrigation"},
             ],
             _scope_id_rows(),
-        ]
+        ])
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json=_create_body(contractValueCents=130000))
         assert resp.status_code == 201
@@ -139,12 +182,12 @@ class TestAutoSplitOnCreate:
     def test_per_line_override_wins_over_catalog_service_type(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        mock_query.side_effect = [
+        mock_query.side_effect = _query_rows([
             [{"id": "sec-1", "square_feet": 1000}],
             [{"section_id": "sec-1", "qty": 5, "unit_sell_cents": 10000, "complexity_pct": 0,
               "discipline": "landscape", "catalog_item_id": "cat-irr"}],
             _scope_id_rows(),
-        ]
+        ])
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json=_create_body(contractValueCents=50000))
         assert resp.status_code == 201
@@ -162,12 +205,12 @@ class TestAutoSplitOnCreate:
     def test_manual_line_defaults_landscape_override_moves_to_ir(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        mock_query.side_effect = [
+        mock_query.side_effect = _query_rows([
             [{"id": "sec-1", "square_feet": 1000}],
             [{"section_id": "sec-1", "qty": 2, "unit_sell_cents": 10000, "complexity_pct": 0,
               "discipline": "irrigation", "catalog_item_id": None}],
             _scope_id_rows(),
-        ]
+        ])
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json=_create_body(contractValueCents=20000))
         assert resp.status_code == 201
@@ -182,7 +225,7 @@ class TestAutoSplitOnCreate:
     def test_explicit_body_values_still_take_precedence(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        mock_query.return_value = _scope_id_rows()
+        mock_query.side_effect = _query_rows([_scope_id_rows()])
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json=_create_body(
             contractValueCents=100000, estLsCents=40000, estIrCents=60000,
@@ -192,7 +235,7 @@ class TestAutoSplitOnCreate:
         assert 40000 in params
         assert 60000 in params
         # explicit values short-circuit the split -- only the itb_scopes lookup runs
-        mock_query.assert_called_once()
+        assert _split_query_count(mock_query) == 1
 
     @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
@@ -201,13 +244,13 @@ class TestAutoSplitOnCreate:
     def test_maintenance_estimate_uses_maintenance_formula(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        mock_query.side_effect = [
+        mock_query.side_effect = _query_rows([
             [{"id": "sec-1", "square_feet": 2000}],
             [{"section_id": "sec-1", "qty": 1, "unit_sell_cents": 2000, "complexity_pct": 0.1,
               "discipline": None, "catalog_item_id": "cat-irr"}],
             [{"id": "cat-irr", "service_type": "Irrigation"}],
             _scope_id_rows(),
-        ]
+        ])
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json=_create_body(
             estimateType="maintenance", contractValueCents=4400,
@@ -225,14 +268,15 @@ class TestAutoSplitOnCreate:
     def test_no_persisted_lines_falls_back_to_all_landscape(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        mock_query.side_effect = [[], _scope_id_rows()]
+        mock_query.side_effect = _query_rows([[], _scope_id_rows()])
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json=_create_body(contractValueCents=5000))
         assert resp.status_code == 201
         params = _itb_insert_params(mock_exec)
         assert 5000 in params
         assert 0 in params
-        assert mock_query.call_count == 2  # estimate_sections lookup (empty) + itb_scopes
+        # estimate_sections lookup (empty) + itb_scopes
+        assert _split_query_count(mock_query) == 2
 
 
 # ── Recompute on line-item edit (LOCKED default) ─────────────────────────────
@@ -243,7 +287,7 @@ class TestRecomputeOnEdit:
     def test_adding_a_service_recomputes_the_split(
         self, mock_query, mock_exec, authed
     ):
-        mock_query.side_effect = [
+        mock_query.side_effect = _query_rows([
             [{"id": "sec-1"}],                                            # section ownership
             [{"estimate_type": "install"}],                               # estimate_type (maintenance guard)
             [{"c": 0}],                                                   # sort-order count
@@ -258,7 +302,7 @@ class TestRecomputeOnEdit:
               "complexity_pct": 0, "unit_sell_cents": 5000, "embedded_cost_cents": None,
               "target_gm": None, "hours": None, "sort_order": 0}],        # reload the new service row
             [],                                                            # components
-        ]
+        ])
         resp = client.post(
             "/api/estimating/estimates/est-1/sections/sec-1/services",
             json={"label": "Drip", "qty": 4, "unitSellCents": 5000, "discipline": "irrigation"},

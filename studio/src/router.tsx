@@ -43,6 +43,13 @@ export const router = createBrowserRouter([
     element: <LoginPage />,
   },
   {
+    path: '/auth/entra-complete',
+    element: <AuthCallbackPage />,
+  },
+  // Kept mounted so a sign-in already in flight across a deploy lands on a real
+  // page instead of the 404 route. Its code fails the exchange (the redirect_uri
+  // no longer matches) and the page bounces to /login for a clean retry.
+  {
     path: '/auth/callback',
     element: <AuthCallbackPage />,
   },

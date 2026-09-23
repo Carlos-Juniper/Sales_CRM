@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { router } from './router'
 import { me } from '@/api/auth'
 import { useAuthStore } from '@/store/authStore'
+import { isAuthCallbackPath } from '@/lib/azureAuth'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,7 +19,7 @@ function AuthBootstrap({ children }: { children: React.ReactNode }) {
   const { login, logout, setInitialized, isInitialized } = useAuthStore()
 
   useEffect(() => {
-    if (window.location.pathname === '/auth/callback') {
+    if (isAuthCallbackPath(window.location.pathname)) {
       setInitialized()
       return
     }

@@ -19,6 +19,7 @@ import pytest
 
 os.environ.setdefault("GCP_PROJECT", "test-project")
 
+import api.authz as authz  # noqa: E402
 import api.seed_auth as seed_auth  # noqa: E402
 
 
@@ -93,13 +94,16 @@ def test_provision_rejects_unknown_role():
         )
 
 
-def test_valid_roles_are_the_ten_canonical_roles():
-    # One canonical role vocabulary, backend-validated.
-    assert seed_auth.VALID_ROLES == frozenset({
-        "procurement", "sales", "inside_sales", "admin", "manager",
-        "regional_director", "maintenance_estimating", "install_estimating",
-        "vice_president", "ceo",
-    })
+def test_valid_roles_is_the_canonical_vocabulary():
+    """seed_auth must not grow a role list of its own.
+
+    This previously repeated the full set, so adding a canonical role (marketing,
+    437c508) broke two tests in two files for one change and left the vocabulary
+    spelled out in three places. The membership check lives in
+    test_rbac.py::test_eleven_canonical_roles; what is worth pinning here is the
+    alias itself — that seed_auth validates against authz and nothing else.
+    """
+    assert seed_auth.VALID_ROLES is authz.CANONICAL_ROLES
 
 
 def test_provision_accepts_new_canonical_roles():

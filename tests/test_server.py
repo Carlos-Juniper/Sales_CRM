@@ -778,6 +778,133 @@ def test_entra_callback_invalid_token_returns_401():
     assert resp.json()["detail"] == "Invalid SSO token"
 
 
+# ── Auth — server-side authorization-code redemption ──────────────────────────
+#
+# The browser used to redeem the code itself, which made every Graph refresh
+# token SPA-bound and unusable by this server (AADSTS9002327). Redemption now
+# happens here, as a confidential client, so the stored refresh token is one the
+# backend can actually redeem for Calendar and Mail.
+
+_EXCHANGE_RESULT = {
+    "id_token_claims": {"email": "carlos.hernandez@juniperlandscaping.com"},
+    "access_token": "at-xxx",
+    "refresh_token": "rt-xxx",
+    "expires_in": 3600,
+    "scope": "Mail.Send Calendars.ReadWrite",
+}
+
+_COMPLETE_BODY = {
+    "code": "auth-code-123",
+    "code_verifier": "verifier-xyz",
+    "redirect_uri": "https://crm.example/auth/entra-complete",
+}
+
+
+def test_entra_complete_redeems_code_and_issues_session():
+    store = AsyncMock()
+    with (
+        patch("api.graph.exchange_code", return_value=_EXCHANGE_RESULT) as exchange,
+        patch("api.graph.store_tokens", store),
+        patch("api.server.query", new_callable=AsyncMock, return_value=[_USER_ROW]),
+    ):
+        resp = client.post("/api/auth/entra-complete", json=_COMPLETE_BODY)
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "u1"
+    assert "session" in resp.cookies
+    # The verifier and the exact redirect_uri the browser sent must both reach
+    # Azure — it matches redirect_uri byte for byte on redemption.
+    exchange.assert_called_once_with(
+        "auth-code-123", "verifier-xyz", "https://crm.example/auth/entra-complete"
+    )
+
+
+def test_entra_complete_stores_graph_tokens_in_the_same_call():
+    """No separate /auth/ms-graph-token round trip on sign-in any more."""
+    store = AsyncMock()
+    with (
+        patch("api.graph.exchange_code", return_value=_EXCHANGE_RESULT),
+        patch("api.graph.store_tokens", store),
+        patch("api.server.query", new_callable=AsyncMock, return_value=[_USER_ROW]),
+    ):
+        resp = client.post("/api/auth/entra-complete", json=_COMPLETE_BODY)
+
+    assert resp.status_code == 200
+    store.assert_awaited_once_with(
+        "u1",
+        access_token="at-xxx",
+        refresh_token="rt-xxx",
+        expires_in=3600,
+        scope="Mail.Send Calendars.ReadWrite",
+    )
+
+
+def test_entra_complete_signs_in_even_when_graph_storage_fails():
+    """KMS or DB trouble must cost the user Graph, never their sign-in."""
+    with (
+        patch("api.graph.exchange_code", return_value=_EXCHANGE_RESULT),
+        patch("api.graph.store_tokens", AsyncMock(side_effect=RuntimeError("KMS down"))),
+        patch("api.server.query", new_callable=AsyncMock, return_value=[_USER_ROW]),
+    ):
+        resp = client.post("/api/auth/entra-complete", json=_COMPLETE_BODY)
+
+    assert resp.status_code == 200
+    assert "session" in resp.cookies
+
+
+def test_entra_complete_without_refresh_token_still_signs_in():
+    """offline_access unconsented: sign-in works, Graph prompts a reconnect later."""
+    result = {**_EXCHANGE_RESULT}
+    del result["refresh_token"]
+    store = AsyncMock()
+    with (
+        patch("api.graph.exchange_code", return_value=result),
+        patch("api.graph.store_tokens", store),
+        patch("api.server.query", new_callable=AsyncMock, return_value=[_USER_ROW]),
+    ):
+        resp = client.post("/api/auth/entra-complete", json=_COMPLETE_BODY)
+
+    assert resp.status_code == 200
+    store.assert_not_awaited()
+
+
+def test_entra_complete_unprovisioned_user_returns_403():
+    with (
+        patch("api.graph.exchange_code", return_value=_EXCHANGE_RESULT),
+        patch("api.graph.store_tokens", AsyncMock()) as store,
+        patch("api.server.query", new_callable=AsyncMock, return_value=[]),
+    ):
+        resp = client.post("/api/auth/entra-complete", json=_COMPLETE_BODY)
+
+    assert resp.status_code == 403
+    assert "provisioned" in resp.json()["detail"].lower()
+    # An unprovisioned sign-in must not leave tokens behind.
+    store.assert_not_awaited()
+
+
+def test_entra_complete_without_email_claim_returns_401():
+    result = {**_EXCHANGE_RESULT, "id_token_claims": {"oid": "no-email-here"}}
+    with patch("api.graph.exchange_code", return_value=result):
+        resp = client.post("/api/auth/entra-complete", json=_COMPLETE_BODY)
+
+    assert resp.status_code == 401
+    assert "email" in resp.json()["detail"].lower()
+
+
+def test_entra_complete_matches_email_case_insensitively():
+    result = {**_EXCHANGE_RESULT, "id_token_claims": {"email": "Carlos.Hernandez@Juniperlandscaping.com"}}
+    query_mock = AsyncMock(return_value=[_USER_ROW])
+    with (
+        patch("api.graph.exchange_code", return_value=result),
+        patch("api.graph.store_tokens", AsyncMock()),
+        patch("api.server.query", query_mock),
+    ):
+        resp = client.post("/api/auth/entra-complete", json=_COMPLETE_BODY)
+
+    assert resp.status_code == 200
+    assert query_mock.await_args[0][1][0] == "carlos.hernandez@juniperlandscaping.com"
+
+
 # ── DELETE /api/leads/:id ─────────────────────────────────────────────────────
 
 

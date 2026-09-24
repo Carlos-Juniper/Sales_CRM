@@ -16,6 +16,16 @@ export const ESTIMATOR_ROLES: readonly UserRole[] = [
   'ceo',
 ]
 
+/**
+ * The two estimating disciplines only. They are refused on leads and proposals
+ * (api/authz.py ESTIMATING_ONLY_ROLES). Admin and management stay in
+ * ESTIMATOR_ROLES for line-item edits, but they are not in this set.
+ */
+export const ESTIMATING_ONLY_ROLES: readonly UserRole[] = [
+  'maintenance_estimating',
+  'install_estimating',
+]
+
 /** Roles that own approval-tier actions (complexity/margin + approve/hand-back). */
 export const APPROVER_ROLES: readonly UserRole[] = [
   'manager',
@@ -54,7 +64,19 @@ export const FULL_ACCESS_ROLES: readonly UserRole[] = [
   'manager', 'regional_director', 'vice_president', 'ceo', 'admin',
 ]
 
-/** Analytics + the shared sales tabs (leads / pipeline / proposals / calendar / accounts / map / commissions / sales-performance). */
+/**
+ * Analytics nav item and `/inside-sales` (GET /api/dashboard/inside-sales).
+ *
+ * Defined once as FULL_ACCESS_ROLES: admin, manager, regional_director,
+ * vice_president, and ceo. REP_SELECTOR_ROLES happens to list the same five
+ * people, but that constant is the sales-performance / commission rep picker
+ * (api/authz.py REP_VIEWER_ROLES). The backend keeps those permissions
+ * separate (ANALYTICS_DASHBOARD_ROLES = FULL_ACCESS_ROLES), so this alias
+ * does too.
+ */
+export const ANALYTICS_NAV_ROLES: readonly UserRole[] = FULL_ACCESS_ROLES
+
+/** Shared sales tabs (leads / pipeline / proposals / calendar / accounts / map / commissions / sales-performance). Analytics is ANALYTICS_NAV_ROLES. */
 export const SALES_NAV_ROLES: readonly UserRole[] = ['sales', ...FULL_ACCESS_ROLES]
 
 /** Public Leads (the inside-sales qualification queue). */
@@ -73,10 +95,13 @@ export function defaultRouteForRole(role: UserRole | null): string {
   if (role === 'inside_sales') return '/inside-sales/leads'
   if (role === 'maintenance_estimating' || role === 'install_estimating' || role === 'procurement')
     return '/inside-sales/estimating'
-  // sales and the full-access tier all have Analytics at /inside-sales.
-  // Any other role (marketing, null, unknown) has no inside-sales access —
-  // redirect to /settings, which is open to every authenticated user, to
-  // avoid an infinite redirect loop.
-  if (role !== null && SALES_NAV_ROLES.includes(role)) return '/inside-sales'
+  // Sales can use the rest of the sales workspace, but not Analytics.
+  // Pipeline is their landing page so a denied visit to /inside-sales
+  // does not bounce back onto itself.
+  if (role === 'sales') return '/inside-sales/pipeline'
+  // Management and admin land on Analytics. Any other role (marketing, null,
+  // unknown) has no inside-sales access — redirect to /settings, which is
+  // open to every authenticated user, to avoid an infinite redirect loop.
+  if (role !== null && ANALYTICS_NAV_ROLES.includes(role)) return '/inside-sales'
   return '/settings'
 }

@@ -764,6 +764,68 @@ describe('MaintenanceIntakeModal — leadId (Pipeline kanban redesign)', () => {
     expect(created[0].leadId).toBe('L-1042')
   })
 
+  it('skips the linked-lead lookup for estimating disciplines and keeps intake usable', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'est-skip-lead', status: 'new_from_sales' })
+    let leadsCalls = 0
+
+    useAuthStore.setState({
+      user: makeUser({ role: 'maintenance_estimating', branch_id: 'b1' }),
+    })
+    server.use(
+      http.get('/api/leads', () => {
+        leadsCalls += 1
+        return HttpResponse.json(
+          { detail: 'Estimators cannot access leads.' },
+          { status: 403 },
+        )
+      }),
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModalRaw({ crmLead: null, initialProperty: h23Property })
+
+    expect(screen.getByText(/no linked crm lead — this intake continues without one/i)).toBeInTheDocument()
+    expect(screen.queryByText(/cannot access leads/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/failed/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(leadsCalls).toBe(0)
+    expect(created[0].leadId).toBeNull()
+    expect(created[0].propertyId).toBe('prop-1')
+    expect(screen.queryByText(/cannot access leads/i)).not.toBeInTheDocument()
+  })
+
+  it('skips the linked-lead lookup for install estimating as well', async () => {
+    let leadsCalls = 0
+    useAuthStore.setState({
+      user: makeUser({ role: 'install_estimating', branch_id: 'b1' }),
+    })
+    server.use(
+      http.get('/api/leads', () => {
+        leadsCalls += 1
+        return HttpResponse.json({ detail: 'Estimators cannot access leads.' }, { status: 403 })
+      }),
+    )
+
+    renderModalRaw({ crmLead: null, initialProperty: h23Property })
+
+    expect(screen.getByText(/no linked crm lead/i)).toBeInTheDocument()
+    // Branch options load in an effect. By the time they arrive, the lead
+    // lookup effect has also had its chance to fire.
+    await screen.findByRole('option', { name: 'Bradenton, FL' })
+    expect(leadsCalls).toBe(0)
+    expect(screen.queryByText(/cannot access leads/i)).not.toBeInTheDocument()
+  })
+
   it('sends leadId null when no lead context is available (no crmLead, no property)', async () => {
     const user = userEvent.setup()
     const created: CreateEstimatePayload[] = []

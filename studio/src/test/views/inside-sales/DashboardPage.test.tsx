@@ -45,7 +45,9 @@ vi.mock('leaflet', () => ({
 }))
 
 function seedUser() {
-  useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'inside_sales' }) })
+  // Analytics data is management-only; the page tests render DashboardPage
+  // directly, so the fixture role has to be one the mock will answer.
+  useAuthStore.setState({ user: makeUser({ name: 'Carlos Hernandez', role: 'manager' }) })
 }
 
 describe('DashboardPage', () => {

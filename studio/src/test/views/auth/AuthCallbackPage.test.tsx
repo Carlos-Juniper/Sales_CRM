@@ -134,7 +134,7 @@ describe('AuthCallbackPage — Entra token exchange', () => {
 
   // ── role-based routing ──────────────────────────────────────────────────────
 
-  it('navigates inside_sales users to /inside-sales', async () => {
+  it('navigates inside_sales users to Public Leads, not Analytics', async () => {
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })
     mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
     mockEntraCallback.mockResolvedValue(makeUser({ role: 'inside_sales' }))
@@ -143,11 +143,11 @@ describe('AuthCallbackPage — Entra token exchange', () => {
     render(<AuthCallbackPage />)
 
     await vi.waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales', { replace: true })
+      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/leads', { replace: true })
     })
   })
 
-  it('navigates outside_sales users to /outside-sales', async () => {
+  it('navigates legacy outside_sales users to the sales landing, not Analytics', async () => {
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })
     mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
     mockEntraCallback.mockResolvedValue(makeUser({ role: 'outside_sales' }))
@@ -156,7 +156,59 @@ describe('AuthCallbackPage — Entra token exchange', () => {
     render(<AuthCallbackPage />)
 
     await vi.waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/outside-sales', { replace: true })
+      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/pipeline', { replace: true })
+    })
+  })
+
+  it('navigates sales users to Pipeline, not Analytics', async () => {
+    setCallbackUrl({ code: 'auth-code', state: 'st-123' })
+    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
+    mockEntraCallback.mockResolvedValue(makeUser({ role: 'sales' }))
+    mockStoreMsGraphToken.mockResolvedValue({ ok: true })
+
+    render(<AuthCallbackPage />)
+
+    await vi.waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/pipeline', { replace: true })
+    })
+  })
+
+  it('navigates estimating disciplines to Estimating, not Analytics', async () => {
+    setCallbackUrl({ code: 'auth-code', state: 'st-123' })
+    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
+    mockEntraCallback.mockResolvedValue(makeUser({ role: 'maintenance_estimating' }))
+    mockStoreMsGraphToken.mockResolvedValue({ ok: true })
+
+    render(<AuthCallbackPage />)
+
+    await vi.waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/estimating', { replace: true })
+    })
+  })
+
+  it('navigates marketing users to Settings, not Analytics', async () => {
+    setCallbackUrl({ code: 'auth-code', state: 'st-123' })
+    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
+    mockEntraCallback.mockResolvedValue(makeUser({ role: 'marketing' }))
+    mockStoreMsGraphToken.mockResolvedValue({ ok: true })
+
+    render(<AuthCallbackPage />)
+
+    await vi.waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/settings', { replace: true })
+    })
+  })
+
+  it('navigates ceo users to Analytics', async () => {
+    setCallbackUrl({ code: 'auth-code', state: 'st-123' })
+    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
+    mockEntraCallback.mockResolvedValue(makeUser({ role: 'ceo' }))
+    mockStoreMsGraphToken.mockResolvedValue({ ok: true })
+
+    render(<AuthCallbackPage />)
+
+    await vi.waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales', { replace: true })
     })
   })
 
@@ -216,7 +268,7 @@ describe('AuthCallbackPage — Entra token exchange', () => {
     render(<AuthCallbackPage />)
 
     await vi.waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales', { replace: true })
+      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales/leads', { replace: true })
     })
     expect(useAuthStore.getState().user).toEqual(user)
   })

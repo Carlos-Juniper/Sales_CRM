@@ -1,39 +1,31 @@
+import { useState, type ReactNode } from 'react'
+import { useAuthStore } from '@/store/authStore'
 import { useRole } from '@/hooks/useRole'
+import { useSalesRepOptions } from '@/hooks/useSalesRepOptions'
 import { PortfolioSection } from '../company/PortfolioSection'
 import { TeamRosterSection } from '../branch/TeamRosterSection'
 import { ClientReferencesSection } from '../branch/ClientReferencesSection'
+import { SettingsFormShell } from '../company/formStatus'
 
 /**
- * Marketing settings group body (Handoff 50 §3).
+ * Sales settings group: the shared portfolio, plus each rep's client
+ * references and team roster.
  *
- * The Marketing role owns the COMPANY-WIDE proposal assets — portfolio pages,
- * client references and team bios/headshots. Carlos's §5.1 scope decision
- * (2026-09-08) makes these company-wide, role-gated resources rather than
- * branch-scoped ones, which is why they live in their own group here (not
- * under Company, which is admin-only, nor under Branch, which is per-branch).
- * Portfolio management "moves into settings" and lives here.
- *
- * Licenses (formerly "Documents"/credentials) is NOT part of this group — it
- * stays a Branch-only, per-branch tab (2026-09-14), since it isn't a
- * company-wide asset like the rest of this group.
- *
- * The section components are the SAME ones the Company/Branch groups use; the
- * team-roster / client-references sections render in their company-wide mode
- * (aspireBranchId=null) with edit rights granted to marketing/admin. The
- * SettingsPage shell already gates this whole group to the marketing role
- * (admin passes via the super-role); this is a second, defense-in-depth guard.
+ * Portfolio has no rep selector — sales, marketing, and admin edit one set.
+ * A sales rep edits only their own roster rows (no dropdown; calls use their
+ * id). Marketing and admin pick a rep before any rep-scoped request fires.
  */
 export function MarketingSection({ slug }: { slug: string }) {
-  const { canManageMarketingAssets } = useRole()
+  const { canPickRosterRep, isSales } = useRole()
 
-  if (!canManageMarketingAssets) {
+  if (!isSales && !canPickRosterRep) {
     return (
       <div
         data-testid={`settings-section-${slug}`}
         className="rounded-lg border border-dashed border-[var(--border)] p-8 text-center"
       >
         <p className="text-xs text-[var(--fg)] opacity-60">
-          Marketing or admin role required — these are company-wide proposal assets.
+          Sales, marketing, or admin role required to edit proposal assets.
         </p>
       </div>
     )
@@ -43,10 +35,98 @@ export function MarketingSection({ slug }: { slug: string }) {
     case 'portfolio':
       return <PortfolioSection />
     case 'client-references':
-      return <ClientReferencesSection aspireBranchId={null} canEditCompanyWide />
+      return (
+        <RepScopedRoster slug="client-references" title="Client references">
+          {(repId) => (
+            <ClientReferencesSection
+              aspireBranchId={null}
+              canEditCompanyWide
+              repId={repId}
+            />
+          )}
+        </RepScopedRoster>
+      )
     case 'team-roster':
-      return <TeamRosterSection aspireBranchId={null} canEditCompanyWide />
+      return (
+        <RepScopedRoster slug="team-roster" title="Team roster">
+          {(repId) => (
+            <TeamRosterSection
+              aspireBranchId={null}
+              canEditCompanyWide
+              repId={repId}
+            />
+          )}
+        </RepScopedRoster>
+      )
     default:
       return null
   }
+}
+
+function RepScopedRoster({
+  slug,
+  title,
+  children,
+}: {
+  slug: string
+  title: string
+  children: (repId: string) => ReactNode
+}) {
+  const { canPickRosterRep, isSales } = useRole()
+  const ownId = useAuthStore((s) => s.user?.id ?? null)
+  const [selectedRepId, setSelectedRepId] = useState<string | null>(null)
+  const repId = isSales ? ownId : selectedRepId
+
+  return (
+    <div>
+      {canPickRosterRep && (
+        <RosterRepPicker value={selectedRepId} onChange={setSelectedRepId} />
+      )}
+      {repId ? (
+        children(repId)
+      ) : (
+        <SettingsFormShell slug={slug} title={title}>
+          <p className="text-xs text-[var(--fg)] opacity-60">
+            Select a sales rep to view and edit their {title.toLowerCase()}.
+          </p>
+        </SettingsFormShell>
+      )}
+    </div>
+  )
+}
+
+function RosterRepPicker({
+  value,
+  onChange,
+}: {
+  value: string | null
+  onChange: (repId: string | null) => void
+}) {
+  const { data: reps = [], isLoading } = useSalesRepOptions()
+
+  return (
+    <div className="mb-4">
+      <label
+        htmlFor="settings-rep-picker"
+        className="block text-xs font-medium text-[var(--fg)] opacity-70 mb-1"
+      >
+        Sales rep
+      </label>
+      <select
+        id="settings-rep-picker"
+        data-testid="settings-rep-picker"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+        disabled={isLoading}
+        className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm text-[var(--fg)]"
+      >
+        <option value="">Select a sales rep</option>
+        {reps.map((rep) => (
+          <option key={rep.id} value={rep.id}>
+            {rep.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
 }

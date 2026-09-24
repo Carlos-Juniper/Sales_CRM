@@ -223,13 +223,42 @@ describe('useTeamMembers — query key scoping', () => {
   })
 
   it('fetches all team members when no params are given', async () => {
+    let url: URL | undefined
     server.use(
-      http.get('/api/proposals/config/team-members', () => HttpResponse.json([mockTeamMember])),
+      http.get('/api/proposals/config/team-members', ({ request }) => {
+        url = new URL(request.url)
+        return HttpResponse.json([mockTeamMember])
+      }),
     )
     const { wrapper } = createWrapper()
     const { result } = renderHook(() => useTeamMembers(), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toHaveLength(1)
+    // Proposal generation omits both; Settings is what adds them.
+    expect(url?.searchParams.has('rep_id')).toBe(false)
+    expect(url?.searchParams.has('region_id')).toBe(false)
+  })
+
+  it('sends rep_id and region_id and keys the cache on both', async () => {
+    let url: URL | undefined
+    server.use(
+      http.get('/api/proposals/config/team-members', ({ request }) => {
+        url = new URL(request.url)
+        return HttpResponse.json([mockTeamMember])
+      }),
+    )
+    const { wrapper, queryClient } = createWrapper()
+    const { result } = renderHook(
+      () => useTeamMembers({ repId: 'rep-2', regionId: 'all' }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(url?.searchParams.get('rep_id')).toBe('rep-2')
+    expect(url?.searchParams.get('region_id')).toBe('all')
+    const cached = queryClient.getQueryCache().findAll({
+      queryKey: ['proposals', 'config', 'team-members', null, null, 'rep-2', 'all'],
+    })
+    expect(cached).toHaveLength(1)
   })
 })
 

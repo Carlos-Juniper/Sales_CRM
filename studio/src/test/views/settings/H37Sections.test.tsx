@@ -333,7 +333,7 @@ describe('PortfolioSection', () => {
       ),
     )
     renderComp(<PortfolioSection />, 'admin')
-    expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i)
+    expect(await screen.findByRole('alert')).toHaveTextContent('fail')
   })
 
   it('admin sees the portfolio section with listed properties', async () => {

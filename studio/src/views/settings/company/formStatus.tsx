@@ -33,6 +33,18 @@ export function FormStatus({
   return null
 }
 
+/** Small label for a roster row whose ownerUserId is null (legacy company/branch). */
+export function LegacyOwnerBadge({ testId }: { testId: string }) {
+  return (
+    <span
+      data-testid={testId}
+      className="ml-2 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800"
+    >
+      Legacy
+    </span>
+  )
+}
+
 /** A titled section wrapper carrying the stable `settings-section-<slug>` testid. */
 export function SettingsFormShell({
   slug,

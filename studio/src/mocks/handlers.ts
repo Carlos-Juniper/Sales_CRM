@@ -1,5 +1,6 @@
 import { http, HttpResponse, delay } from 'msw'
 import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockConnections, mockProposalPackages } from './data'
+import { rosterHandlers } from './rosterHandlers'
 import { CATALOG_ITEM_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid, UserRole } from '@/types'
@@ -437,8 +438,9 @@ const allHandlers = [
     return HttpResponse.json(created, { status: 201 })
   }),
 
-  http.get(`${API}/proposals/config/team-members`, async () => HttpResponse.json([])),
-  http.get(`${API}/proposals/config/client-references`, async () => HttpResponse.json([])),
+  // Rep-scoped team roster and client references (reads, writes, 403/400/404).
+  // Portfolio stays unscoped — no rep_id.
+  ...rosterHandlers,
   http.get(`${API}/proposals/config/portfolio`, async () => HttpResponse.json([])),
 
   // GET /api/users

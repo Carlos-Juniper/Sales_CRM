@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useAuthStore } from '@/store/authStore'
 import { useRole, normalizeRole } from '@/hooks/useRole'
-import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES } from '@/lib/roles'
+import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES, ROSTER_REP_PICKER_ROLES } from '@/lib/roles'
 import { CANONICAL_ROLES } from '@/types'
 import { makeUser } from '@/test/utils'
 
@@ -131,6 +131,14 @@ describe('useRole', () => {
     expect(withRole('manager').seesAllBranches).toBe(false)
     expect(withRole('sales').seesAllBranches).toBe(false)
     expect(withRole('regional_director').seesAllBranches).toBe(false)
+  })
+
+  it('roster rep picker is marketing and admin only', () => {
+    expect([...ROSTER_REP_PICKER_ROLES].sort()).toEqual(['admin', 'marketing'])
+    expect(withRole('marketing').canPickRosterRep).toBe(true)
+    expect(withRole('admin').canPickRosterRep).toBe(true)
+    expect(withRole('sales').canPickRosterRep).toBe(false)
+    expect(withRole('manager').canPickRosterRep).toBe(false)
   })
 
   it('returns null role when logged out', () => {

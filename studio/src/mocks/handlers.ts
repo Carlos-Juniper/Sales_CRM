@@ -376,8 +376,13 @@ const allHandlers = [
     await delay(200)
     const exclude = new URL(request.url).searchParams.get('exclude_status') ?? ''
     const excluded = new Set(exclude.split(',').map((s) => s.trim()).filter(Boolean))
+    // A won/lost row still inside its 7-day grace window (closedAt set) survives
+    // the exclude filter so the queue can show its Won/Lost badge, matching the
+    // backend's grace behaviour; once grace lapses (closedAt null) it drops out.
     const rows = excluded.size
-      ? proposalPackages.filter((pkg) => !pkg.status || !excluded.has(pkg.status))
+      ? proposalPackages.filter(
+          (pkg) => !pkg.status || !excluded.has(pkg.status) || pkg.closedAt != null,
+        )
       : proposalPackages
     return HttpResponse.json(rows)
   }),
@@ -432,6 +437,7 @@ const allHandlers = [
       code: `P-${now.slice(0, 4)}-${created.id.slice(-6).toUpperCase()}`,
       version: null,
       pageCount: null,
+      closedAt: null,
       assignee: null,
     })
     return HttpResponse.json(created, { status: 201 })

@@ -8,7 +8,7 @@ import {
   useUploadTeamMemberHeadshot,
   useDeleteTeamMemberHeadshot,
 } from '@/hooks/useProposals'
-import { teamMemberTitleLabel } from '@/lib/proposal/titleLabels'
+import { teamMemberTitleLabel, TEAM_MEMBER_TITLE_LABELS } from '@/lib/proposal/titleLabels'
 import { ImageUploadField } from '@/components/settings/ImageUploadField'
 import type { TeamMember } from '@/types/proposal'
 import { TEAM_MEMBER_BIO_MAX_LENGTH } from '@/types/proposal'
@@ -216,6 +216,24 @@ function TeamMemberRow({
   )
 }
 
+// Canonical title options for the roster editor. The title feeds a
+// `title === 'manager'`-style filter downstream, so free-text entry would let a
+// typo ("Branch Manager") slip past that check — the <select> constrains it to
+// known enum keys. Deduped by label: `manager` and `branch_manager` both read
+// "Branch Manager", and only the canonical `manager` key is offered.
+const TITLE_OPTIONS: { value: string; label: string }[] = (() => {
+  const seen = new Set<string>()
+  const out: { value: string; label: string }[] = []
+  for (const [value, label] of Object.entries(TEAM_MEMBER_TITLE_LABELS)) {
+    if (seen.has(label)) continue
+    seen.add(label)
+    out.push({ value, label })
+  }
+  return out
+})()
+
+const OTHER_TITLE = '__other__'
+
 // ── Create / Edit form ────────────────────────────────────────────────────────
 
 function TeamMemberForm({
@@ -275,7 +293,7 @@ function TeamMemberForm({
       className="rounded-md border border-[var(--border)] px-3 py-3 space-y-2"
     >
       <Field id="tm-name" label="Name" value={name} onChange={setName} required />
-      <Field id="tm-title" label="Title" value={title} onChange={setTitle} required />
+      <TitleField id="tm-title" value={title} onChange={setTitle} />
       <Field id="tm-location" label="Location" value={location} onChange={setLocation} />
       <TextareaField
         id="tm-bio"
@@ -342,6 +360,78 @@ function Field({
         required={required}
         className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
       />
+    </div>
+  )
+}
+
+/**
+ * Title picker: a <select> of the canonical enum titles plus an "Other…" escape
+ * hatch that reveals a free-text input for genuinely novel titles. Controlled —
+ * it drives the same `title` form state the free-text input used to, so a saved
+ * value that already matches a known key selects that option, and any other
+ * value (e.g. a legacy custom title) opens in "Other" mode with the text shown.
+ */
+function TitleField({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  const isKnown = TITLE_OPTIONS.some((o) => o.value === value)
+  // "Other" once the field holds a value that isn't a known key. Empty stays on
+  // the placeholder so a new row starts unselected (required blocks submit).
+  const [isOther, setIsOther] = useState(value !== '' && !isKnown)
+  const selectValue = isOther ? OTHER_TITLE : value
+
+  return (
+    <div>
+      <label
+        htmlFor={id}
+        className="block text-[10px] font-medium text-[var(--fg)] opacity-70 mb-0.5"
+      >
+        Title
+        <span className="text-red-500 ml-0.5">*</span>
+      </label>
+      <select
+        id={id}
+        value={selectValue}
+        required
+        onChange={(e) => {
+          if (e.target.value === OTHER_TITLE) {
+            setIsOther(true)
+            onChange('') // clear so the freed-up text input starts empty
+          } else {
+            setIsOther(false)
+            onChange(e.target.value)
+          }
+        }}
+        className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
+      >
+        <option value="" disabled>
+          Select a title…
+        </option>
+        {TITLE_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+        <option value={OTHER_TITLE}>Other…</option>
+      </select>
+      {isOther && (
+        <input
+          id={`${id}-other`}
+          type="text"
+          aria-label="Custom title"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          required
+          placeholder="Enter a custom title"
+          className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
+        />
+      )}
     </div>
   )
 }

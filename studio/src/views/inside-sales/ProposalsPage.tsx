@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { TopNav } from '@/components/layout/TopNav'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -39,6 +40,18 @@ function packageMeta(pkg: ProposalPackageSummary): string {
   if (pkg.version != null) parts.push(`v${pkg.version}.0`)
   if (pkg.pageCount != null) parts.push(`${pkg.pageCount} pg`)
   return parts.join(' · ')
+}
+
+/**
+ * Won/Lost badge descriptor for a package still inside its 7-day grace window
+ * (`closedAt` set). Returns null for active rows so the queue stays badge-free.
+ * Green for won, red for lost — matching the codebase's status colour convention.
+ */
+function closedBadge(pkg: ProposalPackageSummary): { label: string; variant: 'green' | 'red' } | null {
+  if (!pkg.closedAt) return null
+  return pkg.status === 'lost'
+    ? { label: 'Lost', variant: 'red' }
+    : { label: 'Won', variant: 'green' }
 }
 
 export default function ProposalsPage() {
@@ -157,6 +170,7 @@ export default function ProposalsPage() {
 
             {!isLoading && !isError && filtered.map((pkg) => {
               const selected = pkg.leadId !== '' && pkg.leadId === selectedLeadId
+              const badge = closedBadge(pkg)
               return (
                 <button
                   key={pkg.id}
@@ -183,6 +197,11 @@ export default function ProposalsPage() {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    {badge && (
+                      <Badge variant={badge.variant} className="text-[10px] px-1.5 py-0">
+                        {badge.label}
+                      </Badge>
+                    )}
                     <span className="text-sm font-semibold text-[#2E7D52]">{formatCurrency(pkg.amount)}</span>
                     {pkg.updatedAt && (
                       <span className="text-[11px] text-[hsl(var(--muted-fg))]">{formatDate(pkg.updatedAt)}</span>

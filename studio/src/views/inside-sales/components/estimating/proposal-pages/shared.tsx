@@ -287,9 +287,11 @@ export function TeamMemberCard({ member }: { member: TeamMember }) {
           {member.location && <p className="lo">{member.location}</p>}
         </div>
       </div>
-      <div className="bio-box">
-        {member.bio && <p className="bi">{member.bio}</p>}
-      </div>
+      {member.bio ? (
+        <div className="bio-box">
+          <p className="bi">{member.bio}</p>
+        </div>
+      ) : null}
     </div>
   )
 }

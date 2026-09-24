@@ -194,6 +194,23 @@ const mockIrrigationManager: TeamMember = {
   sortOrder: 3,
 }
 
+// Guards against a future `title === 'manager'` filter creeping into the picker:
+// a branch manager must still appear, labelled "Branch Manager" (the canonical
+// 'manager' key maps to that display string in teamMemberTitleLabel).
+const mockBranchManager: TeamMember = {
+  id: 'tm-bm-001',
+  name: 'Erin Manager',
+  title: 'manager',
+  teamType: 'branch',
+  aspireBranchId: 3696,
+  userId: null,
+  location: 'Fort Myers, FL',
+  bio: 'Branch manager bio.',
+  headshotObjectKey: null,
+  active: true,
+  sortOrder: 0,
+}
+
 const mockExecutiveMember: TeamMember = {
   id: 'tm-exec-001',
   name: 'Dave CEO',
@@ -289,7 +306,7 @@ function setupDefaultMocks() {
     const data =
       params?.teamType === 'executive'
         ? [mockExecutiveMember]
-        : [mockAccountManager, mockAgronomyManager, mockIrrigationManager]
+        : [mockBranchManager, mockAccountManager, mockAgronomyManager, mockIrrigationManager]
     return { data, isLoading: false, isError: false } as ReturnType<typeof useTeamMembers>
   })
   mockUseClientReferences.mockReturnValue({
@@ -361,6 +378,14 @@ describe('ProposalBuilder — optional sections', () => {
     expect(screen.queryByTestId('executive-team-section')).not.toBeInTheDocument()
     await user.click(screen.getByTestId('section-checkbox-meet_our_team_executive'))
     expect(screen.getByTestId('executive-team-section')).toBeInTheDocument()
+  })
+
+  it('renders a branch manager in the team picker labelled "Branch Manager"', () => {
+    render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} />)
+    const picker = screen.getByTestId('team-member-picker')
+    // 'manager' → 'Branch Manager' via teamMemberTitleLabel; guards against a
+    // future title filter dropping branch managers from the picker.
+    expect(within(picker).getByText('Erin Manager — Branch Manager')).toBeInTheDocument()
   })
 
   it('unchecking a section hides its related inputs', async () => {

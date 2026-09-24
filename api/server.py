@@ -1590,6 +1590,10 @@ async def list_users(
     Filter rules:
       - ?role=<r>: restrict to that role AND active=1 (assignee pickers must
         exclude deactivated reps; Slice 6 deactivates, never deletes).
+        `GET /api/users?role=sales` is the Settings dropdown of sales reps.
+        Each item's `id` is the `rep_id` (alias `user_id`) to pass when
+        marketing or admin reads or writes that rep's client references
+        and team roster.
       - plain GET: returns ALL rows including inactive so historical name lookups
         on old estimates still resolve.
     """

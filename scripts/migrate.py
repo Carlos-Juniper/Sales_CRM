@@ -215,6 +215,16 @@ def column_exists(conn, table: str, column: str) -> bool:
     return bool(row and row["cnt"])
 
 
+def index_exists(conn, table: str, index_name: str) -> bool:
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s",
+        (table, index_name),
+    )
+    return bool(row and row["cnt"])
+
+
 def table_row_count(conn, table: str) -> int:
     row = _fetch_one(conn, f"SELECT COUNT(*) AS cnt FROM `{table}`")
     return int(row["cnt"]) if row else 0
@@ -776,6 +786,23 @@ def detect_042(conn) -> bool:
     return column_exists(conn, "proposal_renders", "overflowing_pages")
 
 
+def detect_058(conn) -> bool:
+    """058 applied ↔ both roster owner columns and their indexes exist.
+
+    058 adds owner_user_id to team_members and client_references, each with
+    an index. Every statement is information_schema-guarded, so a re-run
+    after a partial apply finishes the remainder. True only when all four
+    effects are present — keying on a single column would record a partial
+    apply as detected and skip the rest.
+    """
+    return (
+        column_exists(conn, "team_members", "owner_user_id")
+        and column_exists(conn, "client_references", "owner_user_id")
+        and index_exists(conn, "team_members", "idx_team_members_owner")
+        and index_exists(conn, "client_references", "idx_client_refs_owner")
+    )
+
+
 # ── Detection dispatch table ──────────────────────────────────────────────────
 
 _DETECT: dict = {
@@ -817,6 +844,7 @@ _DETECT: dict = {
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
     "046_section_services_billing_type":          detect_046,
+    "058_rep_owned_proposal_roster":              detect_058,
 }
 
 

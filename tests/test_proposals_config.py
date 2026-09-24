@@ -340,6 +340,7 @@ class TestTeamMembers:
             "headshotObjectKey": None,
             "active": True,
             "sortOrder": 0,
+            "ownerUserId": None,
         }
 
     def test_branch_filter_includes_null_branch_rows(self, authed):
@@ -424,6 +425,7 @@ class TestClientReferences:
             "address": "100 Coral Bay Dr, Jupiter, FL 33458",
             "clientSinceYear": 2021,
             "active": True,
+            "ownerUserId": None,
         }
 
     def test_branch_filter_includes_company_wide_rows(self, authed):

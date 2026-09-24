@@ -9,8 +9,8 @@ Mirrors the api/estimating.py facade pattern exactly:
 Slice 3 scope (this file, Amendment A):
   Config read endpoints — project from crm.branches / new proposal config tables:
     GET /api/proposals/config/branches       → BranchProfile[]
-    GET /api/proposals/config/team-members   → TeamMember[]  (+ optional filters)
-    GET /api/proposals/config/client-references → ClientReference[]
+    GET /api/proposals/config/team-members   → TeamMember[]  (+ optional filters, rep_id)
+    GET /api/proposals/config/client-references → ClientReference[]  (+ optional rep_id)
     GET /api/proposals/config/portfolio      → PortfolioProperty[]
     GET /api/proposals/config/insurance      → InsuranceCert (current cert)
     GET /api/proposals/config/licenses       → { licenses[], certifications[] }
@@ -40,6 +40,7 @@ from typing import Any, Optional
 from fastapi import Depends, HTTPException, Query
 
 from db import execute, query
+from api import authz
 from api._serialize import coerce_row
 
 logger = logging.getLogger(__name__)
@@ -225,6 +226,8 @@ def _team_member_out(r: dict) -> dict:
         "headshotObjectKey": r.get("headshot_object_key"),
         "active": bool(r["active"]),
         "sortOrder": r["sort_order"],
+        # Sales rep this roster row belongs to. Null = legacy company/branch row.
+        "ownerUserId": r.get("owner_user_id"),
     }
 
 
@@ -243,7 +246,27 @@ def _client_reference_out(r: dict) -> dict:
         "address": r["address"],
         "clientSinceYear": r["client_since_year"],
         "active": bool(r["active"]),
+        # Sales rep this reference belongs to. Null = legacy company/branch row.
+        "ownerUserId": r.get("owner_user_id"),
     }
+
+
+_ROSTER_VIEW_DENIED = (
+    "You can view only your own client references and team roster."
+)
+
+
+async def _authorize_rep_roster_read(user: dict, rep_id: str) -> None:
+    """403 unless the caller may read this rep's roster.
+
+    The rep themselves, plus marketing and admin. A live role re-read gates
+    the cross-rep grant so a demoted token cannot keep it.
+    """
+    if rep_id == user.get("id"):
+        return
+    if authz.is_marketing_manager(await authz._live_role(user)):
+        return
+    raise HTTPException(status_code=403, detail=_ROSTER_VIEW_DENIED)
 
 
 def _portfolio_property_out(r: dict) -> dict:
@@ -628,10 +651,16 @@ def register(app, require_auth) -> None:
     async def get_proposal_team_members(
         aspire_branch_id: Optional[int] = Query(default=None),
         team_type: Optional[str] = Query(default=None),
-        _user: dict = Depends(require_auth),
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
+        user: dict = Depends(require_auth),
     ) -> list:
         conditions: list[str] = ["active = 1"]
         params: list[Any] = []
+
+        if rep_id is not None:
+            await _authorize_rep_roster_read(user, rep_id)
+            conditions.append("owner_user_id = %s")
+            params.append(rep_id)
 
         if aspire_branch_id is not None:
             # Include branch-specific AND null-branch (company-wide) rows.
@@ -660,10 +689,16 @@ def register(app, require_auth) -> None:
     @app.get("/api/proposals/config/client-references")
     async def get_proposal_client_references(
         aspire_branch_id: Optional[int] = Query(default=None),
-        _user: dict = Depends(require_auth),
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
+        user: dict = Depends(require_auth),
     ) -> list:
         conditions: list[str] = ["active = 1"]
         params: list[Any] = []
+
+        if rep_id is not None:
+            await _authorize_rep_roster_read(user, rep_id)
+            conditions.append("owner_user_id = %s")
+            params.append(rep_id)
 
         if aspire_branch_id is not None:
             # Include branch-specific AND company-wide (null) rows.

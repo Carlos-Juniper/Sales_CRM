@@ -143,20 +143,18 @@ async def _require_admin(user: dict) -> None:
 
 # ── Marketing-asset guard (Handoff 50 §3) ────────────────────────────────────
 
-async def _require_marketing_manager(user: dict) -> None:
-    """403 unless the LIVE users row may manage company-wide proposal assets.
+async def _require_portfolio_editor(user: dict) -> None:
+    """403 unless the LIVE users row may edit the shared portfolio.
 
-    Portfolio pages, client references and team bios/headshots are company-wide
-    resources gated on the `marketing` role (Carlos's §5.1 call), with `admin`
-    retaining super-role access. Re-reads role+active from the users table (B.2)
-    so a demoted/deactivated token cannot widen scope — mirrors _require_admin.
+    The portfolio is one company-wide set. Sales reps and marketing may add
+    and edit it; admin keeps super-role access. Re-reads role+active (B.2)
+    so a demoted or deactivated token cannot widen scope.
     """
     live_role = await authz._live_role(user)
-    if not authz.is_marketing_manager(live_role):
+    if not authz.is_portfolio_editor(live_role):
         raise HTTPException(
             status_code=403,
-            detail="Marketing or admin role required: portfolio, client "
-            "references and team bios are company-wide proposal assets.",
+            detail="Sales, marketing, or admin role required to edit the shared portfolio.",
         )
 
 
@@ -206,6 +204,114 @@ async def _require_marketing_or_branch_scope_for_row(
     """
     branch_id = int(row_branch) if row_branch is not None else None
     return await _require_marketing_or_branch_scope(user, branch_id)
+
+
+# ── Per-rep roster (client references + team members) ────────────────────────
+#
+# Rows with owner_user_id belong to that sales rep. The rep edits their own.
+# Marketing and admin edit any rep's by passing rep_id (or user_id). Legacy
+# rows (owner_user_id NULL) keep the branch/company rules above, so a branch
+# manager's existing access is unchanged.
+
+_ROSTER_EDIT_DENIED = (
+    "You can edit only your own client references and team roster."
+)
+
+
+def _audit_scope_for_branch(aspire_branch_id: Optional[int]) -> tuple[str, Optional[str]]:
+    """config_audit scope. The column is ENUM('company','branch') only."""
+    if aspire_branch_id is not None:
+        return "branch", str(aspire_branch_id)
+    return "company", None
+
+
+async def _require_active_sales_rep(rep_id: str) -> None:
+    """404/400 unless rep_id is an active user whose canonical role is sales."""
+    rows = await query(
+        "SELECT id, role, active FROM users WHERE id = %s",
+        [rep_id],
+    )
+    if not rows or not rows[0].get("active"):
+        raise HTTPException(status_code=404, detail="Sales rep not found.")
+    if authz.normalize_role(rows[0].get("role")) != "sales":
+        raise HTTPException(
+            status_code=400,
+            detail="rep_id must be an active user with the sales role.",
+        )
+
+
+async def _authorize_roster_create(
+    user: dict,
+    rep_id: Optional[str],
+    aspire_branch_id: Optional[int],
+) -> tuple[Optional[str], str, Optional[str]]:
+    """Return (owner_user_id, audit_scope_type, audit_scope_id) for a new row.
+
+    A sales rep's new rows belong to them. Marketing and admin may pass
+    another rep's id and the row is owned by that rep. Every other caller
+    keeps the legacy branch/company path, which stores owner_user_id NULL.
+    """
+    caller_id = user.get("id")
+    token_role = authz.normalize_role(user.get("role"))
+
+    if rep_id is not None and rep_id != caller_id:
+        if not authz.is_marketing_manager(await authz._live_role(user)):
+            raise HTTPException(status_code=403, detail=_ROSTER_EDIT_DENIED)
+        await _require_active_sales_rep(rep_id)
+        scope_type, scope_id = _audit_scope_for_branch(aspire_branch_id)
+        return rep_id, scope_type, scope_id
+
+    if token_role == "sales" and (rep_id is None or rep_id == caller_id):
+        if not caller_id:
+            raise HTTPException(status_code=403, detail="User identity missing.")
+        scope_type, scope_id = _audit_scope_for_branch(aspire_branch_id)
+        return caller_id, scope_type, scope_id
+
+    if rep_id is not None:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Pass a sales rep's id to edit that rep's client references "
+                "and team roster."
+            ),
+        )
+
+    scope_type, scope_id = await _require_marketing_or_branch_scope(
+        user, aspire_branch_id
+    )
+    return None, scope_type, scope_id
+
+
+async def _authorize_roster_row(
+    user: dict,
+    row: dict,
+    requested_rep_id: Optional[str] = None,
+) -> tuple[str, Optional[str]]:
+    """Authorize a write to an existing team_members or client_references row.
+
+    Owned rows belong to that rep: the owner may edit, and marketing/admin
+    may edit any owned row. A requested rep id that does not match the row
+    is 403. Unowned legacy rows keep the branch/company rule.
+    """
+    owner = row.get("owner_user_id") or None
+    caller_id = user.get("id")
+    raw_branch = row.get("aspire_branch_id")
+    branch_id = int(raw_branch) if raw_branch is not None else None
+
+    if requested_rep_id is not None and owner != requested_rep_id:
+        raise HTTPException(
+            status_code=403,
+            detail="This row belongs to a different rep.",
+        )
+
+    if owner:
+        if owner == caller_id:
+            return _audit_scope_for_branch(branch_id)
+        if authz.is_marketing_manager(await authz._live_role(user)):
+            return _audit_scope_for_branch(branch_id)
+        raise HTTPException(status_code=403, detail=_ROSTER_EDIT_DENIED)
+
+    return await _require_marketing_or_branch_scope_for_row(user, raw_branch)
 
 
 # ── Proposal imagery helpers (Handoff 43 §2) ─────────────────────────────────
@@ -433,6 +539,8 @@ class TeamMemberCreate(BaseModel):
     bio: str = Field(default="", max_length=TEAM_MEMBER_BIO_MAX_LENGTH)
     headshotObjectKey: Optional[str] = None
     sortOrder: int = 0
+    # Owning sales rep. Same meaning as the rep_id query parameter.
+    repId: Optional[str] = None
 
 
 class TeamMemberPatch(BaseModel):
@@ -474,6 +582,8 @@ class ClientReferenceCreate(BaseModel):
     address: str
     clientSinceYear: int
     aspireBranchId: Optional[int] = None
+    # Owning sales rep. Same meaning as the rep_id query parameter.
+    repId: Optional[str] = None
 
 
 class ClientReferencePatch(BaseModel):
@@ -1331,35 +1441,36 @@ def register(app, require_auth) -> None:
         }
 
     # ── Slice 13a: team_members CRUD ─────────────────────────────────────────
-    # Branch-scoped: BM/RD may write rows for branches in their user_branches;
-    # company-wide (aspire_branch_id IS NULL) rows are admin-only.
-    # Soft-delete only (active=0), never a hard DELETE.
+    # Owned rows (owner_user_id) belong to one sales rep. Legacy rows
+    # (owner NULL) stay branch-scoped: BM/RD write their branches; marketing
+    # and admin write company-wide or any branch. Soft-delete only.
 
     @app.post("/api/settings/team-members", status_code=201)
     async def create_team_member(
         body: TeamMemberCreate,
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Create a team_members row with branch-scope or company-wide guard.
+        """Create a team_members row.
 
-        Company-wide rows (aspireBranchId=None) require admin. Branch rows
-        require either admin or a BM/RD whose user_branches includes that branch.
+        Sales reps create rows they own. Marketing and admin pass rep_id
+        (query or body.repId) to create a row for that rep. Omitting rep_id
+        as marketing, admin, or a branch manager keeps the legacy
+        company/branch path (owner_user_id NULL).
         """
         actor = _actor(user)
-
-        # Handoff 50 §3: team_members is a company-wide marketing asset —
-        # marketing/admin may write any row (company-wide OR any branch); a
-        # branch manager keeps write access to its own branch's rows.
-        scope_type, scope_id = await _require_marketing_or_branch_scope(
-            user, body.aspireBranchId
+        target_rep = authz.coalesce_rep_id(rep_id, body.repId)
+        owner_user_id, scope_type, scope_id = await _authorize_roster_create(
+            user, target_rep, body.aspireBranchId
         )
 
         row_id = str(uuid.uuid4())
         await execute(
             """INSERT INTO team_members
                  (id, name, title, team_type, aspire_branch_id, user_id,
-                  location, bio, headshot_object_key, active, sort_order)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s)""",
+                  location, bio, headshot_object_key, active, sort_order,
+                  owner_user_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s)""",
             [
                 row_id,
                 body.name,
@@ -1371,6 +1482,7 @@ def register(app, require_auth) -> None:
                 body.bio,
                 body.headshotObjectKey,
                 body.sortOrder,
+                owner_user_id,
             ],
         )
         await _audit(
@@ -1393,20 +1505,21 @@ def register(app, require_auth) -> None:
             "headshotObjectKey": body.headshotObjectKey,
             "active": True,
             "sortOrder": body.sortOrder,
+            "ownerUserId": owner_user_id,
         }
 
     @app.patch("/api/settings/team-members/{member_id}")
     async def patch_team_member(
         member_id: str,
         body: TeamMemberPatch,
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
         user: dict = Depends(require_auth),
     ) -> dict:
         """Partial update of one team_members row.
 
-        Scope is read from the EXISTING row's aspire_branch_id — the caller
-        cannot change which branch a member belongs to via this endpoint, and
-        a body-supplied branch id cannot widen scope. Company-wide rows (NULL)
-        are admin-only; branch rows require BM/RD scope over that branch.
+        Owned rows: the owner, marketing, or admin. Pass rep_id to confirm
+        which rep the edit is for; a mismatch is 403. Legacy unowned rows
+        keep the branch/company rule, read from the existing row.
         """
         rows = await query(
             "SELECT * FROM team_members WHERE id = %s", [member_id]
@@ -1415,12 +1528,7 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Team member not found")
         current = rows[0]
 
-        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
-        # any branch); a branch manager keeps its own branch. Scope comes
-        # from the EXISTING row, never a body/path-supplied branch id.
-        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
-            user, current.get("aspire_branch_id")
-        )
+        scope_type, scope_id = await _authorize_roster_row(user, current, rep_id)
 
         updates = {
             camel: col
@@ -1461,6 +1569,7 @@ def register(app, require_auth) -> None:
             "headshotObjectKey": r.get("headshot_object_key"),
             "active": bool(r["active"]),
             "sortOrder": r["sort_order"],
+            "ownerUserId": r.get("owner_user_id"),
         }
 
     # ── Handoff 43 §2: team headshot upload ──────────────────────────────────
@@ -1473,6 +1582,7 @@ def register(app, require_auth) -> None:
     async def upload_team_member_headshot(
         member_id: str,
         file: UploadFile = File(...),
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
         user: dict = Depends(require_auth),
     ) -> dict:
         """Upload (or replace) one team member's headshot.
@@ -1488,12 +1598,7 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Team member not found")
         current = rows[0]
 
-        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
-        # any branch); a branch manager keeps its own branch. Scope comes
-        # from the EXISTING row, never a body/path-supplied branch id.
-        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
-            user, current.get("aspire_branch_id")
-        )
+        scope_type, scope_id = await _authorize_roster_row(user, current, rep_id)
 
         data, ext, content_type = await _read_validated_image(file)
         object_key = f"proposal/headshots/{member_id}.{ext}"
@@ -1522,6 +1627,7 @@ def register(app, require_auth) -> None:
     @app.delete("/api/settings/team-members/{member_id}/headshot")
     async def delete_team_member_headshot(
         member_id: str,
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
         user: dict = Depends(require_auth),
     ) -> dict:
         """Clear a team member's headshot and delete the stored object.
@@ -1536,12 +1642,7 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Team member not found")
         current = rows[0]
 
-        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
-        # any branch); a branch manager keeps its own branch. Scope comes
-        # from the EXISTING row, never a body/path-supplied branch id.
-        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
-            user, current.get("aspire_branch_id")
-        )
+        scope_type, scope_id = await _authorize_roster_row(user, current, rep_id)
 
         prior_key = current.get("headshot_object_key")
         await execute(
@@ -1562,6 +1663,7 @@ def register(app, require_auth) -> None:
     @app.delete("/api/settings/team-members/{member_id}")
     async def deactivate_team_member(
         member_id: str,
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
         user: dict = Depends(require_auth),
     ) -> dict:
         """Soft-delete a team_members row by setting active=0.
@@ -1577,12 +1679,7 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Team member not found")
         current = rows[0]
 
-        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
-        # any branch); a branch manager keeps its own branch. Scope comes
-        # from the EXISTING row, never a body/path-supplied branch id.
-        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
-            user, current.get("aspire_branch_id")
-        )
+        scope_type, scope_id = await _authorize_roster_row(user, current, rep_id)
 
         await execute(
             "UPDATE team_members SET active = %s WHERE id = %s", [0, member_id]
@@ -1598,25 +1695,25 @@ def register(app, require_auth) -> None:
         return {"id": member_id, "active": False}
 
     # ── Slice 13a: client_references CRUD ─────────────────────────────────────
-    # Branch-scoped (same rules as team_members): aspire_branch_id NULL = company-wide.
-    # Soft-delete only (active=0).
+    # Same ownership rules as team_members. Soft-delete only (active=0).
 
     @app.post("/api/settings/client-references", status_code=201)
     async def create_client_reference(
         body: ClientReferenceCreate,
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Create a client_references row, enforcing branch scope.
+        """Create a client_references row.
 
-        aspireBranchId=None means company-wide (admin only). A BM/RD may only
-        create rows for branches in their user_branches scope.
+        Sales reps create rows they own. Marketing and admin pass rep_id
+        (query or body.repId) to create a row for that rep. Omitting rep_id
+        as marketing, admin, or a branch manager keeps the legacy
+        company/branch path (owner_user_id NULL).
         """
         actor = _actor(user)
-
-        # Handoff 50 §3: client_references is a company-wide marketing asset —
-        # marketing/admin may write any row; a branch manager keeps its branch.
-        scope_type, scope_id = await _require_marketing_or_branch_scope(
-            user, body.aspireBranchId
+        target_rep = authz.coalesce_rep_id(rep_id, body.repId)
+        owner_user_id, scope_type, scope_id = await _authorize_roster_create(
+            user, target_rep, body.aspireBranchId
         )
 
         row_id = str(uuid.uuid4())
@@ -1624,8 +1721,8 @@ def register(app, require_auth) -> None:
             """INSERT INTO client_references
                  (id, aspire_branch_id, property_name, services_provided,
                   contact_name, contact_title, phone, email, address,
-                  client_since_year, active)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)""",
+                  client_since_year, active, owner_user_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s)""",
             [
                 row_id,
                 body.aspireBranchId,
@@ -1637,6 +1734,7 @@ def register(app, require_auth) -> None:
                 body.email,
                 body.address,
                 body.clientSinceYear,
+                owner_user_id,
             ],
         )
         await _audit(
@@ -1659,12 +1757,14 @@ def register(app, require_auth) -> None:
             "address": body.address,
             "clientSinceYear": body.clientSinceYear,
             "active": True,
+            "ownerUserId": owner_user_id,
         }
 
     @app.patch("/api/settings/client-references/{ref_id}")
     async def patch_client_reference(
         ref_id: str,
         body: ClientReferencePatch,
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
         user: dict = Depends(require_auth),
     ) -> dict:
         """Partial update of a client_references row.
@@ -1679,12 +1779,7 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Client reference not found")
         current = rows[0]
 
-        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
-        # any branch); a branch manager keeps its own branch. Scope comes
-        # from the EXISTING row, never a body/path-supplied branch id.
-        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
-            user, current.get("aspire_branch_id")
-        )
+        scope_type, scope_id = await _authorize_roster_row(user, current, rep_id)
 
         updates = {
             camel: col
@@ -1725,11 +1820,13 @@ def register(app, require_auth) -> None:
             "address": r["address"],
             "clientSinceYear": r["client_since_year"],
             "active": bool(r["active"]),
+            "ownerUserId": r.get("owner_user_id"),
         }
 
     @app.delete("/api/settings/client-references/{ref_id}")
     async def deactivate_client_reference(
         ref_id: str,
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
         user: dict = Depends(require_auth),
     ) -> dict:
         """Soft-delete a client_references row (active=0). Never a hard DELETE."""
@@ -1740,12 +1837,7 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Client reference not found")
         current = rows[0]
 
-        # Handoff 50 §3: marketing/admin may edit any row (company-wide or
-        # any branch); a branch manager keeps its own branch. Scope comes
-        # from the EXISTING row, never a body/path-supplied branch id.
-        scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
-            user, current.get("aspire_branch_id")
-        )
+        scope_type, scope_id = await _authorize_roster_row(user, current, rep_id)
 
         await execute(
             "UPDATE client_references SET active = %s WHERE id = %s", [0, ref_id]
@@ -1772,12 +1864,12 @@ def register(app, require_auth) -> None:
         include_inactive: bool = False,
         user: dict = Depends(require_auth),
     ) -> list[dict]:
-        """List portfolio_properties rows — admin-only.
+        """List portfolio_properties rows.
 
-        By default returns only active rows (active=1). include_inactive=true
-        returns all rows for the admin management surface.
+        Sales, marketing, and admin. By default returns only active rows
+        (active=1). include_inactive=true returns all rows.
         """
-        await _require_marketing_manager(user)
+        await _require_portfolio_editor(user)
 
         where = "" if include_inactive else "WHERE active = 1"
         rows = await query(
@@ -1790,8 +1882,8 @@ def register(app, require_auth) -> None:
         body: PortfolioPropertyCreate,
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Create a portfolio_properties row — admin-only, company-scoped."""
-        await _require_marketing_manager(user)
+        """Create a portfolio_properties row. Shared; sales, marketing, or admin."""
+        await _require_portfolio_editor(user)
         actor = _actor(user)
 
         row_id = str(uuid.uuid4())
@@ -1831,8 +1923,8 @@ def register(app, require_auth) -> None:
         body: PortfolioPropertyPatch,
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Partial update of a portfolio_properties row — admin-only."""
-        await _require_marketing_manager(user)
+        """Partial update of a portfolio_properties row. Shared; sales, marketing, or admin."""
+        await _require_portfolio_editor(user)
 
         rows = await query(
             "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
@@ -1893,7 +1985,7 @@ def register(app, require_auth) -> None:
         would collide with itself the moment a photo in the middle is removed
         and another uploaded, silently overwriting a live photo.
         """
-        await _require_marketing_manager(user)
+        await _require_portfolio_editor(user)
 
         rows = await query(
             "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
@@ -1933,7 +2025,7 @@ def register(app, require_auth) -> None:
         the whole security boundary: without it this endpoint would delete any
         object in the bucket by name, including a rendered proposal PDF.
         """
-        await _require_marketing_manager(user)
+        await _require_portfolio_editor(user)
 
         rows = await query(
             "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]
@@ -1976,7 +2068,7 @@ def register(app, require_auth) -> None:
         must remain resolvable; setting active=0 removes it from the generation
         surface while preserving the record.
         """
-        await _require_marketing_manager(user)
+        await _require_portfolio_editor(user)
 
         rows = await query(
             "SELECT * FROM portfolio_properties WHERE id = %s", [property_id]

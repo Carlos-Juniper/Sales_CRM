@@ -123,7 +123,7 @@ export default function AccountsPage() {
 
   async function handleCreateBid(property: HOAProperty) {
     const lead = await promoteHOAProperty.mutateAsync(property.id)
-    navigate(`/inside-sales/bids?leadId=${lead.id}`)
+    navigate(`/inside-sales/proposals?leadId=${lead.id}`)
   }
 
   // "Create lead": the promote endpoint find-or-creates the

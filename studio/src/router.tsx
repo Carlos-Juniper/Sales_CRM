@@ -4,7 +4,7 @@ import { RequireAuth } from '@/views/auth/RoleGate'
 import LoginPage from '@/views/auth/LoginPage'
 import AuthCallbackPage from '@/views/auth/AuthCallbackPage'
 import {
-  DashboardPage, LeadFeedPage, MyLeadsPage, BidTrackerPage,
+  DashboardPage, LeadFeedPage, MyLeadsPage, ProposalsPage,
   PipelinePage, MapPage, EstimatingPage, CalendarPage,
 } from '@/views/inside-sales'
 import AccountsPage from '@/views/inside-sales/AccountsPage'
@@ -14,6 +14,7 @@ import { SettingsPage } from '@/views/settings/SettingsPage'
 import { SalesWorkspaceGuard, PublicLeadsGuard, EstimatingGuard } from '@/guards'
 import ProposalPrintRoute from '@/views/inside-sales/components/estimating/ProposalPrintRoute'
 import ProposalPreviewRoute from '@/views/inside-sales/components/estimating/ProposalPreviewRoute'
+import { LegacyBidsRedirect } from '@/views/inside-sales/LegacyBidsRedirect'
 
 // DEV-only routes. `import.meta.env.DEV` is replaced with a literal `false` in a
 // production build, so this ternary collapses to `[]` and the dynamic import
@@ -21,6 +22,7 @@ import ProposalPreviewRoute from '@/views/inside-sales/components/estimating/Pro
 // fixture data it pulls in. Same gating convention as main.tsx's mock worker and
 // mocks/handlers.ts. Keep the import dynamic: a static one would tie the dev
 // page's module (and its CSS side effects) into the main graph.
+
 const devRoutes: RouteObject[] = import.meta.env.DEV
   ? [
       {
@@ -91,8 +93,12 @@ export const router = createBrowserRouter([
         element: <SalesWorkspaceGuard><MyLeadsPage /></SalesWorkspaceGuard>,
       },
       {
+        path: 'inside-sales/proposals',
+        element: <SalesWorkspaceGuard><ProposalsPage /></SalesWorkspaceGuard>,
+      },
+      {
         path: 'inside-sales/bids',
-        element: <SalesWorkspaceGuard><BidTrackerPage /></SalesWorkspaceGuard>,
+        element: <LegacyBidsRedirect />,
       },
       {
         path: 'inside-sales/pipeline',

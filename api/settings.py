@@ -440,6 +440,7 @@ class TeamMemberPatch(BaseModel):
     name: Optional[str] = None
     title: Optional[str] = None
     teamType: Optional[str] = None
+    aspireBranchId: Optional[int] = None
     userId: Optional[str] = None
     location: Optional[str] = None
     bio: Optional[str] = Field(default=None, max_length=TEAM_MEMBER_BIO_MAX_LENGTH)
@@ -452,6 +453,7 @@ _TM_UPDATABLE: dict[str, str] = {
     "name": "name",
     "title": "title",
     "teamType": "team_type",
+    "aspireBranchId": "aspire_branch_id",
     "userId": "user_id",
     "location": "location",
     "bio": "bio",
@@ -1403,10 +1405,13 @@ def register(app, require_auth) -> None:
     ) -> dict:
         """Partial update of one team_members row.
 
-        Scope is read from the EXISTING row's aspire_branch_id — the caller
-        cannot change which branch a member belongs to via this endpoint, and
-        a body-supplied branch id cannot widen scope. Company-wide rows (NULL)
-        are admin-only; branch rows require BM/RD scope over that branch.
+        Scope is ordinarily read from the EXISTING row's aspire_branch_id — the
+        caller cannot widen scope by supplying a branch id in the body.
+
+        When aspireBranchId itself is being changed, the caller must hold scope
+        over BOTH the old branch (row's current) AND the new branch, so a rep
+        cannot move a row into or out of a branch they lack write access to.
+        Company-wide rows (NULL aspire_branch_id) are admin/marketing only.
         """
         rows = await query(
             "SELECT * FROM team_members WHERE id = %s", [member_id]
@@ -1421,6 +1426,12 @@ def register(app, require_auth) -> None:
         scope_type, scope_id = await _require_marketing_or_branch_scope_for_row(
             user, current.get("aspire_branch_id")
         )
+
+        # When aspireBranchId is being changed, also authorize against the NEW
+        # branch — prevents moving a row into or out of a branch the caller
+        # lacks scope for (e.g. a BM cannot re-home a row to a foreign branch).
+        if body.aspireBranchId is not None and body.aspireBranchId != current.get("aspire_branch_id"):
+            await _require_marketing_or_branch_scope(user, body.aspireBranchId)
 
         updates = {
             camel: col

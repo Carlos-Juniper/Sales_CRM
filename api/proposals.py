@@ -102,6 +102,76 @@ def _iso(v: Any) -> Any:
     return v
 
 
+# Won/lost proposals stay visible in the packages list for this many days after
+# the status-change action is recorded in lead_actions, then drop automatically.
+CLOSED_PACKAGE_GRACE_DAYS = 7
+
+
+def _package_code(proposal_id: str, created_at: Any) -> str:
+    """Stable display code for the proposals list. Not a stored column."""
+    if isinstance(created_at, datetime):
+        year: Any = created_at.year
+    elif isinstance(created_at, str) and len(created_at) >= 4 and created_at[:4].isdigit():
+        year = created_at[:4]
+    else:
+        year = "0000"
+    suffix = re.sub(r"[^A-Za-z0-9]", "", proposal_id)[:6].upper() or "000000"
+    return f"P-{year}-{suffix}"
+
+
+def _package_subtitle(row: dict) -> Optional[str]:
+    notes = (row.get("notes") or "").strip()
+    if notes:
+        return notes
+    handoff = (row.get("handoff_notes") or "").strip()
+    if handoff:
+        return handoff
+    place = ", ".join(part for part in ((row.get("city") or "").strip(), (row.get("state") or "").strip()) if part)
+    return place or None
+
+
+def _proposal_package_out(row: dict) -> dict:
+    """List-row read model: proposal joined to its lead, assignee, and latest render.
+
+    Section keys are intentionally omitted — the proposals list does not show
+    the document's chapter chips.
+    """
+    amount = row.get("estimated_contract_value")
+    if isinstance(amount, Decimal):
+        amount = float(amount)
+    elif amount is not None:
+        amount = float(amount)
+
+    version = row.get("render_version")
+    page_count = row.get("page_count")
+    assignee = None
+    if row.get("assignee_id"):
+        assignee = {
+            "id": row["assignee_id"],
+            "name": row.get("assignee_name") or "Unknown",
+            "email": row.get("assignee_email") or "",
+            "role": row.get("assignee_role") or "sales",
+            "branchId": row.get("assignee_branch_id") or "",
+            "avatarInitials": row.get("assignee_initials") or "?",
+        }
+
+    return {
+        "id": row["id"],
+        "leadId": row.get("lead_id") or "",
+        "propertyId": row.get("property_id"),
+        "title": (row.get("property_name") or "").strip() or "Untitled proposal",
+        "subtitle": _package_subtitle(row),
+        "amount": amount,
+        "status": row.get("lead_status"),
+        "updatedAt": _iso(row.get("updated_at")),
+        "closedAt": _iso(row.get("closed_at")),
+        "code": _package_code(row["id"], row.get("created_at")),
+        "version": int(version) if version is not None else None,
+        "pageCount": int(page_count) if page_count is not None else None,
+        "assignee": assignee,
+    }
+
+
 def _branch_profile_out(r: dict) -> dict:
     """Project a crm.branches + crm.regions JOIN row into BranchProfile.
 
@@ -562,6 +632,12 @@ def register(app, require_auth) -> None:
     #   IN ADDITION to rows matching that branch — not instead of them.
     #   This surfaces the executive roster (team_type='executive') and
     #   company-wide specialist rows alongside branch-specific ones.
+    #
+    #   Third arm (migration 058): a branch manager holds BOTH the Install and
+    #   Maintenance id at their city via user_branches (the canonical service-area
+    #   table, migration 019). Migration 057 pins each manager's team_members row
+    #   to one twin, so the user_branches subquery surfaces them for the other.
+    #   The subquery hits idx_user_branches_branch; the table is small.
 
     @app.get("/api/proposals/config/team-members")
     async def get_proposal_team_members(
@@ -573,9 +649,14 @@ def register(app, require_auth) -> None:
         params: list[Any] = []
 
         if aspire_branch_id is not None:
-            # Include branch-specific AND null-branch (company-wide) rows.
-            conditions.append("(aspire_branch_id = %s OR aspire_branch_id IS NULL)")
-            params.append(aspire_branch_id)
+            # Include branch-specific, null-branch (company-wide) rows, AND any
+            # row whose linked user holds this branch in user_branches (e.g. a
+            # manager whose team_members row is pinned to the twin branch id).
+            conditions.append(
+                "(aspire_branch_id = %s OR aspire_branch_id IS NULL"
+                " OR user_id IN (SELECT user_id FROM user_branches WHERE aspire_branch_id = %s))"
+            )
+            params.extend([aspire_branch_id, aspire_branch_id])
 
         if team_type:
             conditions.append("team_type = %s")
@@ -736,6 +817,30 @@ def register(app, require_auth) -> None:
                 detail=f"Missing required fields: {', '.join(missing)}",
             )
 
+        # A proposal is always owned by a lead, and that lead must already
+        # point at a canonical property. Orphan packages (no lead, or a lead
+        # with a null property_id) are rejected.
+        lead_rows = await query(
+            "SELECT id, property_id FROM leads WHERE id = %s",
+            [lead_id],
+        )
+        if not lead_rows:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Lead '{lead_id}' was not found. "
+                    "Attach this proposal to an existing lead."
+                ),
+            )
+        if not lead_rows[0].get("property_id"):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "A property must be attached to the lead before a proposal "
+                    "can be created."
+                ),
+            )
+
         # ── When estimate_id is supplied, validate it belongs to leadId ──
         if estimate_id:
             est_rows = await query(
@@ -801,6 +906,84 @@ def register(app, require_auth) -> None:
             "SELECT * FROM proposal_requests WHERE id = %s", [proposal_id]
         )
         return _proposal_request_out(rows[0])
+
+    # ── GET /api/proposals/packages ────────────────────────────────────────
+    # Registered before /api/proposals/{proposal_id} so "packages" is not
+    # captured as a proposal id. One row per saved proposal, joined to the
+    # lead (title, value, status, property) and the latest complete render.
+
+    @app.get("/api/proposals/packages")
+    async def list_proposal_packages(
+        exclude_status: Optional[str] = Query(default=None),
+        _user: dict = Depends(require_auth),
+    ) -> list:
+        # The Proposals queue asks to omit closed leads. Status values match
+        # leads.status (won, lost). Applied here so those rows are never fetched.
+        # Grace window: an excluded-status row is still returned if its terminal
+        # status_change was recorded within CLOSED_PACKAGE_GRACE_DAYS days, so
+        # reps see recently-won/lost proposals for a week before they disappear.
+        excluded = [s.strip() for s in (exclude_status or "").split(",") if s.strip()]
+        where = ""
+        params: list[Any] = []
+        if excluded:
+            placeholders = ", ".join(["%s"] * len(excluded))
+            where = (
+                f"WHERE l.status NOT IN ({placeholders})"
+                " OR COALESCE((SELECT MAX(la.performed_at)"
+                "               FROM lead_actions la"
+                "              WHERE la.lead_id = l.id"
+                "                AND la.action_type = 'status_change'"
+                "                AND la.new_status = l.status), '1970-01-01')"
+                " >= NOW() - INTERVAL %s DAY"
+            )
+            params = excluded + [CLOSED_PACKAGE_GRACE_DAYS]
+        rows = await query(
+            f"""
+            SELECT
+                pr.id,
+                pr.lead_id,
+                pr.created_at,
+                pr.updated_at,
+                l.property_name,
+                l.property_id,
+                l.city,
+                l.state,
+                l.notes,
+                l.handoff_notes,
+                l.status AS lead_status,
+                l.estimated_contract_value,
+                u.id AS assignee_id,
+                u.name AS assignee_name,
+                u.email AS assignee_email,
+                u.role AS assignee_role,
+                u.branch_id AS assignee_branch_id,
+                u.avatar_initials AS assignee_initials,
+                rend.version AS render_version,
+                rend.page_count,
+                (SELECT MAX(la2.performed_at)
+                   FROM lead_actions la2
+                  WHERE la2.lead_id = l.id
+                    AND la2.action_type = 'status_change'
+                    AND la2.new_status = l.status) AS closed_at
+            FROM proposal_requests pr
+            INNER JOIN leads l
+                ON l.id = pr.lead_id AND l.deleted_at IS NULL
+            LEFT JOIN users u
+                ON u.id = COALESCE(NULLIF(l.assigned_to, ''), pr.created_by)
+            LEFT JOIN proposal_renders rend
+                ON rend.proposal_id = pr.id
+               AND rend.status = 'complete'
+               AND rend.version = (
+                    SELECT MAX(r2.version)
+                    FROM proposal_renders r2
+                    WHERE r2.proposal_id = pr.id AND r2.status = 'complete'
+               )
+            {where}
+            ORDER BY pr.updated_at DESC
+            """,
+            params,
+        )
+        return [_proposal_package_out(r) for r in rows]
 
     # ── GET /api/proposals/:id ─────────────────────────────────────────────
     # Reopen / re-edit a persisted proposal.
@@ -1052,7 +1235,8 @@ def register(app, require_auth) -> None:
         user: dict = Depends(require_auth),
     ):
         rows = await query(
-            "SELECT id, lead_id, estimate_id FROM proposal_requests WHERE id = %s",
+            "SELECT id, lead_id, estimate_id, team_member_ids, executive_team_member_ids"
+            " FROM proposal_requests WHERE id = %s",
             (proposal_id,),
         )
         if not rows:
@@ -1064,6 +1248,7 @@ def register(app, require_auth) -> None:
         from api.proposal_validation import (
             validate_proposal_for_render,
             proposal_document_warnings,
+            proposal_team_bio_warnings,
         )
 
         guard_issues = await validate_proposal_for_render(proposal_id)
@@ -1091,6 +1276,22 @@ def register(app, require_auth) -> None:
             warnings = await proposal_document_warnings(estimate_id=estimate_id)
         elif _lead_id_for_warn:
             warnings = await proposal_document_warnings(lead_id=_lead_id_for_warn)
+
+        # Non-blocking bio warnings: each selected team member with an empty bio
+        # will render a card without body text — warn so the rep can fill it
+        # before sending. Decode both id lists and deduplicate.
+        _raw_tm = rows[0].get("team_member_ids") or "[]"
+        _raw_exec = rows[0].get("executive_team_member_ids") or "[]"
+        try:
+            _tm_ids: list[str] = json.loads(_raw_tm) if isinstance(_raw_tm, (str, bytes)) else list(_raw_tm or [])
+        except (json.JSONDecodeError, TypeError):
+            _tm_ids = []
+        try:
+            _exec_ids: list[str] = json.loads(_raw_exec) if isinstance(_raw_exec, (str, bytes)) else list(_raw_exec or [])
+        except (json.JSONDecodeError, TypeError):
+            _exec_ids = []
+        _all_tm_ids = list(dict.fromkeys([str(i) for i in _tm_ids + _exec_ids if i]))
+        warnings += await proposal_team_bio_warnings(_all_tm_ids)
 
         try:
             from api.proposal_render import render_proposal_pdf

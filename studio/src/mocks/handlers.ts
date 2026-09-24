@@ -1,8 +1,9 @@
 import { http, HttpResponse, delay } from 'msw'
-import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockConnections } from './data'
+import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockConnections, mockProposalPackages } from './data'
 import { CATALOG_ITEM_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
 import { PAGE_SIZE } from '../lib/constants'
-import type { Lead, Bid } from '@/types'
+import type { Lead, Bid, UserRole } from '@/types'
+import type { ProposalPackageSummary } from '@/types/proposal'
 import type {
   Estimate,
   EstimateAdjustment,
@@ -48,6 +49,7 @@ import {
 const API = '/api'
 const leads = [...mockLeads]
 const bids = [...mockBids]
+const proposalPackages: ProposalPackageSummary[] = [...mockProposalPackages]
 
 // In-memory store for the new estimating model.
 const estimates: Estimate[] = structuredClone(mockEstimatesV2)
@@ -184,6 +186,18 @@ function itbProjectForEstimate(e: Estimate): MockItbProject {
 const itbProjects: MockItbProject[] = estimates.map(itbProjectForEstimate)
 
 const allHandlers = [
+  // GET /api/auth/me — mock session so the app shell can boot under VITE_MOCK
+  http.get(`${API}/auth/me`, async () => {
+    return HttpResponse.json({
+      id: 'u2',
+      email: 'morgan.lee@example.com',
+      name: 'Morgan Lee',
+      role: 'sales' as UserRole,
+      branch_id: 'c1',
+      avatar_initials: 'ML',
+    })
+  }),
+
   // GET /api/leads
   http.get(`${API}/leads`, async ({ request }) => {
     await delay(300)
@@ -279,6 +293,11 @@ const allHandlers = [
     return HttpResponse.json(newLead, { status: 201 })
   }),
 
+  // GET /api/leads/:id/attachments — proposal documents when no estimate is linked
+  http.get(`${API}/leads/:id/attachments`, async () => {
+    return HttpResponse.json([])
+  }),
+
   // GET /api/leads/:id
   http.get(`${API}/leads/:id`, async ({ params }) => {
     await delay(150)
@@ -350,6 +369,83 @@ const allHandlers = [
     bids[idx] = { ...bids[idx], ...body, updated_at: new Date().toISOString() }
     return HttpResponse.json(bids[idx])
   }),
+
+  // GET /api/proposals/packages — Proposals list (no section chips).
+  // exclude_status is applied before the response, matching the API.
+  http.get(`${API}/proposals/packages`, async ({ request }) => {
+    await delay(200)
+    const exclude = new URL(request.url).searchParams.get('exclude_status') ?? ''
+    const excluded = new Set(exclude.split(',').map((s) => s.trim()).filter(Boolean))
+    // A won/lost row still inside its 7-day grace window (closedAt set) survives
+    // the exclude filter so the queue can show its Won/Lost badge, matching the
+    // backend's grace behaviour; once grace lapses (closedAt null) it drops out.
+    const rows = excluded.size
+      ? proposalPackages.filter(
+          (pkg) => !pkg.status || !excluded.has(pkg.status) || pkg.closedAt != null,
+        )
+      : proposalPackages
+    return HttpResponse.json(rows)
+  }),
+
+  // POST /api/proposals — same lead + property constraint as the API
+  http.post(`${API}/proposals`, async ({ request }) => {
+    await delay(200)
+    const body = await request.json() as { leadId?: string; estimateId?: string | null; createdBy?: string; signerUserId?: string }
+    if (!body.leadId) {
+      return HttpResponse.json({ detail: 'Missing required fields: leadId' }, { status: 400 })
+    }
+    const lead = leads.find((l) => l.id === body.leadId)
+    if (!lead) {
+      return HttpResponse.json(
+        { detail: `Lead '${body.leadId}' was not found. Attach this proposal to an existing lead.` },
+        { status: 422 },
+      )
+    }
+    if (!lead.property_id) {
+      return HttpResponse.json(
+        { detail: 'A property must be attached to the lead before a proposal can be created.' },
+        { status: 422 },
+      )
+    }
+    const now = new Date().toISOString()
+    const created = {
+      id: `prop-${Date.now()}`,
+      leadId: body.leadId,
+      estimateId: body.estimateId ?? null,
+      createdBy: body.createdBy ?? 'u1',
+      sections: [],
+      orgChart: {},
+      startupPlan: {},
+      teamMemberIds: [],
+      executiveTeamMemberIds: [],
+      clientReferenceIds: [],
+      portfolioPropertyIds: [],
+      chapterOrder: null,
+      signerUserId: body.signerUserId ?? body.createdBy ?? 'u1',
+      createdAt: now,
+      updatedAt: now,
+    }
+    proposalPackages.unshift({
+      id: created.id,
+      leadId: lead.id,
+      propertyId: lead.property_id,
+      title: lead.property_name,
+      subtitle: [lead.city, lead.state].filter(Boolean).join(', ') || null,
+      amount: lead.estimated_contract_value,
+      status: lead.status,
+      updatedAt: now,
+      code: `P-${now.slice(0, 4)}-${created.id.slice(-6).toUpperCase()}`,
+      version: null,
+      pageCount: null,
+      closedAt: null,
+      assignee: null,
+    })
+    return HttpResponse.json(created, { status: 201 })
+  }),
+
+  http.get(`${API}/proposals/config/team-members`, async () => HttpResponse.json([])),
+  http.get(`${API}/proposals/config/client-references`, async () => HttpResponse.json([])),
+  http.get(`${API}/proposals/config/portfolio`, async () => HttpResponse.json([])),
 
   // GET /api/users
   http.get(`${API}/users`, async ({ request }) => {

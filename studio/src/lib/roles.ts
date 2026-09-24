@@ -54,7 +54,7 @@ export const FULL_ACCESS_ROLES: readonly UserRole[] = [
   'manager', 'regional_director', 'vice_president', 'ceo', 'admin',
 ]
 
-/** Analytics + the shared sales tabs (leads / pipeline / bids / calendar / accounts / map / commissions / sales-performance). */
+/** Analytics + the shared sales tabs (leads / pipeline / proposals / calendar / accounts / map / commissions / sales-performance). */
 export const SALES_NAV_ROLES: readonly UserRole[] = ['sales', ...FULL_ACCESS_ROLES]
 
 /** Public Leads (the inside-sales qualification queue). */

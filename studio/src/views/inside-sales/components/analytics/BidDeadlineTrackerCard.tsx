@@ -125,9 +125,9 @@ export function BidDeadlineTrackerCard() {
               variant="link"
               size="sm"
               className="mt-1 px-0 h-auto text-xs"
-              onClick={() => navigate('/inside-sales/bids')}
+              onClick={() => navigate('/inside-sales/proposals')}
             >
-              View all bids →
+              View proposals →
             </Button>
           </>
         )}

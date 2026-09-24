@@ -844,8 +844,9 @@ def _draft_out(r: dict) -> dict:
     }
 
 
-# The Takeoff Insert scan is a scanned map image (or PDF); the
-# intake kinds stay PDF-only at the endpoint layer.
+# The Takeoff Insert scan is a scanned map image (or PDF). RFP documents on
+# the maintenance and install intakes also accept Word and Excel (see
+# attachments.validate_rfp_document). Every other intake kind stays PDF-only.
 _SCAN_CONTENT_TYPES = frozenset(
     {"application/pdf", "image/png", "image/jpeg", "image/webp"}
 )
@@ -2395,9 +2396,11 @@ def register(app, require_auth) -> None:
         if not est_rows:
             raise HTTPException(status_code=404, detail="Estimate not found")
 
-        # 2. Validate content type per kind. Intake docs and the contract stay
-        # PDF-only; the Takeoff Insert scan and the measurements/other proposal
-        # kinds are scanned images, so they also accept common image types.
+        # 2. Validate content type per kind. RFP documents (maintenance and
+        # install intake) accept PDF, Word, and Excel when the extension and
+        # MIME agree. The contract and the other intake docs stay PDF-only.
+        # The Takeoff Insert scan and the measurements/other proposal kinds
+        # are scanned images, so they also accept common image types.
         #
         # Unknown kinds coerce to 'other' (legacy behaviour). The three proposal
         # kinds are in the allowlist, so they never coerce — a proposal document
@@ -2407,7 +2410,14 @@ def register(app, require_auth) -> None:
         if kind not in _VALID_ATTACHMENT_KINDS:
             kind = "other"
         content_type = body.get("contentType", "")
-        if kind in _IMAGE_OR_PDF_KINDS:
+        if kind == "rfp":
+            try:
+                content_type = _att_mod.validate_rfp_document(
+                    body.get("fileName", ""), content_type
+                )
+            except _att_mod.RfpDocumentRejected as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+        elif kind in _IMAGE_OR_PDF_KINDS:
             if content_type not in _SCAN_CONTENT_TYPES:
                 raise HTTPException(
                     status_code=400,
@@ -2462,7 +2472,15 @@ def register(app, require_auth) -> None:
         raw_origin = request.headers.get("origin", "")
         origin = raw_origin if raw_origin in _att_mod.ALLOWED_ORIGINS else ""
         upload_url = _att_mod.begin_resumable_session(object_key, content_type, origin)
-        return {"attachmentId": attachment_id, "objectKey": object_key, "uploadUrl": upload_url}
+        # contentType is the value the resumable session was opened with. The
+        # browser PUT must send this exact Content-Type (RFP uploads are
+        # canonicalized, so it can differ in case from the request).
+        return {
+            "attachmentId": attachment_id,
+            "objectKey": object_key,
+            "uploadUrl": upload_url,
+            "contentType": content_type,
+        }
 
     @app.post(
         "/api/estimating/estimates/{estimate_id}/attachments/{attachment_id}/confirm",
@@ -2578,7 +2596,15 @@ def register(app, require_auth) -> None:
         if row.get("status") != "stored":
             raise HTTPException(status_code=409, detail="Attachment is not yet stored")
 
-        url = _att_mod.signed_get_url(row["object_key"], row["file_name"])
+        # RFP downloads pin the response Content-Type to the type presign
+        # stored (PDF, Word, or Excel). Other kinds keep the previous signed
+        # URL, which serves the object's own content type.
+        sign_kwargs: dict = {}
+        if row.get("kind") == "rfp" and row.get("content_type"):
+            sign_kwargs["content_type"] = row["content_type"]
+        url = _att_mod.signed_get_url(
+            row["object_key"], row["file_name"], **sign_kwargs
+        )
         return {"url": url, "expiresIn": _att_mod.GCS_SIGNED_URL_TTL_MIN * 60}
 
     @app.patch(

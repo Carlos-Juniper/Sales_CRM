@@ -114,7 +114,6 @@ def _portfolio_row(**over) -> dict:
         "city_state": "Jupiter, FL",
         "region_id": "east-coast",
         "photo_object_keys": "[]",
-        "before_after_object_keys": None,
         "sort_order": 0,
     }
     row.update(over)
@@ -235,9 +234,28 @@ def _coverage_row(**over) -> dict:
         "address1": "5880 Staley Road",
         "city": "Fort Myers",
         "state": "FL",
+        # The roster query LEFT JOINs regions (api/proposals.py:492). Default to
+        # an unassigned office: region_of() short-circuits on an empty region_id,
+        # which is the grouping these tests assert on. Override per test to
+        # exercise the grouped path.
+        "region_id": None,
+        "region_name": None,
+        "region_sort": None,
     }
     row.update(over)
     return row
+
+
+
+def _office_names(state_group: dict) -> list[str]:
+    """Office names in a state, flattened across region buckets.
+
+    branch-coverage groups offices by region within each state
+    (StateCoverageGroup.regions — studio/src/types/proposal.ts:104). These tests
+    are about state grouping and name de-duplication, not region ordering, so
+    they flatten the buckets rather than restating the nesting five times.
+    """
+    return [name for region in state_group["regions"] for name in region["branches"]]
 
 
 class TestBranchCoverage:
@@ -254,8 +272,8 @@ class TestBranchCoverage:
         body = res.json()
         assert [g["state"] for g in body] == ["FL", "TX"]
         assert body[0]["stateName"] == "Florida"
-        assert body[0]["branches"] == ["Fort Myers"]
-        assert body[1]["branches"] == ["Houston"]
+        assert _office_names(body[0]) == ["Fort Myers"]
+        assert _office_names(body[1]) == ["Houston"]
 
     def test_does_not_require_coordinates(self, authed):
         """Coverage is a roster, not a proximity calc — most rows are un-geocoded."""
@@ -277,7 +295,7 @@ class TestBranchCoverage:
                               address1="533 Paul Morris Drive", city="Englewood"),
             ]
             res = client.get("/api/proposals/config/branch-coverage")
-        assert res.json()[0]["branches"] == ["Venice"]
+        assert _office_names(res.json()[0]) == ["Venice"]
 
     def test_division_row_collapses_into_its_host_office(self, authed):
         """Aquatics/Sports Turf branches are booked at a host yard's address."""
@@ -289,7 +307,7 @@ class TestBranchCoverage:
                               address1="1 Griffin Rd", city="Davie"),
             ]
             res = client.get("/api/proposals/config/branch-coverage")
-        assert res.json()[0]["branches"] == ["Davie"]
+        assert _office_names(res.json()[0]) == ["Davie"]
 
     def test_distinct_towns_sharing_a_yard_both_listed(self, authed):
         """Panama City Beach and Tyndall really do share 511 N Highway 79."""
@@ -301,7 +319,7 @@ class TestBranchCoverage:
                               address1="511 N Highway 79", city="Panama City Beach"),
             ]
             res = client.get("/api/proposals/config/branch-coverage")
-        assert res.json()[0]["branches"] == ["Panama City Beach", "Tyndall"]
+        assert _office_names(res.json()[0]) == ["Panama City Beach", "Tyndall"]
 
     def test_unknown_state_code_falls_back_to_the_code(self, authed):
         with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
@@ -402,6 +420,28 @@ class TestTeamMembers:
         sql = mock_q.call_args.args[0]
         assert "active = 1" in sql
 
+    def test_branch_filter_includes_user_branches_subquery(self, authed):
+        """Migration 058: when aspire_branch_id is given, the SQL must include a
+        user_branches subquery so managers pinned to a twin branch id are still
+        returned for the sibling branch.  The branch id must appear TWICE in params
+        — once for the direct aspire_branch_id column match and once for the subquery.
+        """
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            client.get("/api/proposals/config/team-members?aspire_branch_id=3696")
+        sql, params = mock_q.call_args.args[0], mock_q.call_args.args[1]
+        assert "user_branches" in sql
+        assert params.count(3696) == 2
+
+    def test_no_branch_filter_omits_user_branches_subquery(self, authed):
+        """Without a branch filter the user_branches subquery must NOT appear —
+        it would be a superfluous correlated subquery against every row."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            client.get("/api/proposals/config/team-members")
+        sql = mock_q.call_args.args[0]
+        assert "user_branches" not in sql
+
 
 # ── GET /api/proposals/config/client-references ──────────────────────────────
 
@@ -475,7 +515,6 @@ class TestPortfolio:
             "cityState": "Jupiter, FL",
             "regionId": "east-coast",
             "photoObjectKeys": [],
-            "beforeAfterObjectKeys": None,
             "sortOrder": 0,
         }
 
@@ -513,14 +552,11 @@ class TestPortfolio:
             res = client.get("/api/proposals/config/portfolio")
         assert res.json()[0]["photoObjectKeys"] == ["proposal/portfolio/img1.jpg"]
 
-    def test_before_after_object_keys_parsed(self, authed):
-        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
-            mock_q.return_value = [_portfolio_row(
-                before_after_object_keys='{"before": "ba/before.jpg", "after": "ba/after.jpg"}'
-            )]
-            res = client.get("/api/proposals/config/portfolio")
-        ba = res.json()[0]["beforeAfterObjectKeys"]
-        assert ba == {"before": "ba/before.jpg", "after": "ba/after.jpg"}
+    # test_before_after_object_keys_parsed removed: migration 039 dropped
+    # portfolio_properties.before_after_object_keys as a speculative field that
+    # was never built out ("every INSERT in migrations 015 and 036 sets the
+    # column to NULL, and the API/frontend never reads or writes it"). The
+    # endpoint no longer projects it, so there is nothing left to parse.
 
 
 # ── GET /api/proposals/config/insurance ─────────────────────────────────────

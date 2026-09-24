@@ -70,6 +70,7 @@ for at least one real deploy cycle.
 - **026** — adds `leads.created_by` plus indexes on `created_by`, `assigned_to` and `source`, backing the user-scoped Leads tab (`?mine=true`) and the gov-only Public Leads feed (`?sources=higher_gov,sam_gov`). Originally numbered 015; renumbered for same reason as 025.
 - **027** — adds `estimates.latest_proposal_render_id` + `estimates.latest_proposal_object_key`, a denormalized pointer to the most recent successful proposal PDF render. Written by `api/proposal_render.py` after each render; `proposal_renders` remains the source of truth for full version history.
 - **028** — merges `insurance_certificates` into `licenses_certifications` (Handoff 42), widening the `kind` ENUM to include `'insurance'` and dropping the source table as its final step. Originally numbered 027; renumbered to avoid colliding with `027_estimate_proposal_pdf_link.sql`, which merged to staging first.
+- **058** — backfills `user_branches` with both twin branch ids for the 11 managers inserted by 057; fixes the proposal team picker omitting managers on maintenance-twin branches (Handoff 43 A.6).
 
 ### Numbering history
 

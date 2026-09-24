@@ -166,7 +166,7 @@ Thin wrappers around Radix UI primitives with Tailwind styling applied via CVA (
 | `DashboardPage.tsx` | Analytics hub. Renders KPI summary cards from `useInsideSalesDashboard` plus six analytics sub-cards (revenue forecast, pipeline, score distribution, team performance, territory heat map, bid deadline tracker). |
 | `LeadFeedPage.tsx` | Paginated, filterable, sortable lead list. Reads filter/sort state from `leadsStore`; opens `LeadDetailPanel` on row click. |
 | `OutreachQueuePage.tsx` | Shows leads with `status = contacted` that are pending follow-up. Inline actions: Send Now and Snooze 3 days. |
-| `BidTrackerPage.tsx` | Table of RFP bids with live deadline countdown chips (via `DeadlineChip`), estimated value, and per-bid status actions. Stats row at top. |
+| `ProposalsPage.tsx` | List of saved proposal packages, each linked to its lead. Search + status filter; clicking a row opens `LeadDetailPanel`. Won/Lost badge on packages still inside their 7-day grace window. Tested by `ProposalsPage.test.tsx`. |
 | `PipelinePage.tsx` / `PipelinePage.css` | Kanban board with four columns (New, Contacted, Proposal Sent, Won/Lost). Uses `@dnd-kit` for drag-and-drop between columns. Displays column lead count and total value. |
 | `MapPage.tsx` / `MapPage.css` | Leaflet map of all leads plotted as circle markers. Marker color = lead type; radius scales with contract value; opacity dims won/lost/disqualified leads. Filter bar for lead type. Clicking a marker opens `LeadDetailPanel`. |
 | `EstimatingPage.tsx` | Tabbed estimating workspace with four tabs: Estimate Queue, Line-Item Editor, Proposal Export, and Margin Analysis. Selecting a queue item auto-navigates to the editor. |

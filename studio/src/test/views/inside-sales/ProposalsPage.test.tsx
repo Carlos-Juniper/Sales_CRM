@@ -1,13 +1,16 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
+import { server } from '@/mocks/server'
 import { render, makeUser } from '@/test/utils'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
 import { Sidebar } from '@/components/layout/Sidebar'
 import ProposalsPage from '@/views/inside-sales/ProposalsPage'
 import { filterProposalPackages } from '@/views/inside-sales/proposalPackageFilters'
-import { mockProposalPackages } from '@/mocks/data'
+import { mockProposalPackages, mockGraceWonPackage } from '@/mocks/data'
+import type { ProposalPackageSummary } from '@/types/proposal'
 
 function seedUser() {
   useAuthStore.setState({ user: makeUser({ name: 'Morgan Lee', role: 'sales' }) })
@@ -79,6 +82,49 @@ describe('ProposalsPage', () => {
     await user.type(screen.getByLabelText('Search proposals'), 'dobson')
     expect(screen.getByText('Dobson Ranch HOA')).toBeInTheDocument()
     expect(screen.queryByText('City of Tempe — Parks RFP')).not.toBeInTheDocument()
+  })
+
+  it('renders a Won badge for a package inside its 7-day grace window (closedAt set)', async () => {
+    // Serve the default list plus a won package still in grace (closedAt set).
+    server.use(
+      http.get('/api/proposals/packages', () =>
+        HttpResponse.json([mockGraceWonPackage, ...mockProposalPackages]),
+      ),
+    )
+    render(<ProposalsPage />)
+    const row = await screen.findByRole('button', { name: /Desert Ridge Marketplace/ })
+    const badge = within(row).getByText('Won')
+    // Green (won) per the codebase's status colour convention.
+    expect(badge.className).toMatch(/green/)
+    expect(within(row).queryByText('Lost')).not.toBeInTheDocument()
+  })
+
+  it('renders a Lost badge for a lost package inside its grace window', async () => {
+    const lost: ProposalPackageSummary = {
+      ...mockGraceWonPackage,
+      id: 'prop-lost-grace',
+      title: 'Palm Court Estates',
+      status: 'lost',
+    }
+    server.use(
+      http.get('/api/proposals/packages', () =>
+        HttpResponse.json([lost, ...mockProposalPackages]),
+      ),
+    )
+    render(<ProposalsPage />)
+    const row = await screen.findByRole('button', { name: /Palm Court Estates/ })
+    const badge = within(row).getByText('Lost')
+    expect(badge.className).toMatch(/red/)
+  })
+
+  it('renders no Won/Lost badge for an active package (closedAt null)', async () => {
+    render(<ProposalsPage />)
+    // The default list is all-active (closedAt null) — no row carries a badge.
+    const rows = await screen.findAllByTestId('proposal-row')
+    for (const row of rows) {
+      expect(within(row).queryByText('Won')).not.toBeInTheDocument()
+      expect(within(row).queryByText('Lost')).not.toBeInTheDocument()
+    }
   })
 
   it('opens the associated lead when a package row is clicked', async () => {

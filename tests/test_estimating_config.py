@@ -103,7 +103,9 @@ def _kit_row(**over) -> dict:
         "target_gm": Decimal("0.3800"),
         "kit_type": "install_quantity",
         "production_rate": None,
-        "branch": "Orlando, FL",
+        # Slice 14: the `branch` city string gave way to aspire_branch_id
+        # (the branch model, migration 019).
+        "aspire_branch_id": 1403,
         "active": 1,
         "service_type": "Trees",
     }
@@ -300,7 +302,7 @@ class TestCatalogItems:
             "targetGm": 0.38,
             "kitType": "install_quantity",
             "productionRate": None,
-            "branch": "Orlando, FL",
+            "aspireBranchId": 1403,
             "active": True,
             "serviceType": "Trees",
         }]
@@ -312,18 +314,19 @@ class TestCatalogItems:
         assert res.status_code == 200
         assert res.json() == []
 
-    def test_filters_branch_kit_type_active(self, authed):
+    def test_filters_kit_type_and_active(self, authed):
+        """Slice 14 removed the `branch` city-string filter (api/estimating.py:3016)."""
         with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = []
             res = client.get(
-                "/api/estimating/catalog-items?branch=Orlando%2C%20FL&kit_type=install_quantity&active=true"
+                "/api/estimating/catalog-items?kit_type=install_quantity&active=true"
             )
         assert res.status_code == 200
         sql, params = mock_query.call_args.args[0], mock_query.call_args.args[1]
-        assert "branch = %s" in sql
         assert "kit_type = %s" in sql
         assert "active = %s" in sql
-        assert params == ["Orlando, FL", "install_quantity", 1]
+        assert "branch = %s" not in sql
+        assert params == ["install_quantity", 1]
 
     def test_active_false_filter(self, authed):
         with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:

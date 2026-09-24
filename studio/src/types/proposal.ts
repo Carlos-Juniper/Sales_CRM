@@ -317,5 +317,11 @@ export interface ProposalPackageSummary {
   version: number | null
   /** Latest complete render page count, when one exists. */
   pageCount: number | null
+  /**
+   * When a won/lost package is still inside its 7-day grace window, the ISO
+   * timestamp it was closed at; null otherwise. Drives the Won/Lost badge — an
+   * active (open) row leaves this null so the queue stays badge-free.
+   */
+  closedAt: string | null
   assignee: ProposalPackageAssignee | null
 }

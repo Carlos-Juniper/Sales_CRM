@@ -5,7 +5,8 @@ vi.stubEnv('VITE_ENTRA_CLIENT_ID', 'test-client-id')
 vi.stubEnv('VITE_ENTRA_TENANT_ID', 'test-tenant-id')
 
 // Re-import after env setup
-const { redirectToAzureLogin, exchangeCodeForTokens } = await import('@/lib/azureAuth')
+const { redirectToAzureLogin, consumePkce, isAuthCallbackPath, AUTH_CALLBACK_PATH } =
+  await import('@/lib/azureAuth')
 
 describe('azureAuth — scope construction', () => {
   beforeEach(() => {
@@ -59,50 +60,84 @@ describe('azureAuth — scope construction', () => {
   })
 })
 
-describe('azureAuth — exchangeCodeForTokens', () => {
-  it('returns id_token, access_token, refresh_token, expires_in, scope', async () => {
-    sessionStorage.setItem('oauth_state', 'state-abc')
-    sessionStorage.setItem('pkce_verifier', 'verifier-xyz')
-
-    const mockResponse = {
-      id_token: 'id-tok',
-      access_token: 'at-xxx',
-      refresh_token: 'rt-xxx',
-      expires_in: 3600,
-      scope: 'Mail.Send Calendars.ReadWrite',
-    }
-
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => mockResponse,
-    } as Response)
-
-    const result = await exchangeCodeForTokens('auth-code-123', 'state-abc')
-
-    expect(result.id_token).toBe('id-tok')
-    expect(result.access_token).toBe('at-xxx')
-    expect(result.refresh_token).toBe('rt-xxx')
-    expect(result.expires_in).toBe(3600)
-    expect(result.scope).toBe('Mail.Send Calendars.ReadWrite')
+describe('azureAuth — redirect target', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { origin: 'http://localhost:5174', href: '' },
+    })
   })
 
-  it('throws when state does not match', async () => {
+  it('sends the Web-platform callback path, not the old SPA one', async () => {
+    await redirectToAzureLogin()
+    const url = new URL(window.location.href as string)
+    expect(url.searchParams.get('redirect_uri')).toBe(
+      'http://localhost:5174/auth/entra-complete',
+    )
+  })
+
+  it('stores the redirect_uri it sent, so redemption can echo it back exactly', async () => {
+    await redirectToAzureLogin()
+    expect(sessionStorage.getItem('oauth_redirect_uri')).toBe(
+      `http://localhost:5174${AUTH_CALLBACK_PATH}`,
+    )
+  })
+})
+
+describe('azureAuth — isAuthCallbackPath', () => {
+  it('matches the current and the legacy callback routes', () => {
+    expect(isAuthCallbackPath('/auth/entra-complete')).toBe(true)
+    expect(isAuthCallbackPath('/auth/callback')).toBe(true)
+  })
+
+  it('does not match ordinary routes', () => {
+    expect(isAuthCallbackPath('/login')).toBe(false)
+    expect(isAuthCallbackPath('/inside-sales')).toBe(false)
+  })
+})
+
+describe('azureAuth — consumePkce', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  it('returns the verifier and redirect_uri for backend redemption', () => {
+    sessionStorage.setItem('oauth_state', 'state-abc')
+    sessionStorage.setItem('pkce_verifier', 'verifier-xyz')
+    sessionStorage.setItem('oauth_redirect_uri', 'http://localhost:5174/auth/entra-complete')
+
+    expect(consumePkce('state-abc')).toEqual({
+      code_verifier: 'verifier-xyz',
+      redirect_uri: 'http://localhost:5174/auth/entra-complete',
+    })
+  })
+
+  it('clears the stored material so a replayed callback cannot redeem twice', () => {
+    sessionStorage.setItem('oauth_state', 'state-abc')
+    sessionStorage.setItem('pkce_verifier', 'verifier-xyz')
+    sessionStorage.setItem('oauth_redirect_uri', 'http://localhost:5174/auth/entra-complete')
+
+    consumePkce('state-abc')
+
+    expect(sessionStorage.getItem('pkce_verifier')).toBeNull()
+    expect(sessionStorage.getItem('oauth_state')).toBeNull()
+    expect(sessionStorage.getItem('oauth_redirect_uri')).toBeNull()
+    expect(() => consumePkce('state-abc')).toThrow('Invalid OAuth state')
+  })
+
+  it('throws when state does not match', () => {
     sessionStorage.setItem('oauth_state', 'different-state')
     sessionStorage.setItem('pkce_verifier', 'verifier-xyz')
+    sessionStorage.setItem('oauth_redirect_uri', 'http://localhost:5174/auth/entra-complete')
 
-    await expect(exchangeCodeForTokens('code', 'wrong-state')).rejects.toThrow(
-      'Invalid OAuth state',
-    )
+    expect(() => consumePkce('wrong-state')).toThrow('Invalid OAuth state')
   })
 
-  it('throws when token exchange fails', async () => {
+  it('throws when the redirect_uri was never stored', () => {
     sessionStorage.setItem('oauth_state', 'state-abc')
     sessionStorage.setItem('pkce_verifier', 'verifier-xyz')
 
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false } as Response)
-
-    await expect(exchangeCodeForTokens('code', 'state-abc')).rejects.toThrow(
-      'Token exchange failed',
-    )
+    expect(() => consumePkce('state-abc')).toThrow('Invalid OAuth state')
   })
 })

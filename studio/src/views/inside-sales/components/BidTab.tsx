@@ -182,9 +182,9 @@ export function BidTab({ lead, builderOpen, onBuilderOpenChange }: BidTabProps) 
         </div>
       )}
 
-      {/* Bid Tracker */}
+      {/* Proposals */}
       <div>
-        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Bid Tracker</p>
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Proposals</p>
         <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
           <div className="flex items-center justify-between px-4 py-3">
             <span className="text-xs text-gray-500">Est. Annual Value</span>

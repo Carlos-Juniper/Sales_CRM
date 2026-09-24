@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import base64
 import os
+import msal
+import warnings
+import json
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 # Minimal env to satisfy module-level imports
 os.environ.setdefault("ENTRA_CLIENT_ID", "test-client-id")
@@ -29,6 +33,8 @@ from api.graph import (  # noqa: E402
     _decrypt,
     _refresh_scopes,
     _msal_app,
+    _DEFAULT_GRAPH_SCOPES,
+    exchange_code,
     find_token_row,
     has_graph_connection,
     GraphNotConnected,
@@ -307,14 +313,38 @@ async def test_get_valid_token_raises_when_refresh_fails():
             await get_valid_token("u1")
 
 
+# _refresh_scopes returns list(set), so its order is arbitrary — these compare
+# sets. The previous version of these assertions compared lists and also expected
+# the stored scopes alone; both stopped holding at 621d777, which made the
+# defaults unconditional so a token stored before Calendars.ReadWrite was
+# requested still refreshes with calendar access.
+
+
 def test_refresh_scopes_strips_oidc_and_offline_access():
     """Refresh must not send offline_access / openid — MSAL adds those itself."""
-    assert _refresh_scopes("openid profile email offline_access Calendars.ReadWrite Mail.Send") == [
-        "Calendars.ReadWrite",
-        "Mail.Send",
-    ]
-    assert _refresh_scopes("") == ["Mail.Send", "Mail.Read", "Calendars.ReadWrite"]
+    scopes = _refresh_scopes("openid profile email offline_access Calendars.ReadWrite Mail.Send")
+    assert set(scopes).isdisjoint({"openid", "profile", "email", "offline_access"})
     assert "offline_access" not in _refresh_scopes("offline_access")
+
+
+def test_refresh_scopes_always_includes_the_graph_defaults():
+    """621d777: every refresh re-requests the defaults, whatever was stored."""
+    assert set(_refresh_scopes("")) == set(_DEFAULT_GRAPH_SCOPES)
+    # A token stored before Calendars.ReadWrite was requested still gets it back.
+    assert "Calendars.ReadWrite" in _refresh_scopes("Mail.Send")
+
+
+def test_refresh_scopes_keeps_stored_scopes_beyond_the_defaults():
+    """A scope the user consented to must survive the union with the defaults."""
+    assert set(_refresh_scopes("Files.Read offline_access")) == (
+        set(_DEFAULT_GRAPH_SCOPES) | {"Files.Read"}
+    )
+
+
+def test_refresh_scopes_does_not_duplicate():
+    """Union semantics: a stored default appears once, not twice."""
+    scopes = _refresh_scopes("Mail.Send Mail.Send Calendars.ReadWrite")
+    assert len(scopes) == len(set(scopes))
 
 
 def test_msal_app_uses_confidential_client_when_secret_set():
@@ -332,17 +362,72 @@ def test_msal_app_uses_confidential_client_when_secret_set():
     public_ctor.assert_not_called()
 
 
-def test_msal_app_uses_public_client_without_secret(monkeypatch):
+def test_msal_app_raises_503_without_secret(monkeypatch):
+    """No secret means no refresh is possible — fail loudly, don't fall back.
+
+    A PublicClientApplication cannot redeem a grant this server obtained as a
+    confidential client (AADSTS700025), so the old silent public-client fallback
+    could only ever produce a confusing downstream failure.
+    """
     monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-    mock_public = MagicMock()
+    with pytest.raises(HTTPException) as exc:
+        _msal_app()
+    assert exc.value.status_code == 503
+    assert "ENTRA_CLIENT_SECRET" in exc.value.detail
+
+
+def test_exchange_code_redeems_as_confidential_client_with_pkce():
+    """Redemption must carry the secret AND the verifier, at the sent redirect_uri."""
+    mock_app = MagicMock()
+    mock_app.acquire_token_by_authorization_code.return_value = {
+        "access_token": "at", "refresh_token": "rt", "id_token_claims": {"email": "a@b.c"}
+    }
     with (
-        patch("api.graph.msal.PublicClientApplication", return_value=mock_public) as ctor,
-        patch("api.graph.msal.ConfidentialClientApplication") as confidential_ctor,
+        patch.dict(os.environ, {"ENTRA_CLIENT_SECRET": "super-secret"}, clear=False),
+        patch("api.graph.msal.ConfidentialClientApplication", return_value=mock_app) as ctor,
+        patch("api.graph.msal.PublicClientApplication") as public_ctor,
     ):
-        app = _msal_app()
-    assert app is mock_public
-    ctor.assert_called_once()
-    confidential_ctor.assert_not_called()
+        result = exchange_code("the-code", "the-verifier", "https://crm.example/auth/entra-complete")
+
+    assert result["refresh_token"] == "rt"
+    assert ctor.call_args[1]["client_credential"] == "super-secret"
+    public_ctor.assert_not_called()
+    kwargs = mock_app.acquire_token_by_authorization_code.call_args[1]
+    assert kwargs["redirect_uri"] == "https://crm.example/auth/entra-complete"
+    # Inside data=, not as a bare kwarg — see test_exchange_code_puts_verifier_on_the_wire.
+    assert kwargs["data"] == {"code_verifier": "the-verifier"}
+
+
+def test_exchange_code_requests_graph_scopes_without_oidc():
+    """MSAL adds openid/profile/offline_access itself; sending them breaks redemption."""
+    mock_app = MagicMock()
+    mock_app.acquire_token_by_authorization_code.return_value = {"access_token": "at"}
+    with (
+        patch.dict(os.environ, {"ENTRA_CLIENT_SECRET": "s"}, clear=False),
+        patch("api.graph.msal.ConfidentialClientApplication", return_value=mock_app),
+    ):
+        exchange_code("c", "v", "https://crm.example/auth/entra-complete")
+
+    scopes = mock_app.acquire_token_by_authorization_code.call_args[1]["scopes"]
+    assert "Calendars.ReadWrite" in scopes
+    assert not {"openid", "profile", "email", "offline_access"} & set(scopes)
+
+
+def test_exchange_code_raises_401_on_aad_error():
+    mock_app = MagicMock()
+    mock_app.acquire_token_by_authorization_code.return_value = {
+        "error": "invalid_grant",
+        "error_description": "AADSTS54005: code already redeemed",
+    }
+    with (
+        patch.dict(os.environ, {"ENTRA_CLIENT_SECRET": "s"}, clear=False),
+        patch("api.graph.msal.ConfidentialClientApplication", return_value=mock_app),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            exchange_code("c", "v", "https://crm.example/auth/entra-complete")
+
+    assert exc.value.status_code == 401
+    assert "AADSTS54005" in exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -619,3 +704,64 @@ async def test_create_event_includes_attendees():
     addresses = [a["emailAddress"]["address"] for a in call_json["attendees"]]
     assert "a@example.com" in addresses
     assert "b@example.com" in addresses
+
+
+def test_exchange_code_puts_verifier_on_the_wire():
+    """The PKCE verifier must reach Azure in the token POST body.
+
+    Exercised through real MSAL against a stub transport rather than a mocked
+    client, because the bug this guards against is invisible at the call site:
+    MSAL accepts **kwargs but merges only its ``data`` dict into the request, so
+    a bare ``code_verifier=`` argument is dropped with no error and Azure
+    rejects the redemption with AADSTS501481.
+    """
+    tenant = "https://login.microsoftonline.com/common"
+    oidc = {
+        "authorization_endpoint": f"{tenant}/oauth2/v2.0/authorize",
+        "token_endpoint": f"{tenant}/oauth2/v2.0/token",
+        "issuer": tenant,
+        "device_authorization_endpoint": f"{tenant}/devicecode",
+    }
+    posted: dict = {}
+
+    class _Resp:
+        status_code = 200
+        headers: dict = {}
+
+        def __init__(self, payload):
+            self._payload = payload
+            self.text = json.dumps(payload)
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            pass
+
+    class _StubHttp:
+        def get(self, url, **kwargs):
+            return _Resp(oidc)
+
+        def post(self, url, params=None, data=None, headers=None, **kwargs):
+            posted.update(data or {})
+            return _Resp({"access_token": "at", "token_type": "Bearer", "expires_in": 3600})
+
+    real_ctor = msal.ConfidentialClientApplication
+
+    def _with_stub_transport(**kwargs):
+        return real_ctor(**kwargs, http_client=_StubHttp())
+
+    with (
+        patch.dict(os.environ, {"ENTRA_CLIENT_SECRET": "s"}, clear=False),
+        patch("api.graph.msal.ConfidentialClientApplication", side_effect=_with_stub_transport),
+        warnings.catch_warnings(),
+    ):
+        warnings.simplefilter("ignore", DeprecationWarning)
+        exchange_code("the-code", "the-verifier", "https://crm.example/auth/entra-complete")
+
+    assert posted.get("code_verifier") == "the-verifier"
+    assert posted.get("grant_type") == "authorization_code"
+    assert posted.get("redirect_uri") == "https://crm.example/auth/entra-complete"
+    # Confidential redemption: the secret must be on the wire too, or the
+    # refresh token Azure returns is not one this server can redeem later.
+    assert posted.get("client_secret") == "s"

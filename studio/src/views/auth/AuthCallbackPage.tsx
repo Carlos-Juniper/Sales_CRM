@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Leaf } from 'lucide-react'
-import { exchangeCodeForTokens } from '@/lib/azureAuth'
-import { entraCallback, storeMsGraphToken } from '@/api/auth'
+import { consumePkce } from '@/lib/azureAuth'
+import { entraComplete } from '@/api/auth'
 import { useAuthStore } from '@/store/authStore'
 
 function roleDefaultRoute(role: string) {
@@ -31,25 +31,12 @@ export default function AuthCallbackPage() {
           return
         }
 
-        const tokens = await exchangeCodeForTokens(code, state)
-        const user = await entraCallback(tokens.id_token)
+        // The backend redeems the code and stores the Graph tokens in the same
+        // call, so there is no separate token-storage step here any more. It
+        // has to be the backend: a code redeemed by this page would yield a
+        // SPA-bound refresh token the server could never use.
+        const user = await entraComplete({ code, ...consumePkce(state) })
         login(user)
-
-        // Store Graph tokens server-side so email/calendar features work.
-        // This is best-effort — if it fails the user is still logged in,
-        // and they'll see a "connect Microsoft" prompt when they try to send email.
-        if (tokens.access_token && tokens.refresh_token) {
-          try {
-            await storeMsGraphToken({
-              access_token: tokens.access_token,
-              refresh_token: tokens.refresh_token,
-              expires_in: tokens.expires_in,
-              scope: tokens.scope,
-            })
-          } catch {
-            // non-fatal — Graph features will surface a reconnect prompt
-          }
-        }
 
         navigate(roleDefaultRoute(user.role), { replace: true })
       } catch {

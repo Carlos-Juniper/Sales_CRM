@@ -13,20 +13,20 @@ vi.mock('react-router-dom', async (importOriginal) => {
 })
 
 // ── azureAuth ─────────────────────────────────────────────────────────────────
-const mockExchangeCodeForTokens = vi.fn()
+const mockConsumePkce = vi.fn()
 
 vi.mock('@/lib/azureAuth', () => ({
-  exchangeCodeForTokens: (code: string, state: string) =>
-    mockExchangeCodeForTokens(code, state),
+  consumePkce: (state: string) => mockConsumePkce(state),
 }))
 
 // ── api/auth ──────────────────────────────────────────────────────────────────
-const mockEntraCallback = vi.fn()
-const mockStoreMsGraphToken = vi.fn()
+// One backend call now does what exchangeCodeForTokens + entraCallback +
+// storeMsGraphToken used to do across three. The redemption moved server-side so
+// the Graph refresh token is one the backend can actually redeem later.
+const mockEntraComplete = vi.fn()
 
 vi.mock('@/api/auth', () => ({
-  entraCallback: (idToken: string) => mockEntraCallback(idToken),
-  storeMsGraphToken: (payload: unknown) => mockStoreMsGraphToken(payload),
+  entraComplete: (payload: unknown) => mockEntraComplete(payload),
 }))
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -40,30 +40,27 @@ function setCallbackUrl(params: Record<string, string>) {
   })
 }
 
-const GOOD_TOKENS = {
-  id_token: 'id-tok',
-  access_token: 'at-xxx',
-  refresh_token: 'rt-xxx',
-  expires_in: 3600,
-  scope: 'Mail.Send Calendars.ReadWrite',
+const PKCE = {
+  code_verifier: 'verifier-xyz',
+  redirect_uri: 'http://localhost:5174/auth/entra-complete',
 }
 
 // ── suite ─────────────────────────────────────────────────────────────────────
 
-describe('AuthCallbackPage — Entra token exchange', () => {
+describe('AuthCallbackPage — Entra sign-in completion', () => {
   beforeEach(() => {
     mockNavigate.mockClear()
-    mockExchangeCodeForTokens.mockReset()
-    mockEntraCallback.mockReset()
-    mockStoreMsGraphToken.mockReset()
+    mockConsumePkce.mockReset()
+    mockEntraComplete.mockReset()
+    mockConsumePkce.mockReturnValue(PKCE)
     useAuthStore.setState({ user: null, isLoading: false })
   })
 
   // ── loading UI ──────────────────────────────────────────────────────────────
 
   it('renders the "Completing sign-in" spinner while the exchange is in flight', () => {
-    // Keep exchange pending so the component stays in the loading state.
-    mockExchangeCodeForTokens.mockReturnValue(new Promise(() => {}))
+    // Keep the exchange pending so the component stays in the loading state.
+    mockEntraComplete.mockReturnValue(new Promise(() => {}))
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })
 
     render(<AuthCallbackPage />)
@@ -78,11 +75,10 @@ describe('AuthCallbackPage — Entra token exchange', () => {
 
     render(<AuthCallbackPage />)
 
-    // Let the microtask queue flush.
     await vi.waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true })
     })
-    expect(mockExchangeCodeForTokens).not.toHaveBeenCalled()
+    expect(mockEntraComplete).not.toHaveBeenCalled()
   })
 
   it('redirects to /login when the state param is absent', async () => {
@@ -93,91 +89,62 @@ describe('AuthCallbackPage — Entra token exchange', () => {
     await vi.waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true })
     })
-    expect(mockExchangeCodeForTokens).not.toHaveBeenCalled()
+    expect(mockEntraComplete).not.toHaveBeenCalled()
   })
 
   // ── happy path ──────────────────────────────────────────────────────────────
 
-  it('exchanges code for tokens, calls entraCallback, and stores the user', async () => {
+  it('sends the code with the stored PKCE material and stores the user', async () => {
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })
-    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
     const user = makeUser({ role: 'inside_sales' })
-    mockEntraCallback.mockResolvedValue(user)
-    mockStoreMsGraphToken.mockResolvedValue({ ok: true })
+    mockEntraComplete.mockResolvedValue(user)
 
     render(<AuthCallbackPage />)
 
     await vi.waitFor(() => {
-      expect(mockExchangeCodeForTokens).toHaveBeenCalledWith('auth-code', 'st-123')
-      expect(mockEntraCallback).toHaveBeenCalledWith(GOOD_TOKENS.id_token)
+      expect(mockConsumePkce).toHaveBeenCalledWith('st-123')
+      expect(mockEntraComplete).toHaveBeenCalledWith({ code: 'auth-code', ...PKCE })
       expect(useAuthStore.getState().user).toEqual(user)
     })
   })
 
-  it('stores Graph tokens server-side after a successful exchange', async () => {
+  it('never redeems the code in the browser — no token call leaves this page', async () => {
+    // A browser redemption is exactly what produced SPA-bound refresh tokens
+    // (AADSTS9002327) that the backend could never refresh for Calendar/Mail.
+    const fetchSpy = vi.fn()
+    globalThis.fetch = fetchSpy as unknown as typeof fetch
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })
-    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
-    mockEntraCallback.mockResolvedValue(makeUser())
-    mockStoreMsGraphToken.mockResolvedValue({ ok: true })
+    mockEntraComplete.mockResolvedValue(makeUser())
 
     render(<AuthCallbackPage />)
 
-    await vi.waitFor(() => {
-      expect(mockStoreMsGraphToken).toHaveBeenCalledWith({
-        access_token: GOOD_TOKENS.access_token,
-        refresh_token: GOOD_TOKENS.refresh_token,
-        expires_in: GOOD_TOKENS.expires_in,
-        scope: GOOD_TOKENS.scope,
-      })
-    })
+    await vi.waitFor(() => expect(mockEntraComplete).toHaveBeenCalled())
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   // ── role-based routing ──────────────────────────────────────────────────────
 
-  it('navigates inside_sales users to /inside-sales', async () => {
+  it.each([
+    ['inside_sales', '/inside-sales'],
+    ['outside_sales', '/outside-sales'],
+    // BranchManagerPage removed in Slice 12; managers land on settings.
+    ['manager', '/settings'],
+  ])('navigates %s users to %s', async (role, route) => {
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })
-    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
-    mockEntraCallback.mockResolvedValue(makeUser({ role: 'inside_sales' }))
-    mockStoreMsGraphToken.mockResolvedValue({ ok: true })
+    mockEntraComplete.mockResolvedValue(makeUser({ role: role as 'inside_sales' }))
 
     render(<AuthCallbackPage />)
 
     await vi.waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales', { replace: true })
-    })
-  })
-
-  it('navigates outside_sales users to /outside-sales', async () => {
-    setCallbackUrl({ code: 'auth-code', state: 'st-123' })
-    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
-    mockEntraCallback.mockResolvedValue(makeUser({ role: 'outside_sales' }))
-    mockStoreMsGraphToken.mockResolvedValue({ ok: true })
-
-    render(<AuthCallbackPage />)
-
-    await vi.waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/outside-sales', { replace: true })
-    })
-  })
-
-  it('navigates manager users to /settings (BranchManagerPage removed in Slice 12)', async () => {
-    setCallbackUrl({ code: 'auth-code', state: 'st-123' })
-    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
-    mockEntraCallback.mockResolvedValue(makeUser({ role: 'manager' }))
-    mockStoreMsGraphToken.mockResolvedValue({ ok: true })
-
-    render(<AuthCallbackPage />)
-
-    await vi.waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/settings', { replace: true })
+      expect(mockNavigate).toHaveBeenCalledWith(route, { replace: true })
     })
   })
 
   // ── error handling ──────────────────────────────────────────────────────────
 
-  it('redirects to /login?error=sso_failed when token exchange throws', async () => {
+  it('redirects to /login?error=sso_failed when the backend exchange throws', async () => {
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })
-    mockExchangeCodeForTokens.mockRejectedValue(new Error('Token exchange failed'))
+    mockEntraComplete.mockRejectedValue(new Error('Microsoft sign-in failed'))
 
     render(<AuthCallbackPage />)
 
@@ -190,10 +157,11 @@ describe('AuthCallbackPage — Entra token exchange', () => {
     expect(useAuthStore.getState().user).toBeNull()
   })
 
-  it('redirects to /login?error=sso_failed when entraCallback throws', async () => {
-    setCallbackUrl({ code: 'auth-code', state: 'st-123' })
-    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
-    mockEntraCallback.mockRejectedValue(new Error('Backend refused token'))
+  it('redirects to /login?error=sso_failed when the state check fails', async () => {
+    setCallbackUrl({ code: 'auth-code', state: 'tampered' })
+    mockConsumePkce.mockImplementation(() => {
+      throw new Error('Invalid OAuth state or missing PKCE verifier')
+    })
 
     render(<AuthCallbackPage />)
 
@@ -203,21 +171,6 @@ describe('AuthCallbackPage — Entra token exchange', () => {
         { replace: true },
       )
     })
-  })
-
-  it('still navigates the user on success even when storeMsGraphToken fails', async () => {
-    setCallbackUrl({ code: 'auth-code', state: 'st-123' })
-    mockExchangeCodeForTokens.mockResolvedValue(GOOD_TOKENS)
-    const user = makeUser({ role: 'inside_sales' })
-    mockEntraCallback.mockResolvedValue(user)
-    // Graph token store is best-effort — failure must not block sign-in.
-    mockStoreMsGraphToken.mockRejectedValue(new Error('Graph store unavailable'))
-
-    render(<AuthCallbackPage />)
-
-    await vi.waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/inside-sales', { replace: true })
-    })
-    expect(useAuthStore.getState().user).toEqual(user)
+    expect(mockEntraComplete).not.toHaveBeenCalled()
   })
 })

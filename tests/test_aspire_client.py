@@ -173,3 +173,45 @@ class TestLifecycle:
         async with AspireClient(client=http) as client:
             assert client is not None
         assert http.aclose.called
+
+
+class TestEnvironmentSelection:
+    """ASPIRE_ENV picks the host and the credential pair.
+
+    These monkeypatch ASPIRE_ENV explicitly rather than leaning on whatever the
+    process happens to have. Before tests/conftest.py pinned it, the ambient
+    value from a developer's .env decided which branch ran — which is how the
+    real ASPIRE_SANDBOX_SECRET ended up in a failure message. Deciding it per
+    test means both branches are covered and neither depends on the machine.
+    """
+
+    def test_defaults_to_prod_when_unset(self, monkeypatch):
+        monkeypatch.delenv("ASPIRE_ENV", raising=False)
+        assert ac._resolve_env() == "prod"
+
+    def test_reads_and_normalises_the_env_var(self, monkeypatch):
+        monkeypatch.setenv("ASPIRE_ENV", "  SandBox  ")
+        assert ac._resolve_env() == "sandbox"
+
+    def test_prod_uses_the_prod_credential_pair(self, monkeypatch):
+        monkeypatch.setenv("ASPIRE_CLIENT_ID", "prod-id")
+        monkeypatch.setenv("ASPIRE_SECRET", "prod-secret")
+        assert ac._resolve_credentials("prod") == ("prod-id", "prod-secret")
+
+    def test_sandbox_uses_the_sandbox_credential_pair(self, monkeypatch):
+        monkeypatch.setenv("ASPIRE_SANDBOX_CLIENT_ID", "sbx-id")
+        monkeypatch.setenv("ASPIRE_SANDBOX_SECRET", "sbx-secret")
+        assert ac._resolve_credentials("sandbox") == ("sbx-id", "sbx-secret")
+
+    def test_sandbox_never_falls_back_to_prod_credentials(self, monkeypatch):
+        """A missing sandbox credential must fail, not silently hit production."""
+        monkeypatch.delenv("ASPIRE_SANDBOX_CLIENT_ID", raising=False)
+        monkeypatch.setenv("ASPIRE_CLIENT_ID", "prod-id")
+        with pytest.raises(KeyError):
+            ac._resolve_credentials("sandbox")
+
+    def test_base_url_follows_the_environment(self, monkeypatch):
+        monkeypatch.setenv("ASPIRE_SANDBOX_BASE_URL", "https://sandbox.example")
+        monkeypatch.setenv("ASPIRE_BASE_URL", "https://prod.example")
+        assert ac._resolve_base_url("sandbox") == "https://sandbox.example"
+        assert ac._resolve_base_url("prod") == "https://prod.example"

@@ -59,12 +59,20 @@ def as_role():
 # ── Canonical role model ─────────────────────────────────────────────────────
 
 class TestRoleModel:
-    def test_ten_canonical_roles(self):
+    def test_eleven_canonical_roles(self):
         assert authz.CANONICAL_ROLES == frozenset({
             "procurement", "sales", "inside_sales", "admin", "manager",
             "regional_director", "maintenance_estimating", "install_estimating",
             "vice_president", "ceo",
+            # Handoff 50 §3 (437c508): cross-branch owner of the company-wide
+            # proposal assets. Not an estimator or approver — the two tests
+            # below pin it out of those sets.
+            "marketing",
         })
+
+    def test_marketing_is_neither_estimator_nor_approver(self):
+        assert "marketing" not in authz.ESTIMATOR_ROLES
+        assert "marketing" not in authz.APPROVER_ROLES
 
     def test_only_outside_sales_normalizes_to_sales(self):
         assert authz.normalize_role("outside_sales") == "sales"

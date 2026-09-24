@@ -1134,6 +1134,28 @@ describe('ProposalPreview — variable data', () => {
     expect(within(page).getByText('Alice Johnson')).toBeInTheDocument()
   })
 
+  it('renders the bio-box only for a team member with a bio', () => {
+    // A bio'd member gets the green-outlined bio panel; an empty bio must render
+    // no .bio-box at all (not an empty bordered sliver beside the headshot).
+    const noBioMember: TeamMember = {
+      ...mockAccountManager,
+      id: 'tm-am-002',
+      name: 'Nolan Nobio',
+      bio: '',
+    }
+    renderPreview({}, { teamMembers: [mockAccountManager, noBioMember] })
+    const page = screen.getByTestId('page-meet-our-team')
+
+    // Alice has a bio → her card carries a .bio-box; Nolan does not.
+    const cards = page.querySelectorAll('.team-card')
+    const aliceCard = Array.from(cards).find((c) => c.textContent?.includes('Alice Johnson'))
+    const nolanCard = Array.from(cards).find((c) => c.textContent?.includes('Nolan Nobio'))
+    expect(aliceCard).toBeTruthy()
+    expect(nolanCard).toBeTruthy()
+    expect(aliceCard!.querySelector('.bio-box')).not.toBeNull()
+    expect(nolanCard!.querySelector('.bio-box')).toBeNull()
+  })
+
   it('Client References renders the passed reference property name', () => {
     renderPreview({}, { clientReferences: [mockClientRef] })
     const page = screen.getByTestId('page-client-references')

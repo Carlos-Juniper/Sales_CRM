@@ -102,6 +102,11 @@ def _iso(v: Any) -> Any:
     return v
 
 
+# Won/lost proposals stay visible in the packages list for this many days after
+# the status-change action is recorded in lead_actions, then drop automatically.
+CLOSED_PACKAGE_GRACE_DAYS = 7
+
+
 def _package_code(proposal_id: str, created_at: Any) -> str:
     """Stable display code for the proposals list. Not a stored column."""
     if isinstance(created_at, datetime):
@@ -159,6 +164,7 @@ def _proposal_package_out(row: dict) -> dict:
         "amount": amount,
         "status": row.get("lead_status"),
         "updatedAt": _iso(row.get("updated_at")),
+        "closedAt": _iso(row.get("closed_at")),
         "code": _package_code(row["id"], row.get("created_at")),
         "version": int(version) if version is not None else None,
         "pageCount": int(page_count) if page_count is not None else None,
@@ -266,7 +272,10 @@ def _portfolio_property_out(r: dict) -> dict:
         except (json.JSONDecodeError, TypeError):
             photo_keys = []
     else:
-        photo_keys = []
+        # Already a list (a driver that parses JSON columns itself). Pass it
+        # through rather than discarding it — the isinstance guard below still
+        # rejects anything that is not a list, so this cannot widen the shape.
+        photo_keys = photo_keys_raw
 
     return {
         "id": r["id"],
@@ -623,6 +632,12 @@ def register(app, require_auth) -> None:
     #   IN ADDITION to rows matching that branch — not instead of them.
     #   This surfaces the executive roster (team_type='executive') and
     #   company-wide specialist rows alongside branch-specific ones.
+    #
+    #   Third arm (migration 058): a branch manager holds BOTH the Install and
+    #   Maintenance id at their city via user_branches (the canonical service-area
+    #   table, migration 019). Migration 057 pins each manager's team_members row
+    #   to one twin, so the user_branches subquery surfaces them for the other.
+    #   The subquery hits idx_user_branches_branch; the table is small.
 
     @app.get("/api/proposals/config/team-members")
     async def get_proposal_team_members(
@@ -634,9 +649,14 @@ def register(app, require_auth) -> None:
         params: list[Any] = []
 
         if aspire_branch_id is not None:
-            # Include branch-specific AND null-branch (company-wide) rows.
-            conditions.append("(aspire_branch_id = %s OR aspire_branch_id IS NULL)")
-            params.append(aspire_branch_id)
+            # Include branch-specific, null-branch (company-wide) rows, AND any
+            # row whose linked user holds this branch in user_branches (e.g. a
+            # manager whose team_members row is pinned to the twin branch id).
+            conditions.append(
+                "(aspire_branch_id = %s OR aspire_branch_id IS NULL"
+                " OR user_id IN (SELECT user_id FROM user_branches WHERE aspire_branch_id = %s))"
+            )
+            params.extend([aspire_branch_id, aspire_branch_id])
 
         if team_type:
             conditions.append("team_type = %s")
@@ -899,13 +919,24 @@ def register(app, require_auth) -> None:
     ) -> list:
         # The Proposals queue asks to omit closed leads. Status values match
         # leads.status (won, lost). Applied here so those rows are never fetched.
+        # Grace window: an excluded-status row is still returned if its terminal
+        # status_change was recorded within CLOSED_PACKAGE_GRACE_DAYS days, so
+        # reps see recently-won/lost proposals for a week before they disappear.
         excluded = [s.strip() for s in (exclude_status or "").split(",") if s.strip()]
         where = ""
         params: list[Any] = []
         if excluded:
             placeholders = ", ".join(["%s"] * len(excluded))
-            where = f"WHERE l.status NOT IN ({placeholders})"
-            params = excluded
+            where = (
+                f"WHERE l.status NOT IN ({placeholders})"
+                " OR COALESCE((SELECT MAX(la.performed_at)"
+                "               FROM lead_actions la"
+                "              WHERE la.lead_id = l.id"
+                "                AND la.action_type = 'status_change'"
+                "                AND la.new_status = l.status), '1970-01-01')"
+                " >= NOW() - INTERVAL %s DAY"
+            )
+            params = excluded + [CLOSED_PACKAGE_GRACE_DAYS]
         rows = await query(
             f"""
             SELECT
@@ -928,7 +959,12 @@ def register(app, require_auth) -> None:
                 u.branch_id AS assignee_branch_id,
                 u.avatar_initials AS assignee_initials,
                 rend.version AS render_version,
-                rend.page_count
+                rend.page_count,
+                (SELECT MAX(la2.performed_at)
+                   FROM lead_actions la2
+                  WHERE la2.lead_id = l.id
+                    AND la2.action_type = 'status_change'
+                    AND la2.new_status = l.status) AS closed_at
             FROM proposal_requests pr
             INNER JOIN leads l
                 ON l.id = pr.lead_id AND l.deleted_at IS NULL
@@ -1199,7 +1235,8 @@ def register(app, require_auth) -> None:
         user: dict = Depends(require_auth),
     ):
         rows = await query(
-            "SELECT id, lead_id, estimate_id FROM proposal_requests WHERE id = %s",
+            "SELECT id, lead_id, estimate_id, team_member_ids, executive_team_member_ids"
+            " FROM proposal_requests WHERE id = %s",
             (proposal_id,),
         )
         if not rows:
@@ -1211,6 +1248,7 @@ def register(app, require_auth) -> None:
         from api.proposal_validation import (
             validate_proposal_for_render,
             proposal_document_warnings,
+            proposal_team_bio_warnings,
         )
 
         guard_issues = await validate_proposal_for_render(proposal_id)
@@ -1238,6 +1276,22 @@ def register(app, require_auth) -> None:
             warnings = await proposal_document_warnings(estimate_id=estimate_id)
         elif _lead_id_for_warn:
             warnings = await proposal_document_warnings(lead_id=_lead_id_for_warn)
+
+        # Non-blocking bio warnings: each selected team member with an empty bio
+        # will render a card without body text — warn so the rep can fill it
+        # before sending. Decode both id lists and deduplicate.
+        _raw_tm = rows[0].get("team_member_ids") or "[]"
+        _raw_exec = rows[0].get("executive_team_member_ids") or "[]"
+        try:
+            _tm_ids: list[str] = json.loads(_raw_tm) if isinstance(_raw_tm, (str, bytes)) else list(_raw_tm or [])
+        except (json.JSONDecodeError, TypeError):
+            _tm_ids = []
+        try:
+            _exec_ids: list[str] = json.loads(_raw_exec) if isinstance(_raw_exec, (str, bytes)) else list(_raw_exec or [])
+        except (json.JSONDecodeError, TypeError):
+            _exec_ids = []
+        _all_tm_ids = list(dict.fromkeys([str(i) for i in _tm_ids + _exec_ids if i]))
+        warnings += await proposal_team_bio_warnings(_all_tm_ids)
 
         try:
             from api.proposal_render import render_proposal_pdf

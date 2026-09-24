@@ -282,6 +282,7 @@ export const mockProposalPackages: ProposalPackageSummary[] = [
     code: 'P-2026-TEMP01',
     version: 2,
     pageCount: 18,
+    closedAt: null,
     assignee: assignee(mockUsers[1]),
   },
   {
@@ -296,6 +297,7 @@ export const mockProposalPackages: ProposalPackageSummary[] = [
     code: 'P-2026-SUSD01',
     version: 1,
     pageCount: 14,
+    closedAt: null,
     assignee: assignee(mockUsers[4]),
   },
   {
@@ -310,6 +312,7 @@ export const mockProposalPackages: ProposalPackageSummary[] = [
     code: 'P-2026-DOBS01',
     version: 1,
     pageCount: 12,
+    closedAt: null,
     assignee: assignee(mockUsers[1]),
   },
   {
@@ -324,6 +327,7 @@ export const mockProposalPackages: ProposalPackageSummary[] = [
     code: 'P-2026-MARI01',
     version: null,
     pageCount: null,
+    closedAt: null,
     assignee: null,
   },
   {
@@ -338,6 +342,32 @@ export const mockProposalPackages: ProposalPackageSummary[] = [
     code: 'P-2026-GILB01',
     version: 3,
     pageCount: 22,
+    // Won, but closed longer than 7 days ago: past the grace window, so the API
+    // excludes it and it carries no badge. `closedAt` is null once grace lapses.
+    closedAt: null,
     assignee: assignee(mockUsers[2]),
   },
 ]
+
+/**
+ * A won package still inside its 7-day grace window: the API keeps it in the
+ * list and stamps `closedAt`, so the queue shows a green Won badge before the
+ * row ages out. Kept out of {@link mockProposalPackages} (and the default list
+ * handler) so it doesn't perturb the default queue — tests opt in by injecting
+ * it via a per-test MSW handler override. Mirrors the backend grace behaviour.
+ */
+export const mockGraceWonPackage: ProposalPackageSummary = {
+  id: 'prop-desert-ridge',
+  leadId: 'l14',
+  propertyId: 'prop-l14',
+  title: 'Desert Ridge Marketplace',
+  subtitle: 'Phoenix, AZ',
+  amount: 165000,
+  status: 'won',
+  updatedAt: new Date(Date.now() - 2 * 24 * 3600000).toISOString(),
+  code: 'P-2026-DRDG01',
+  version: 1,
+  pageCount: 16,
+  closedAt: new Date(Date.now() - 2 * 24 * 3600000).toISOString(),
+  assignee: assignee(mockUsers[2]),
+}

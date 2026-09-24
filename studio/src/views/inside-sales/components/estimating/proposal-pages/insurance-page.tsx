@@ -17,6 +17,11 @@
 // Same shape as LicenseImage in ./shared, except a failure here is visible:
 // a bare heading over white space reads as an oversight to the client, so the
 // page says what happened instead of printing an empty well.
+//
+// The `insurance` class makes the well a column flex container so the scan
+// sizes to whatever the heading leaves, rather than to a fixed max-height that
+// pushed a letter-proportioned scan under the footer bar. Same device as the
+// `portfolio` sheets; see .insurance-cert-embed in proposal-print.css.
 // ---------------------------------------------------------------------------
 
 import { useState } from 'react'
@@ -34,7 +39,7 @@ export function InsurancePage({
   const { data } = useProposalMediaUrl(cert?.objectKey ?? null)
   const url = cert && data?.url && !failed ? data.url : null
   return (
-    <PrintPage data-testid="page-insurance">
+    <PrintPage className="insurance" data-testid="page-insurance">
       <p className="eyebrow">Coverage &amp; Compliance</p>
       <h1 className="page-title">{copy.heading}</h1>
       {url ? (

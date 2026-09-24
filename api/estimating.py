@@ -264,6 +264,99 @@ def _iso(v: Any) -> Any:
     return v
 
 
+# BRD I-6.2 estimating return window, in calendar days. The live value is
+# company_settings.sla_return_window_days (migration 020 seeds 14, the same
+# number as studio SLA_CONFIG.returnWindowDays). This constant is the only
+# backend spelling of that day count, and the fallback when the singleton
+# row is missing. A needed-back date inside the window is a rush job, not
+# a validation error — the window is no longer a minimum lead time.
+SLA_RETURN_WINDOW_DAYS = 14
+
+
+def _coerce_date(value: Any) -> Optional[date]:
+    """Calendar date from a SQL DATE, datetime, or YYYY-MM-DD string.
+
+    Returns None for blank or unparseable values. Serializers use this so a
+    bad stored date cannot 500 a read; writers validate separately.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if len(text) < 10:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _require_due_back_not_past(value: Any, *, today: Optional[date] = None) -> None:
+    """Reject a needed-back / dueBackDate that is already in the past.
+
+    Applies to maintenance and install intake. Both forms write the same
+    estimates.due_back_date column (maintenance "Needed back", install
+    "Internal deadline") through create and PATCH. Dates inside the SLA
+    window are accepted; they are flagged isRush instead of blocked.
+    Omitted or blank is allowed — create defaults the column to today.
+    """
+    if value is None or value == "":
+        return
+    due = _coerce_date(value)
+    if due is None:
+        raise HTTPException(
+            status_code=400,
+            detail="dueBackDate must be a YYYY-MM-DD date",
+        )
+    if due < (today or date.today()):
+        raise HTTPException(
+            status_code=400,
+            detail="dueBackDate cannot be in the past",
+        )
+
+
+def _is_rush(
+    due_value: Any,
+    window_days: int = SLA_RETURN_WINDOW_DAYS,
+    *,
+    today: Optional[date] = None,
+) -> bool:
+    """True when needed-back falls strictly inside the SLA return window.
+
+    Calendar days from today until due_back_date. Due today through
+    window_days - 1 is a rush so estimators can prioritize a short
+    turnaround. window_days or more meets the SLA and is not a rush.
+    A missing date or a date already in the past is not a rush — past
+    dates are rejected on write, and a stored overdue date is the queue's
+    breached SLA state rather than a new rush flag.
+    """
+    due = _coerce_date(due_value)
+    if due is None:
+        return False
+    days_out = (due - (today or date.today())).days
+    return 0 <= days_out < window_days
+
+
+async def _sla_return_window_days() -> int:
+    """Read the estimating SLA window from company_settings.
+
+    Falls back to SLA_RETURN_WINDOW_DAYS only when the singleton row is
+    absent — never invents a different number.
+    """
+    rows = await query(
+        "SELECT sla_return_window_days FROM company_settings WHERE id = %s", [1]
+    )
+    if not rows or rows[0].get("sla_return_window_days") is None:
+        return SLA_RETURN_WINDOW_DAYS
+    try:
+        return int(rows[0]["sla_return_window_days"])
+    except (TypeError, ValueError):
+        return SLA_RETURN_WINDOW_DAYS
+
+
 def _component_out(r: dict) -> dict:
     return {
         "id": r["id"],
@@ -327,7 +420,12 @@ def _section_out(r: dict, services: list[dict]) -> dict:
     }
 
 
-def _estimate_out(r: dict, sections: list[dict]) -> dict:
+def _estimate_out(
+    r: dict,
+    sections: list[dict],
+    *,
+    sla_window_days: int = SLA_RETURN_WINDOW_DAYS,
+) -> dict:
     return {
         "id": r["id"],
         "estimateType": r["estimate_type"],
@@ -363,6 +461,10 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         "winProbability": _num(r["win_probability"]),
         "siteWalkDate": _iso(r["site_walk_date"]),
         "dueBackDate": _iso(r["due_back_date"]),
+        # Computed, not stored. True when dueBackDate (the intake needed-back
+        # date) is inside the SLA window. The queue sorts by that date, so a
+        # rush row already surfaces ahead of a longer lead time.
+        "isRush": _is_rush(r.get("due_back_date"), sla_window_days),
         "anticipatedCloseDate": _iso(r["anticipated_close_date"]),
         "serviceStartDate": _iso(r["service_start_date"]),
         "assignedLsEstimator": r["assigned_ls_estimator"],
@@ -397,7 +499,9 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
     }
 
 
-async def _load_estimate(estimate_id: str) -> Optional[dict]:
+async def _load_estimate(
+    estimate_id: str, *, sla_window_days: Optional[int] = None
+) -> Optional[dict]:
     """Assemble the full estimate → sections → services → components tree.
 
     Slice 14: LEFT JOIN to branches on aspire_branch_id so that branchCity is
@@ -462,7 +566,9 @@ async def _load_estimate(estimate_id: str) -> Optional[dict]:
         )
 
     sections = [_section_out(s, services_by_section.get(s["id"], [])) for s in section_rows]
-    return _estimate_out(est, sections)
+    if sla_window_days is None:
+        sla_window_days = await _sla_return_window_days()
+    return _estimate_out(est, sections, sla_window_days=sla_window_days)
 
 
 def _new_id(prefix: str) -> str:
@@ -1504,10 +1610,18 @@ def register(app, require_auth) -> None:
             conditions.append("lead_id = %s")
             params.append(lead_id)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        # created_at order is the API default. The estimating queue re-sorts
+        # by priority or by dueBackDate. Rush is derived from that due date
+        # (sooner than the SLA window), so a deadline sort already places
+        # rush estimates ahead of longer lead times. Nothing is stored.
         rows = await query(
             f"SELECT id FROM estimates {where} ORDER BY created_at DESC", params
         )
-        return [await _load_estimate(r["id"]) for r in rows]
+        if not rows:
+            return []
+        window = await _sla_return_window_days()
+        loaded = [await _load_estimate(r["id"], sla_window_days=window) for r in rows]
+        return [est for est in loaded if est is not None]
 
     @app.post("/api/estimating/estimates", status_code=201)
     async def create_estimate(
@@ -1524,6 +1638,10 @@ def register(app, require_auth) -> None:
                 status_code=400,
                 detail="aspireBranchId is required — select a branch from the intake form",
             )
+        # Needed-back may be inside the SLA window (a rush). Only a past
+        # date is rejected, and the check runs before any INSERT. Maintenance
+        # and install share this column.
+        _require_due_back_not_past(body.get("dueBackDate"))
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
             await _require_resolvable_maintenance_lines([
@@ -1736,6 +1854,10 @@ def register(app, require_auth) -> None:
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
         current = rows[0]
+        # Same needed-back rule as create: past dates rejected, short
+        # turnarounds kept and flagged isRush on the reloaded estimate.
+        if "dueBackDate" in body:
+            _require_due_back_not_past(body.get("dueBackDate"))
         if "estimateType" in body and body["estimateType"] != current["estimate_type"]:
             raise HTTPException(
                 status_code=400,

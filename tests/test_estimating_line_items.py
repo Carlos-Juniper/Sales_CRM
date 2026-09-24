@@ -257,7 +257,7 @@ def _maintenance_payload() -> dict:
         "customerType": "hoa",
         "contractValueCents": 5_077_395,
         "targetMargin": 0.22,
-        "dueBackDate": "2026-08-20",
+        "dueBackDate": "2027-08-20",
         "sections": [
             {
                 "name": "Common Area",
@@ -294,7 +294,7 @@ def _install_payload() -> dict:
         "customerType": "commercial",
         "contractValueCents": 5_342_000,
         "targetMargin": 0.42,
-        "dueBackDate": "2026-08-25",
+        "dueBackDate": "2027-08-25",
         "sections": [
             {
                 "name": "Phase 1 — Planting",

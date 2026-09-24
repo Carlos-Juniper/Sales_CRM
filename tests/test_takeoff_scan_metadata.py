@@ -292,9 +292,10 @@ class TestManualTakeoffMetadata:
                 # current-status guard read
                 [{"estimate_type": "maintenance", "status": "in_progress",
                   "aspire_opportunity_id": None}],
-                # _load_estimate: estimate row + (no) sections
+                # _load_estimate: estimate row + (no) sections + SLA window
                 [_full_est_row(turf_area_acres=12.5, curb_miles=3.4)],
                 [],
+                [{"sla_return_window_days": 14}],
             ]
             resp = client.patch(
                 "/api/estimating/estimates/est-1",

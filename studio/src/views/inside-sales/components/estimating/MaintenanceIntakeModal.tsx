@@ -43,6 +43,7 @@ import { useToast } from './useToast'
 import type { BranchOption, Estimate, MaintenanceCustomerType } from '@/types/estimating'
 import { FileAttachRow, type AttachedFile } from './IntakeFileAttachRow'
 import { useAttachmentUpload } from '@/lib/estimating/useAttachmentUpload'
+import { RFP_FILE_ACCEPT } from '@/lib/estimating/rfpContentTypes'
 
 // ----- Types -----------------------------------------------------------------
 
@@ -108,7 +109,7 @@ export function MaintenanceIntakeModal({
 }: MaintenanceIntakeModalProps) {
   const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
-  const { upload: uploadFile } = useAttachmentUpload()
+  const { upload: uploadFile, lastUploadError } = useAttachmentUpload()
 
   const [form, setForm] = useState<FormState>(() => ({
     contactName: '',
@@ -325,16 +326,27 @@ export function MaintenanceIntakeModal({
       })
 
       // Upload each file directly to GCS — presign → XHR PUT → confirm per file.
-      // Errors are non-fatal: the estimate already exists; estimator sees the row
-      // as name-only and can resubmit files outside the modal.
+      // One hook, so uploads run one at a time and each failure's API `detail`
+      // (or the client-side rejection) is available on lastUploadError.
+      // Errors are non-fatal: the estimate already exists; the toast shows the
+      // detail and the estimator can resubmit files outside the modal.
       const uploads: Array<() => Promise<unknown>> = [
         ...(propertyMapFile ? [() => uploadFile(created.id, propertyMapFile.file, 'property_map')] : []),
         ...(rfpFile ? [() => uploadFile(created.id, rfpFile.file, 'rfp')] : []),
         ...otherFiles.map((f) => () => uploadFile(created.id, f.file, 'other')),
       ]
-      await Promise.allSettled(uploads.map((fn) => fn()))
+      const uploadErrors: string[] = []
+      for (const start of uploads) {
+        const attachment = await start()
+        const uploadError = lastUploadError()
+        if (!attachment && uploadError) uploadErrors.push(uploadError)
+      }
 
-      show('Maintenance estimate created — opening editor…')
+      show(
+        uploadErrors.length > 0
+          ? uploadErrors.join(' ')
+          : 'Maintenance estimate created — opening editor…',
+      )
       onCreated(created)
       openEstimateAt(created, 'editor')
       onClose()
@@ -685,11 +697,12 @@ export function MaintenanceIntakeModal({
               {/* RFP document */}
               <FileAttachRow
                 label="RFP document"
-                hint="PDF"
+                hint="PDF, Word (.doc, .docx), or Excel (.xls, .xlsx)"
                 file={rfpFile}
                 testId="rfp-file-area"
                 inputRef={rfpRef}
-                accept="application/pdf"
+                accept={RFP_FILE_ACCEPT}
+                actionLabel="Attach file"
                 onChange={handleRfpChange}
                 onClear={() => setRfpFile(null)}
               />

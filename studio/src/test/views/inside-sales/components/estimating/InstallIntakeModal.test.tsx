@@ -419,6 +419,35 @@ describe('InstallIntakeModal — file attachments (AC §3 bullet 3)', () => {
     expect(screen.getByText(/site-plan\.pdf/i)).toBeInTheDocument()
   })
 
+  it('accepts Word and Excel on the RFP input and keeps the property map PDF-only', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    const rfpArea = document.querySelector('[data-testid="install-rfp-file-area"]')!
+    const rfpInput = rfpArea.querySelector('input[type="file"]') as HTMLInputElement
+    expect(rfpInput.accept).toContain('.docx')
+    expect(rfpInput.accept).toContain('.xlsx')
+    expect(rfpInput.accept).toContain('.doc')
+    expect(rfpInput.accept).toContain('.xls')
+    expect(rfpInput.accept).toContain('application/pdf')
+
+    const mapArea = document.querySelector('[data-testid="install-property-map-file-area"]')!
+    const mapInput = mapArea.querySelector('input[type="file"]') as HTMLInputElement
+    expect(mapInput.accept).toBe('application/pdf')
+
+    const docx = new File(['PK'], 'scope.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
+    await user.upload(rfpInput, docx)
+    expect(screen.getByText(/scope\.docx/i)).toBeInTheDocument()
+
+    const xlsx = new File(['PK'], 'pricing.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    await user.upload(rfpInput, xlsx)
+    expect(screen.getByText(/pricing\.xlsx/i)).toBeInTheDocument()
+  })
+
   it('accepts a PDF for the RFP document', async () => {
     const user = userEvent.setup()
     renderModal()

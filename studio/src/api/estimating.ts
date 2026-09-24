@@ -277,12 +277,16 @@ export const estimatingApi = {
   retryAspireSync: (id: string) =>
     apiClient.post<{ status: string }>(`/estimating/estimates/${id}/retry-aspire-sync`, {}),
 
-  /** Presign a GCS resumable upload session for a single PDF attachment. */
+  /**
+   * Presign a GCS resumable upload session. RFP (`kind: "rfp"`) accepts PDF,
+   * Word, and Excel; every other kind stays on its own allowlist. The returned
+   * `contentType` is the MIME the browser PUT must send.
+   */
   presignAttachment: (
     estimateId: string,
     body: { kind: import('@/types/estimating').AttachmentKind; fileName: string; contentType: string; sizeBytes: number },
   ) =>
-    apiClient.post<{ attachmentId: string; objectKey: string; uploadUrl: string }>(
+    apiClient.post<{ attachmentId: string; objectKey: string; uploadUrl: string; contentType: string }>(
       `/estimating/estimates/${estimateId}/attachments/presign`,
       body,
     ),
@@ -328,7 +332,7 @@ export const estimatingApi = {
     leadId: string,
     body: { kind: import('@/types/estimating').AttachmentKind; fileName: string; contentType: string; sizeBytes: number },
   ) =>
-    apiClient.post<{ attachmentId: string; objectKey: string; uploadUrl: string }>(
+    apiClient.post<{ attachmentId: string; objectKey: string; uploadUrl: string; contentType?: string }>(
       `/leads/${leadId}/attachments/presign`,
       body,
     ),

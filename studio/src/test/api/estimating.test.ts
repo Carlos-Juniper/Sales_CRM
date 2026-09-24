@@ -201,7 +201,96 @@ describe('attachment API round-trip (GCS feature)', () => {
         contentType: 'application/vnd.ms-excel',
         sizeBytes: 1024,
       }),
-    ).rejects.toMatchObject({ status: 400 })
+    ).rejects.toMatchObject({ status: 400, message: 'Only PDF attachments are supported' })
+  })
+
+  it('presign accepts an rfp docx and confirm stores that content type after a matching PUT', async () => {
+    const estimateId = await createWithIntake('RFP docx')
+    const contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    const presign = await estimatingApi.presignAttachment(estimateId, {
+      kind: 'rfp',
+      fileName: 'scope.docx',
+      contentType,
+      sizeBytes: 2048,
+    })
+    expect(presign.contentType).toBe(contentType)
+    expect(presign.objectKey).toMatch(/\.docx$/)
+
+    const put = await fetch(presign.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': presign.contentType },
+      body: new Uint8Array(32),
+    })
+    expect(put.ok).toBe(true)
+
+    const confirmed = await estimatingApi.confirmAttachment(estimateId, presign.attachmentId)
+    expect(confirmed.status).toBe('stored')
+    expect(confirmed.contentType).toBe(contentType)
+
+    const download = await estimatingApi.getAttachmentDownloadUrl(estimateId, presign.attachmentId)
+    expect(download.url).toContain(presign.objectKey)
+    expect(download.expiresIn).toBe(600)
+  })
+
+  it('confirm returns 400 when the uploaded blob content type does not match the presign', async () => {
+    const estimateId = await createWithIntake('RFP mismatch confirm')
+    const presign = await estimatingApi.presignAttachment(estimateId, {
+      kind: 'rfp',
+      fileName: 'pricing.xlsx',
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      sizeBytes: 1024,
+    })
+    await fetch(presign.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/pdf' },
+      body: new Uint8Array(16),
+    })
+    await expect(estimatingApi.confirmAttachment(estimateId, presign.attachmentId)).rejects.toMatchObject({
+      status: 400,
+      message: 'Upload validation failed',
+    })
+  })
+
+  it('presign rejects an rfp extension that is not PDF, Word, or Excel', async () => {
+    const estimateId = await createWithIntake('RFP exe')
+    await expect(
+      estimatingApi.presignAttachment(estimateId, {
+        kind: 'rfp',
+        fileName: 'payload.exe',
+        contentType: 'application/pdf',
+        sizeBytes: 128,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'RFP documents must be PDF, Word (.doc, .docx), or Excel (.xls, .xlsx)',
+    })
+  })
+
+  it('presign rejects an rfp whose extension does not match its content type', async () => {
+    const estimateId = await createWithIntake('RFP mismatch')
+    await expect(
+      estimatingApi.presignAttachment(estimateId, {
+        kind: 'rfp',
+        fileName: 'scope.docx',
+        contentType: 'application/pdf',
+        sizeBytes: 128,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'RFP file extension does not match its content type',
+    })
+  })
+
+  it('presign still rejects a docx for a non-rfp kind', async () => {
+    const estimateId = await createWithIntake('Property map docx')
+    await expect(
+      estimatingApi.presignAttachment(estimateId, {
+        kind: 'property_map',
+        fileName: 'notes.docx',
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        sizeBytes: 128,
+      }),
+    ).rejects.toMatchObject({ status: 400, message: 'Only PDF attachments are supported' })
   })
 })
 

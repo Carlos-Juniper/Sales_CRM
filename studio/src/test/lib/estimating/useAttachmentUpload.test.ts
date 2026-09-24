@@ -10,7 +10,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 import { estimatingApi } from '@/api/estimating'
+import { server } from '@/mocks/server'
 import { useAttachmentUpload } from '@/lib/estimating/useAttachmentUpload'
 
 // ── XHR stub ─────────────────────────────────────────────────────────────────
@@ -22,19 +24,25 @@ interface StubXhrOptions {
   networkError?: boolean
 }
 
+const xhrHeaders: Array<Record<string, string>> = []
+
 function stubXhr({ status = 200, networkError = false }: StubXhrOptions = {}) {
   // Must use a regular function/class so `new XMLHttpRequest()` works correctly.
   function MockXHR(this: {
     open: () => void
-    setRequestHeader: () => void
+    setRequestHeader: (name: string, value: string) => void
     send: (body: unknown) => void
     upload: { onprogress: ((e: ProgressEvent) => void) | null }
     onload: (() => void) | null
     onerror: (() => void) | null
     status: number
   }) {
+    const headers: Record<string, string> = {}
+    xhrHeaders.push(headers)
     this.open = vi.fn()
-    this.setRequestHeader = vi.fn()
+    this.setRequestHeader = vi.fn((name: string, value: string) => {
+      headers[name] = value
+    })
     this.upload = { onprogress: null }
     this.onload = null
     this.onerror = null
@@ -98,8 +106,12 @@ function makePdf(sizeBytes = 1024): File {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
 describe('useAttachmentUpload', () => {
   beforeEach(() => {
+    xhrHeaders.length = 0
     stubXhr()
   })
 
@@ -225,6 +237,180 @@ describe('useAttachmentUpload', () => {
 
     expect(ret).toBeNull()
     expect(result.current.state.status).toBe('error')
+  })
+
+  it('uploads an rfp .docx and an rfp .xlsx', async () => {
+    const estimateId = await createEstimateWithIntake()
+    const { result } = renderHook(() => useAttachmentUpload())
+
+    const docx = new File([new Uint8Array(256)], 'scope.docx', { type: DOCX_MIME })
+    const xlsx = new File([new Uint8Array(256)], 'pricing.xlsx', { type: XLSX_MIME })
+
+    let docxAttachment: Awaited<ReturnType<typeof result.current.upload>> = null
+    let xlsxAttachment: Awaited<ReturnType<typeof result.current.upload>> = null
+    await act(async () => {
+      docxAttachment = await result.current.upload(estimateId, docx, 'rfp')
+      xlsxAttachment = await result.current.upload(estimateId, xlsx, 'rfp')
+    })
+
+    expect(docxAttachment?.status).toBe('stored')
+    expect(docxAttachment?.contentType).toBe(DOCX_MIME)
+    expect(docxAttachment?.objectKey).toMatch(/\.docx$/)
+    expect(xlsxAttachment?.status).toBe('stored')
+    expect(xlsxAttachment?.contentType).toBe(XLSX_MIME)
+    expect(xlsxAttachment?.objectKey).toMatch(/\.xlsx$/)
+  })
+
+  it('derives the MIME for an rfp .doc with an empty file.type and PUTs the presign contentType', async () => {
+    const estimateId = await createEstimateWithIntake()
+    const file = new File([new Uint8Array(128)], 'scope.doc', { type: '' })
+    expect(file.type).toBe('')
+
+    const presignSpy = vi.spyOn(estimatingApi, 'presignAttachment')
+    const { result } = renderHook(() => useAttachmentUpload())
+
+    await act(async () => {
+      await result.current.upload(estimateId, file, 'rfp')
+    })
+
+    expect(presignSpy).toHaveBeenCalledWith(
+      estimateId,
+      expect.objectContaining({
+        kind: 'rfp',
+        fileName: 'scope.doc',
+        contentType: 'application/msword',
+        sizeBytes: 128,
+      }),
+    )
+    const presign = await presignSpy.mock.results[0]?.value
+    expect(presign.contentType).toBe('application/msword')
+    expect(xhrHeaders.at(-1)?.['Content-Type']).toBe(presign.contentType)
+    expect(file.type).toBe('')
+    presignSpy.mockRestore()
+  })
+
+  it('PUTs the presign response contentType rather than file.type', async () => {
+    const estimateId = await createEstimateWithIntake()
+    server.use(
+      http.post('/api/estimating/estimates/:estimateId/attachments/presign', () =>
+        HttpResponse.json(
+          {
+            attachmentId: 'att-put',
+            objectKey: 'estimating/x/att-put.doc',
+            uploadUrl: 'http://localhost/__mock_gcs_upload/sess-put',
+            contentType: 'application/msword',
+          },
+          { status: 201 },
+        ),
+      ),
+      http.post('/api/estimating/estimates/:estimateId/attachments/:attachmentId/confirm', () =>
+        HttpResponse.json({
+          id: 'att-put',
+          status: 'stored',
+          downloadable: true,
+          contentType: 'application/msword',
+          kind: 'rfp',
+          fileName: 'scope.docx',
+        }),
+      ),
+    )
+
+    // file.type is the docx MIME; the presign response canonicalizes to msword.
+    const file = new File([new Uint8Array(32)], 'scope.docx', { type: DOCX_MIME })
+    const { result } = renderHook(() => useAttachmentUpload())
+    await act(async () => {
+      await result.current.upload(estimateId, file, 'rfp')
+    })
+
+    expect(xhrHeaders.at(-1)?.['Content-Type']).toBe('application/msword')
+    expect(xhrHeaders.at(-1)?.['Content-Type']).not.toBe(file.type)
+  })
+
+  it('derives the MIME when an rfp .xls file.type does not match the extension', async () => {
+    const estimateId = await createEstimateWithIntake()
+    const file = new File([new Uint8Array(64)], 'pricing.XLS', { type: 'application/octet-stream' })
+    const presignSpy = vi.spyOn(estimatingApi, 'presignAttachment')
+    const { result } = renderHook(() => useAttachmentUpload())
+
+    await act(async () => {
+      await result.current.upload(estimateId, file, 'rfp')
+    })
+
+    expect(presignSpy).toHaveBeenCalledWith(
+      estimateId,
+      expect.objectContaining({
+        kind: 'rfp',
+        fileName: 'pricing.XLS',
+        contentType: 'application/vnd.ms-excel',
+      }),
+    )
+    presignSpy.mockRestore()
+  })
+
+  it('rejects a .docx for a non-rfp kind before hitting the network', async () => {
+    const estimateId = await createEstimateWithIntake()
+    const docx = new File([new Uint8Array(64)], 'notes.docx', { type: DOCX_MIME })
+    const presignSpy = vi.spyOn(estimatingApi, 'presignAttachment')
+    const { result } = renderHook(() => useAttachmentUpload())
+
+    let ret: Awaited<ReturnType<typeof result.current.upload>> = null
+    await act(async () => {
+      ret = await result.current.upload(estimateId, docx, 'property_map')
+    })
+
+    expect(ret).toBeNull()
+    expect(result.current.state.status).toBe('error')
+    expect(result.current.state.error).toBe('Only PDF files are supported')
+    expect(presignSpy).not.toHaveBeenCalled()
+    presignSpy.mockRestore()
+  })
+
+  it('rejects a disallowed rfp extension with the backend wording', async () => {
+    const estimateId = await createEstimateWithIntake()
+    const exe = new File([new Uint8Array(32)], 'payload.exe', { type: 'application/pdf' })
+    const { result } = renderHook(() => useAttachmentUpload())
+
+    await act(async () => {
+      await result.current.upload(estimateId, exe, 'rfp')
+    })
+
+    expect(result.current.state.error).toBe(
+      'RFP documents must be PDF, Word (.doc, .docx), or Excel (.xls, .xlsx)',
+    )
+  })
+
+  it('shows the API detail when presign returns 400', async () => {
+    server.use(
+      http.post('/api/estimating/estimates/:estimateId/attachments/presign', () =>
+        HttpResponse.json(
+          { detail: 'RFP file extension does not match its content type' },
+          { status: 400 },
+        ),
+      ),
+    )
+
+    const estimateId = await createEstimateWithIntake()
+    const file = new File([new Uint8Array(64)], 'scope.pdf', { type: 'application/pdf' })
+    const { result } = renderHook(() => useAttachmentUpload())
+
+    await act(async () => {
+      await result.current.upload(estimateId, file, 'rfp')
+    })
+
+    expect(result.current.state.status).toBe('error')
+    expect(result.current.state.error).toBe('RFP file extension does not match its content type')
+  })
+
+  it('rejects a non-positive rfp size before presign', async () => {
+    const estimateId = await createEstimateWithIntake()
+    const empty = new File([], 'empty.pdf', { type: 'application/pdf' })
+    const { result } = renderHook(() => useAttachmentUpload())
+
+    await act(async () => {
+      await result.current.upload(estimateId, empty, 'rfp')
+    })
+
+    expect(result.current.state.error).toBe('sizeBytes must be positive')
   })
 
   it('reset() brings state back to idle', async () => {

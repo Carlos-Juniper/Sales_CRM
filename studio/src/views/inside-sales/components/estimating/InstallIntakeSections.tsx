@@ -17,6 +17,7 @@ import { PropertySelector } from './PropertySelector'
 import { ServiceLineSelect } from './AspirePickers'
 import { SLA_CONFIG } from '@/lib/estimating/sla'
 import { FileAttachRow } from './IntakeFileAttachRow'
+import { RFP_FILE_ACCEPT } from '@/lib/estimating/rfpContentTypes'
 import type { AttachedFile } from './IntakeFileAttachRow'
 import type { BranchOption, InstallCustomerType, Property } from '@/types/estimating'
 
@@ -881,11 +882,12 @@ export function TakeoffFilesSection({
         />
         <FileAttachRow
           label="RFP document"
-          hint="PDF — Request for Proposal or bid package"
+          hint="PDF, Word (.doc, .docx), or Excel (.xls, .xlsx) — Request for Proposal or bid package"
           file={rfpFile}
           testId="install-rfp-file-area"
           inputRef={rfpRef}
-          accept="application/pdf"
+          accept={RFP_FILE_ACCEPT}
+          actionLabel="Attach file"
           onChange={onRfpChange}
           onClear={onClearRfp}
         />

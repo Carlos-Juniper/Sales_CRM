@@ -25,6 +25,7 @@ import type {
   TakeoffLine,
 } from '@/types/estimating'
 import type { EstimateLifecycle } from '@/types/estimating'
+import type { OccurrenceCountKey } from '@/lib/estimating/occurrences'
 import type { StatusTransitionRecord } from '@/lib/estimating/transitions'
 
 // Omit that distributes over the Estimate discriminated union so the
@@ -38,20 +39,27 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
  */
 export type CreateEstimatePayload = DistributiveOmit<
   Estimate,
-  'id' | 'createdAt' | 'updatedAt' | 'aspireOpportunityId' | 'aspireSyncStatus'
-> & {
-  /**
-   * Opportunity service line (→ Aspire DivisionID). Not persisted on the estimate
-   * row; the backend reads it to build the opportunity payload. Defaults per type.
-   */
-  serviceLine?: string
-  /**
-   * Structured intake form payload. Persisted verbatim to intake_submissions —
-   * NEVER to `notes` (that column is a short human queue note). Attachment file
-   * bytes are future scope; only names travel, inside `payload`.
-   */
-  intake?: IntakeSubmissionInput
-}
+  | 'id'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'aspireOpportunityId'
+  | 'aspireSyncStatus'
+  // Optional on create: omit or null stores NULL. Install intake omits them.
+  | OccurrenceCountKey
+> &
+  Partial<Pick<Estimate, OccurrenceCountKey>> & {
+    /**
+     * Opportunity service line (→ Aspire DivisionID). Not persisted on the estimate
+     * row; the backend reads it to build the opportunity payload. Defaults per type.
+     */
+    serviceLine?: string
+    /**
+     * Structured intake form payload. Persisted verbatim to intake_submissions —
+     * NEVER to `notes` (that column is a short human queue note). Attachment file
+     * bytes are future scope; only names travel, inside `payload`.
+     */
+    intake?: IntakeSubmissionInput
+  }
 
 /** Structured intake payload sent alongside estimate creation (→ intake_submissions). */
 export interface IntakeSubmissionInput {
@@ -74,6 +82,13 @@ export type UpdateEstimatePayload = Partial<{
   branchCity: string | null
   customerType: Estimate['customerType']
   acreage: number | null
+  /** Yearly visit counts. Omit to leave unchanged; null clears; 0 stores 0. */
+  mowingOccurrences: number | null
+  pruningOccurrences: number | null
+  turfFertOccurrences: number | null
+  shrubFertOccurrences: number | null
+  ipmOccurrences: number | null
+  irrigationOccurrences: number | null
   contractValueCents: number
   targetMargin: number
   status: EstimateStatus

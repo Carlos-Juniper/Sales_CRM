@@ -35,6 +35,11 @@ import type {
 } from '@/api/estimating'
 import { deriveTakeoffLine } from '@/lib/estimating/discrepancy'
 import {
+  OCCURRENCE_COUNT_FIELDS,
+  emptyOccurrenceCounts,
+  occurrenceCountError,
+} from '@/lib/estimating/occurrences'
+import {
   approveAndHandBack,
   canTransition,
   IllegalTransitionError,
@@ -127,6 +132,27 @@ function eid(prefix: string): string {
 
 function notFound() {
   return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+}
+
+/** 422 detail when a present occurrence count is not an integer 0–366 or null. */
+function occurrenceDetail(body: object): string | null {
+  const record = body as Record<string, unknown>
+  for (const { key } of OCCURRENCE_COUNT_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+    const message = occurrenceCountError(key, record[key])
+    if (message) return message
+  }
+  return null
+}
+
+/** Create stores NULL for omitted keys. 0 is preserved; null stays null. */
+function occurrenceColumns(body: object): ReturnType<typeof emptyOccurrenceCounts> {
+  const record = body as Record<string, unknown>
+  const counts = emptyOccurrenceCounts()
+  for (const { key } of OCCURRENCE_COUNT_FIELDS) {
+    if (record[key] !== undefined) counts[key] = record[key] as number | null
+  }
+  return counts
 }
 
 // ---------------------------------------------------------------------------
@@ -622,6 +648,10 @@ const allHandlers = [
         { status: 400 },
       )
     }
+    const occurrenceError = occurrenceDetail(body)
+    if (occurrenceError) {
+      return HttpResponse.json({ detail: occurrenceError }, { status: 422 })
+    }
     const id = eid('est')
     const now = new Date().toISOString()
     const sections: EstimateSection[] = (body.sections ?? []).map((section, si) => {
@@ -656,6 +686,7 @@ const allHandlers = [
     // then flips to synced. Simulate the flip so the UI can exercise both states.
     const created = {
       ...estimateBody,
+      ...occurrenceColumns(estimateBody),
       id,
       sections,
       aspireOpportunityId: null,
@@ -705,6 +736,10 @@ const allHandlers = [
     const idx = estimates.findIndex((e) => e.id === params.id)
     if (idx === -1) return notFound()
     const body = (await request.json()) as UpdateEstimatePayload & { estimateType?: string }
+    const occurrenceError = occurrenceDetail(body)
+    if (occurrenceError) {
+      return HttpResponse.json({ detail: occurrenceError }, { status: 422 })
+    }
     if (body.estimateType !== undefined && body.estimateType !== estimates[idx].estimateType) {
       return HttpResponse.json(
         { error: 'estimate_type is immutable and cannot be changed after creation' },

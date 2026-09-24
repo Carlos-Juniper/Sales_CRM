@@ -1,8 +1,11 @@
 -- ---------------------------------------------------------------------------
--- Migration 059 — Per-rep ownership of client references and the team roster.
+-- Migration 062 — Per-rep ownership of client references and the team roster.
 --
--- Numbered 059 because 058_bm_user_branches_backfill.sql already occupies
--- 058 on main. Detection is keyed on the owner columns, not the filename.
+-- Numbered 062. 058 is PR #25's number, and 059, 060, and 061 are reserved
+-- by the S2, S4, and S1 PRs. The role split itself adds no DDL (users.role
+-- is VARCHAR). This file is the roster owner-column change integrated from
+-- #25. Every statement is information_schema-guarded, so if #25's 058
+-- already added these columns this file is a no-op.
 --
 -- The shared portfolio stays one company-wide set (no owner column).
 -- client_references and team_members gain owner_user_id (users.id of the

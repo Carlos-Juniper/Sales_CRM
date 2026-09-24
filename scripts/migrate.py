@@ -786,15 +786,16 @@ def detect_042(conn) -> bool:
     return column_exists(conn, "proposal_renders", "overflowing_pages")
 
 
-def detect_059(conn) -> bool:
-    """059 applied ↔ both roster owner columns and their indexes exist.
+def detect_062(conn) -> bool:
+    """062 applied ↔ both roster owner columns and their indexes exist.
 
-    059 adds owner_user_id to team_members and client_references, each with
+    062 adds owner_user_id to team_members and client_references, each with
     an index. Every statement is information_schema-guarded, so a re-run
     after a partial apply finishes the remainder. True only when all four
     effects are present — keying on a single column would record a partial
-    apply as detected and skip the rest. Renumbered from the in-flight 058
-    file because 058_bm_user_branches_backfill.sql is already on main.
+    apply as detected and skip the rest. Numbered 062 because 058 is PR
+    #25's and 059–061 are reserved. If those columns already exist, this
+    detects as applied and the guarded statements no-op.
     """
     return (
         column_exists(conn, "team_members", "owner_user_id")
@@ -845,7 +846,7 @@ _DETECT: dict = {
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
     "046_section_services_billing_type":          detect_046,
-    "059_rep_owned_proposal_roster":              detect_059,
+    "062_rep_owned_proposal_roster":              detect_062,
 }
 
 

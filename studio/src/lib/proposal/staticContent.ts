@@ -124,6 +124,13 @@ export interface JuniperMappingContent {
 /** Heading for the insurance page (the page itself is just the title + certificate image). */
 export interface InsurancePageCopy {
   heading: string
+  /**
+   * Printed in place of the certificate when no active cert is configured or its
+   * scan cannot be resolved. The page must say something — a heading over an
+   * empty well reads to a client as an oversight, and the previous silent-blank
+   * behaviour is exactly how a broken certificate shipped unnoticed.
+   */
+  unavailable: string
 }
 
 // ---------------------------------------------------------------------------
@@ -870,6 +877,7 @@ export const LICENSES_PAGE_COPY = {
 
 export const INSURANCE_PAGE_COPY: InsurancePageCopy = {
   heading: 'Insurance',
+  unavailable: 'Certificate of insurance failed to load.',
 }
 
 // ---------------------------------------------------------------------------

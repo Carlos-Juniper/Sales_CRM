@@ -500,8 +500,10 @@ export function makeDevProposalFixture(): DevProposalFixture {
     },
     insurance: {
       id: 'ins-dev-001',
-      // Empty key keeps useProposalMediaUrl disabled (enabled: !!objectKey),
-      // so the insurance page shows its prose fallback and fires no request.
+      // Empty key keeps useProposalMediaUrl disabled (enabled: !!objectKey), so
+      // the insurance page renders INSURANCE_PAGE_COPY.unavailable and fires no
+      // request. The live key is a PNG scan (credentials/licenses/*.png), never
+      // the source PDF — see insurance-page.tsx for why.
       objectKey: '',
       expiryDate: '2027-03-31',
       label: 'General Liability',

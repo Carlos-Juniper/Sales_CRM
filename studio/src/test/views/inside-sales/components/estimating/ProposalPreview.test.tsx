@@ -99,6 +99,7 @@ vi.mock('@/lib/proposal/staticContent', async (importActual) => {
 
 import { useProposalConfig, useProposalRepBranches, useProposalLicenses, useProposalInsurance, useProposalMediaUrl, useRenderProposal } from '@/hooks/useProposals'
 import {
+  INSURANCE_PAGE_COPY,
   SERVICES_CONTENT,
   SERVICE_OVERVIEW_CATEGORIES,
   STARTUP_PLAN_SEED,
@@ -405,7 +406,10 @@ function setupDefaultMocks() {
   mockUseProposalInsurance.mockReturnValue({
     data: {
       id: 'ins-001',
-      objectKey: 'proposal/insurance/cert-2026.pdf',
+      // A raster scan, matching what swap_insurance_cert.py writes. A .pdf key
+      // here would not reproduce production: Chromium cannot print an embedded
+      // PDF, which is the bug this page's <img> rendering exists to avoid.
+      objectKey: 'credentials/licenses/ins-cert-001.png',
       expiryDate: '2027-03-31',
       label: 'General Liability',
       uploadedAt: '2026-01-01T00:00:00Z',
@@ -980,9 +984,39 @@ describe('ProposalPreview — static content from constants', () => {
     mockAllMediaResolved()
     renderPreview()
     const page = screen.getByTestId('page-insurance')
-    const img = page.querySelector('.insurance-cert-img')
-    expect(img).toHaveAttribute('src', 'https://signed.example/proposal/insurance/cert-2026.pdf')
-    expect(within(page).queryByText(/available on request/i)).not.toBeInTheDocument()
+    const img = page.querySelector('img.insurance-cert-embed')
+    expect(img).toHaveAttribute('src', 'https://signed.example/credentials/licenses/ins-cert-001.png')
+    expect(within(page).queryByText(/failed to load/i)).not.toBeInTheDocument()
+  })
+
+  // The certificate must be an <img>, never an <object>/<embed>: headless
+  // Chromium does not rasterize nested PDF plugin content, so an <object> looks
+  // correct on screen and prints as a blank page (the Sept 2026 regression).
+  it('insurance page renders the certificate as an img, not an embedded object', () => {
+    mockAllMediaResolved()
+    renderPreview()
+    const page = screen.getByTestId('page-insurance')
+    expect(page.querySelector('object')).toBeNull()
+    expect(page.querySelector('embed')).toBeNull()
+  })
+
+  it('insurance page prints a message, not an empty well, when the scan does not resolve', () => {
+    // Default mock: useProposalMediaUrl returns no URL.
+    renderPreview()
+    const page = screen.getByTestId('page-insurance')
+    expect(page.querySelector('img.insurance-cert-embed')).toBeNull()
+    expect(within(page).getByText(INSURANCE_PAGE_COPY.unavailable)).toBeInTheDocument()
+  })
+
+  it('insurance page prints a message when no certificate is configured at all', () => {
+    mockAllMediaResolved()
+    mockUseProposalInsurance.mockReturnValue({
+      data: null,
+    } as ReturnType<typeof useProposalInsurance>)
+    renderPreview()
+    const page = screen.getByTestId('page-insurance')
+    expect(page.querySelector('img.insurance-cert-embed')).toBeNull()
+    expect(within(page).getByText(INSURANCE_PAGE_COPY.unavailable)).toBeInTheDocument()
   })
 
   it('licenses page renders the prose empty state, not a grid, when nothing is current', () => {

@@ -101,8 +101,11 @@ export function defaultRouteForRole(role: UserRole | null): string {
   if (role === 'inside_sales') return '/inside-sales/leads'
   if (role === 'maintenance_estimating' || role === 'install_estimating' || role === 'procurement')
     return '/inside-sales/estimating'
-  // sales, maintenance_sales, and install_sales are in SALES_NAV_ROLES, so
-  // they share this landing. Full-access roles land here too.
+  // Split field-sales roles share the sales workspace but not Analytics.
+  // Pipeline is a page they can open, so a denied visit to /inside-sales
+  // does not bounce back onto itself. Legacy sales still lands on Analytics.
+  if (role === 'maintenance_sales' || role === 'install_sales') return '/inside-sales/pipeline'
+  // sales and the full-access tier all have Analytics at /inside-sales.
   // Any other role (marketing, null, unknown) has no inside-sales access —
   // redirect to /settings, which is open to every authenticated user, to
   // avoid an infinite redirect loop.

@@ -54,8 +54,8 @@ describe('split field-sales role gates', () => {
     }
     expect(ANALYTICS_NAV_ROLES).toContain('sales')
     expect(PUBLIC_LEADS_NAV_ROLES).toContain('inside_sales')
-    expect(defaultRouteForRole('maintenance_sales')).toBe('/inside-sales')
-    expect(defaultRouteForRole('install_sales')).toBe('/inside-sales')
+    expect(defaultRouteForRole('maintenance_sales')).toBe('/inside-sales/pipeline')
+    expect(defaultRouteForRole('install_sales')).toBe('/inside-sales/pipeline')
     expect(defaultRouteForRole('sales')).toBe('/inside-sales')
   })
 

@@ -9,7 +9,8 @@ function roleDefaultRoute(role: string) {
   if (role === 'outside_sales') return '/outside-sales'
   // BranchManagerPage removed in Slice 12; managers land on settings.
   if (role === 'manager') return '/settings'
-  // sales, maintenance_sales, and install_sales share this landing.
+  // Split field-sales roles do not see Analytics (/inside-sales).
+  if (role === 'maintenance_sales' || role === 'install_sales') return '/inside-sales/pipeline'
   return '/inside-sales'
 }
 

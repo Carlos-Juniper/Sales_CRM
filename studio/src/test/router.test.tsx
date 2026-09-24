@@ -9,6 +9,7 @@ import {
   SalesWorkspaceGuard,
   PublicLeadsGuard,
   EstimatingGuard,
+  AnalyticsGuard,
 } from '@/guards'
 import { makeUser } from '@/test/utils'
 import type { AuthUser } from '@/types'
@@ -27,7 +28,7 @@ function renderRoute(initialEntries: string[], user: AuthUser | null = null) {
       <MemoryRouter initialEntries={initialEntries}>
         <Routes>
           <Route path="/login" element={<div>Login Page</div>} />
-          <Route path="/inside-sales" element={<SalesWorkspaceGuard><div>Analytics Dashboard</div></SalesWorkspaceGuard>} />
+          <Route path="/inside-sales" element={<AnalyticsGuard><div>Analytics Dashboard</div></AnalyticsGuard>} />
           <Route path="/settings" element={<div>Settings Page</div>} />
           <Route path="/inside-sales/leads" element={<PublicLeadsGuard><div>Public Leads</div></PublicLeadsGuard>} />
           <Route path="/inside-sales/pipeline" element={<SalesWorkspaceGuard><div>Pipeline</div></SalesWorkspaceGuard>} />
@@ -256,15 +257,16 @@ describe('Per-route workspace guards (role-scoped navigation)', () => {
     expect(screen.getByText('Estimating')).toBeInTheDocument()
   })
 
-  it('install_sales lands on the sales home, the same page as sales', () => {
+  it('install_sales is redirected from Analytics to Pipeline', () => {
     renderRoute(['/inside-sales'], makeUser({ role: 'install_sales' }))
-    expect(screen.getByText('Analytics Dashboard')).toBeInTheDocument()
+    expect(screen.queryByText('Analytics Dashboard')).not.toBeInTheDocument()
+    expect(screen.getByText('Pipeline')).toBeInTheDocument()
   })
 
-  it('maintenance_sales is redirected from Public Leads to the sales home', () => {
+  it('maintenance_sales is redirected from Public Leads to Pipeline', () => {
     renderRoute(['/inside-sales/leads'], makeUser({ role: 'maintenance_sales' }))
     expect(screen.queryByText('Public Leads')).not.toBeInTheDocument()
-    expect(screen.getByText('Analytics Dashboard')).toBeInTheDocument()
+    expect(screen.getByText('Pipeline')).toBeInTheDocument()
   })
 
   // ── inside_sales: blocked from Estimating entirely ─────────────────────

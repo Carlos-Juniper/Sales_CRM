@@ -32,6 +32,7 @@ import { estimatingApi, estimatingConfigApi } from '@/api/estimating'
 import type { Property } from '@/types/estimating'
 import { DEFAULT_SERVICE_LINE } from '@/lib/estimating/aspireOptions'
 import { SLA_CONFIG, toDateOnly } from '@/lib/estimating/sla'
+import { useAuthStore } from '@/store/authStore'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
 import type { InstallCustomerType } from '@/types/estimating'
@@ -71,6 +72,10 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
   const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
   const { upload: uploadFile } = useAttachmentUpload()
+  // Sales-author identity is no longer collected in the form. Submit still
+  // sends the same fields, falling back to the signed-in user when the form
+  // (or a resumed draft) does not already have them.
+  const currentUser = useAuthStore((s) => s.user)
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -220,6 +225,17 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
   const rfpRef = useRef<HTMLInputElement>(null)
   const otherRef = useRef<HTMLInputElement>(null)
 
+  function salesAuthorFields(source: Pick<FormState, 'requestedBy' | 'phone' | 'email'>) {
+    return {
+      // A resumed draft keeps whatever it stored. A new request uses the
+      // signed-in user. Phone is not on the session user, so it stays the
+      // stored value (blank on a new form).
+      requestedBy: source.requestedBy || currentUser?.name || '',
+      phone: source.phone,
+      email: source.email || currentUser?.email || '',
+    }
+  }
+
   function setStr(field: keyof FormState, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
@@ -257,14 +273,15 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
   }
 
   function buildIntakePayload(branchCity: string | null) {
+    const author = salesAuthorFields(form)
     return {
       leadId: form.leadId || null,
-      requestedBy: form.requestedBy,
+      requestedBy: author.requestedBy,
       // Persist the human-readable city (identity travels on the estimate's
       // aspireBranchId); form.installBranch now holds the raw Aspire id string.
       installBranch: branchCity ?? form.installBranch,
-      phone: form.phone,
-      email: form.email,
+      phone: author.phone,
+      email: author.email,
       requestDate: form.requestDate,
       isNewClient: form.isNewClient,
       isBondRequired: form.isBondRequired,
@@ -363,6 +380,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       const aspireBranchId = Number(form.installBranch)
       const branchCity = selectedBranchCity
 
+      const author = salesAuthorFields(form)
       const intakePayload = buildIntakePayload(branchCity)
       const created = await estimatingApi.create({
         estimateType: 'install',
@@ -391,7 +409,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
         serviceStartDate: form.startDate ? toDateOnly(form.startDate) : null,
         assignedLsEstimator: null,
         assignedIrrEstimator: null,
-        crmRep: form.requestedBy || null,
+        crmRep: author.requestedBy || null,
         // RFI status is tracked first-class on the estimate
         // row (surfaced in queue/editor), in addition to the verbatim payload.
         rfiStatus: form.rfiStatus || null,
@@ -433,7 +451,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
     try {
       const saved = await estimatingApi.saveIntakeDraft({
         estimateType: 'install',
-        payload: { ...form },
+        payload: { ...form, ...salesAuthorFields(form) },
         ...(draftId ? { draftId } : {}),
       })
       setDraftId(saved.id)

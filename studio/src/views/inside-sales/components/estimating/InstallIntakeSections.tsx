@@ -155,7 +155,9 @@ export function AspireSection({
 }
 
 // ---------------------------------------------------------------------------
-// RequestorSection
+// RequestorSection — lead, branch, request date, and flags.
+// Sales-author identity (requested by / phone / email) is not shown here;
+// the modal still submits those fields, defaulted from the signed-in user.
 // ---------------------------------------------------------------------------
 
 interface RequestorSectionProps {
@@ -170,7 +172,7 @@ export function RequestorSection({ form, setStr, setBool, branchOptions }: Reque
   return (
     <section>
       <p className="text-xs font-semibold text-[hsl(var(--muted-fg))] uppercase tracking-wide mb-2">
-        Requestor
+        Request details
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">
@@ -180,17 +182,6 @@ export function RequestorSection({ form, setStr, setBool, branchOptions }: Reque
             value={form.leadId}
             onChange={(e) => setStr('leadId', e.target.value)}
             placeholder="L-1234"
-            className="h-8 text-xs"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-requested-by" className="text-xs">Requested by *</Label>
-          <Input
-            id="ii-requested-by"
-            value={form.requestedBy}
-            onChange={(e) => setStr('requestedBy', e.target.value)}
-            placeholder="Sales rep name"
-            required
             className="h-8 text-xs"
           />
         </div>
@@ -208,30 +199,6 @@ export function RequestorSection({ form, setStr, setBool, branchOptions }: Reque
               <option key={b.aspire_branch_id} value={String(b.aspire_branch_id)}>{b.city}</option>
             ))}
           </select>
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-phone" className="text-xs">Phone *</Label>
-          <Input
-            id="ii-phone"
-            type="tel"
-            value={form.phone}
-            onChange={(e) => setStr('phone', e.target.value)}
-            placeholder="602-555-1234"
-            required
-            className="h-8 text-xs"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-email" className="text-xs">Email *</Label>
-          <Input
-            id="ii-email"
-            type="email"
-            value={form.email}
-            onChange={(e) => setStr('email', e.target.value)}
-            placeholder="rep@juniper.com"
-            required
-            className="h-8 text-xs"
-          />
         </div>
         <div className="space-y-1">
           <Label htmlFor="ii-request-date" className="text-xs">Request date</Label>

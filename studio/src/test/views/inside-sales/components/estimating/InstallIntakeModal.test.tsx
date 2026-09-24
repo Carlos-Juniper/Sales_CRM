@@ -68,10 +68,6 @@ function renderModal({ open = true, onClose = vi.fn(), shell }: RenderModalOptio
  * a resumed draft's pre-selected property).
  */
 async function fillMinimumFieldsFast() {
-  // Requestor section — use exact label text to avoid ambiguity with client fields
-  fireEvent.change(screen.getByLabelText(/^requested by/i), { target: { value: 'Alex Reyes' } })
-  fireEvent.change(screen.getByLabelText(/^phone \*/i), { target: { value: '602-555-9000' } })
-  fireEvent.change(screen.getByLabelText(/^email \*/i), { target: { value: 'areyes@juniper.com' } })
   // Opportunity section
   fireEvent.change(screen.getByLabelText(/opportunity name/i), { target: { value: 'Greenfield Estate Install' } })
   // Aspire property — search finds nothing, then create it inline.
@@ -110,14 +106,14 @@ describe('InstallIntakeModal — field rendering (AC §3 bullet 1)', () => {
     expect(screen.getByText(/estimating queue/i)).toBeInTheDocument()
   })
 
-  it('renders the Requestor section fields', () => {
+  it('does not render sales author fields and still renders the other request fields', () => {
     renderModal()
+    expect(screen.queryByLabelText(/^requested by/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^phone \*/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^email \*/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^requestor$/i)).not.toBeInTheDocument()
     expect(screen.getByLabelText(/lead id/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^requested by/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/install branch/i)).toBeInTheDocument()
-    // "Phone *" in requestor; "Client phone number" in client — use specific pattern
-    expect(screen.getByLabelText(/^phone \*/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^email \*/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/request date/i)).toBeInTheDocument()
   })
 
@@ -489,9 +485,6 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
       }),
     )
     renderModal()
-    fireEvent.change(screen.getByLabelText(/^requested by/i), { target: { value: 'Alex Reyes' } })
-    fireEvent.change(screen.getByLabelText(/^phone \*/i), { target: { value: '602-555-9000' } })
-    fireEvent.change(screen.getByLabelText(/^email \*/i), { target: { value: 'areyes@juniper.com' } })
     fireEvent.change(screen.getByLabelText(/opportunity name/i), { target: { value: 'Greenfield Estate Install' } })
     fireEvent.change(screen.getByLabelText(/^company \*/i), { target: { value: 'Greenfield Development LLC' } })
     fireEvent.change(screen.getByLabelText(/contact person/i), { target: { value: 'Morgan Pierce' } })
@@ -499,6 +492,31 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
     expect(await screen.findByText(/select or create a property/i)).toBeInTheDocument()
     expect(postCalls).toHaveLength(0)
+  })
+
+  it('still sends sales author fields, defaulted from the signed-in user', async () => {
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildInstallEstimate({ id: 'author-default', status: 'new_from_sales' })
+
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json({ ...fakeEstimate, ...body, id: 'author-default' }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFieldsFast()
+    await selectInstallBranch()
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.requestedBy).toBe('Test User')
+    expect(payload.email).toBe('test@example.com')
+    expect(payload.phone).toBe('')
+    expect(created[0].crmRep).toBe('Test User')
   })
 
   it('sources the estimate acreage from the selected/created property', async () => {
@@ -798,6 +816,50 @@ describe('InstallIntakeModal — backend Save Draft (§3.3)', () => {
     // No estimate is created for a draft, and nothing lands in localStorage.
     expect(estimatePosts).toHaveLength(0)
     expect(localStorage.getItem('install-intake-draft')).toBeNull()
+  })
+
+  it('keeps a resumed draft sales author instead of replacing it with the current user', async () => {
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildInstallEstimate({ id: 'draft-author', status: 'new_from_sales' })
+    server.use(
+      http.get('/api/estimating/intake/drafts', () =>
+        HttpResponse.json([
+          {
+            id: 'draft-author',
+            estimateType: 'install',
+            payload: {
+              opportunityName: 'Draft With Author',
+              requestedBy: 'Alex Reyes',
+              phone: '602-555-9000',
+              email: 'areyes@juniper.com',
+            },
+            submittedBy: 'u1',
+            isDraft: true,
+            createdAt: '2026-08-01T10:00:00Z',
+          },
+        ]),
+      ),
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json({ ...fakeEstimate, ...body, id: 'draft-author' }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await waitFor(() =>
+      expect(screen.getByLabelText(/opportunity name/i)).toHaveValue('Draft With Author'),
+    )
+    await fillMinimumFieldsFast()
+    await selectInstallBranch()
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.requestedBy).toBe('Alex Reyes')
+    expect(payload.phone).toBe('602-555-9000')
+    expect(payload.email).toBe('areyes@juniper.com')
+    expect(created[0].crmRep).toBe('Alex Reyes')
   })
 
   it('restores the latest backend draft when the modal opens (resume on another device)', async () => {

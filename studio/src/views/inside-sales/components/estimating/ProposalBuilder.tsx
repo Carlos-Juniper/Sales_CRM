@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronRight, Loader2, X } from 'lucide-react'
+import './proposal-generator.css'
 import { useAuthStore } from '@/store/authStore'
 import { teamMemberTitleLabel } from '@/lib/proposal/titleLabels'
 import { ProposalDocumentsSection } from './ProposalDocumentsSection'
@@ -979,7 +980,7 @@ export function ProposalBuilder({
 
   if (loadingProposal) {
     return (
-      <div className="flex items-center justify-center py-16">
+      <div className="proposal-generator flex items-center justify-center py-16" data-testid="proposal-generator">
         <Loader2 className="h-5 w-5 animate-spin text-[hsl(var(--muted-fg))]" />
       </div>
     )
@@ -988,7 +989,7 @@ export function ProposalBuilder({
   const anchorReady = !!attachedLead?.id && !!attachedLead.property_id
 
   return (
-    <div className="flex flex-col gap-4 overflow-y-auto pb-6">
+    <div className="proposal-generator flex flex-col gap-4 overflow-y-auto pb-6" data-testid="proposal-generator">
       {showHeader && (
         <div className="flex items-center justify-between">
           <div>

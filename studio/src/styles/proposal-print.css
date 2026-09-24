@@ -1556,12 +1556,22 @@
 
 /* --- Insurance -------------------------------------------------------------- */
 
+/* The certificate scan is a raster image, not an embedded PDF — see the header
+   comment in proposal-pages/insurance-page.tsx. height:auto + max-height keeps a
+   letter-proportioned scan inside the well without stretching it; object-fit
+   guards the case where a future scan is some other aspect ratio. */
 .proposal-root .insurance-cert-embed {
   display: block;
   width: 100%;
-  height: 9in;
+  height: auto;
+  max-height: 9in;
+  object-fit: contain;
   margin-top: 0.26in;
   border: none;
+}
+
+.proposal-root .insurance-cert-error {
+  margin-top: 0.26in;
 }
 
 .proposal-root .footnote {

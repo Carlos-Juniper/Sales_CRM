@@ -258,6 +258,13 @@ def _num(v: Any) -> Any:
     return v
 
 
+def _int_or_none(v: Any) -> Optional[int]:
+    """Nullable integer column → JSON number or null. Missing columns stay null."""
+    if v is None:
+        return None
+    return int(v)
+
+
 def _iso(v: Any) -> Any:
     if isinstance(v, (datetime, date)):
         return v.isoformat()
@@ -354,6 +361,15 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         "priorCrewRateCentsPerHour": r.get("prior_crew_rate_cents_per_hour"),
         "customerType": r["customer_type"],
         "acreage": _num(r["acreage"]),
+        # Yearly maintenance visit counts (migration 058). Null when the rep
+        # left the field blank, on install estimates, and on rows created
+        # before the columns existed (.get keeps those rows working).
+        "mowingOccurrences": _int_or_none(r.get("mowing_occurrences")),
+        "pruningOccurrences": _int_or_none(r.get("pruning_occurrences")),
+        "turfFertOccurrences": _int_or_none(r.get("turf_fert_occurrences")),
+        "shrubFertOccurrences": _int_or_none(r.get("shrub_fert_occurrences")),
+        "ipmOccurrences": _int_or_none(r.get("ipm_occurrences")),
+        "irrigationOccurrences": _int_or_none(r.get("irrigation_occurrences")),
         "contractValueCents": int(r["contract_value_cents"]),
         "targetMargin": _num(r["target_margin"]),
         "status": r["status"],
@@ -1353,6 +1369,55 @@ async def _require_resolvable_maintenance_lines(services: list[dict]) -> None:
 # Payloads accept arbitrary camelCase keys (validated against the DB columns in
 # the handlers); modeled loosely to mirror the flexible mock contract.
 
+# Yearly service occurrence counts (visits per year) captured on the
+# maintenance intake. Nullable: null means unanswered, 0 means the service
+# is not in the contract. 366 is every day of a leap year — one visit per
+# day, including Feb 29. More than that would be more than once a day,
+# which these services are not scheduled as.
+MAX_YEARLY_OCCURRENCES = 366
+
+_OCCURRENCE_COUNT_FIELDS = {
+    "mowingOccurrences": "mowing_occurrences",
+    "pruningOccurrences": "pruning_occurrences",
+    "turfFertOccurrences": "turf_fert_occurrences",
+    "shrubFertOccurrences": "shrub_fert_occurrences",
+    "ipmOccurrences": "ipm_occurrences",
+    "irrigationOccurrences": "irrigation_occurrences",
+}
+
+
+def _validate_occurrence_counts(body: dict) -> None:
+    """Reject a non-integer or out-of-range yearly occurrence count with 422.
+
+    Absent keys and JSON null are valid (column stays null / unchanged).
+    Bool is rejected even though it is an int subclass. Floats and numeric
+    strings are rejected so the wire type is a JSON integer.
+    """
+    for camel in _OCCURRENCE_COUNT_FIELDS:
+        if camel not in body:
+            continue
+        value = body[camel]
+        if value is None:
+            continue
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            or value > MAX_YEARLY_OCCURRENCES
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{camel} must be an integer from 0 to {MAX_YEARLY_OCCURRENCES}, or null"
+                ),
+            )
+
+
+def _occurrence_insert_values(body: dict) -> list:
+    """Column order matches _OCCURRENCE_COUNT_FIELDS. Missing keys store NULL."""
+    return [body.get(camel) for camel in _OCCURRENCE_COUNT_FIELDS]
+
+
 # Scalar estimate columns updatable via PATCH (estimate_type intentionally absent).
 _UPDATABLE = {
     "name": "name",
@@ -1385,6 +1450,9 @@ _UPDATABLE = {
     # lands it writes these same fields). Acreage/sqft stay derived, never stored.
     "turfAreaAcres": "turf_area_acres",
     "curbMiles": "curb_miles",
+    # Yearly maintenance visit counts. Same PATCH path as the other header
+    # scalars (estimator-owned). Omitted keys are left unchanged.
+    **_OCCURRENCE_COUNT_FIELDS,
     "notifyBmRdOnReturn": "notify_bm_rd_on_return",
     # Captured at the lost transition so the durability sweep can re-send the same
     # reason on a retry (otherwise a re-push would drop it).
@@ -1524,6 +1592,10 @@ def register(app, require_auth) -> None:
                 status_code=400,
                 detail="aspireBranchId is required — select a branch from the intake form",
             )
+        # Yearly occurrence counts are optional on maintenance create. Validate
+        # before any INSERT so a 422 persists nothing. Install may omit them
+        # (they store NULL); a value that is sent is held to the same range.
+        _validate_occurrence_counts(body)
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
             await _require_resolvable_maintenance_lines([
@@ -1542,8 +1614,10 @@ def register(app, require_auth) -> None:
                   acreage, contract_value_cents, target_margin, status, lifecycle, aspire_owner,
                   priority, win_probability, site_walk_date, due_back_date, anticipated_close_date,
                   service_start_date, assigned_ls_estimator, assigned_irr_estimator, crm_rep,
-                  notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                  notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status,
+                  mowing_occurrences, pruning_occurrences, turf_fert_occurrences,
+                  shrub_fert_occurrences, ipm_occurrences, irrigation_occurrences)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 estimate_id,
                 est_type,
@@ -1574,11 +1648,16 @@ def register(app, require_auth) -> None:
                 body.get("leadId"),
                 # RFI status tracked first-class (install).
                 body.get("rfiStatus"),
+                *_occurrence_insert_values(body),
             ],
         )
         for si, section in enumerate(body.get("sections") or []):
             await _insert_section(estimate_id, section, si)
         # Structured intake payload lands in its own table (never estimate.notes).
+        # Maintenance scopeOfWork inside intake.payload is optional free text.
+        # When a rep still sends it, it is stored verbatim with the rest of the
+        # payload so older estimates keep their scope text. It is not required,
+        # and this path does not drop or rewrite that JSON.
         intake = body.get("intake")
         if isinstance(intake, dict) and intake.get("payload") is not None:
             await _insert_intake_submission(
@@ -1735,6 +1814,10 @@ def register(app, require_auth) -> None:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
+        # Same 0..366 integer rule as create. Runs before the UPDATE so a 422
+        # leaves the row untouched. Applies to every estimate type — the
+        # columns live on estimates, and install clients simply omit them.
+        _validate_occurrence_counts(body)
         current = rows[0]
         if "estimateType" in body and body["estimateType"] != current["estimate_type"]:
             raise HTTPException(

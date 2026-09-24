@@ -48,6 +48,8 @@ export function OrgChartPage({
           headshotObjectKey: null,
           active: true,
           sortOrder: 0,
+          // Synthesised from the signer, not a roster row, so it has no branch region.
+          regionId: null,
         }
       }
       return undefined

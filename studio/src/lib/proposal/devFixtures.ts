@@ -146,6 +146,7 @@ function makeTeamMember(over: Partial<TeamMember> & Pick<TeamMember, 'id' | 'nam
     headshotObjectKey: null,
     active: true,
     sortOrder: 1,
+    regionId: 'west-coast',
     ...over,
   }
 }
@@ -189,6 +190,7 @@ const EXECUTIVE = makeTeamMember({
   title: 'executive',
   teamType: 'executive',
   aspireBranchId: null,
+  regionId: null,
   userId: 'user-dev-exec',
   location: 'Naples, FL',
   bio: 'Michelle leads the executive team and is accountable for client outcomes company-wide.',
@@ -270,6 +272,7 @@ const CLIENT_REFERENCES: ClientReference[] = [
     address: '24401 Walden Center Drive, Bonita Springs, FL 34134',
     clientSinceYear: 2016,
     active: true,
+    regionId: null,
   },
   {
     id: 'cr-002',
@@ -283,6 +286,7 @@ const CLIENT_REFERENCES: ClientReference[] = [
     address: '8152 Fiddler’s Creek Parkway, Naples, FL 34114',
     clientSinceYear: 2019,
     active: true,
+    regionId: null,
   },
   {
     id: 'cr-003',
@@ -296,6 +300,7 @@ const CLIENT_REFERENCES: ClientReference[] = [
     address: '10630 Plantation Bay Drive, Tampa, FL 33647',
     clientSinceYear: 2014,
     active: true,
+    regionId: null,
   },
 ]
 

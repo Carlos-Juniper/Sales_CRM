@@ -63,6 +63,7 @@ const mockTeamMember: TeamMember = {
   headshotObjectKey: null,
   active: true,
   sortOrder: 1,
+  regionId: 'west-coast',
 }
 
 const mockClientRef: ClientReference = {
@@ -77,6 +78,7 @@ const mockClientRef: ClientReference = {
   address: '123 Coral Way, Fort Myers, FL 33901',
   clientSinceYear: 2018,
   active: true,
+  regionId: null,
 }
 
 const mockPortfolio: PortfolioProperty = {
@@ -223,13 +225,44 @@ describe('useTeamMembers — query key scoping', () => {
   })
 
   it('fetches all team members when no params are given', async () => {
+    let regionId: string | null = 'sentinel'
     server.use(
-      http.get('/api/proposals/config/team-members', () => HttpResponse.json([mockTeamMember])),
+      http.get('/api/proposals/config/team-members', ({ request }) => {
+        regionId = new URL(request.url).searchParams.get('region_id')
+        return HttpResponse.json([mockTeamMember])
+      }),
     )
     const { wrapper } = createWrapper()
     const { result } = renderHook(() => useTeamMembers(), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toHaveLength(1)
+    expect(regionId).toBeNull()
+  })
+
+  it('sends region_id, keeps it in the query key, and reads X-Region-Filter', async () => {
+    server.use(
+      http.get('/api/proposals/config/team-members', ({ request }) => {
+        const url = new URL(request.url)
+        expect(url.searchParams.get('region_id')).toBe('central')
+        expect(url.searchParams.get('aspire_branch_id')).toBe('1403')
+        return HttpResponse.json([mockTeamMember], {
+          headers: { 'X-Region-Filter': 'central' },
+        })
+      }),
+    )
+    const { wrapper, queryClient } = createWrapper()
+    const { result } = renderHook(
+      () => useTeamMembers({ aspireBranchId: 1403, regionId: 'central' }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.regionFilter).toBe('central')
+    expect(result.current.data?.[0].regionId).toBe('west-coast')
+    expect(
+      queryClient.getQueryCache().find({
+        queryKey: ['proposals', 'config', 'team-members', 1403, null, 'central'],
+      }),
+    ).toBeTruthy()
   })
 })
 
@@ -246,6 +279,28 @@ describe('useClientReferences — query key scoping', () => {
     const { result } = renderHook(() => useClientReferences({ aspireBranchId: 1403 }), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data?.[0].id).toBe('cr-001')
+  })
+
+  it('sends region_id=all and reads the echoed filter', async () => {
+    let regionId: string | null = null
+    server.use(
+      http.get('/api/proposals/config/client-references', ({ request }) => {
+        regionId = new URL(request.url).searchParams.get('region_id')
+        return HttpResponse.json([mockClientRef], {
+          headers: { 'X-Region-Filter': 'all' },
+        })
+      }),
+    )
+    const { wrapper, queryClient } = createWrapper()
+    const { result } = renderHook(() => useClientReferences({ regionId: 'all' }), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(regionId).toBe('all')
+    expect(result.current.regionFilter).toBe('all')
+    expect(
+      queryClient.getQueryCache().find({
+        queryKey: ['proposals', 'config', 'client-references', null, 'all'],
+      }),
+    ).toBeTruthy()
   })
 })
 

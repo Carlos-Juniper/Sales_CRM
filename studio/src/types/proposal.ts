@@ -65,6 +65,12 @@ export interface TeamMember {
   headshotObjectKey: string | null   // GCS, same pattern as IntakeAttachment.objectKey
   active: boolean
   sortOrder: number
+  /**
+   * `branches.region_id` for this row's branch.
+   * null = company-wide, a missing branch, or a branch whose region was never
+   * set. Those rows stay in every region filter; label them "All regions".
+   */
+  regionId: string | null
 }
 
 /**
@@ -149,6 +155,12 @@ export interface ClientReference {
   address: string
   clientSinceYear: number
   active: boolean
+  /**
+   * `branches.region_id` for this reference's branch.
+   * null = company-wide or a branch with no region. Those rows stay in every
+   * region filter; label them "All regions".
+   */
+  regionId: string | null
 }
 
 export interface PortfolioProperty {

@@ -7,6 +7,7 @@ import {
   useDeactivateClientReference,
 } from '@/hooks/useProposals'
 import type { ClientReference } from '@/types/proposal'
+import { AllRegionsBadge } from '@/components/proposal/RegionSwitcher'
 import type {
   ClientReferenceCreateBody,
   ClientReferencePatchBody,
@@ -37,8 +38,10 @@ export function ClientReferencesSection({
   canEditCompanyWide?: boolean
 }) {
   const companyWide = aspireBranchId === null
+  // Reference management must keep seeing every region. An omitted region_id
+  // narrows to the caller once that default is live.
   const { data, isLoading, isError } = useClientReferences(
-    companyWide ? undefined : { aspireBranchId },
+    companyWide ? { regionId: 'all' } : { aspireBranchId, regionId: 'all' },
   )
   const { isAdmin } = useRole()
   const canEditCompany = isAdmin || canEditCompanyWide
@@ -82,10 +85,10 @@ export function ClientReferencesSection({
       )}
 
       <ul className="space-y-2 mb-4">
-        {refs.map((ref) => (
+        {refs.map((reference) => (
           <ClientReferenceRow
-            key={ref.id}
-            ref={ref}
+            key={reference.id}
+            reference={reference}
             branchId={aspireBranchId}
             isAdmin={canEditCompany}
           />
@@ -113,18 +116,18 @@ export function ClientReferencesSection({
 // ── Row ───────────────────────────────────────────────────────────────────────
 
 function ClientReferenceRow({
-  ref: cr,
+  reference,
   branchId,
   isAdmin,
 }: {
-  ref: ClientReference
+  reference: ClientReference
   branchId: number | null
   isAdmin: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const deactivate = useDeactivateClientReference(branchId ?? 0)
 
-  const isCompanyWide = cr.aspireBranchId === null
+  const isCompanyWide = reference.aspireBranchId === null
   const canEdit = isAdmin || !isCompanyWide
 
   if (editing && canEdit) {
@@ -132,7 +135,7 @@ function ClientReferenceRow({
       <li>
         <ClientReferenceForm
           aspireBranchId={branchId}
-          existing={cr}
+          existing={reference}
           onDone={() => setEditing(false)}
         />
       </li>
@@ -142,12 +145,13 @@ function ClientReferenceRow({
   return (
     <li className="flex items-start justify-between rounded-md border border-[var(--border)] px-3 py-2 text-xs">
       <div>
-        <span className="font-medium text-[var(--fg)]">{cr.propertyName}</span>
-        <span className="ml-2 text-[var(--fg)] opacity-60">{cr.contactName}</span>
-        <span className="ml-2 text-[var(--fg)] opacity-50">· {cr.clientSinceYear}</span>
+        <span className="font-medium text-[var(--fg)]">{reference.propertyName}</span>
+        <AllRegionsBadge regionId={reference.regionId} testId={`client-ref-${reference.id}-all-regions`} />
+        <span className="ml-2 text-[var(--fg)] opacity-60">{reference.contactName}</span>
+        <span className="ml-2 text-[var(--fg)] opacity-50">· {reference.clientSinceYear}</span>
         {isCompanyWide && (
           <span
-            data-testid={`client-ref-${cr.id}-readonly`}
+            data-testid={`client-ref-${reference.id}-readonly`}
             className="ml-2 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800"
           >
             Company-wide (read-only)
@@ -165,7 +169,7 @@ function ClientReferenceRow({
           </button>
           <button
             type="button"
-            onClick={() => deactivate.mutate(cr.id)}
+            onClick={() => deactivate.mutate(reference.id)}
             disabled={deactivate.isPending}
             className="text-red-600 opacity-70 hover:opacity-100 text-[10px] disabled:opacity-30"
           >

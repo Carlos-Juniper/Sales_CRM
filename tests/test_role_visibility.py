@@ -3,11 +3,14 @@
 Estimating disciplines reach estimating, not leads, proposals, sales
 performance, the analytics dashboard, or public leads.
 
-Sales reaches leads, proposals, and its own sales-performance and commission
-rows. It does not reach the public-lead queue or the analytics dashboard.
+Sales reaches leads, proposals, its own sales-performance and commission
+rows, and the analytics dashboard scoped to leads it owns. It does not
+reach the public-lead queue.
 
 Public leads: inside_sales, admin, and management.
-Analytics dashboard: admin and management.
+Analytics dashboard: sales (including outside_sales), inside_sales, admin,
+and management. Sales counts use own_lead_filter; the others are company-wide.
+Estimators, procurement, and marketing are refused.
 REP_VIEWER_ROLES may read any rep; every other role is self-scoped.
 The reps-listing endpoints stay 403 outside that set.
 """
@@ -136,12 +139,6 @@ class TestSalesWorkspace:
             proposals = client.get("/api/proposals")
         assert proposals.status_code == 200
 
-    def test_sales_cannot_open_the_analytics_dashboard(self, as_role):
-        as_role("sales")
-        assert client.get("/api/dashboard/inside-sales").status_code == 403
-        as_role("outside_sales")
-        assert client.get("/api/dashboard/inside-sales").status_code == 403
-
     def test_sales_performance_is_self_scoped(self, as_role):
         as_role("sales", user_id="rep-1")
         captured: list[list] = []
@@ -222,10 +219,10 @@ class TestPublicLeadsAndAnalytics:
 
     @pytest.mark.parametrize(
         "role",
-        ["admin", "manager", "regional_director", "vice_president", "ceo"],
+        ["inside_sales", "admin", "manager", "regional_director", "vice_president", "ceo"],
     )
-    def test_leadership_can_open_analytics(self, as_role, role):
-        as_role(role)
+    def test_company_wide_roles_open_analytics_without_an_owner_filter(self, as_role, role):
+        as_role(role, user_id="leader-1")
         with patch("api.server.query", new_callable=AsyncMock) as mock_query:
             mock_query.side_effect = [
                 [{"cnt": 1}],
@@ -236,12 +233,40 @@ class TestPublicLeadsAndAnalytics:
             ]
             resp = client.get("/api/dashboard/inside-sales")
         assert resp.status_code == 200
+        for call in mock_query.await_args_list:
+            sql = call.args[0]
+            params = call.args[1] if len(call.args) > 1 else None
+            assert authz.OWN_LEAD_PREDICATE not in sql
+            assert params in (None, [])
+
+    @pytest.mark.parametrize("role", ["sales", "outside_sales"])
+    def test_sales_dashboard_is_limited_to_owned_leads(self, as_role, role):
+        as_role(role, user_id="rep-1")
+        with patch("api.server.query", new_callable=AsyncMock) as mock_query:
+            mock_query.side_effect = [
+                [{"cnt": 1}],
+                [{"cnt": 1}],
+                [{"status": "new", "cnt": 1}],
+                [{"avg_score": 10}],
+                [{"state": "FL", "cnt": 1}],
+            ]
+            resp = client.get("/api/dashboard/inside-sales")
+        assert resp.status_code == 200
+        assert len(mock_query.await_args_list) == 5
+        for call in mock_query.await_args_list:
+            sql, params = call.args
+            assert authz.OWN_LEAD_PREDICATE in sql
+            assert list(params) == ["rep-1", "rep-1"]
+            where_at = sql.index(authz.OWN_LEAD_PREDICATE)
+            for keyword in ("GROUP BY", "ORDER BY"):
+                if keyword in sql:
+                    assert where_at < sql.index(keyword)
 
     @pytest.mark.parametrize(
         "role",
-        ["sales", "inside_sales", "procurement", "marketing", "maintenance_estimating"],
+        ["procurement", "marketing", "maintenance_estimating", "install_estimating"],
     )
-    def test_non_leadership_cannot_open_analytics(self, as_role, role):
+    def test_other_roles_cannot_open_analytics(self, as_role, role):
         as_role(role)
         assert client.get("/api/dashboard/inside-sales").status_code == 403
 

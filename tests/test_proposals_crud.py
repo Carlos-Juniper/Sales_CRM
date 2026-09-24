@@ -627,7 +627,13 @@ class TestListProposalPackages:
         assert "NOT IN" not in sql
 
     def test_exclude_status_drops_won_and_lost_in_sql(self, authed):
-        """The queue request excludes closed leads in SQL, not after the response."""
+        """The queue request excludes closed leads in SQL, not after the response.
+        Grace window: won/lost entries within CLOSED_PACKAGE_GRACE_DAYS days are
+        still included, so the WHERE clause uses an OR with a lead_actions subquery
+        and the grace-day count is appended as the last param.
+        """
+        from api.proposals import CLOSED_PACKAGE_GRACE_DAYS
+
         with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
             mock_q.return_value = []
             res = client.get("/api/proposals/packages?exclude_status=won,lost")
@@ -637,4 +643,94 @@ class TestListProposalPackages:
         sql = mock_q.call_args.args[0]
         params = mock_q.call_args.args[1]
         assert "l.status NOT IN" in sql
-        assert params == ["won", "lost"]
+        # Grace-window OR clause: recently-closed rows survive the exclude filter.
+        assert "lead_actions" in sql
+        assert "INTERVAL" in sql
+        # Status names come first; grace-day constant is the final param.
+        assert params[0] == "won"
+        assert params[1] == "lost"
+        assert params[-1] == CLOSED_PACKAGE_GRACE_DAYS
+
+    def test_grace_window_sql_structure(self, authed):
+        """SQL must include a correlated subquery on lead_actions for the grace window."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            client.get("/api/proposals/packages?exclude_status=won,lost")
+        sql = mock_q.call_args.args[0]
+        assert "action_type = 'status_change'" in sql
+        assert "new_status = l.status" in sql
+        assert "closed_at" in sql
+
+    def test_no_exclude_status_omits_lead_actions_where(self, authed):
+        """Without exclude_status the WHERE clause is absent — no spurious join."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            client.get("/api/proposals/packages")
+        sql = mock_q.call_args.args[0]
+        # closed_at is always SELECTed (for the mapper) even without a WHERE clause.
+        assert "closed_at" in sql
+        # But the filtering WHERE/OR should NOT be present.
+        assert "l.status NOT IN" not in sql
+
+    def test_closed_at_in_response_shape(self, authed):
+        """closedAt must appear in each package item (None when not closed)."""
+        row = {
+            "id": "prop-xyz",
+            "lead_id": "lead-002",
+            "created_at": datetime(2026, 9, 1, 10, 0, 0),
+            "updated_at": datetime(2026, 9, 1, 10, 0, 0),
+            "property_name": "Test HOA",
+            "property_id": None,
+            "city": "Naples",
+            "state": "FL",
+            "notes": None,
+            "handoff_notes": None,
+            "lead_status": "won",
+            "estimated_contract_value": None,
+            "assignee_id": None,
+            "assignee_name": None,
+            "assignee_email": None,
+            "assignee_role": None,
+            "assignee_branch_id": None,
+            "assignee_initials": None,
+            "render_version": None,
+            "page_count": None,
+            "closed_at": datetime(2026, 9, 20, 8, 0, 0),
+        }
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = [row]
+            res = client.get("/api/proposals/packages")
+        item = res.json()[0]
+        assert "closedAt" in item
+        assert item["closedAt"] == "2026-09-20T08:00:00"
+
+    def test_closed_at_none_when_not_closed(self, authed):
+        """closedAt is None for a proposal that has never been won/lost."""
+        row = {
+            "id": "prop-abc123def456",
+            "lead_id": "lead-001",
+            "created_at": datetime(2026, 6, 16, 12, 0, 0),
+            "updated_at": datetime(2026, 6, 16, 15, 0, 0),
+            "property_name": "Lakewood Pines HOA",
+            "property_id": "prop-1",
+            "city": "Tampa",
+            "state": "FL",
+            "notes": None,
+            "handoff_notes": None,
+            "lead_status": "proposal_sent",
+            "estimated_contract_value": None,
+            "assignee_id": None,
+            "assignee_name": None,
+            "assignee_email": None,
+            "assignee_role": None,
+            "assignee_branch_id": None,
+            "assignee_initials": None,
+            "render_version": None,
+            "page_count": None,
+            "closed_at": None,
+        }
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = [row]
+            res = client.get("/api/proposals/packages")
+        item = res.json()[0]
+        assert item["closedAt"] is None

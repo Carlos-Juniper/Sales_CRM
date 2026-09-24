@@ -420,6 +420,28 @@ class TestTeamMembers:
         sql = mock_q.call_args.args[0]
         assert "active = 1" in sql
 
+    def test_branch_filter_includes_user_branches_subquery(self, authed):
+        """Migration 058: when aspire_branch_id is given, the SQL must include a
+        user_branches subquery so managers pinned to a twin branch id are still
+        returned for the sibling branch.  The branch id must appear TWICE in params
+        — once for the direct aspire_branch_id column match and once for the subquery.
+        """
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            client.get("/api/proposals/config/team-members?aspire_branch_id=3696")
+        sql, params = mock_q.call_args.args[0], mock_q.call_args.args[1]
+        assert "user_branches" in sql
+        assert params.count(3696) == 2
+
+    def test_no_branch_filter_omits_user_branches_subquery(self, authed):
+        """Without a branch filter the user_branches subquery must NOT appear —
+        it would be a superfluous correlated subquery against every row."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = []
+            client.get("/api/proposals/config/team-members")
+        sql = mock_q.call_args.args[0]
+        assert "user_branches" not in sql
+
 
 # ── GET /api/proposals/config/client-references ──────────────────────────────
 

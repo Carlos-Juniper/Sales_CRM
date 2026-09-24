@@ -249,3 +249,42 @@ async def proposal_document_warnings(
             "without the Aspire contract pages appended."
         ]
     return []
+
+
+async def proposal_team_bio_warnings(team_member_ids: list[str]) -> list[str]:
+    """Return non-blocking warnings for selected team members who have no bio.
+
+    An empty bio is not a hard block (TeamMemberCreate.bio defaults to '' and
+    many manager rows are seeded empty), but the rep should know before sending
+    that those cards will render without body text. Uses a WARNING string, never
+    a GuardIssue — GuardIssues hard-422 and would block every proposal that
+    picks a manager with a blank bio.
+
+    Args:
+        team_member_ids: The list of team_member id strings selected for the
+            proposal (team_member_ids JSON column, decoded).
+
+    Returns:
+        One warning string per member whose bio is NULL or empty string.
+        Empty list when all selected members have bio text.
+    """
+    if not team_member_ids:
+        return []
+
+    if query is None:  # pragma: no cover - db unavailable at import time
+        return []
+
+    placeholders = ", ".join(["%s"] * len(team_member_ids))
+    rows = await query(
+        f"SELECT id, name, bio FROM team_members WHERE id IN ({placeholders})",
+        team_member_ids,
+    )
+    warnings: list[str] = []
+    for r in rows:
+        bio = (r.get("bio") or "").strip()
+        if not bio:
+            name = r.get("name") or r["id"]
+            warnings.append(
+                f"Team member '{name}' has no bio; their card will print without body text."
+            )
+    return warnings

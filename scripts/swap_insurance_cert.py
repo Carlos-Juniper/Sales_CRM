@@ -22,13 +22,20 @@ the portfolio chapter does — see scripts/rasterize_portfolio_pages.py.
 Only page 1 is rasterized: that is the page the proposal shows. The full
 multi-page PDF is still uploaded, so nothing is lost.
 
-Usage (from repo root, with venv active and Cloud SQL proxy running):
-    python scripts/swap_insurance_cert.py --dry-run
-    python scripts/swap_insurance_cert.py
+Usage (from repo root, with the Cloud SQL proxy running via
+`./venv/bin/python run_dev.py`):
+
+    ./venv/bin/python scripts/swap_insurance_cert.py --dry-run --use-default-bucket
+    ./venv/bin/python scripts/swap_insurance_cert.py --use-default-bucket
+
+`--use-default-bucket` is only needed while GCS_CREDENTIALS_BUCKET is absent from
+your local .env; set it there and the flag becomes unnecessary. The script
+deliberately refuses to guess — see the DEFAULT_CREDENTIALS_BUCKET comment.
 
 Note: staging and prod SHARE the credentials bucket (GCS_CREDENTIALS_BUCKET is
 juniper-crm-attachments-prod in both cloudbuild files) but have SEPARATE
-databases, so the upload happens once and the DB update must be run per env.
+databases, so the upload happens once and the DB update must be run per env
+(point MYSQL_* / the proxy at each in turn).
 """
 from __future__ import annotations
 
@@ -71,12 +78,20 @@ PNG_CONTENT_TYPE = "image/png"
 DPI = 200
 COI_PAGE_INDEX = 0  # page 1 only — the page the proposal prints
 
-# Use GCS_CREDENTIALS_BUCKET when set (prod bucket in all deployed envs),
-# falling back to GCS_ATTACHMENTS_BUCKET for local dev without the var.
-GCS_BUCKET = (
-    os.environ.get("GCS_CREDENTIALS_BUCKET", "")
-    or os.environ.get("GCS_ATTACHMENTS_BUCKET", "")
-)
+# Credential documents live in GCS_CREDENTIALS_BUCKET, which is
+# juniper-crm-attachments-prod in BOTH cloudbuild.staging.yaml and
+# cloudbuild.yaml — every deployed environment reads credentials/* from the one
+# prod bucket.
+#
+# api.attachments falls back to GCS_ATTACHMENTS_BUCKET when the var is unset, so
+# that local dev works standalone. This script must NOT inherit that fallback:
+# it publishes to the deployed environments, and a laptop .env that only sets
+# GCS_ATTACHMENTS_BUCKET would silently upload to the staging attachments bucket
+# — which neither deployed environment ever reads. The upload would report
+# success and the certificate would still be missing from every proposal. Ask
+# for the bucket explicitly instead of guessing wrong.
+DEFAULT_CREDENTIALS_BUCKET = "juniper-crm-attachments-prod"
+GCS_BUCKET = os.environ.get("GCS_CREDENTIALS_BUCKET", "")
 
 DB_CFG = dict(
     host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
@@ -143,6 +158,22 @@ def main() -> int:
         action="store_true",
         help="Print what would happen without uploading or updating the DB.",
     )
+    ap.add_argument(
+        "--bucket",
+        default="",
+        help=(
+            "Credentials bucket to upload to. Defaults to $GCS_CREDENTIALS_BUCKET, "
+            f"then {DEFAULT_CREDENTIALS_BUCKET!r} with --use-default-bucket."
+        ),
+    )
+    ap.add_argument(
+        "--use-default-bucket",
+        action="store_true",
+        help=(
+            f"Use {DEFAULT_CREDENTIALS_BUCKET!r} (the value every deployed "
+            "environment uses) when GCS_CREDENTIALS_BUCKET is not set locally."
+        ),
+    )
     args = ap.parse_args()
 
     # ── Pre-flight checks ────────────────────────────────────────────────────
@@ -150,13 +181,28 @@ def main() -> int:
         print(f"ERROR: source file not found: {SOURCE_PATH}", file=sys.stderr)
         return 1
 
-    if not GCS_BUCKET:
-        print("ERROR: GCS_ATTACHMENTS_BUCKET is not set in .env", file=sys.stderr)
+    bucket_name = args.bucket or GCS_BUCKET
+    if not bucket_name and args.use_default_bucket:
+        bucket_name = DEFAULT_CREDENTIALS_BUCKET
+    if not bucket_name:
+        print(
+            "ERROR: no credentials bucket resolved.\n"
+            "  GCS_CREDENTIALS_BUCKET is not set in .env, and this script will not\n"
+            "  fall back to GCS_ATTACHMENTS_BUCKET: credentials/* are served only\n"
+            f"  from the credentials bucket ({DEFAULT_CREDENTIALS_BUCKET} in both\n"
+            "  cloudbuild files), so uploading anywhere else silently succeeds and\n"
+            "  leaves the certificate missing from every proposal.\n"
+            "\n"
+            "  Fix with either:\n"
+            f"    echo 'GCS_CREDENTIALS_BUCKET={DEFAULT_CREDENTIALS_BUCKET}' >> .env\n"
+            "    ./venv/bin/python scripts/swap_insurance_cert.py --use-default-bucket",
+            file=sys.stderr,
+        )
         return 1
 
     size_kb = SOURCE_PATH.stat().st_size // 1024
     print(f"Source     : {SOURCE_PATH}  ({size_kb} KB)")
-    print(f"GCS bucket : {GCS_BUCKET}")
+    print(f"GCS bucket : {bucket_name}")
     print(f"PDF key    : {PDF_OBJECT_KEY}   (source document)")
     print(f"PNG key    : {PNG_OBJECT_KEY}   (page 1 @ {DPI} dpi — what the proposal prints)")
     print(f"New expiry : {NEW_EXPIRY}")
@@ -203,8 +249,8 @@ def main() -> int:
 
     if args.dry_run:
         print("[dry-run] Would upload:")
-        print(f"  gs://{GCS_BUCKET}/{PDF_OBJECT_KEY}  ({len(pdf_bytes):,} bytes)")
-        print(f"  gs://{GCS_BUCKET}/{PNG_OBJECT_KEY}  ({len(png_bytes):,} bytes)")
+        print(f"  gs://{bucket_name}/{PDF_OBJECT_KEY}  ({len(pdf_bytes):,} bytes)")
+        print(f"  gs://{bucket_name}/{PNG_OBJECT_KEY}  ({len(png_bytes):,} bytes)")
         print()
         print("[dry-run] Would execute:")
         print(f"  UPDATE licenses_certifications")
@@ -229,12 +275,12 @@ def main() -> int:
     # strictly better than pointing at a key that has no image behind it.
     try:
         client = gcs_storage.Client()
-        bucket = client.bucket(GCS_BUCKET)
+        bucket = client.bucket(bucket_name)
         for key, data, ctype in (
             (PNG_OBJECT_KEY, png_bytes, PNG_CONTENT_TYPE),
             (PDF_OBJECT_KEY, pdf_bytes, PDF_CONTENT_TYPE),
         ):
-            print(f"Uploading {len(data):,} bytes to gs://{GCS_BUCKET}/{key} ...")
+            print(f"Uploading {len(data):,} bytes to gs://{bucket_name}/{key} ...")
             bucket.blob(key).upload_from_string(data, content_type=ctype)
             print("  Upload complete.")
     except Exception as e:
@@ -266,8 +312,8 @@ def main() -> int:
     conn.close()
 
     print("Done.")
-    print(f"  PDF        : gs://{GCS_BUCKET}/{PDF_OBJECT_KEY}")
-    print(f"  PNG        : gs://{GCS_BUCKET}/{PNG_OBJECT_KEY}")
+    print(f"  PDF        : gs://{bucket_name}/{PDF_OBJECT_KEY}")
+    print(f"  PNG        : gs://{bucket_name}/{PNG_OBJECT_KEY}")
     print(f"  object_key : {after.get('object_key') if after else 'unknown'}")
     print(f"  expiry_date: {after.get('expiry_date') if after else 'unknown'}")
     return 0

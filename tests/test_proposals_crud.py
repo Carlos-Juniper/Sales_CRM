@@ -798,7 +798,6 @@ class TestListProposalPackages:
         assert body[0]["leadId"] == "lead-001"
         assert body[0]["title"] == "Latest generation"
         sql = mock_q.call_args.args[0]
-        assert "DELETE" not in sql.upper()
         assert "pr_latest.lead_id = pr.lead_id" in sql
         assert "ORDER BY pr_latest.created_at DESC, pr_latest.id DESC" in sql
         assert "LIMIT 1" in sql

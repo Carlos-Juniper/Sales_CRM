@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Query
 
 from db import query
 
@@ -56,8 +56,11 @@ LEGACY_ROLE_MAP = {
 FIELD_SALES_ROLES = frozenset({"sales", "maintenance_sales", "install_sales"})
 
 # users.role values that identify a sales rep in selector queries (sales
-# performance, commissions). Wider than FIELD_SALES_ROLES: inside_sales was
-# already listed, and outside_sales still sits on un-migrated rows.
+# performance, commissions) and in GET /api/users?role=sales. Wider than
+# FIELD_SALES_ROLES: inside_sales is included, and outside_sales still sits
+# on un-migrated rows. `?role=sales` matches this whole tuple so the Settings
+# rep dropdown does not need a new query parameter. Any other role value,
+# including inside_sales or maintenance_sales alone, stays an exact match.
 SALES_REP_DB_ROLES = (
     "sales",
     "maintenance_sales",
@@ -65,6 +68,12 @@ SALES_REP_DB_ROLES = (
     "inside_sales",
     "outside_sales",
 )
+
+# Normalized roles that own client-reference and team-roster rows and may
+# edit the shared portfolio. inside_sales is in this set and stays OUT of
+# FIELD_SALES_ROLES, so its leads remain company-wide. outside_sales is not
+# listed: normalize_role maps it to sales before the check.
+ROSTER_REP_ROLES = FIELD_SALES_ROLES | frozenset({"inside_sales"})
 
 # Intake types a role may submit. Only the split field-sales roles are locked;
 # legacy sales, inside sales, admin, and the manager tier may submit both.
@@ -121,12 +130,18 @@ ANALYTICS_DASHBOARD_ROLES = FULL_ACCESS_ROLES
 # assigned_to is set (it then belongs to that rep's leads).
 PUBLIC_LEAD_SOURCES = ("higher_gov", "sam_gov")
 
-# Handoff 50 §3: roles that may manage the company-wide proposal assets —
-# portfolio_properties, client_references, team_members, org-chart config.
-# Marketing owns these cross-branch; admin retains its super-role access.
-# This is a resource-scoped role gate, deliberately NOT a new branch-scoping
-# mechanism (Carlos's §5.1 call: company-wide, role-gated).
+# Roles that may manage per-rep proposal roster rows (client_references,
+# team_members) for ANY sales rep, and that keep the legacy company-wide /
+# any-branch write path. Admin retains super-role access.
+# Portfolio editing is wider — see PORTFOLIO_EDITOR_ROLES. This is a
+# resource-scoped role gate, deliberately NOT a new branch-scoping mechanism.
 MARKETING_ROLES = frozenset({"marketing", "admin"})
+
+# Shared portfolio (one company-wide set, not owned by a rep). Every roster
+# rep (legacy sales, inside_sales, maintenance_sales, install_sales) and
+# marketing may add and edit; admin keeps super-role access. Other roles
+# stay read-only on the write endpoints.
+PORTFOLIO_EDITOR_ROLES = ROSTER_REP_ROLES | frozenset({"marketing", "admin"})
 
 def normalize_role(role: Optional[str]) -> str:
     """Map a stored/JWT role onto the canonical vocabulary (legacy → sales)."""
@@ -147,8 +162,62 @@ def sees_all_branches(role: Optional[str]) -> bool:
 
 
 def is_marketing_manager(role: Optional[str]) -> bool:
-    """True if the role may manage company-wide proposal assets (§3)."""
+    """True if the role may manage any rep's client references and team roster."""
     return normalize_role(role) in MARKETING_ROLES
+
+
+def is_roster_rep(role: Optional[str]) -> bool:
+    """True for a role that owns its own client references and team roster.
+
+    Legacy `sales`, `outside_sales` (normalized to sales), `inside_sales`,
+    `maintenance_sales`, and `install_sales`. This is not the lead-book
+    check: `inside_sales` is a roster rep and is not a field-sales rep.
+    """
+    return normalize_role(role) in ROSTER_REP_ROLES
+
+
+def is_portfolio_editor(role: Optional[str]) -> bool:
+    """True if the role may add or edit the shared portfolio."""
+    return normalize_role(role) in PORTFOLIO_EDITOR_ROLES
+
+
+def coalesce_rep_id(*values: Optional[str]) -> Optional[str]:
+    """Collapse rep_id / user_id / body repId into one owning-rep id.
+
+    Empty strings are ignored. Two different non-empty values are a 400 —
+    the caller named two reps.
+    """
+    present = [v.strip() for v in values if v and str(v).strip()]
+    if not present:
+        return None
+    if len(set(present)) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="rep_id and user_id must be the same rep.",
+        )
+    return present[0]
+
+
+def roster_rep_query(
+    rep_id: Optional[str] = Query(
+        default=None,
+        description=(
+            "Owning sales rep (users.id). On reads, filters client references "
+            "and the team roster to that rep. On creates, the new row is owned "
+            "by that rep. Marketing and admin may name any roster rep "
+            "(sales, outside_sales, inside_sales, maintenance_sales, "
+            "install_sales). A roster rep may name only themselves; omitting "
+            "it on a write assigns the row to the caller. Omitting it on a "
+            "read keeps the existing unscoped list used by proposal generation."
+        ),
+    ),
+    user_id: Optional[str] = Query(
+        default=None,
+        description="Alias of rep_id. When both are sent they must match.",
+    ),
+) -> Optional[str]:
+    """Query dependency: `rep_id` or `user_id` selects which rep's roster."""
+    return coalesce_rep_id(rep_id, user_id)
 
 
 def requires_aspire_sales_rep(role: Optional[str]) -> bool:

@@ -194,6 +194,8 @@ class TestSplitSalesRoles:
             assert authz.is_approver(role) == authz.is_approver("sales")
             assert authz.sees_all_branches(role) == authz.sees_all_branches("sales")
             assert authz.is_marketing_manager(role) == authz.is_marketing_manager("sales")
+            assert authz.is_roster_rep(role) == authz.is_roster_rep("sales")
+            assert authz.is_portfolio_editor(role) == authz.is_portfolio_editor("sales")
             assert authz.requires_aspire_sales_rep(role)
             assert authz.is_sales_rep(role)
             sql, params = authz.own_lead_filter(_user(role, id="rep-1"))
@@ -207,6 +209,19 @@ class TestSplitSalesRoles:
         # Existing inside_sales keeps the shared queue: company-wide leads.
         assert not authz.is_sales_rep("inside_sales")
         assert authz.own_lead_filter(_user("inside_sales")) == ("", [])
+        # Roster ownership is wider than the lead book: inside_sales counts.
+        for roster_role in (
+            "sales", "outside_sales", "inside_sales",
+            "maintenance_sales", "install_sales",
+        ):
+            assert authz.is_roster_rep(roster_role), roster_role
+            assert authz.is_portfolio_editor(roster_role), roster_role
+        assert "inside_sales" not in authz.FIELD_SALES_ROLES
+        assert "inside_sales" in authz.ROSTER_REP_ROLES
+        assert authz.is_portfolio_editor("marketing")
+        assert authz.is_portfolio_editor("admin")
+        assert not authz.is_roster_rep("marketing")
+        assert not authz.is_portfolio_editor("manager")
         for wide in ("admin", "manager", "regional_director", "vice_president", "ceo"):
             assert not authz.is_sales_rep(wide)
             assert authz.own_lead_filter(_user(wide)) == ("", [])

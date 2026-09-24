@@ -1631,14 +1631,30 @@ async def list_users(
     Filter rules:
       - ?role=<r>: restrict to that role AND active=1 (assignee pickers must
         exclude deactivated reps; Slice 6 deactivates, never deletes).
+        `GET /api/users?role=sales` (and `?role=outside_sales`, the same
+        alias) is the sales-role group: stored roles sales, outside_sales,
+        inside_sales, maintenance_sales, and install_sales. That is the
+        Settings rep dropdown and the lead-assignee picker. Each item's
+        `id` is the `rep_id` (alias `user_id`) to pass when marketing or
+        admin reads or writes that rep's client references and team roster.
+        Any other value, including `?role=inside_sales` or
+        `?role=maintenance_sales`, stays an exact match of that one role.
       - plain GET: returns ALL rows including inactive so historical name lookups
         on old estimates still resolve.
     """
     conditions: list[str] = []
     params: list[Any] = []
     if role:
-        conditions.append("role = %s")
-        params.append(role)
+        # role=sales is the sales-role group (see docstring). Every other
+        # role stays an exact match so an admin filter for one persona
+        # does not widen.
+        if authz.normalize_role(role) == "sales":
+            placeholders = ", ".join(["%s"] * len(authz.SALES_REP_DB_ROLES))
+            conditions.append(f"role IN ({placeholders})")
+            params.extend(authz.SALES_REP_DB_ROLES)
+        else:
+            conditions.append("role = %s")
+            params.append(role)
         # A role filter drives the assignee pickers (e.g. ?role=sales for the
         # lead-assignee picker, §2.8), so it must exclude DEACTIVATED users:
         # Slice 6 deactivates instead of deleting, and a deactivated rep must

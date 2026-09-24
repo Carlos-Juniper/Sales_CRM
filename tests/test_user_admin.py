@@ -41,6 +41,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("ENTRA_CLIENT_ID", "x")
 os.environ.setdefault("ENTRA_TENANT_ID", "x")
 
+from api.authz import SALES_REP_DB_ROLES  # noqa: E402
 from api.server import app, require_auth  # noqa: E402
 
 client = TestClient(app)
@@ -382,9 +383,11 @@ class TestActivateDeactivate:
         ]
         r = client.get("/api/users", params={"role": "sales"})
         assert r.status_code == 200
-        sql = mock_server_query.await_args_list[0].args[0]
+        sql, params = mock_server_query.await_args_list[0].args
         assert "active = 1" in sql
-        assert "role = %s" in sql
+        # role=sales is the sales-role group, not an exact users.role match.
+        assert "role IN (" in sql
+        assert list(params) == list(SALES_REP_DB_ROLES)
 
     @patch("api.server.query", new_callable=AsyncMock)
     async def test_historical_name_lookup_still_resolves_deactivated(
@@ -572,10 +575,11 @@ class TestListUsersEnriched:
         r = client.get("/api/users", params={"role": "sales"})
         assert r.status_code == 200
 
-        # SQL must carry both filters.
-        sql = mock_server_query.await_args_list[0].args[0]
+        # SQL must carry both filters. role=sales matches the sales-role group.
+        sql, params = mock_server_query.await_args_list[0].args
         assert "active = 1" in sql
-        assert "role = %s" in sql
+        assert "role IN (" in sql
+        assert list(params) == list(SALES_REP_DB_ROLES)
 
         users = r.json()
         u = users[0]
@@ -583,6 +587,21 @@ class TestListUsersEnriched:
         assert u["aspireRepId"] == 4242
         # branches must be a list (even if empty).
         assert isinstance(u["branches"], list)
+
+    @patch("api.server.query", new_callable=AsyncMock)
+    async def test_specific_role_filter_stays_exact(
+        self, mock_server_query, as_role
+    ):
+        """A single persona such as inside_sales is not widened to the group."""
+        as_role("admin")
+        mock_server_query.return_value = []
+        r = client.get("/api/users", params={"role": "inside_sales"})
+        assert r.status_code == 200
+        sql, params = mock_server_query.await_args_list[0].args
+        assert "role = %s" in sql
+        assert "role IN (" not in sql
+        assert params == ["inside_sales"]
+        assert "active = 1" in sql
 
     @patch("api.server.query", new_callable=AsyncMock)
     async def test_plain_list_still_returns_inactive_users(

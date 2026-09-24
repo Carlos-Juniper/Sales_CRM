@@ -59,9 +59,10 @@ def as_role():
 # ── Canonical role model ─────────────────────────────────────────────────────
 
 class TestRoleModel:
-    def test_eleven_canonical_roles(self):
+    def test_canonical_roles(self):
         assert authz.CANONICAL_ROLES == frozenset({
-            "procurement", "sales", "inside_sales", "admin", "manager",
+            "procurement", "sales", "maintenance_sales", "install_sales",
+            "inside_sales", "admin", "manager",
             "regional_director", "maintenance_estimating", "install_estimating",
             "vice_president", "ceo",
             # Handoff 50 §3 (437c508): cross-branch owner of the company-wide
@@ -82,13 +83,19 @@ class TestRoleModel:
     def test_estimator_roles(self):
         for r in ("maintenance_estimating", "install_estimating", "admin"):
             assert authz.is_estimator(r), r
-        for r in ("manager", "regional_director", "vice_president", "ceo", "sales", "procurement"):
+        for r in (
+            "manager", "regional_director", "vice_president", "ceo",
+            "sales", "maintenance_sales", "install_sales", "procurement",
+        ):
             assert not authz.is_estimator(r), r
 
     def test_approver_roles(self):
         for r in ("manager", "regional_director", "vice_president", "ceo", "admin"):
             assert authz.is_approver(r), r
-        for r in ("maintenance_estimating", "install_estimating", "sales", "procurement"):
+        for r in (
+            "maintenance_estimating", "install_estimating",
+            "sales", "maintenance_sales", "install_sales", "procurement",
+        ):
             assert not authz.is_approver(r), r
 
     @patch("api.authz.query", new_callable=AsyncMock)
@@ -105,9 +112,10 @@ class TestRoleModel:
             authz.require_estimator(_user(role))  # must not raise
 
     def test_require_estimator_403s_sales(self):
-        with pytest.raises(HTTPException) as exc:
-            authz.require_estimator(_user("sales"))
-        assert exc.value.status_code == 403
+        for role in ("sales", "maintenance_sales", "install_sales"):
+            with pytest.raises(HTTPException) as exc:
+                authz.require_estimator(_user(role))
+            assert exc.value.status_code == 403
 
     def test_require_estimator_403s_procurement(self):
         with pytest.raises(HTTPException) as exc:
@@ -137,6 +145,208 @@ class TestRoleModel:
         # CEO's top tier has max_value_cents NULL → unlimited.
         mock_authz_query.return_value = [{"max_value_cents": None}]
         assert await authz.approval_ceiling_cents("ceo") is None
+
+
+# ── Split field-sales roles (maintenance_sales / install_sales) ──────────────
+
+_PRIVILEGED_ROLE_SETS = (
+    "ESTIMATOR_ROLES",
+    "APPROVER_ROLES",
+    "LINE_ITEM_EDIT_ROLES",
+    "CROSS_BRANCH_ROLES",
+    "REP_VIEWER_ROLES",
+    "MARKETING_ROLES",
+)
+
+_BOTH_INTAKES = ["maintenance", "install"]
+
+
+class TestSplitSalesRoles:
+    """maintenance_sales and install_sales match sales access, then lock intake.
+
+    Legacy `sales` stays canonical. Nothing here rewrites stored users.
+    REP_VIEWER_ROLES is pinned exactly so the split cannot widen who sees
+    every rep's numbers.
+    """
+
+    def test_legacy_sales_stays_canonical(self):
+        assert "sales" in authz.CANONICAL_ROLES
+        assert authz.normalize_role("sales") == "sales"
+        assert authz.normalize_role("outside_sales") == "sales"
+        assert authz.normalize_role("maintenance_sales") == "maintenance_sales"
+        assert authz.normalize_role("install_sales") == "install_sales"
+
+    def test_rep_viewer_roles_unchanged(self):
+        assert authz.REP_VIEWER_ROLES == frozenset({
+            "admin", "vice_president", "ceo", "manager", "regional_director",
+        })
+        for role in ("sales", "maintenance_sales", "install_sales"):
+            assert role not in authz.REP_VIEWER_ROLES
+
+    def test_split_roles_match_sales_on_every_authz_set(self):
+        for role in ("maintenance_sales", "install_sales"):
+            assert role in authz.CANONICAL_ROLES
+            assert role in authz.FIELD_SALES_ROLES
+            for set_name in _PRIVILEGED_ROLE_SETS:
+                role_set = getattr(authz, set_name)
+                assert (role in role_set) == ("sales" in role_set), set_name
+            assert authz.is_estimator(role) == authz.is_estimator("sales")
+            assert authz.is_approver(role) == authz.is_approver("sales")
+            assert authz.sees_all_branches(role) == authz.sees_all_branches("sales")
+            assert authz.is_marketing_manager(role) == authz.is_marketing_manager("sales")
+            assert authz.requires_aspire_sales_rep(role)
+        assert authz.requires_aspire_sales_rep("sales")
+        assert not authz.requires_aspire_sales_rep("manager")
+        assert not authz.requires_aspire_sales_rep("inside_sales")
+
+    def test_split_roles_cannot_open_an_estimate(self):
+        # Same gate as sales: the queue is visible, estimate detail is not.
+        for role in ("sales", "maintenance_sales", "install_sales"):
+            with pytest.raises(HTTPException) as exc:
+                authz.require_estimate_viewer(_user(role))
+            assert exc.value.status_code == 403
+
+    def test_intake_lock_and_open_roles(self):
+        assert authz.allowed_intake_types("maintenance_sales") == ["maintenance"]
+        assert authz.allowed_intake_types("install_sales") == ["install"]
+        for role in (
+            "sales", "inside_sales", "admin", "manager", "regional_director",
+            "vice_president", "ceo", "procurement", "marketing",
+            "maintenance_estimating", "install_estimating",
+        ):
+            assert authz.allowed_intake_types(role) == _BOTH_INTAKES, role
+        # A missing claim is not locked.
+        assert authz.allowed_intake_types(None) == _BOTH_INTAKES
+        assert authz.allowed_intake_types("  maintenance_sales  ") == ["maintenance"]
+
+    def test_require_intake_type_blocks_only_the_other_intake(self):
+        authz.require_intake_type(_user("maintenance_sales"), "maintenance")
+        authz.require_intake_type(_user("install_sales"), "install")
+        authz.require_intake_type(_user("sales"), "install")
+        authz.require_intake_type(_user("admin"), "maintenance")
+        authz.require_intake_type(_user("manager"), "install")
+        with pytest.raises(HTTPException) as exc:
+            authz.require_intake_type(_user("maintenance_sales"), "install")
+        assert exc.value.status_code == 403
+        assert "maintenance" in exc.value.detail
+        with pytest.raises(HTTPException) as exc:
+            authz.require_intake_type(_user("install_sales"), "maintenance")
+        assert exc.value.status_code == 403
+        assert "install" in exc.value.detail
+
+    def test_me_exposes_role_and_allowed_intake_types(self, as_role):
+        as_role("maintenance_sales")
+        body = client.get("/api/auth/me").json()
+        assert body["role"] == "maintenance_sales"
+        assert body["allowed_intake_types"] == ["maintenance"]
+
+        as_role("install_sales")
+        body = client.get("/api/auth/me").json()
+        assert body["role"] == "install_sales"
+        assert body["allowed_intake_types"] == ["install"]
+
+        as_role("sales")
+        assert client.get("/api/auth/me").json()["allowed_intake_types"] == _BOTH_INTAKES
+
+        as_role("admin")
+        assert client.get("/api/auth/me").json()["allowed_intake_types"] == _BOTH_INTAKES
+
+        as_role("regional_director")
+        assert client.get("/api/auth/me").json()["allowed_intake_types"] == _BOTH_INTAKES
+
+    def test_create_estimate_enforces_intake_lock(self, as_role):
+        # Forbidden type is rejected before any write (no DB mock needed).
+        as_role("install_sales")
+        blocked = client.post("/api/estimating/estimates", json={
+            "estimateType": "maintenance", "aspireBranchId": 1,
+        })
+        assert blocked.status_code == 403
+
+        as_role("maintenance_sales")
+        blocked = client.post("/api/estimating/estimates", json={
+            "estimateType": "install", "aspireBranchId": 1,
+        })
+        assert blocked.status_code == 403
+
+        # Legacy sales, admin, and a manager-tier role pass the lock and fail
+        # later on the missing branch id — not on role.
+        for role, estimate_type in (
+            ("sales", "install"),
+            ("sales", "maintenance"),
+            ("admin", "maintenance"),
+            ("manager", "install"),
+            ("vice_president", "maintenance"),
+        ):
+            as_role(role)
+            resp = client.post("/api/estimating/estimates", json={"estimateType": estimate_type})
+            assert resp.status_code == 400, role
+            assert "aspireBranchId" in resp.json()["detail"]
+
+    def test_draft_enforces_intake_lock(self, as_role):
+        as_role("maintenance_sales")
+        resp = client.post("/api/estimating/intake/drafts", json={
+            "estimateType": "install", "payload": {"a": 1},
+        })
+        assert resp.status_code == 403
+
+        as_role("install_sales")
+        resp = client.post("/api/estimating/intake/drafts", json={
+            "estimateType": "maintenance", "payload": {"a": 1},
+        })
+        assert resp.status_code == 403
+
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_draft_allows_matching_and_unlocked_roles(self, mock_query, mock_exec, as_role):
+        for role, estimate_type in (
+            ("maintenance_sales", "maintenance"),
+            ("install_sales", "install"),
+            ("sales", "install"),
+            ("sales", "maintenance"),
+            ("admin", "install"),
+            ("ceo", "maintenance"),
+        ):
+            as_role(role)
+            resp = client.post("/api/estimating/intake/drafts", json={
+                "estimateType": estimate_type, "payload": {"a": 1},
+            })
+            assert resp.status_code == 201, (role, resp.text)
+            assert resp.json()["estimateType"] == estimate_type
+
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_draft_resume_rejects_stored_other_type(self, mock_query, mock_exec, as_role):
+        as_role("maintenance_sales")
+        mock_query.return_value = [{
+            "id": "ins-1",
+            "estimate_id": None,
+            "estimate_type": "install",
+            "payload": "{}",
+            "submitted_by": "u1",
+            "is_draft": 1,
+            "created_at": "2026-08-01 10:00:00",
+        }]
+        resp = client.post("/api/estimating/intake/drafts", json={
+            "estimateType": "maintenance",
+            "payload": {"a": 1},
+            "draftId": "ins-1",
+        })
+        assert resp.status_code == 403
+        mock_exec.assert_not_called()
+
+    @patch("api.commissions.query", new_callable=AsyncMock, return_value=[])
+    @patch("api.sales_performance.query", new_callable=AsyncMock, return_value=[])
+    def test_rep_selectors_include_split_roles(self, mock_perf, mock_comm, as_role):
+        as_role("admin")
+        assert client.get("/api/sales-performance/reps").status_code == 200
+        assert client.get("/api/commissions/reps").status_code == 200
+        for mock in (mock_perf, mock_comm):
+            params = list(mock.await_args.args[1])
+            assert "sales" in params
+            assert "maintenance_sales" in params
+            assert "install_sales" in params
+            assert "inside_sales" in params
+            assert "outside_sales" in params
 
 
 # ── Line-item edit mutations (widened role set) ──────────────────────────────

@@ -383,7 +383,8 @@ class UserAdminPatch(BaseModel):
     """Partial update of one users row (role / branches / active).
 
     Every field optional — the PATCH applies only the keys present. Setting role
-    to 'sales' re-runs the aspire_rep_id hard-block; `active` toggles the
+    to a field-sales role (sales, maintenance_sales, install_sales) re-runs the
+    aspire_rep_id hard-block; `active` toggles the
     deactivate flag (never a DELETE); `branches` is a replace-set on
     user_branches.
     """
@@ -1117,8 +1118,9 @@ def register(app, require_auth) -> None:
 
         Not "create from scratch": name/email come from the M365 pick, so the
         stored email is exact. Email is lowercased (Entra SSO matches lowercased
-        email). role='sales' triggers the aspire_rep_id hard-block; other roles
-        save with no Aspire link and no warning. The authorize and any branch
+        email). A field-sales role (sales, maintenance_sales, install_sales)
+        triggers the aspire_rep_id hard-block; other roles save with no Aspire
+        link and no warning. The authorize and any branch
         set are audited.
         """
         await _require_admin(user)
@@ -1129,9 +1131,9 @@ def register(app, require_auth) -> None:
 
         email = body.email.strip().lower()
 
-        # Hard-block sales without a resolvable Aspire contact BEFORE any write.
+        # Hard-block field sales without a resolvable Aspire contact BEFORE any write.
         aspire_rep_id: Optional[int] = None
-        if role == "sales":
+        if authz.requires_aspire_sales_rep(role):
             aspire_rep_id = await _require_resolved_sales_rep(email, None)
 
         user_id = str(uuid.uuid4())
@@ -1170,8 +1172,9 @@ def register(app, require_auth) -> None:
 
         Deactivate, never delete: `active=false` sets users.active=0 (no DELETE),
         so historical references survive and the user drops from ?role= pickers
-        (which filter active=1). Setting role='sales' re-runs the aspire_rep_id
-        hard-block against the row's stored rep or a live resolution. Branches
+        (which filter active=1). Setting a field-sales role re-runs the
+        aspire_rep_id hard-block against the row's stored rep or a live
+        resolution. Branches
         are a replace-set. Every change is audited.
         """
         await _require_admin(user)
@@ -1192,9 +1195,11 @@ def register(app, require_auth) -> None:
                 raise HTTPException(status_code=422, detail=f"Unknown role {new_role!r}")
 
             new_rep_id = current.get("aspire_rep_id")
-            if new_role == "sales":
-                # Block a sales role that cannot resolve an Aspire contact BEFORE
-                # writing anything (prevent-don't-repair).
+            if authz.requires_aspire_sales_rep(new_role):
+                # Block a field-sales role that cannot resolve an Aspire contact
+                # BEFORE writing anything (prevent-don't-repair). An existing
+                # aspire_rep_id is trusted, so reassigning sales → a split role
+                # does not drop the link.
                 new_rep_id = await _require_resolved_sales_rep(
                     current.get("email") or "", current.get("aspire_rep_id")
                 )
@@ -2379,8 +2384,9 @@ async def _replace_user_branches(
 async def _require_resolved_sales_rep(email: str, current_rep_id: Any) -> int:
     """Return a resolved Aspire ContactID for a sales rep, or 422 with §2.8 copy.
 
-    The hard-block (§2.8, prevent-don't-repair): a user with role='sales' must
-    map to an Aspire contact so opportunity pushes stamp SalesRepID. If the row
+    The hard-block (§2.8, prevent-don't-repair): a field-sales role (sales,
+    maintenance_sales, install_sales) must map to an Aspire contact so
+    opportunity pushes stamp SalesRepID. If the row
     already carries an aspire_rep_id it is trusted; otherwise the email is
     resolved live against Aspire. An unresolved rep raises 422 with the EXACT
     §2.8 copy — no partial save.

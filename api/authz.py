@@ -1,9 +1,9 @@
 """Canonical role model + server-side authorization.
 
-One role vocabulary for the whole app (ten business roles), the
-estimator/approver ownership split enforced server-side, the approval-tier
-authority ladder, and branch scoping derived from the authenticated user —
-never from a client-supplied query param (BRD I-9.5).
+One role vocabulary for the whole app, the estimator/approver ownership
+split enforced server-side, the approval-tier authority ladder, and branch
+scoping derived from the authenticated user — never from a client-supplied
+query param (BRD I-9.5).
 
 Layered on `require_auth`: handlers call `require_estimator(user)` /
 `require_approver(user)` / `require_approval_authority(user, value)` with the
@@ -23,6 +23,8 @@ from db import query
 CANONICAL_ROLES = frozenset({
     "procurement",
     "sales",
+    "maintenance_sales",
+    "install_sales",
     "inside_sales",
     "admin",
     "manager",
@@ -39,10 +41,37 @@ CANONICAL_ROLES = frozenset({
 })
 
 # `inside_sales` qualifies raw public/government leads and assigns them on to a
-# `sales` CRM, so the two are distinct personas and only inside sales reaches the
-# public lead feed. `outside_sales` remains retired and collapses into `sales`.
+# field-sales CRM, so it stays a distinct persona and only inside sales reaches
+# the public lead feed. `outside_sales` remains retired and collapses into
+# `sales`. `maintenance_sales` and `install_sales` split field sales by the
+# intake they submit; legacy `sales` stays valid until an admin reassigns
+# people — nothing here rewrites existing users.role rows.
 LEGACY_ROLE_MAP = {
     "outside_sales": "sales",
+}
+
+# Field-sales personas. The two split roles inherit every access grant `sales`
+# has (they are members of the same sets, and absent from the same privileged
+# sets). They differ only in which intake type they may submit.
+FIELD_SALES_ROLES = frozenset({"sales", "maintenance_sales", "install_sales"})
+
+# users.role values that identify a sales rep in selector queries (sales
+# performance, commissions). Wider than FIELD_SALES_ROLES: inside_sales was
+# already listed, and outside_sales still sits on un-migrated rows.
+SALES_REP_DB_ROLES = (
+    "sales",
+    "maintenance_sales",
+    "install_sales",
+    "inside_sales",
+    "outside_sales",
+)
+
+# Intake types a role may submit. Only the split field-sales roles are locked;
+# legacy sales, inside sales, admin, and the manager tier may submit both.
+_INTAKE_TYPES = ("maintenance", "install")
+_INTAKE_TYPE_LOCK = {
+    "maintenance_sales": "maintenance",
+    "install_sales": "install",
 }
 
 # Estimator-owned scope: line items / sections / services / components / takeoff.
@@ -97,6 +126,43 @@ def sees_all_branches(role: Optional[str]) -> bool:
 def is_marketing_manager(role: Optional[str]) -> bool:
     """True if the role may manage company-wide proposal assets (§3)."""
     return normalize_role(role) in MARKETING_ROLES
+
+
+def requires_aspire_sales_rep(role: Optional[str]) -> bool:
+    """True if saving this role must resolve an Aspire ContactID (§2.8).
+
+    Field sales (legacy `sales` and the maintenance/install split) stamp
+    SalesRepID on opportunity push. Other roles save with no Aspire link.
+    """
+    return normalize_role(role) in FIELD_SALES_ROLES
+
+
+def allowed_intake_types(role: Optional[str]) -> list[str]:
+    """Intake types (`maintenance`, `install`) this role may submit.
+
+    `maintenance_sales` and `install_sales` are locked to one type. Every
+    other role — including legacy `sales`, admin, and manager-tier roles —
+    may submit both. An empty or unknown role is not locked, so a missing
+    claim cannot accidentally hide an intake.
+    """
+    locked = _INTAKE_TYPE_LOCK.get(normalize_role(role))
+    if locked is None:
+        return list(_INTAKE_TYPES)
+    return [locked]
+
+
+def require_intake_type(user: dict, estimate_type: str) -> None:
+    """403 when a split sales role submits the other intake type.
+
+    Admins, managers, legacy `sales`, and every non-locked role pass. Callers
+    still reject an estimateType that is neither maintenance nor install.
+    """
+    allowed = allowed_intake_types(user.get("role"))
+    if estimate_type not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Role may only submit {allowed[0]} intakes.",
+        )
 
 
 async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:

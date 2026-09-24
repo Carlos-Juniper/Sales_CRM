@@ -1503,6 +1503,9 @@ def register(app, require_auth) -> None:
         est_type = body.get("estimateType")
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
+        # Split field-sales roles may submit only their intake. Legacy sales,
+        # admin, and manager-tier roles are not locked. Runs before any write.
+        authz.require_intake_type(user, est_type)
         # Branch identity rides on the Aspire BranchID (int), captured at intake.
         # TODO(slice14-contract): once Carlos applies migration 022 to live, the
         #   estimates.branch NOT NULL constraint is gone. Remove the branch_city
@@ -1647,6 +1650,9 @@ def register(app, require_auth) -> None:
         est_type = body.get("estimateType")
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
+        # Same intake lock as estimate create. A resume of an existing draft
+        # is also refused when the stored type is one this role cannot submit.
+        authz.require_intake_type(user, est_type)
         payload = body.get("payload")
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="payload must be an object")
@@ -1660,6 +1666,9 @@ def register(app, require_auth) -> None:
             )
             if not rows:
                 raise HTTPException(status_code=404, detail="Draft not found")
+            stored_type = rows[0].get("estimate_type")
+            if stored_type:
+                authz.require_intake_type(user, stored_type)
             await execute(
                 "UPDATE intake_submissions SET payload = %s WHERE id = %s",
                 [json.dumps(payload), draft_id],

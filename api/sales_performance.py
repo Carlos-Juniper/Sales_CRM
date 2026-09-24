@@ -66,13 +66,15 @@ def register(app, require_auth) -> None:
         if not _can_view_all(user):
             raise HTTPException(status_code=403)
 
+        placeholders = ", ".join(["%s"] * len(authz.SALES_REP_DB_ROLES))
         rows = await query(
-            """
+            f"""
             SELECT id, name, email
             FROM users
-            WHERE role IN ('sales', 'inside_sales', 'outside_sales')
+            WHERE role IN ({placeholders})
             ORDER BY name
-            """
+            """,
+            list(authz.SALES_REP_DB_ROLES),
         )
         return [_coerce_row(row) for row in rows]
 

@@ -1664,8 +1664,11 @@ async def dashboard_inside_sales(_user: dict = Depends(require_auth)) -> dict:
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
-def _issue_jwt(user: dict, response: Response) -> dict:
-    payload = {
+def _session_user(user: dict) -> dict:
+    """Public session user. `allowed_intake_types` is derived, not stored on the JWT."""
+    from api import authz
+
+    return {
         "id": user["id"],
         "name": user["name"],
         "email": user["email"],
@@ -1675,9 +1678,20 @@ def _issue_jwt(user: dict, response: Response) -> dict:
         # Aspire ContactID for defaulting an opportunity's SalesRepContactID; may be
         # null until the one-time backfill runs. .get keeps pre-backfill rows working.
         "aspire_rep_id": user.get("aspire_rep_id"),
+        "allowed_intake_types": authz.allowed_intake_types(user.get("role")),
+    }
+
+
+def _issue_jwt(user: dict, response: Response) -> dict:
+    payload = {
+        **_session_user(user),
         "exp": datetime.now(timezone.utc) + timedelta(seconds=SESSION_DURATION),
     }
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    # The intake flag is derived from role on every response. Keep it out of the
+    # cookie so a role already on the token picks up the flag without re-login,
+    # and so the claim set stays the identity fields require_auth already trusts.
+    token_payload = {k: v for k, v in payload.items() if k != "allowed_intake_types"}
+    token = jwt.encode(token_payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     response.set_cookie(
         key="session",
         value=token,
@@ -1858,7 +1872,18 @@ async def logout(response: Response) -> dict:
 
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(require_auth)) -> dict:
-    return user
+    """Current session. `role` is the JWT claim; `allowed_intake_types` is derived.
+
+    The intake list is computed here (not stored on the token) so existing
+    sessions gain it on the next /me without a new login. It follows the JWT
+    role, the same staleness as every other non-approver route.
+    """
+    from api import authz
+
+    return {
+        **user,
+        "allowed_intake_types": authz.allowed_intake_types(user.get("role")),
+    }
 
 
 # ── Calendar ─────────────────────────────────────────────────────────────────

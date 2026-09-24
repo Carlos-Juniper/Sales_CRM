@@ -118,8 +118,9 @@ async def resolve_aspire_rep_id(
 ) -> Optional[int]:
     """Resolve a sales rep's Aspire ContactID from their email, or None.
 
-    Backs the §2.8 hard-block: a user saved with role='sales' MUST resolve to an
-    Aspire contact so the opportunity push can stamp SalesRepID. This is the
+    Backs the §2.8 hard-block: a field-sales user (sales, maintenance_sales,
+    install_sales) MUST resolve to an Aspire contact so the opportunity push
+    can stamp SalesRepID. This is the
     single source of truth for that resolution (the port owns all Aspire field
     names) and is reused by the "Link Aspire Rep" action.
 

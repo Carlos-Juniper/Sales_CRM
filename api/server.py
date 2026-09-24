@@ -41,6 +41,7 @@ from db import (
     has_won_lead_for_property,
     close_pool,
 )
+from api import authz
 SESSION_DURATION = 28800  # 8 hours in seconds
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
@@ -430,6 +431,11 @@ async def list_leads(
     page_size: int = Query(default=25, le=100),
     _user: dict = Depends(require_auth),
 ) -> dict:
+    authz.require_not_estimating_only(_user, "leads")
+    # unassigned_only is the public qualification queue, not "my leads".
+    if unassigned_only and authz.hides_public_lead_queue(_user):
+        authz.require_public_leads_access(_user)
+
     if sort_by not in _ALLOWED_SORT:
         sort_by = "score"
     if sort_dir not in ("asc", "desc"):
@@ -482,6 +488,13 @@ async def list_leads(
     if unassigned_only:
         conditions.append("assigned_to IS NULL")
 
+    # Sales and every other non-qualifier still list their own leads, but the
+    # unassigned government queue stays inside sales / admin / management.
+    if authz.hides_public_lead_queue(_user):
+        placeholders = ", ".join(["%s"] * len(authz.PUBLIC_LEAD_SOURCES))
+        conditions.append(f"NOT (source IN ({placeholders}) AND assigned_to IS NULL)")
+        params.extend(list(authz.PUBLIC_LEAD_SOURCES))
+
     if min_score is not None:
         conditions.append("score >= %s")
         params.append(min_score)
@@ -515,11 +528,15 @@ async def list_leads(
 
 @app.get("/api/leads/{lead_id}")
 async def get_lead(lead_id: str, _user: dict = Depends(require_auth)) -> dict:
-    return await _fetch_lead(lead_id)
+    authz.require_not_estimating_only(_user, "leads")
+    lead = await _fetch_lead(lead_id)
+    authz.require_lead_access(_user, lead.get("source"), lead.get("assigned_to"))
+    return lead
 
 
 @app.post("/api/leads", status_code=201)
 async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth)) -> dict:
+    authz.require_not_estimating_only(_user, "leads")
     new_id = str(uuid.uuid4())
 
     # WS1 auto-property safety net: if no property_id was supplied, create a
@@ -586,7 +603,9 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
 
 @app.patch("/api/leads/{lead_id}")
 async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(require_auth)) -> dict:
+    authz.require_not_estimating_only(_user, "leads")
     current = await _fetch_lead(lead_id)
+    authz.require_lead_access(_user, current.get("source"), current.get("assigned_to"))
 
     _PATCHABLE = frozenset({
         "status", "assigned_to", "notes", "priority",
@@ -664,7 +683,9 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
 
 @app.delete("/api/leads/{lead_id}", status_code=204)
 async def delete_lead(lead_id: str, _user: dict = Depends(require_auth)) -> None:
-    await _fetch_lead(lead_id)
+    authz.require_not_estimating_only(_user, "leads")
+    current = await _fetch_lead(lead_id)
+    authz.require_lead_access(_user, current.get("source"), current.get("assigned_to"))
     await execute(
         "UPDATE leads SET deleted_at = CURRENT_TIMESTAMP() WHERE id = %s AND deleted_at IS NULL",
         [lead_id],
@@ -713,6 +734,15 @@ _ACTION_TO_CHANNEL_FULL: dict[str, str] = {
 @app.get("/api/leads/{lead_id}/activity")
 async def get_lead_activity(lead_id: str, _user: dict = Depends(require_auth)) -> list:
     """Unified activity feed across all channels."""
+    authz.require_not_estimating_only(_user, "leads")
+    # Missing leads keep the historical empty feed. A public-queue row is
+    # refused for roles that cannot qualify those leads.
+    meta = await query(
+        "SELECT source, assigned_to FROM leads WHERE id = %s AND deleted_at IS NULL",
+        [lead_id],
+    )
+    if meta:
+        authz.require_lead_access(_user, meta[0].get("source"), meta[0].get("assigned_to"))
     rows = await query(
         """
         SELECT * FROM lead_actions
@@ -1645,6 +1675,7 @@ async def list_users(
 
 @app.get("/api/dashboard/inside-sales")
 async def dashboard_inside_sales(_user: dict = Depends(require_auth)) -> dict:
+    authz.require_analytics_dashboard(_user)
     total_rows, new_rows, status_rows, avg_rows, state_rows = await asyncio.gather(
         query("SELECT COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL"),
         query("SELECT COUNT(*) AS cnt FROM leads WHERE status = 'new' AND deleted_at IS NULL"),
@@ -1699,6 +1730,7 @@ async def issue_render_token(
     used only for GET requests against /api/proposals/<proposal_id>/... and
     /api/proposals/config/... routes.
     """
+    authz.require_proposals_access(user)
     if not JWT_SECRET:
         raise HTTPException(status_code=500, detail="JWT_SECRET not configured")
     payload = {
@@ -1975,6 +2007,10 @@ async def schedule_lead_meeting(
 ) -> dict:
     """Create a calendar event and record a meeting_scheduled lead action."""
     from api import graph as _graph
+
+    authz.require_not_estimating_only(user, "leads")
+    lead = await _fetch_lead(lead_id)
+    authz.require_lead_access(user, lead.get("source"), lead.get("assigned_to"))
 
     event = await _graph_call(
         _graph.create_event(

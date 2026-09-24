@@ -26,7 +26,6 @@ import {
   Clock,
   Hammer,
   Inbox,
-  Lock,
   Repeat,
   RotateCcw,
   Send,
@@ -48,26 +47,11 @@ import { useEstimates } from '@/hooks/useEstimate'
 import { SyncStatusBadge } from './SyncStatusBadge'
 import { acresFromSqft } from '@/lib/estimating/calc'
 import { SLA_CONFIG, slaCountdownLabel, slaDaysLeft, slaStateFor, type SlaState } from '@/lib/estimating/sla'
-import { useAuthStore } from '@/store/authStore'
-import { useRole } from '@/hooks/useRole'
 import { useUsers } from '@/hooks/useUsers'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import type { Estimate, EstimatePriority, EstimateStatus } from '@/types/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
-
-// ----- Branch scope ----------------------------------------------------------
-// The scope is enforced SERVER-side from the JWT (BRD I-9.5): the
-// API derives the branch from the authenticated user and ignores any client
-// `branch` param for non-exec roles, so the client sends nothing. The
-// lock-chip only *displays* the applied scope.
-function branchScopeLabel(
-  seesAllBranches: boolean,
-  branchId: string | null | undefined,
-): string {
-  if (seesAllBranches) return 'All branches'
-  return branchId || 'your branch'
-}
 
 // ----- Badge configs (§3.2 status enum + priority) ----------------------------
 
@@ -156,9 +140,6 @@ export function EstimateQueue({
 }: EstimateQueueProps) {
   const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
-  const user = useAuthStore((s) => s.user)
-  const { seesAllBranches } = useRole()
-  const branchScope = branchScopeLabel(seesAllBranches, user?.branch_id)
   const { findUser } = useUsers()
 
   // Branch scope is applied server-side from the session — no branch param.
@@ -254,12 +235,6 @@ export function EstimateQueue({
             ))}
           </SelectContent>
         </Select>
-
-        {/* Lock-chip — reflects the server-enforced row scope (BRD I-9.5). */}
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-[#bfdcc9] bg-[#e8f3ed] px-2.5 py-1 text-[11px] font-medium text-[#2E7D52]">
-          <Lock className="h-3 w-3" />
-          Role &amp; branch scoped — {branchScope}
-        </span>
 
         <div className="flex items-center gap-1 ml-auto text-xs text-[hsl(var(--muted-fg))]">
           Sort by:

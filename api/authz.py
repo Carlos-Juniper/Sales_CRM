@@ -165,6 +165,55 @@ def require_intake_type(user: dict, estimate_type: str) -> None:
         )
 
 
+def is_sales_rep(role: Optional[str]) -> bool:
+    """True for a field-sales role whose leads are a personal book.
+
+    Legacy `sales` and `outside_sales` (which normalizes to `sales`) are
+    included, as are `maintenance_sales` and `install_sales`. The existing
+    `inside_sales` role stays distinct: it works the shared public-lead
+    queue and must not be forced onto a personal book.
+    """
+    return normalize_role(role) in FIELD_SALES_ROLES
+
+
+# Same predicate the Leads tab uses for ?mine=true. The id is always the
+# JWT subject, never a client-supplied user id (BRD I-9.5).
+OWN_LEAD_PREDICATE = "(assigned_to = %s OR created_by = %s)"
+
+
+def own_lead_filter(user: dict) -> tuple[str, list]:
+    """SQL predicate + params that limit a field-sales rep to their own leads.
+
+    Empty for every other role, including admin and manager-type roles
+    (manager, regional_director, vice_president, ceo) and inside_sales.
+    Those callers keep company-wide visibility unless they opt into ?mine=true.
+    """
+    if not is_sales_rep(user.get("role")):
+        return "", []
+    return OWN_LEAD_PREDICATE, [user.get("id"), user.get("id")]
+
+
+def require_own_lead(user: dict, lead: dict) -> None:
+    """403 when a field-sales rep reads or writes a lead they do not own.
+
+    Ownership matches the Leads tab: `assigned_to` or `created_by` is the
+    caller. No-op for every other role, including inside_sales. A
+    proposal-render token is already pinned to one lead id by require_auth,
+    so it is admitted here too.
+    """
+    if user.get("scope") == "proposal_render":
+        return
+    if not is_sales_rep(user.get("role")):
+        return
+    uid = user.get("id")
+    if uid and (lead.get("assigned_to") == uid or lead.get("created_by") == uid):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="You can only access your own leads.",
+    )
+
+
 async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
     """Max estimate value (cents) the role may approve; None = unlimited.
 

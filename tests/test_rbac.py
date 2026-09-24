@@ -195,9 +195,21 @@ class TestSplitSalesRoles:
             assert authz.sees_all_branches(role) == authz.sees_all_branches("sales")
             assert authz.is_marketing_manager(role) == authz.is_marketing_manager("sales")
             assert authz.requires_aspire_sales_rep(role)
+            assert authz.is_sales_rep(role)
+            sql, params = authz.own_lead_filter(_user(role, id="rep-1"))
+            assert sql == authz.OWN_LEAD_PREDICATE
+            assert params == ["rep-1", "rep-1"]
         assert authz.requires_aspire_sales_rep("sales")
+        assert authz.is_sales_rep("sales")
+        assert authz.is_sales_rep("outside_sales")
         assert not authz.requires_aspire_sales_rep("manager")
         assert not authz.requires_aspire_sales_rep("inside_sales")
+        # Existing inside_sales keeps the shared queue: company-wide leads.
+        assert not authz.is_sales_rep("inside_sales")
+        assert authz.own_lead_filter(_user("inside_sales")) == ("", [])
+        for wide in ("admin", "manager", "regional_director", "vice_president", "ceo"):
+            assert not authz.is_sales_rep(wide)
+            assert authz.own_lead_filter(_user(wide)) == ("", [])
 
     def test_split_roles_cannot_open_an_estimate(self):
         # Same gate as sales: the queue is visible, estimate detail is not.

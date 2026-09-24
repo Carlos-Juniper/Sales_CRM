@@ -1451,6 +1451,22 @@ def _adjustment_out(r: dict) -> dict:
 
 # ── Routes ──────────────────────────────────────────────────────────────────
 
+async def _assert_lead_visible(user: dict, lead_id: str) -> None:
+    """404 when the lead is missing; 403 when a field-sales rep does not own it.
+
+    sales, maintenance_sales, and install_sales use the same assigned_to /
+    created_by predicate as the pipeline list. inside_sales and every other
+    role are unchanged.
+    """
+    rows = await query(
+        "SELECT id, assigned_to, created_by FROM leads WHERE id = %s",
+        [lead_id],
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    authz.require_own_lead(user, rows[0])
+
+
 def register(app, require_auth) -> None:
     """Attach all estimating routes to the FastAPI app with the shared auth dep."""
 
@@ -2692,10 +2708,8 @@ def register(app, require_auth) -> None:
         Only the three proposal document kinds are accepted; intake/takeoff kinds
         must be uploaded against an estimate (estimate-scoped presign endpoint).
         """
-        # 1. Lead must exist.
-        lead_rows = await query("SELECT id FROM leads WHERE id = %s", [lead_id])
-        if not lead_rows:
-            raise HTTPException(status_code=404, detail="Lead not found")
+        # 1. Lead must exist, and a sales rep may only attach to their own lead.
+        await _assert_lead_visible(user, lead_id)
 
         # 2. Only proposal kinds are accepted at the lead level.
         kind = body.get("kind", "")
@@ -2765,6 +2779,7 @@ def register(app, require_auth) -> None:
         Looks up the attachment by both id AND lead_id so a rep cannot confirm
         an attachment belonging to a different lead.
         """
+        await _assert_lead_visible(_user, lead_id)
         rows = await query(
             "SELECT ia.* FROM intake_attachments ia WHERE ia.id = %s AND ia.lead_id = %s",
             [attachment_id, lead_id],
@@ -2833,9 +2848,7 @@ def register(app, require_auth) -> None:
         Returns only the three proposal kinds; intake/takeoff attachments are
         always estimate-scoped and will not appear here.
         """
-        lead_rows = await query("SELECT id FROM leads WHERE id = %s", [lead_id])
-        if not lead_rows:
-            raise HTTPException(status_code=404, detail="Lead not found")
+        await _assert_lead_visible(_user, lead_id)
 
         rows = await query(
             """SELECT ia.* FROM intake_attachments ia
@@ -2859,7 +2872,9 @@ def register(app, require_auth) -> None:
         Scopes the lookup to both id AND lead_id so a rep cannot delete an
         attachment belonging to a different lead. GCS delete is best-effort —
         an already-absent object must not block the soft-delete of the row.
+        A sales rep cannot delete an attachment on a lead they do not own.
         """
+        await _assert_lead_visible(_user, lead_id)
         rows = await query(
             "SELECT * FROM intake_attachments WHERE id = %s AND lead_id = %s",
             [attachment_id, lead_id],

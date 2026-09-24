@@ -27,6 +27,7 @@ import { ApiError } from '@/api/client'
 import type { EstimateLifecycle, MaintenanceEstimate, SectionService } from '@/types/estimating'
 import { LostTransition } from './LostTransition'
 import { acresFromSqft, contractTotal, tierForValue } from '@/lib/estimating/calc'
+import { formatOptionalBudget } from '@/lib/estimating/contractBudgets'
 import { tiersForType } from '@/lib/estimating/config'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import {
@@ -227,6 +228,10 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
             ≈ {acresFromSqft(totalSqft).toFixed(1)} ac · {formatCents(contractCents)} ·{' '}
             <span className="font-medium text-[hsl(var(--fg))]">{draft.branchCity}</span>{' '}
             · Target margin {Math.round(draft.targetMargin * 100)}%
+          </p>
+          <p data-testid="contract-budgets" className="mt-0.5 text-xs text-[hsl(var(--muted-fg))]">
+            Homes budget {formatOptionalBudget(draft.homesBudget)} · Common area budget{' '}
+            {formatOptionalBudget(draft.commonAreaBudget)}
           </p>
         </div>
 

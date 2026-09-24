@@ -27,6 +27,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { estimatingApi, estimatingConfigApi } from '@/api/estimating'
+import { ApiError } from '@/api/client'
+import { parseContractBudget } from '@/lib/estimating/contractBudgets'
 import { leadsApi } from '@/api/leads'
 import {
   crmLeadFromLead,
@@ -245,6 +247,24 @@ export function MaintenanceIntakeModal({
       show('Select or create a property before submitting.')
       return
     }
+    // Split budgets are optional dollars. Blank → null (never 0). A typed 0
+    // stays 0. Negatives and non-numeric values are rejected before POST.
+    let homesBudget: number | null = null
+    let commonAreaBudget: number | null = null
+    if (form.contractStructure === 'split') {
+      const homes = parseContractBudget(form.homesBudget, 'homesBudget')
+      const common = parseContractBudget(form.commonAreaBudget, 'commonAreaBudget')
+      if (!homes.ok) {
+        show('Homes budget must be blank or a non-negative number.')
+        return
+      }
+      if (!common.ok) {
+        show('Common area budget must be blank or a non-negative number.')
+        return
+      }
+      homesBudget = homes.value
+      commonAreaBudget = common.value
+    }
     setSubmitting(true)
 
     try {
@@ -273,8 +293,8 @@ export function MaintenanceIntakeModal({
         customerType: form.customerType,
         contractStructure: form.contractStructure,
         ...(form.contractStructure === 'split' && {
-          homesBudget: form.homesBudget,
-          commonAreaBudget: form.commonAreaBudget,
+          homesBudget,
+          commonAreaBudget,
         }),
         // Unit/home COUNT (I-6.4: count only units in the
         // proposed scope). Distinct from the budget dollars above.
@@ -319,6 +339,12 @@ export function MaintenanceIntakeModal({
         assignedLsEstimator: null,
         assignedIrrEstimator: null,
         crmRep: leadCtx?.rep ?? null,
+        // Dollars at the top level (blank is null, a typed 0 is 0). The same
+        // values ride in intake.payload; the server prefers the top level.
+        ...(form.contractStructure === 'split' && {
+          homesBudget,
+          commonAreaBudget,
+        }),
         // Structured intake goes to its own table (intake_submissions), never notes.
         intake: { payload: intakePayload },
         sections: [],
@@ -338,8 +364,12 @@ export function MaintenanceIntakeModal({
       onCreated(created)
       openEstimateAt(created, 'editor')
       onClose()
-    } catch {
-      show('Failed to create estimate — please try again.')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 400) {
+        show(err.message || 'Homes and common area budgets must be blank or a non-negative number.')
+      } else {
+        show('Failed to create estimate — please try again.')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -519,7 +549,7 @@ export function MaintenanceIntakeModal({
                 <div className="grid grid-cols-2 gap-3 pl-0 border-l-2 border-[#bfdcc9] pl-3">
                   <div className="space-y-1">
                     <Label htmlFor="mi-homes-budget" className="text-xs">
-                      Homes budget ($) *
+                      Homes budget ($)
                     </Label>
                     <Input
                       id="mi-homes-budget"
@@ -527,14 +557,17 @@ export function MaintenanceIntakeModal({
                       min={0}
                       value={form.homesBudget}
                       onChange={(e) => set('homesBudget', e.target.value)}
+                      onInvalid={(e) => {
+                        e.preventDefault()
+                        show('Homes budget must be blank or a non-negative number.')
+                      }}
                       placeholder="120000"
-                      required
                       className="h-8 text-xs bg-[#eff6ff] border-[#bfdbfe]"
                     />
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="mi-common-area-budget" className="text-xs">
-                      Common area budget ($) *
+                      Common area budget ($)
                     </Label>
                     <Input
                       id="mi-common-area-budget"
@@ -542,8 +575,11 @@ export function MaintenanceIntakeModal({
                       min={0}
                       value={form.commonAreaBudget}
                       onChange={(e) => set('commonAreaBudget', e.target.value)}
+                      onInvalid={(e) => {
+                        e.preventDefault()
+                        show('Common area budget must be blank or a non-negative number.')
+                      }}
                       placeholder="80000"
-                      required
                       className="h-8 text-xs bg-[#eff6ff] border-[#bfdbfe]"
                     />
                   </div>

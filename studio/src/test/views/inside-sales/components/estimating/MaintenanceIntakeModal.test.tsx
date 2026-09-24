@@ -230,6 +230,140 @@ describe('MaintenanceIntakeModal — contract structure (AC §3 bullet 5)', () =
     expect(screen.queryByLabelText(/homes.*budget|budget.*homes/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/common.*area.*budget|budget.*common/i)).not.toBeInTheDocument()
   })
+
+  it('does not mark split budgets required', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+
+    expect(screen.getByText('Homes budget ($)')).toBeInTheDocument()
+    expect(screen.getByText('Common area budget ($)')).toBeInTheDocument()
+    expect(screen.queryByText(/Homes budget \(\$\) \*/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Common area budget \(\$\) \*/)).not.toBeInTheDocument()
+
+    const homes = screen.getByLabelText(/homes budget/i)
+    const common = screen.getByLabelText(/common area budget/i)
+    expect(homes).not.toBeRequired()
+    expect(common).not.toBeRequired()
+  })
+
+  it('sends null (not 0) when both split budgets are left blank', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'budget-blank', status: 'new_from_sales' })
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].homesBudget).toBeNull()
+    expect(created[0].commonAreaBudget).toBeNull()
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.homesBudget).toBeNull()
+    expect(payload.commonAreaBudget).toBeNull()
+    expect(payload.homesBudget).not.toBe(0)
+    expect(payload.commonAreaBudget).not.toBe('')
+  })
+
+  it('sends 0 only when the rep typed 0', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'budget-zero', status: 'new_from_sales' })
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    await user.type(screen.getByLabelText(/homes budget/i), '0')
+    await user.type(screen.getByLabelText(/common area budget/i), '0')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].homesBudget).toBe(0)
+    expect(created[0].commonAreaBudget).toBe(0)
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.homesBudget).toBe(0)
+    expect(payload.commonAreaBudget).toBe(0)
+  })
+
+  it('sends typed budget amounts in dollars', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'budget-dollars', status: 'new_from_sales' })
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    await user.type(screen.getByLabelText(/homes budget/i), '120000')
+    await user.type(screen.getByLabelText(/common area budget/i), '80000')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].homesBudget).toBe(120000)
+    expect(created[0].commonAreaBudget).toBe(80000)
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.homesBudget).toBe(120000)
+    expect(payload.commonAreaBudget).toBe(80000)
+  })
+
+  it('rejects a negative budget without posting and shows the form error', async () => {
+    const user = userEvent.setup()
+    const postCalls: unknown[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        postCalls.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    await user.type(screen.getByLabelText(/homes budget/i), '-5')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    expect(postCalls).toHaveLength(0)
+    await waitFor(() =>
+      expect(document.body).toHaveTextContent(/homes budget must be blank or a non-negative number/i),
+    )
+  })
+
+  it('surfaces a 400 from create in the form error toast', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/api/estimating/estimates', () =>
+        HttpResponse.json({ detail: 'homesBudget cannot be negative' }, { status: 400 }),
+      ),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() =>
+      expect(document.body).toHaveTextContent(/homesBudget cannot be negative/i),
+    )
+  })
 })
 
 // ---------------------------------------------------------------------------

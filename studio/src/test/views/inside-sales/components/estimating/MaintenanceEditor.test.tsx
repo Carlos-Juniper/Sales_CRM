@@ -72,6 +72,16 @@ const RATED_KIT: CatalogItem = {
 }
 
 describe('MaintenanceEditor — structure', () => {
+  it('renders a null budget as an em dash and a real zero as $0', () => {
+    renderMaint(
+      buildMaintenanceEstimate({ homesBudget: null, commonAreaBudget: 0 }),
+    )
+    const budgets = screen.getByTestId('contract-budgets')
+    expect(budgets).toHaveTextContent(/Homes budget —/)
+    expect(budgets).toHaveTextContent(/Common area budget \$0/)
+    expect(budgets).not.toHaveTextContent(/Homes budget \$0/)
+  })
+
   it('renders header with name, draft badge, and lifecycle control', () => {
     renderMaint()
     expect(screen.getByText('Dobson Ranch HOA — Grounds Maintenance')).toBeInTheDocument()

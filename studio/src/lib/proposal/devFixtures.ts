@@ -370,6 +370,8 @@ const ESTIMATE: Estimate = {
   branchCity: 'Fort Myers, FL',
   acreage: 45,
   contractValueCents: 18_500_000,
+  homesBudget: null,
+  commonAreaBudget: null,
   targetMargin: 0.22,
   lifecycle: 'won',
   aspireOwner: 'crm',

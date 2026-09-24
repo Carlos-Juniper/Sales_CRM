@@ -193,6 +193,17 @@ export interface EstimateBase {
   acreage: number | null
   /** Derived roll-up, persisted for queue/reporting. Integer cents. */
   contractValueCents: number
+  /**
+   * Split-contract homes budget, in dollars (not cents). Null is unknown —
+   * a blank intake field — and must never be rendered or summed as $0.
+   * A real 0 is a known zero. Always present on list and GET.
+   */
+  homesBudget: number | null
+  /**
+   * Split-contract common-area budget, in dollars (not cents). Same null
+   * contract as {@link homesBudget}.
+   */
+  commonAreaBudget: number | null
   /** Decimal, default 0.22 (branch standard). */
   targetMargin: number
   status: EstimateStatus

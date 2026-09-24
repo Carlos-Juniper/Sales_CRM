@@ -502,6 +502,24 @@ describe('EstimateQueue — RFI status surfaced (§3.2)', () => {
     )
   })
 
+  it('renders a null maintenance budget as an em dash and a real zero as $0', async () => {
+    renderQueue({
+      estimates: [
+        buildMaintenanceEstimate({
+          id: 'q-budgets',
+          name: 'Split Budget HOA',
+          homesBudget: null,
+          commonAreaBudget: 0,
+        }),
+      ],
+    })
+    const card = await screen.findByTestId('queue-card')
+    const budgets = within(card).getByTestId('queue-contract-budgets')
+    expect(budgets).toHaveTextContent(/Homes budget\s+—/)
+    expect(budgets).toHaveTextContent(/Common area budget\s+\$0/)
+    expect(budgets).not.toHaveTextContent(/Homes budget\s+\$0/)
+  })
+
   it('renders no RFI chip when rfiStatus is absent', async () => {
     renderQueue({
       estimates: [buildInstallEstimate({ id: 'q-no-rfi', name: 'No RFI Job' })],

@@ -1560,11 +1560,22 @@
    comment in proposal-pages/insurance-page.tsx. height:auto + max-height keeps a
    letter-proportioned scan inside the well without stretching it; object-fit
    guards the case where a future scan is some other aspect ratio. */
+/* Insurance: the cert scan absorbs whatever height the title leaves, the same
+   device as .portfolio-photo above and for the same reason. The previous
+   `max-height: 9in` was taller than the ~8.27in the well actually has left
+   after its top padding, the eyebrow, the 30pt title and the footer bar's
+   reserved strip, so a letter-proportioned scan ran under the footer and
+   clipped at the bottom edge. Flex rather than a computed max-height so the
+   arithmetic cannot drift if the heading type ever changes. */
+.proposal-root .print-page.insurance > .well {
+  display: flex;
+  flex-direction: column;
+}
+
 .proposal-root .insurance-cert-embed {
-  display: block;
+  flex: 1;
+  min-height: 0;          /* without this a flex child refuses to shrink below content size */
   width: 100%;
-  height: auto;
-  max-height: 9in;
   object-fit: contain;
   margin-top: 0.26in;
   border: none;

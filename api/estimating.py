@@ -489,6 +489,16 @@ SALES_TYPE_BY_CUSTOMER = {"hoa": "HOA", "commercial": "commercial"}
 _SWEEP_INTERVAL_SECONDS = int(os.environ.get("ASPIRE_SWEEP_INTERVAL", "300"))
 
 
+def _territory_city_for_branch(aspire_branch_id: Any) -> str:
+    """City key in ASPIRE_BRANCH_MAP for an Aspire BranchID, or '' if unknown."""
+    if aspire_branch_id is None:
+        return ""
+    for (city, _is_install), bid in ASPIRE_BRANCH_MAP.items():
+        if bid == aspire_branch_id:
+            return city
+    return ""
+
+
 async def _build_opportunity_input(est_row: dict, service_line: Optional[str] = None) -> OpportunityInput:
     """Assemble a neutral OpportunityInput from the estimate + its property/rep rows.
 
@@ -521,7 +531,10 @@ async def _build_opportunity_input(est_row: dict, service_line: Optional[str] = 
     return OpportunityInput(
         name=est_row.get("name", ""),
         service_line=service_line or DEFAULT_SERVICE_LINE.get(est_type, "Maintenance: Contract"),
-        branch_city=branch_city or est_row.get("branch") or "",
+        # estimates.branch was dropped by migration 022. The replacement identity
+        # is aspire_branch_id; reverse it through the vendored city map when the
+        # property has no branch_city of its own.
+        branch_city=branch_city or _territory_city_for_branch(est_row.get("aspire_branch_id")),
         is_install=(est_type == "install"),
         aspire_property_id=aspire_property_id,
         aspire_rep_contact_id=rep_contact_id,
@@ -1178,9 +1191,9 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
             estimate_id,
             body.get("name", ""),
             body.get("aspireNumber"),
-            # ITB project carries the display branch city.
-            # TODO(slice14-contract): after migration 022 is applied to live and
-            #   itb_projects.branch is also dropped (or nullable), remove this write.
+            # itb_projects.branch is a different column from estimates.branch.
+            # Migration 022 drops only estimates.branch and catalog_items.branch;
+            # itb_projects.branch is still VARCHAR NOT NULL, so this write stays.
             body.get("branchCity") or body.get("branch", ""),
             body.get("crmRep"),
             body.get("assignedLsEstimator"),
@@ -1504,28 +1517,12 @@ def register(app, require_auth) -> None:
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
         # Branch identity rides on the Aspire BranchID (int), captured at intake.
-        # TODO(slice14-contract): once Carlos applies migration 022 to live, the
-        #   estimates.branch NOT NULL constraint is gone. Remove the branch_city
-        #   write from the INSERT below and drop this city-resolution block.
+        # Migration 022 dropped estimates.branch; do not write that column.
         aspire_branch_id = body.get("aspireBranchId")
         if not isinstance(aspire_branch_id, int) or isinstance(aspire_branch_id, bool):
             raise HTTPException(
                 status_code=400,
                 detail="aspireBranchId is required — select a branch from the intake form",
-            )
-        # Resolve a display city from the id so the still-NOT-NULL estimates.branch
-        # column is never left empty (live DB has NOT NULL until 022 is applied).
-        branch_city = (body.get("branchCity") or "").strip()
-        if not branch_city:
-            branch_city = next(
-                (city for (city, _install), bid in ASPIRE_BRANCH_MAP.items()
-                 if bid == aspire_branch_id),
-                "",
-            )
-        if not branch_city:
-            raise HTTPException(
-                status_code=400,
-                detail="aspireBranchId does not resolve to a known branch",
             )
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
@@ -1540,13 +1537,13 @@ def register(app, require_auth) -> None:
         estimate_number = int(next_num_row[0]["next_num"]) if next_num_row else 1
         await execute(
             """INSERT INTO estimates
-                 (id, estimate_type, name, aspire_number, estimate_number, client_name, branch, aspire_branch_id,
+                 (id, estimate_type, name, aspire_number, estimate_number, client_name, aspire_branch_id,
                   customer_type,
                   acreage, contract_value_cents, target_margin, status, lifecycle, aspire_owner,
                   priority, win_probability, site_walk_date, due_back_date, anticipated_close_date,
                   service_start_date, assigned_ls_estimator, assigned_irr_estimator, crm_rep,
                   notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 estimate_id,
                 est_type,
@@ -1554,7 +1551,6 @@ def register(app, require_auth) -> None:
                 body.get("aspireNumber"),
                 estimate_number,
                 body.get("clientName", ""),
-                branch_city,
                 aspire_branch_id,
                 body.get("customerType", ""),
                 body.get("acreage"),

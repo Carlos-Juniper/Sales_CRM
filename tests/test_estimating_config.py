@@ -300,7 +300,7 @@ class TestCatalogItems:
             "targetGm": 0.38,
             "kitType": "install_quantity",
             "productionRate": None,
-            "branch": "Orlando, FL",
+            "aspireBranchId": None,
             "active": True,
             "serviceType": "Trees",
         }]
@@ -312,7 +312,9 @@ class TestCatalogItems:
         assert res.status_code == 200
         assert res.json() == []
 
-    def test_filters_branch_kit_type_active(self, authed):
+    def test_filters_kit_type_and_active_not_dropped_branch_column(self, authed):
+        """catalog_items.branch was dropped by migration 022. The list query
+        must not filter on that column (the old `branch=` query param is ignored)."""
         with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = []
             res = client.get(
@@ -320,10 +322,10 @@ class TestCatalogItems:
             )
         assert res.status_code == 200
         sql, params = mock_query.call_args.args[0], mock_query.call_args.args[1]
-        assert "branch = %s" in sql
+        assert "branch = %s" not in sql
         assert "kit_type = %s" in sql
         assert "active = %s" in sql
-        assert params == ["Orlando, FL", "install_quantity", 1]
+        assert params == ["install_quantity", 1]
 
     def test_active_false_filter(self, authed):
         with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:

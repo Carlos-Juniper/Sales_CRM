@@ -63,8 +63,13 @@ _NON_OFFICE_BRANCHES = (
 # Sorts the no-region bucket last, after every real region's sort_order.
 _UNGROUPED_REGION_SORT = 10_000
 
+# Bound, not inlined. db.query()/aiomysql %-formats the SQL whenever params is
+# non-empty, so a literal '%DO NOT USE%' raises ValueError ('%D') on the
+# signer-scoped branches query (which also binds aspire_branch_id placeholders).
+_DO_NOT_USE_LIKE = "%DO NOT USE%"
+
 _BRANCH_ROSTER_FILTER = (
-    "active = 1 AND branch_name NOT LIKE '%DO NOT USE%' AND branch_name NOT IN ("
+    "active = 1 AND branch_name NOT LIKE %s AND branch_name NOT IN ("
     + ", ".join("'" + n.replace("'", "''") + "'" for n in _NON_OFFICE_BRANCHES)
     + ")"
 )
@@ -515,7 +520,7 @@ def register(app, require_auth) -> None:
                   AND b.aspire_branch_id IN ({placeholders})
                 ORDER BY b.branch_name
                 """,
-                held_branch_ids,
+                [_DO_NOT_USE_LIKE, *held_branch_ids],
             )
         else:
             rows = await query(
@@ -536,6 +541,7 @@ def register(app, require_auth) -> None:
                   AND b.lng IS NOT NULL
                 ORDER BY b.branch_name
                 """,
+                [_DO_NOT_USE_LIKE],
             )
         return [_branch_profile_out(r) for r in rows]
 
@@ -561,6 +567,7 @@ def register(app, require_auth) -> None:
               AND b.state IS NOT NULL AND b.state <> ''
             ORDER BY b.state, b.branch_name
             """,
+            [_DO_NOT_USE_LIKE],
         )
 
         # Region key for an office. Branches with no region_id fall into the

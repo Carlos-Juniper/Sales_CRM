@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { estimatingApi } from '@/api/estimating'
-import { apiClient } from '@/api/client'
+import { apiClient, ApiError } from '@/api/client'
+import { server } from '@/mocks/server'
+import { DUE_BACK_PAST_MESSAGE, SLA_CONFIG, localDateOnly } from '@/lib/estimating/sla'
 import {
   buildMaintenanceEstimate,
   buildInstallEstimate,
@@ -222,5 +225,67 @@ describe('estimateType immutability guard (§2)', () => {
     // and the stored record is untouched
     const fetched = await estimatingApi.get(created.id)
     expect(fetched.estimateType).toBe('install')
+  })
+})
+
+function calendarShift(days: number): string {
+  const [y, m, d] = localDateOnly().split('-').map(Number)
+  return localDateOnly(new Date(y, m - 1, d + days))
+}
+
+describe('dueBackDate rush contract (MSW)', () => {
+  it('rejects a past dueBackDate with the server detail and writes nothing', async () => {
+    const before = (await estimatingApi.list()).length
+    const err = await estimatingApi
+      .create(toCreatePayload(buildMaintenanceEstimate({ dueBackDate: calendarShift(-1) })))
+      .catch((e) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err).toMatchObject({ status: 400, message: DUE_BACK_PAST_MESSAGE })
+    expect((await estimatingApi.list()).length).toBe(before)
+  })
+
+  it('returns isRush from create, get, list, and patch, and ignores a client flag', async () => {
+    const rush = await estimatingApi.create(
+      toCreatePayload(buildMaintenanceEstimate({ name: 'Rush RT', dueBackDate: calendarShift(0) })),
+    )
+    expect(rush.isRush).toBe(true)
+    expect(await estimatingApi.get(rush.id)).toMatchObject({ isRush: true })
+    const listed = await estimatingApi.list()
+    expect(listed.find((e) => e.id === rush.id)?.isRush).toBe(true)
+
+    const outside = await estimatingApi.create(
+      toCreatePayload(
+        buildInstallEstimate({
+          name: 'Outside RT',
+          dueBackDate: calendarShift(SLA_CONFIG.returnWindowDays),
+        }),
+      ),
+    )
+    expect(outside.isRush).toBe(false)
+
+    const moved = await estimatingApi.update(outside.id, { dueBackDate: calendarShift(1) })
+    expect(moved.isRush).toBe(true)
+    await expect(
+      estimatingApi.update(outside.id, { dueBackDate: calendarShift(-2) }),
+    ).rejects.toMatchObject({ status: 400, message: DUE_BACK_PAST_MESSAGE })
+    expect((await estimatingApi.get(outside.id)).dueBackDate.slice(0, 10)).toBe(calendarShift(1))
+  })
+
+  it('never sends isRush on create', async () => {
+    let sent: Record<string, unknown> | null = null
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        sent = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(
+          { ...buildMaintenanceEstimate({ id: 'stripped' }), ...sent, isRush: false },
+          { status: 201 },
+        )
+      }),
+    )
+    await estimatingApi.create({
+      ...toCreatePayload(buildMaintenanceEstimate({ dueBackDate: calendarShift(1) })),
+      isRush: true,
+    } as never)
+    expect(sent).not.toHaveProperty('isRush')
   })
 })

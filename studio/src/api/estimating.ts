@@ -38,7 +38,7 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
  */
 export type CreateEstimatePayload = DistributiveOmit<
   Estimate,
-  'id' | 'createdAt' | 'updatedAt' | 'aspireOpportunityId' | 'aspireSyncStatus'
+  'id' | 'createdAt' | 'updatedAt' | 'aspireOpportunityId' | 'aspireSyncStatus' | 'isRush'
 > & {
   /**
    * Opportunity service line (→ Aspire DivisionID). Not persisted on the estimate
@@ -202,6 +202,14 @@ function assertNoEstimateTypeMutation(body: object): void {
   }
 }
 
+/** `isRush` is computed by the server. Drop it if a caller still has it. */
+function stripIsRush<T extends object>(body: T): T {
+  if (!('isRush' in body)) return body
+  const copy = { ...body }
+  delete (copy as { isRush?: unknown }).isRush
+  return copy
+}
+
 export const estimatingApi = {
   list: (params?: ListEstimatesParams) => {
     const qs = new URLSearchParams()
@@ -215,10 +223,10 @@ export const estimatingApi = {
   },
   get: (id: string) => apiClient.get<Estimate>(`/estimating/estimates/${id}`),
   create: (body: CreateEstimatePayload) =>
-    apiClient.post<Estimate>('/estimating/estimates', body),
+    apiClient.post<Estimate>('/estimating/estimates', stripIsRush(body)),
   update: async (id: string, body: UpdateEstimatePayload) => {
     assertNoEstimateTypeMutation(body)
-    return apiClient.patch<Estimate>(`/estimating/estimates/${id}`, body)
+    return apiClient.patch<Estimate>(`/estimating/estimates/${id}`, stripIsRush(body))
   },
 
   /**

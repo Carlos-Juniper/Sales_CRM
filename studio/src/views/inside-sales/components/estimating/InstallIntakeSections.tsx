@@ -8,15 +8,17 @@
 // ---------------------------------------------------------------------------
 
 import type { ChangeEvent, RefObject } from 'react'
-import { FileText, Info, Paperclip, X } from 'lucide-react'
+import { FileText, Paperclip, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { PropertySelector } from './PropertySelector'
 import { ServiceLineSelect } from './AspirePickers'
-import { SLA_CONFIG } from '@/lib/estimating/sla'
+import { localDateOnly } from '@/lib/estimating/sla'
+import { useSlaReturnWindowDays } from '@/hooks/useCompanySettings'
 import { FileAttachRow } from './IntakeFileAttachRow'
+import { RushWindowNote } from './RushIndicators'
 import type { AttachedFile } from './IntakeFileAttachRow'
 import type { BranchOption, InstallCustomerType, Property } from '@/types/estimating'
 
@@ -295,6 +297,7 @@ interface DatesProbabilitySectionProps {
 }
 
 export function DatesProbabilitySection({ form, setStr }: DatesProbabilitySectionProps) {
+  const slaWindowDays = useSlaReturnWindowDays()
   return (
     <section>
       <p className="text-xs font-semibold text-[hsl(var(--muted-fg))] uppercase tracking-wide mb-2">
@@ -306,10 +309,12 @@ export function DatesProbabilitySection({ form, setStr }: DatesProbabilitySectio
           <Input
             id="ii-internal-deadline"
             type="date"
+            min={localDateOnly()}
             value={form.internalDeadline}
             onChange={(e) => setStr('internalDeadline', e.target.value)}
             className="h-8 text-xs"
           />
+          <RushWindowNote date={form.internalDeadline} windowDays={slaWindowDays} />
         </div>
         <div className="space-y-1">
           <Label htmlFor="ii-client-deadline" className="text-xs">Client deadline</Label>
@@ -356,14 +361,6 @@ export function DatesProbabilitySection({ form, setStr }: DatesProbabilitySectio
           />
           <p className="text-[10px] text-[hsl(var(--muted-fg))]">20–100%</p>
         </div>
-      </div>
-      {/* SLA note */}
-      <div className="mt-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700 flex items-start gap-2">
-        <Info className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-        <span>
-          <strong>14-calendar-day SLA</strong> — clock starts when sent to Estimating.
-          Internal deadline defaults to +{SLA_CONFIG.returnWindowDays} calendar days if blank.
-        </span>
       </div>
     </section>
   )

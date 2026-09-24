@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen, waitFor, fireEvent } from '@testing-library/react'
+import { act, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { render, makeUser } from '@/test/utils'
@@ -23,6 +23,13 @@ import { EstimatingToastProvider } from '@/views/inside-sales/components/estimat
 import { InstallIntakeModal } from '@/views/inside-sales/components/estimating/InstallIntakeModal'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 import type { CreateEstimatePayload } from '@/api/estimating'
+import { DUE_BACK_PAST_MESSAGE, localDateOnly } from '@/lib/estimating/sla'
+
+/** Local calendar date offset. Avoids `toISOString()` shifting the day off UTC. */
+function calendarShift(days: number): string {
+  const [y, m, d] = localDateOnly().split('-').map(Number)
+  return localDateOnly(new Date(y, m - 1, d + days))
+}
 
 // jsdom stubs for Radix Dialog
 window.HTMLElement.prototype.hasPointerCapture = vi.fn()
@@ -88,6 +95,17 @@ async function fillMinimumFieldsFast() {
   fireEvent.change(screen.getByLabelText(/contact person/i), { target: { value: 'Morgan Pierce' } })
 }
 
+/**
+ * The modal resumes the latest server draft on open and replaces the form when
+ * that request lands. Tests that run after a draft was saved must wait it out
+ * before typing, or the resume clobbers the fields and the browser blocks submit.
+ */
+async function settleDraftResume() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  })
+}
+
 /** Wait for async branch options to appear then select one — required before submit. */
 async function selectInstallBranch() {
   await screen.findByRole('option', { name: 'Bradenton, FL' })
@@ -144,9 +162,10 @@ describe('InstallIntakeModal — field rendering (AC §3 bullet 1)', () => {
     expect(winInput).toHaveAttribute('max', '100')
   })
 
-  it('renders the SLA note with calendar day count', () => {
+  it('does not render the 14-day SLA minimum', () => {
     renderModal()
-    expect(screen.getByText(/14-calendar-day sla/i)).toBeInTheDocument()
+    expect(screen.queryByText(/14-calendar-day sla/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/defaults to \+/i)).not.toBeInTheDocument()
   })
 
   it('renders the Opportunity section fields', () => {
@@ -594,7 +613,8 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
     await waitFor(() => expect(created).toHaveLength(1))
-    expect(created[0].dueBackDate).toBeTruthy()
+    expect(created[0].dueBackDate).toBe(localDateOnly())
+    expect(created[0]).not.toHaveProperty('isRush')
   })
 
   it('routes to the editor tab after successful submit (install engine, no mode prompt)', async () => {
@@ -933,5 +953,94 @@ describe('InstallIntakeModal — EstimatingPage integration (seam)', () => {
 
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
     expect(screen.getByText(/sales-authored/i)).toBeInTheDocument()
+  })
+})
+
+describe('InstallIntakeModal — internal deadline', () => {
+  it('lets today be selected and blocks yesterday in the picker and on submit', async () => {
+    const postCalls: unknown[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        postCalls.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+    renderModal()
+    const input = screen.getByLabelText(/internal deadline/i) as HTMLInputElement
+    expect(input).toHaveAttribute('min', localDateOnly())
+    expect(calendarShift(-1) < input.min).toBe(true)
+
+    await settleDraftResume()
+    await fillMinimumFieldsFast()
+    await selectInstallBranch()
+
+    fireEvent.change(input, { target: { value: localDateOnly() } })
+    expect(input).toHaveValue(localDateOnly())
+
+    // A value below min is not a picker choice. Submit the form directly so the
+    // handler's past-date check runs even when the browser blocks the button.
+    fireEvent.change(input, { target: { value: calendarShift(-1) } })
+    expect(input).toHaveValue(calendarShift(-1))
+    fireEvent.submit(input.form!)
+    expect(await screen.findByText(DUE_BACK_PAST_MESSAGE)).toBeInTheDocument()
+    expect(postCalls).toHaveLength(0)
+  })
+
+  it('accepts a date inside the old 14-day floor with no 14-day error', async () => {
+    const created: CreateEstimatePayload[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json(buildInstallEstimate({ id: 'short-turn', status: 'new_from_sales' }), { status: 201 })
+      }),
+    )
+    renderModal()
+    await settleDraftResume()
+    await fillMinimumFieldsFast()
+    await selectInstallBranch()
+    fireEvent.change(screen.getByLabelText(/internal deadline/i), { target: { value: calendarShift(3) } })
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].dueBackDate).toBe(calendarShift(3))
+    expect(screen.queryByText(/14-calendar-day/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the rush note inside the SLA window and hides it outside', async () => {
+    server.use(
+      http.get('/api/settings/company', () =>
+        HttpResponse.json({ id: 1, sla_return_window_days: 7 }),
+      ),
+    )
+    renderModal()
+    const input = screen.getByLabelText(/internal deadline/i)
+
+    fireEvent.change(input, { target: { value: calendarShift(6) } })
+    expect(await screen.findByTestId('rush-window-note')).toHaveTextContent(/flagged as a rush job/i)
+
+    fireEvent.change(input, { target: { value: localDateOnly() } })
+    expect(screen.getByTestId('rush-window-note')).toBeInTheDocument()
+
+    fireEvent.change(input, { target: { value: calendarShift(7) } })
+    await waitFor(() => expect(screen.queryByTestId('rush-window-note')).not.toBeInTheDocument())
+
+    fireEvent.change(input, { target: { value: '' } })
+    expect(screen.queryByTestId('rush-window-note')).not.toBeInTheDocument()
+  })
+
+  it('surfaces the server detail when a past date is rejected', async () => {
+    server.use(
+      http.post('/api/estimating/estimates', () =>
+        HttpResponse.json({ detail: DUE_BACK_PAST_MESSAGE }, { status: 400 }),
+      ),
+    )
+    renderModal()
+    await settleDraftResume()
+    await fillMinimumFieldsFast()
+    await selectInstallBranch()
+    fireEvent.change(screen.getByLabelText(/internal deadline/i), { target: { value: localDateOnly() } })
+    fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
+    expect(await screen.findByText(DUE_BACK_PAST_MESSAGE)).toBeInTheDocument()
+    expect(screen.queryByText(/please try again/i)).not.toBeInTheDocument()
   })
 })

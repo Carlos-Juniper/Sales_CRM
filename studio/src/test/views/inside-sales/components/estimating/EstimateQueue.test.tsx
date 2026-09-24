@@ -23,6 +23,12 @@ import {
 } from '@/views/inside-sales/components/estimating/useEstimatingShell'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 import type { Estimate } from '@/types/estimating'
+import { localDateOnly } from '@/lib/estimating/sla'
+
+function calendarShift(days: number): string {
+  const [y, m, d] = localDateOnly().split('-').map(Number)
+  return localDateOnly(new Date(y, m - 1, d + days))
+}
 
 // Radix Select needs these DOM APIs that jsdom does not implement.
 window.HTMLElement.prototype.hasPointerCapture = vi.fn()
@@ -508,5 +514,47 @@ describe('EstimateQueue — RFI status surfaced (§3.2)', () => {
     })
     await screen.findByTestId('queue-card')
     expect(screen.queryByTestId('queue-rfi-status')).not.toBeInTheDocument()
+  })
+})
+
+describe('EstimateQueue — rush badge', () => {
+  it('shows Rush on a queue row only when isRush is true', async () => {
+    renderQueue({
+      estimates: [
+        buildMaintenanceEstimate({
+          id: 'q-rush',
+          name: 'Rush Job',
+          dueBackDate: calendarShift(2),
+          isRush: true,
+        }),
+        buildMaintenanceEstimate({
+          id: 'q-later',
+          name: 'Later Job',
+          dueBackDate: calendarShift(30),
+          isRush: false,
+        }),
+      ],
+    })
+    const cards = await screen.findAllByTestId('queue-card')
+    const rush = cards.find((c) => within(c).queryByText('Rush Job'))!
+    const later = cards.find((c) => within(c).queryByText('Later Job'))!
+    expect(within(rush).getByTestId('rush-badge')).toHaveTextContent('Rush')
+    expect(within(later).queryByTestId('rush-badge')).not.toBeInTheDocument()
+  })
+
+  it('keeps the overdue label on past-due rows and does not badge them Rush', async () => {
+    renderQueue({
+      estimates: [
+        buildInstallEstimate({
+          id: 'q-late',
+          name: 'Late Job',
+          dueBackDate: calendarShift(-3),
+          isRush: false,
+        }),
+      ],
+    })
+    const card = await screen.findByTestId('queue-card')
+    expect(within(card).getByText(/overdue — SLA breached/)).toBeInTheDocument()
+    expect(within(card).queryByTestId('rush-badge')).not.toBeInTheDocument()
   })
 })

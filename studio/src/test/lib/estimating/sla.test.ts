@@ -6,6 +6,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   SLA_CONFIG,
+  calendarDaysOut,
+  isPastCalendarDate,
+  isRushWindowDate,
+  localDateOnly,
   slaCountdownLabel,
   slaDaysLeft,
   slaStateFor,
@@ -90,5 +94,32 @@ describe('slaCountdownLabel', () => {
 
   it('renders "Xd overdue — SLA breached" when breached', () => {
     expect(slaCountdownLabel(-3, 'breached')).toBe('3d overdue — SLA breached')
+  })
+})
+
+describe('local calendar dates', () => {
+  const today = '2026-09-24'
+
+  it('formats the local calendar date rather than the UTC instant', () => {
+    const local = new Date(2026, 0, 1, 23, 30, 0)
+    const month = String(local.getMonth() + 1).padStart(2, '0')
+    const day = String(local.getDate()).padStart(2, '0')
+    expect(localDateOnly(local)).toBe(`${local.getFullYear()}-${month}-${day}`)
+  })
+
+  it('counts calendar days without parsing YYYY-MM-DD as UTC midnight', () => {
+    expect(calendarDaysOut('2026-09-24', today)).toBe(0)
+    expect(calendarDaysOut('2026-09-23', today)).toBe(-1)
+    expect(calendarDaysOut('2026-10-08', today)).toBe(14)
+    expect(isPastCalendarDate('2026-09-23', today)).toBe(true)
+    expect(isPastCalendarDate('2026-09-24', today)).toBe(false)
+  })
+
+  it('treats today through window-1 as a rush and the window boundary as not', () => {
+    expect(isRushWindowDate('2026-09-24', 14, today)).toBe(true)
+    expect(isRushWindowDate('2026-10-07', 14, today)).toBe(true)
+    expect(isRushWindowDate('2026-10-08', 14, today)).toBe(false)
+    expect(isRushWindowDate('2026-09-23', 14, today)).toBe(false)
+    expect(isRushWindowDate('', 14, today)).toBe(false)
   })
 })

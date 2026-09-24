@@ -431,6 +431,7 @@ export const mockBidOutcomes: BidOutcomeLog[] = [
 import { contractTotal } from '@/lib/estimating/calc'
 import { INSTALL_KIT_CATALOG } from '@/lib/estimating/install'
 import type { CreateEstimatePayload } from '@/api/estimating'
+import { SLA_CONFIG, isRushWindowDate } from '@/lib/estimating/sla'
 
 let fixtureSeq = 0
 function fid(prefix: string): string {
@@ -525,6 +526,7 @@ export function buildMaintenanceEstimate(
     winProbability: 0.6,
     siteWalkDate: new Date(Date.now() - 4 * DAY).toISOString(),
     dueBackDate: new Date(Date.now() + 10 * DAY).toISOString(),
+    isRush: false,
     anticipatedCloseDate: new Date(Date.now() + 45 * DAY).toISOString(),
     serviceStartDate: null,
     assignedLsEstimator: 'u5',
@@ -534,8 +536,11 @@ export function buildMaintenanceEstimate(
     createdAt: new Date(Date.now() - 6 * DAY).toISOString(),
     updatedAt: new Date(Date.now() - DAY).toISOString(),
   }
-  const merged = { ...base, ...overrides }
+  const merged = { ...base, ...overrides, isRush: overrides.isRush ?? false }
   merged.contractValueCents = overrides.contractValueCents ?? contractTotal(merged)
+  if (overrides.isRush === undefined) {
+    merged.isRush = isRushWindowDate(merged.dueBackDate, SLA_CONFIG.returnWindowDays)
+  }
   return merged
 }
 
@@ -630,6 +635,7 @@ export function buildInstallEstimate(
     winProbability: 0.5,
     siteWalkDate: new Date(Date.now() - 2 * DAY).toISOString(),
     dueBackDate: new Date(Date.now() + 7 * DAY).toISOString(),
+    isRush: false,
     anticipatedCloseDate: new Date(Date.now() + 30 * DAY).toISOString(),
     serviceStartDate: new Date(Date.now() + 90 * DAY).toISOString(),
     assignedLsEstimator: 'u5',
@@ -639,8 +645,11 @@ export function buildInstallEstimate(
     createdAt: new Date(Date.now() - 3 * DAY).toISOString(),
     updatedAt: new Date(Date.now() - DAY).toISOString(),
   }
-  const merged = { ...base, ...overrides }
+  const merged = { ...base, ...overrides, isRush: overrides.isRush ?? false }
   merged.contractValueCents = overrides.contractValueCents ?? contractTotal(merged)
+  if (overrides.isRush === undefined) {
+    merged.isRush = isRushWindowDate(merged.dueBackDate, SLA_CONFIG.returnWindowDays)
+  }
   return merged
 }
 
@@ -659,6 +668,7 @@ export function toCreatePayload(estimate: Estimate): CreateEstimatePayload {
   delete payload.id
   delete payload.createdAt
   delete payload.updatedAt
+  delete payload.isRush
   return payload as CreateEstimatePayload
 }
 

@@ -518,3 +518,22 @@ describe('MaintenanceEditor — kit catalog + production-rate save guard', () =>
     expect(err).toHaveTextContent(/production rate/i)
   })
 })
+
+describe('MaintenanceEditor — rush badge', () => {
+  it('shows Rush on the estimate detail only when isRush is true', () => {
+    renderMaint(buildMaintenanceEstimate({ name: 'Rush Detail', isRush: true }))
+    expect(screen.getByTestId('maintenance-editor')).toBeInTheDocument()
+    expect(screen.getByTestId('rush-badge')).toHaveTextContent('Rush')
+  })
+
+  it('hides Rush when isRush is false, including a past-due estimate', () => {
+    renderMaint(
+      buildMaintenanceEstimate({
+        name: 'Plain Detail',
+        dueBackDate: '2020-01-01',
+        isRush: false,
+      }),
+    )
+    expect(screen.queryByTestId('rush-badge')).not.toBeInTheDocument()
+  })
+})

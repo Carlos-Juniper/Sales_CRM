@@ -180,6 +180,8 @@
 .proposal-root .footer .mark {
   width: 0.74in;
   height: 0.462in;
+  object-fit: contain;
+  display: block;
 }
 
 .proposal-root .footer .meta {

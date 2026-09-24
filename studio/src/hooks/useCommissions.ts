@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { commissionsApi } from '@/api/commissions'
+import { useRole } from '@/hooks/useRole'
 import { useUIStore } from '@/store/uiStore'
 import type { CommissionFilters } from '@/types/commissions'
 
@@ -22,10 +23,15 @@ export function useCommissionsList(filters?: CommissionFilters) {
 }
 
 export function useCommissionReps() {
+  // GET /api/commissions/reps is 403 outside REP_SELECTOR_ROLES
+  // (api/authz.py REP_VIEWER_ROLES). Leave the query disabled so non-viewers
+  // never issue the request; summary and list auto-scope with no rep param.
+  const { canViewRepSelector } = useRole()
   return useQuery({
     queryKey: [COMMISSIONS_KEY, 'reps'],
     queryFn: () => commissionsApi.getReps(),
     staleTime: 300_000,
+    enabled: canViewRepSelector,
   })
 }
 

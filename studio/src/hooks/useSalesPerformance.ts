@@ -1,14 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
 import { salesPerformanceApi } from '@/api/salesPerformance'
+import { useRole } from '@/hooks/useRole'
 import type { SalesPerformanceFilters } from '@/types/sales-performance'
 
 export const SALES_PERFORMANCE_KEY = 'sales-performance'
 
 export function useSalesPerformanceReps() {
+  // GET /api/sales-performance/reps is 403 outside REP_SELECTOR_ROLES
+  // (api/authz.py REP_VIEWER_ROLES). Leave the query disabled so non-viewers
+  // never issue the request; summary and deal lists auto-scope with no rep param.
+  const { canViewRepSelector } = useRole()
   return useQuery({
     queryKey: [SALES_PERFORMANCE_KEY, 'reps'],
     queryFn: () => salesPerformanceApi.getReps(),
     staleTime: 300_000,
+    enabled: canViewRepSelector,
   })
 }
 

@@ -40,6 +40,7 @@ import { PropertySelector } from './PropertySelector'
 import { ServiceLineSelect } from './AspirePickers'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
+import { intakeDeniedMessage } from '@/lib/intakeAccess'
 import type { BranchOption, Estimate, MaintenanceCustomerType } from '@/types/estimating'
 import { FileAttachRow, type AttachedFile } from './IntakeFileAttachRow'
 import { useAttachmentUpload } from '@/lib/estimating/useAttachmentUpload'
@@ -338,8 +339,8 @@ export function MaintenanceIntakeModal({
       onCreated(created)
       openEstimateAt(created, 'editor')
       onClose()
-    } catch {
-      show('Failed to create estimate — please try again.')
+    } catch (err) {
+      show(intakeDeniedMessage(err, 'Failed to create estimate — please try again.'))
     } finally {
       setSubmitting(false)
     }

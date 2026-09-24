@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
 // Canonical 10-role model on the frontend.
 //
-//   * UserRole covers the ten business roles, including `inside_sales`; only
+//   * UserRole covers the canonical business roles, including `inside_sales`
+//     and the field-sales split (`maintenance_sales`, `install_sales`); only
 //     the retired `outside_sales` normalizes to `sales`.
 //   * `admin` is the frontend super-role (canAccess always true); `manager`
 //     narrows to its approval-tier role.
@@ -53,8 +54,10 @@ describe('canonical role set', () => {
         'admin',
         'ceo',
         'install_estimating',
+        'install_sales',
         'inside_sales',
         'maintenance_estimating',
+        'maintenance_sales',
         'manager',
         'marketing',
         'procurement',
@@ -131,6 +134,15 @@ describe('useRole', () => {
     expect(withRole('manager').seesAllBranches).toBe(false)
     expect(withRole('sales').seesAllBranches).toBe(false)
     expect(withRole('regional_director').seesAllBranches).toBe(false)
+  })
+
+  it('treats the split field-sales roles as sales, not as rep-selector viewers', () => {
+    expect(withRole('maintenance_sales').isSales).toBe(true)
+    expect(withRole('install_sales').isSales).toBe(true)
+    expect(withRole('sales').isSales).toBe(true)
+    expect(withRole('maintenance_sales').canViewRepSelector).toBe(false)
+    expect(withRole('install_sales').canViewRepSelector).toBe(false)
+    expect(withRole('inside_sales').isSales).toBe(false)
   })
 
   it('returns null role when logged out', () => {

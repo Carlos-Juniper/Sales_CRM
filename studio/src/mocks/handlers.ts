@@ -47,6 +47,46 @@ import {
 } from '@/lib/estimating/config'
 
 const API = '/api'
+
+type IntakeTypeName = 'maintenance' | 'install'
+
+const DEFAULT_ALLOWED_INTAKE: IntakeTypeName[] = ['maintenance', 'install']
+
+/**
+ * Mock session read by GET /api/auth/me and the intake lock.
+ * Tests that need a locked role mutate `allowed_intake_types` and reset it.
+ */
+export const mockAuthSession: {
+  role: UserRole
+  allowed_intake_types: IntakeTypeName[]
+} = {
+  role: 'sales',
+  allowed_intake_types: [...DEFAULT_ALLOWED_INTAKE],
+}
+
+export function resetMockAuthSession() {
+  mockAuthSession.role = 'sales'
+  mockAuthSession.allowed_intake_types = [...DEFAULT_ALLOWED_INTAKE]
+}
+
+/** 403 when the mock session may not submit this intake type. Null when allowed. */
+function denyDisallowedIntake(estimateType: string) {
+  if (mockAuthSession.allowed_intake_types.includes(estimateType as IntakeTypeName)) return null
+  const only = mockAuthSession.allowed_intake_types
+  const detail = only.length === 1
+    ? `Role may only submit ${only[0]} intakes.`
+    : 'Role may not submit this intake type.'
+  return HttpResponse.json({ detail }, { status: 403 })
+}
+
+/** `?role=sales` (and legacy `outside_sales`) is the whole sales-rep group. */
+const SALES_GROUP_ROLES = new Set([
+  'sales',
+  'outside_sales',
+  'inside_sales',
+  'maintenance_sales',
+  'install_sales',
+])
 const leads = [...mockLeads]
 const bids = [...mockBids]
 const proposalPackages: ProposalPackageSummary[] = [...mockProposalPackages]
@@ -192,9 +232,10 @@ const allHandlers = [
       id: 'u2',
       email: 'morgan.lee@example.com',
       name: 'Morgan Lee',
-      role: 'sales' as UserRole,
+      role: mockAuthSession.role,
       branch_id: 'c1',
       avatar_initials: 'ML',
+      allowed_intake_types: mockAuthSession.allowed_intake_types,
     })
   }),
 
@@ -454,7 +495,11 @@ const allHandlers = [
     const role = url.searchParams.get('role')
     const branchId = url.searchParams.get('branch_id')
     let users = [...mockUsers]
-    if (role) users = users.filter(u => u.role === role)
+    if (role === 'sales' || role === 'outside_sales') {
+      users = users.filter((u) => SALES_GROUP_ROLES.has(u.role))
+    } else if (role) {
+      users = users.filter((u) => u.role === role)
+    }
     if (branchId) users = users.filter(u => u.branch_id === branchId)
     return HttpResponse.json(users)
   }),
@@ -628,6 +673,8 @@ const allHandlers = [
         { status: 400 },
       )
     }
+    const denied = denyDisallowedIntake(body.estimateType)
+    if (denied) return denied
     const id = eid('est')
     const now = new Date().toISOString()
     const sections: EstimateSection[] = (body.sections ?? []).map((section, si) => {
@@ -840,9 +887,14 @@ const allHandlers = [
         { status: 400 },
       )
     }
+    const denied = denyDisallowedIntake(body.estimateType)
+    if (denied) return denied
     if (body.draftId) {
       const existing = intakeDrafts.find((d) => d.id === body.draftId)
       if (!existing) return notFound()
+      // Resuming a draft of the other type is the same lock as creating one.
+      const deniedStored = denyDisallowedIntake(existing.estimateType)
+      if (deniedStored) return deniedStored
       existing.payload = body.payload
       return HttpResponse.json(existing)
     }

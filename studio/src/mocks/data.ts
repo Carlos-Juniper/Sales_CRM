@@ -13,6 +13,8 @@ export const mockUsers: User[] = [
   { id: 'u9', name: 'Carlos Hernandez', email: 'carlos.hernandez@juniperlandscaping.com', role: 'inside_sales', branch_id: 'b1', avatar_initials: 'CH' },
   { id: 'u10', name: 'Maria Garcia', email: 'maria.garcia@juniperlandscaping.com', role: 'outside_sales', branch_id: 'c1', avatar_initials: 'MG' },
   { id: 'u11', name: 'Robert Chen', email: 'robert.chen@juniperlandscaping.com', role: 'manager', branch_id: 'b1', avatar_initials: 'RC' },
+  { id: 'u12', name: 'Avery Brooks', email: 'avery.brooks@example.com', role: 'maintenance_sales', branch_id: 'c1', avatar_initials: 'AB' },
+  { id: 'u13', name: 'Parker Singh', email: 'parker.singh@example.com', role: 'install_sales', branch_id: 'c1', avatar_initials: 'PS' },
 ]
 
 const scoreFactors = (score: number) => [

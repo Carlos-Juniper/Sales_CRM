@@ -1,19 +1,5 @@
 import { CANONICAL_ROLES, type UserRole } from '@/types'
-
-/** Human labels for the canonical roles (select options are the raw slugs). */
-const ROLE_LABELS: Record<UserRole, string> = {
-  procurement: 'Procurement',
-  sales: 'Sales',
-  inside_sales: 'Inside Sales',
-  admin: 'Admin',
-  manager: 'Branch Manager',
-  regional_director: 'Regional Director',
-  maintenance_estimating: 'Maintenance Estimating',
-  install_estimating: 'Install Estimating',
-  vice_president: 'Vice President',
-  ceo: 'CEO',
-  marketing: 'Marketing',
-}
+import { ROLE_LABELS } from '@/lib/roleLabels'
 
 /** Role picker backed by the canonical role vocabulary (mirrors api/authz). */
 export function RoleSelect({

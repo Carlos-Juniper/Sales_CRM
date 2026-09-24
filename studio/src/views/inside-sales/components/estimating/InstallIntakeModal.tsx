@@ -34,6 +34,8 @@ import { DEFAULT_SERVICE_LINE } from '@/lib/estimating/aspireOptions'
 import { SLA_CONFIG, toDateOnly } from '@/lib/estimating/sla'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
+import { canStartIntake, intakeDeniedMessage } from '@/lib/intakeAccess'
+import { useAuthStore } from '@/store/authStore'
 import type { InstallCustomerType } from '@/types/estimating'
 import type { Estimate } from '@/types/estimating'
 import type { AttachedFile } from './IntakeFileAttachRow'
@@ -70,6 +72,7 @@ export interface InstallIntakeModalProps {
 export function InstallIntakeModal({ open, onClose, onCreated, initialProperty = null }: InstallIntakeModalProps) {
   const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
+  const sessionUser = useAuthStore((s) => s.user)
   const { upload: uploadFile } = useAttachmentUpload()
 
   const today = new Date().toISOString().split('T')[0]
@@ -175,13 +178,16 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
     estimatingApi
       .listIntakeDrafts('install')
       .then((drafts) => {
-        const latest = drafts[0]
+        const latest = drafts.find((d) => canStartIntake(sessionUser, d.estimateType))
         if (cancelled || !latest) return
         setForm({ ...defaultForm(), ...(latest.payload as Partial<FormState>) })
         setDraftId(latest.id)
       })
-      .catch(() => {
-        // Draft resume is best-effort — a fresh form is always a safe fallback.
+      .catch((err) => {
+        // A fresh form is a safe fallback. A 403 (resume of a locked type)
+        // still has to be visible — the server refuses that draft.
+        const denied = intakeDeniedMessage(err, '')
+        if (denied) show(denied)
       })
     return () => {
       cancelled = true
@@ -418,8 +424,8 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       onCreated(created)
       openEstimateAt(created, 'editor')
       onClose()
-    } catch {
-      show('Failed to create estimate — please try again.')
+    } catch (err) {
+      show(intakeDeniedMessage(err, 'Failed to create estimate — please try again.'))
     } finally {
       setSubmitting(false)
     }
@@ -438,8 +444,8 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       })
       setDraftId(saved.id)
       show('Draft saved.')
-    } catch {
-      show('Could not save draft — please try again.')
+    } catch (err) {
+      show(intakeDeniedMessage(err, 'Could not save draft — please try again.'))
     }
   }
 

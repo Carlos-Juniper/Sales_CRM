@@ -30,6 +30,8 @@ import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import { useItbProjects } from '@/hooks/useItbProjects'
 import { ESTIMATES_KEY, useEstimate } from '@/hooks/useEstimate'
 import { useRole } from '@/hooks/useRole'
+import { canStartIntake } from '@/lib/intakeAccess'
+import { useAuthStore } from '@/store/authStore'
 import type { Estimate, Property } from '@/types/estimating'
 import type { Lead } from '@/types'
 import { cn } from '@/lib/utils'
@@ -102,7 +104,12 @@ export default function EstimatingPage({
   // leads.property_id once a property is selected.
   const incomingCrmLead = incomingLead ? crmLeadFromLead(incomingLead) : null
 
-  const [maintIntakeOpen, setMaintIntakeOpen] = useState(incomingProperty != null)
+  const sessionUser = useAuthStore((s) => s.user)
+  // "Request estimate" opens maintenance intake. Skip it when the server
+  // did not allow that type — the queue still shows the buttons it did allow.
+  const [maintIntakeOpen, setMaintIntakeOpen] = useState(
+    () => incomingProperty != null && canStartIntake(sessionUser, 'maintenance'),
+  )
   const [installIntakeOpen, setInstallIntakeOpen] = useState(false)
   // Queue refresh key: bump after successful intake to trigger re-fetch.
   const [queueKey, setQueueKey] = useState(0)

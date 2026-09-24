@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/authStore'
 import type { LegacyUserRole, UserRole } from '@/types'
-import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES, REP_SELECTOR_ROLES } from '@/lib/roles'
+import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES, FIELD_SALES_ROLES, REP_SELECTOR_ROLES } from '@/lib/roles'
 
 // ── Canonical role model (mirrors api/authz.py) ─────────────────
 
@@ -19,7 +19,7 @@ export function useRole() {
 
   return {
     role,
-    isSales: role === 'sales',
+    isSales: role !== null && FIELD_SALES_ROLES.includes(role),
     // `admin` is the super-role; `manager` narrows to its approval tier.
     isAdmin: role === 'admin',
     isManager: role === 'manager',

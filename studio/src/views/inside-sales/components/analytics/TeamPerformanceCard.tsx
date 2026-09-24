@@ -6,6 +6,7 @@ import { AssigneeAvatar } from '@/components/shared/AssigneeAvatar'
 import { useAllLeads } from '@/hooks/useLeads'
 import { useUsers } from '@/hooks/useBids'
 import { formatCurrency } from '@/lib/utils'
+import { roleLabel } from '@/lib/roleLabels'
 import type { User } from '@/types'
 
 interface RepMetrics {
@@ -25,8 +26,12 @@ export function TeamPerformanceCard() {
 
   const repMetrics = useMemo((): RepMetrics[] => {
     const leads = leadsData?.data ?? []
-    const salesReps = (users ?? []).filter(
-      (u) => u.role === 'inside_sales' || u.role === 'outside_sales'
+    const salesReps = (users ?? []).filter((u) =>
+      u.role === 'sales' ||
+      u.role === 'outside_sales' ||
+      u.role === 'inside_sales' ||
+      u.role === 'maintenance_sales' ||
+      u.role === 'install_sales',
     )
 
     return salesReps.map((user) => {
@@ -81,7 +86,7 @@ export function TeamPerformanceCard() {
                     <AssigneeAvatar user={rep.user} size="sm" />
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-[hsl(var(--fg))] truncate">{rep.user.name.split(' ')[0]}</p>
-                      <p className="text-[10px] text-[hsl(var(--muted-fg))] capitalize">{rep.user.role.replace('_', ' ')}</p>
+                      <p className="text-[10px] text-[hsl(var(--muted-fg))]">{roleLabel(rep.user.role)}</p>
                     </div>
                   </div>
                   <span className="text-xs font-medium text-[hsl(var(--fg))] text-center w-10">{rep.leadsAssigned}</span>

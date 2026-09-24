@@ -121,6 +121,27 @@ describe('apiClient — ApiError', () => {
     expect(err.status).toBe(500)
   })
 
+  it('parses a 422 notes validation error into a message and loc', async () => {
+    server.use(
+      http.post('/api/leads-notes', () =>
+        HttpResponse.json({
+          detail: [{
+            type: 'string_too_long',
+            loc: ['body', 'notes'],
+            msg: 'String should have at most 10000 characters',
+          }],
+        }, { status: 422 }),
+      ),
+    )
+    const err = await apiClient.post('/leads-notes', { notes: 'x' }).catch(e => e) as ApiError
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.status).toBe(422)
+    expect(err.message).toBe('String should have at most 10000 characters')
+    expect(err.issues).toEqual([
+      { loc: ['body', 'notes'], msg: 'String should have at most 10000 characters' },
+    ])
+  })
+
   it('falls back to statusText when body has no error field', async () => {
     server.use(
       http.get('/api/weird-error', () =>

@@ -19,6 +19,7 @@ import type {
   SectionServiceComponent,
   TakeoffLine,
 } from '@/types/estimating'
+import { LEAD_NOTES_MAX_LENGTH } from '@/api/leads'
 import type {
   ApproveHandBackPayload,
   CreateAdjustmentPayload,
@@ -185,6 +186,14 @@ function itbProjectForEstimate(e: Estimate): MockItbProject {
 // Seeded estimates get their auto-generated projects too.
 const itbProjects: MockItbProject[] = estimates.map(itbProjectForEstimate)
 
+/** Match POST /api/leads: blank notes become null; over-max is a 422. */
+function notesForCreate(raw: unknown): { ok: true; notes: string | null } | { ok: false } {
+  if (typeof raw !== 'string') return { ok: true, notes: null }
+  if (raw.length > LEAD_NOTES_MAX_LENGTH) return { ok: false }
+  const trimmed = raw.trim()
+  return { ok: true, notes: trimmed.length > 0 ? trimmed : null }
+}
+
 const allHandlers = [
   // GET /api/auth/me — mock session so the app shell can boot under VITE_MOCK
   http.get(`${API}/auth/me`, async () => {
@@ -257,6 +266,20 @@ const allHandlers = [
   http.post(`${API}/leads`, async ({ request }) => {
     await delay(300)
     const body = await request.json() as Partial<Lead>
+    const notesResult = notesForCreate(body.notes)
+    if (!notesResult.ok) {
+      return HttpResponse.json(
+        {
+          detail: [{
+            type: 'string_too_long',
+            loc: ['body', 'notes'],
+            msg: `String should have at most ${LEAD_NOTES_MAX_LENGTH} characters`,
+            ctx: { max_length: LEAD_NOTES_MAX_LENGTH },
+          }],
+        },
+        { status: 422 },
+      )
+    }
     const newLead: Lead = {
       id: `l${Date.now()}`,
       property_name: body.property_name ?? 'Unnamed Lead',
@@ -279,7 +302,7 @@ const allHandlers = [
       bid_deadline: null,
       status: body.status ?? 'new',
       assigned_to: null,
-      notes: null,
+      notes: notesResult.notes,
       handoff_notes: null,
       ai_linkedin_draft: null,
       branch_id: 'b1',

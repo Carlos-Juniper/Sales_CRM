@@ -13,6 +13,8 @@ import { useLeadsStore } from '@/store/leadsStore'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
 import { createWrapper, makeUser } from '../utils'
+import { ApiError } from '@/api/client'
+import { LEAD_NOTES_MAX_LENGTH } from '@/api/leads'
 import type { Lead } from '@/types'
 
 const defaultLeadsResponse = {
@@ -274,6 +276,64 @@ describe('useCreateLead', () => {
     const errorToast = toasts.find((t) => t.variant === 'error')
     expect(errorToast?.title).toBe('Failed to add lead')
     expect(errorToast?.description).toBe("Unknown column 'property_id'")
+  })
+
+  it('echoes trimmed notes and stores blank notes as null', async () => {
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useCreateLead(), { wrapper })
+
+    result.current.mutate({
+      property_name: 'Noted Property',
+      city: 'Dallas',
+      state: 'TX',
+      lead_type: 'commercial',
+      estimated_contract_value: 50000,
+      estimated_acreage: 5,
+      status: 'new',
+      notes: '  met at the show  ',
+    })
+    await waitFor(() => expect(result.current.data?.notes).toBe('met at the show'))
+
+    result.current.mutate({
+      property_name: 'Blank Notes',
+      city: 'Dallas',
+      state: 'TX',
+      lead_type: 'commercial',
+      estimated_contract_value: 1,
+      estimated_acreage: 1,
+      status: 'new',
+      notes: '   ',
+    })
+    await waitFor(() => expect(result.current.data?.property_name).toBe('Blank Notes'))
+    expect(result.current.data?.notes).toBeNull()
+  })
+
+  it('returns 422 with loc body.notes when notes exceed the max length', async () => {
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useCreateLead(), { wrapper })
+
+    result.current.mutate({
+      property_name: 'Too Long',
+      city: 'Dallas',
+      state: 'TX',
+      lead_type: 'commercial',
+      estimated_contract_value: 1,
+      estimated_acreage: 1,
+      status: 'new',
+      notes: 'x'.repeat(LEAD_NOTES_MAX_LENGTH + 1),
+    })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.error).toBeInstanceOf(ApiError)
+    const err = result.current.error as ApiError
+    expect(err.status).toBe(422)
+    expect(err.issues).toEqual([
+      expect.objectContaining({ loc: ['body', 'notes'] }),
+    ])
+    const errorToast = useUIStore.getState().toasts.find((t) => t.variant === 'error')
+    expect(errorToast?.description).toBe(
+      `String should have at most ${LEAD_NOTES_MAX_LENGTH} characters`,
+    )
   })
 })
 

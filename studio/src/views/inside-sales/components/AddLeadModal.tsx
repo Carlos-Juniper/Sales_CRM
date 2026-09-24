@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { useCreateLead } from '@/hooks/useLeads'
 import { useBranchList } from '@/hooks/useBranchList'
+import { ApiError } from '@/api/client'
+import { LEAD_NOTES_MAX_LENGTH } from '@/api/leads'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { LEAD_TYPES } from '@/types'
 import type { LeadStatus, LeadType } from '@/types'
@@ -14,6 +17,13 @@ import { LEAD_TYPE_LABELS } from '@/lib/constants'
 import type { Property } from '@/types/estimating'
 import { stageForStatus } from '@/lib/pipelineStages'
 import { PropertySelector } from './estimating/PropertySelector'
+
+/** 422 loc ["body","notes"] — the form has no per-field server-error map, so this feeds the existing alert. */
+function notesValidationMessage(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 422) return null
+  const issue = err.issues.find((item) => item.loc[0] === 'body' && item.loc[1] === 'notes')
+  return issue?.msg ?? null
+}
 
 interface AddLeadModalProps {
   open: boolean
@@ -32,6 +42,7 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
     units: '',
     contact_name: '',
     contact_email: '',
+    notes: '',
   }
   const [form, setForm] = useState(INITIAL_FORM)
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null)
@@ -55,6 +66,8 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
     }
     setValidationError(null)
 
+    const notes = form.notes.trim()
+
     try {
       await createLead.mutateAsync({
         // Property fields sourced from the selected property.
@@ -70,13 +83,18 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
         contact_name: form.contact_name || undefined,
         contact_email: form.contact_email || undefined,
         branch_id: branchId,
+        // Blank notes are omitted (JSON drops undefined). The API stores NULL.
+        notes: notes || undefined,
       })
       setForm(INITIAL_FORM)
       setSelectedProperty(null)
       setBranchId('')
       onClose()
-    } catch {
-      // error toast shown by useCreateLead's onError
+    } catch (err) {
+      // No per-field server-error pattern on this form. A notes 422 reuses the
+      // existing alert; useCreateLead still toasts error.message.
+      const notesMessage = notesValidationMessage(err)
+      if (notesMessage) setValidationError(notesMessage)
     }
   }
 
@@ -84,7 +102,7 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add lead to {colLabel}</DialogTitle>
           <DialogDescription>
@@ -202,6 +220,33 @@ export function AddLeadModal({ open, defaultStatus, onClose }: AddLeadModalProps
               onChange={(e) => set('contact_email', e.target.value)}
               placeholder="jane@example.com"
               className="h-8 text-xs"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <Label htmlFor="add-lead-notes" className="text-xs">Notes</Label>
+              <span
+                id="add-lead-notes-count"
+                className={cn(
+                  'text-[10px] tabular-nums',
+                  form.notes.length > LEAD_NOTES_MAX_LENGTH
+                    ? 'text-red-500'
+                    : 'text-[hsl(var(--muted-fg))]',
+                )}
+              >
+                {form.notes.length}/{LEAD_NOTES_MAX_LENGTH}
+              </span>
+            </div>
+            <Textarea
+              id="add-lead-notes"
+              value={form.notes}
+              onChange={(e) => set('notes', e.target.value)}
+              maxLength={LEAD_NOTES_MAX_LENGTH}
+              rows={3}
+              placeholder="Add internal notes about this lead…"
+              aria-describedby="add-lead-notes-count"
+              className="text-xs"
             />
           </div>
 

@@ -30,6 +30,9 @@ export interface LeadQueryParams {
   sort_dir?: 'asc' | 'desc'
 }
 
+/** POST /api/leads rejects notes longer than this with 422 loc ["body","notes"]. */
+export const LEAD_NOTES_MAX_LENGTH = 10_000
+
 export interface CreateLeadPayload {
   property_name: string
   city: string
@@ -46,6 +49,11 @@ export interface CreateLeadPayload {
   property_id?: string | null
   /** WS1: branch the lead belongs to (from the branch picker in AddLeadModal). */
   branch_id?: string
+  /**
+   * Optional first-touch note. Omit, null, or blank stores NULL.
+   * Non-blank values are trimmed. Lead.notes is the same column.
+   */
+  notes?: string | null
 }
 
 export const leadsApi = {

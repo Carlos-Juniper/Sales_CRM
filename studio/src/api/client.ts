@@ -5,13 +5,45 @@ const BASE_URL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
   : '/api'
 
+export interface ApiValidationIssue {
+  loc: Array<string | number>
+  msg: string
+}
+
 class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  /** FastAPI/Pydantic issues when `detail` is an array. Empty otherwise. */
+  issues: ApiValidationIssue[]
+  constructor(status: number, message: string, issues: ApiValidationIssue[] = []) {
     super(message)
     this.status = status
     this.name = 'ApiError'
+    this.issues = issues
   }
+}
+
+function apiErrorFromBody(
+  body: { detail?: unknown; error?: unknown },
+  statusText: string,
+): { message: string; issues: ApiValidationIssue[] } {
+  const { detail, error } = body
+  if (typeof detail === 'string') return { message: detail, issues: [] }
+  if (Array.isArray(detail)) {
+    const issues: ApiValidationIssue[] = []
+    for (const item of detail) {
+      if (!item || typeof item !== 'object') continue
+      const rec = item as { loc?: unknown; msg?: unknown }
+      if (typeof rec.msg !== 'string' || !rec.msg) continue
+      const loc = Array.isArray(rec.loc)
+        ? rec.loc.filter((part): part is string | number => typeof part === 'string' || typeof part === 'number')
+        : []
+      issues.push({ loc, msg: rec.msg })
+    }
+    const message = issues.map((issue) => issue.msg).join('; ')
+    return { message: message || statusText, issues }
+  }
+  if (typeof error === 'string') return { message: error, issues: [] }
+  return { message: statusText, issues: [] }
 }
 
 async function request<T>(path: string, options: RequestInit = {}, skipContentType = false): Promise<T> {
@@ -39,7 +71,8 @@ async function request<T>(path: string, options: RequestInit = {}, skipContentTy
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }))
-    throw new ApiError(res.status, body.detail ?? body.error ?? res.statusText)
+    const { message, issues } = apiErrorFromBody(body, res.statusText)
+    throw new ApiError(res.status, message, issues)
   }
   if (res.status === 204) return undefined as T
   return res.json()

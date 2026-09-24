@@ -46,8 +46,6 @@ _WIDE_ROLES = (
     "ceo",
     "inside_sales",
     "procurement",
-    "maintenance_estimating",
-    "install_estimating",
     "marketing",
 )
 
@@ -137,6 +135,13 @@ def test_sales_mine_flag_does_not_duplicate_the_predicate(as_user):
     sql, params = _list("sales", as_user, mine="true")
     assert sql.count(authz.OWN_LEAD_PREDICATE) == 1
     assert params.count(REP_ID) == 2
+
+
+@pytest.mark.parametrize("role", ("maintenance_estimating", "install_estimating"))
+def test_estimators_cannot_list_leads(as_user, role):
+    as_user(role)
+    resp = client.get("/api/leads")
+    assert resp.status_code == 403
 
 
 @pytest.mark.parametrize("role", _WIDE_ROLES)
@@ -345,18 +350,14 @@ def _dashboard(role: str, as_user):
     return mock_query.await_args_list
 
 
-def test_sales_dashboard_counts_are_scoped_to_the_caller(as_user):
-    calls = _dashboard("sales", as_user)
-    assert len(calls) == 5
-    for call in calls:
-        sql, params = call.args
-        assert authz.OWN_LEAD_PREDICATE in sql
-        assert list(params) == [REP_ID, REP_ID]
-        # The predicate has to stay in WHERE, ahead of GROUP BY / ORDER BY.
-        where_at = sql.index(authz.OWN_LEAD_PREDICATE)
-        for keyword in ("GROUP BY", "ORDER BY"):
-            if keyword in sql:
-                assert where_at < sql.index(keyword)
+@pytest.mark.parametrize(
+    "role", ("sales", "maintenance_sales", "install_sales", "inside_sales")
+)
+def test_non_leadership_dashboard_is_denied(as_user, role):
+    """Analytics dashboard is admin/management only, including the sales split."""
+    as_user(role)
+    resp = client.get("/api/dashboard/inside-sales")
+    assert resp.status_code == 403
 
 
 def test_manager_dashboard_counts_stay_company_wide(as_user):

@@ -659,6 +659,7 @@ def test_list_users_filters_by_branch_id(authed):
 
 
 def test_dashboard_inside_sales_returns_expected_shape(authed):
+    app.dependency_overrides[require_auth] = lambda: {**_AUTHED_USER, "role": "manager"}
     with patch("api.server.query", new_callable=AsyncMock) as mock_query:
         mock_query.side_effect = [
             [{"cnt": 42}],
@@ -679,6 +680,7 @@ def test_dashboard_inside_sales_returns_expected_shape(authed):
 
 
 def test_dashboard_avg_score_zero_when_no_scored_leads(authed):
+    app.dependency_overrides[require_auth] = lambda: {**_AUTHED_USER, "role": "manager"}
     with patch("api.server.query", new_callable=AsyncMock) as mock_query:
         mock_query.side_effect = [
             [{"cnt": 0}],
@@ -998,6 +1000,7 @@ def test_get_lead_sql_excludes_deleted(authed):
 
 
 def test_dashboard_sql_excludes_deleted(authed):
+    app.dependency_overrides[require_auth] = lambda: {**_AUTHED_USER, "role": "manager"}
     with patch("api.server.query", new_callable=AsyncMock) as mock_query:
         mock_query.side_effect = [
             [{"cnt": 5}],

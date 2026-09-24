@@ -1452,18 +1452,21 @@ def _adjustment_out(r: dict) -> dict:
 # ── Routes ──────────────────────────────────────────────────────────────────
 
 async def _assert_lead_visible(user: dict, lead_id: str) -> None:
-    """404 when the lead is missing; 403 when a field-sales rep does not own it.
+    """404 when the lead is missing; 403 when the role may not see it.
 
-    sales, maintenance_sales, and install_sales use the same assigned_to /
-    created_by predicate as the pipeline list. inside_sales and every other
-    role are unchanged.
+    Estimators are refused. Unassigned government leads stay on the public
+    queue (inside_sales, admin, management). Field sales (sales,
+    maintenance_sales, install_sales) may only touch a lead they are
+    assigned to or created. inside_sales is not own-lead scoped.
     """
+    authz.require_not_estimating_only(user, "leads")
     rows = await query(
-        "SELECT id, assigned_to, created_by FROM leads WHERE id = %s",
+        "SELECT id, source, assigned_to, created_by FROM leads WHERE id = %s",
         [lead_id],
     )
     if not rows:
         raise HTTPException(status_code=404, detail="Lead not found")
+    authz.require_lead_access(user, rows[0].get("source"), rows[0].get("assigned_to"))
     authz.require_own_lead(user, rows[0])
 
 
@@ -2708,7 +2711,7 @@ def register(app, require_auth) -> None:
         Only the three proposal document kinds are accepted; intake/takeoff kinds
         must be uploaded against an estimate (estimate-scoped presign endpoint).
         """
-        # 1. Lead must exist, and a sales rep may only attach to their own lead.
+        # Estimator deny, public-queue allowlist, and own-lead scope.
         await _assert_lead_visible(user, lead_id)
 
         # 2. Only proposal kinds are accepted at the lead level.

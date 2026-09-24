@@ -361,7 +361,7 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         "priorCrewRateCentsPerHour": r.get("prior_crew_rate_cents_per_hour"),
         "customerType": r["customer_type"],
         "acreage": _num(r["acreage"]),
-        # Yearly maintenance visit counts (migration 058). Null when the rep
+        # Yearly maintenance visit counts (migration 061). Null when the rep
         # left the field blank, on install estimates, and on rows created
         # before the columns existed (.get keeps those rows working).
         "mowingOccurrences": _int_or_none(r.get("mowing_occurrences")),

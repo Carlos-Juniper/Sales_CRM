@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- Migration 058 — yearly maintenance service occurrence counts.
+-- Migration 061 — yearly maintenance service occurrence counts.
 --
 -- The maintenance intake form replaces the free-text scope-of-work box with
 -- six structured visit counts (occurrences per year). Each is a nullable

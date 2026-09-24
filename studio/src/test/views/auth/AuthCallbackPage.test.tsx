@@ -129,6 +129,10 @@ describe('AuthCallbackPage — Entra sign-in completion', () => {
     ['outside_sales', '/outside-sales'],
     // BranchManagerPage removed in Slice 12; managers land on settings.
     ['manager', '/settings'],
+    // Split field-sales roles share the sales landing.
+    ['sales', '/inside-sales'],
+    ['maintenance_sales', '/inside-sales'],
+    ['install_sales', '/inside-sales'],
   ])('navigates %s users to %s', async (role, route) => {
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })
     mockEntraComplete.mockResolvedValue(makeUser({ role: role as 'inside_sales' }))

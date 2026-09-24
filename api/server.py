@@ -1676,25 +1676,12 @@ async def list_users(
 @app.get("/api/dashboard/inside-sales")
 async def dashboard_inside_sales(_user: dict = Depends(require_auth)) -> dict:
     authz.require_analytics_dashboard(_user)
-    # Pipeline counts follow the same sales-rep book as GET /api/leads.
-    # Other roles keep the company-wide totals. The predicate is inserted
-    # into the WHERE clause — several of these statements also GROUP BY.
-    # Same helper as PR #17 (cursor/scope-sales-leads-c935); that PR is
-    # not merged yet, so the helper lives here too.
-    owner_sql, owner_params = authz.own_lead_filter(_user)
-    scope = f" AND {owner_sql}" if owner_sql else ""
-
-    def _dash(sql: str):
-        if scope:
-            sql = sql.replace("deleted_at IS NULL", f"deleted_at IS NULL{scope}", 1)
-        return query(sql, list(owner_params) if owner_params else None)
-
     total_rows, new_rows, status_rows, avg_rows, state_rows = await asyncio.gather(
-        _dash("SELECT COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL"),
-        _dash("SELECT COUNT(*) AS cnt FROM leads WHERE status = 'new' AND deleted_at IS NULL"),
-        _dash("SELECT status, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY status"),
-        _dash("SELECT AVG(score) AS avg_score FROM leads WHERE score IS NOT NULL AND deleted_at IS NULL"),
-        _dash("SELECT state, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY state ORDER BY cnt DESC"),
+        query("SELECT COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL"),
+        query("SELECT COUNT(*) AS cnt FROM leads WHERE status = 'new' AND deleted_at IS NULL"),
+        query("SELECT status, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY status"),
+        query("SELECT AVG(score) AS avg_score FROM leads WHERE score IS NOT NULL AND deleted_at IS NULL"),
+        query("SELECT state, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY state ORDER BY cnt DESC"),
     )
     avg_val = avg_rows[0]["avg_score"] if avg_rows and avg_rows[0]["avg_score"] is not None else 0.0
     return {

@@ -81,11 +81,10 @@ FULL_ACCESS_ROLES = MANAGEMENT_ROLES | frozenset({"admin"})
 # Public-lead qualification queue (unassigned higher_gov / sam_gov rows).
 PUBLIC_LEADS_ROLES = frozenset({"inside_sales"}) | FULL_ACCESS_ROLES
 
-# Analytics dashboard. Sales (legacy outside_sales included) and inside sales
-# can open it. Sales counts are scoped to the caller's own leads; inside sales
-# and admin/management stay company-wide. Estimators, procurement, and
-# marketing stay out.
-ANALYTICS_DASHBOARD_ROLES = FULL_ACCESS_ROLES | frozenset({"sales", "inside_sales"})
+# Analytics dashboard is management only: admin plus manager, regional
+# director, vice president, and CEO. Sales, inside sales, estimators,
+# procurement, and marketing are refused.
+ANALYTICS_DASHBOARD_ROLES = FULL_ACCESS_ROLES
 
 # Scraper sources that feed the public-lead queue. A row leaves the queue once
 # assigned_to is set (it then belongs to that rep's leads).
@@ -119,53 +118,6 @@ def sees_all_branches(role: Optional[str]) -> bool:
 def is_marketing_manager(role: Optional[str]) -> bool:
     """True if the role may manage company-wide proposal assets (§3)."""
     return normalize_role(role) in MARKETING_ROLES
-
-
-def is_sales_rep(role: Optional[str]) -> bool:
-    """True for the CRM sales role. Legacy `outside_sales` normalizes to it.
-
-    `inside_sales` stays distinct: that role works the shared public-lead
-    queue and must not be forced onto a personal book.
-    """
-    return normalize_role(role) == "sales"
-
-
-# Same predicate the Leads tab uses for ?mine=true. The id is always the
-# JWT subject, never a client-supplied user id (BRD I-9.5).
-OWN_LEAD_PREDICATE = "(assigned_to = %s OR created_by = %s)"
-
-
-def own_lead_filter(user: dict) -> tuple[str, list]:
-    """SQL predicate + params that limit a sales rep to their own leads.
-
-    Empty for every other role, including admin and manager-type roles
-    (manager, regional_director, vice_president, ceo) and inside_sales.
-    Those callers keep the visibility they already have: company-wide
-    unless they opt into ?mine=true.
-    """
-    if not is_sales_rep(user.get("role")):
-        return "", []
-    return OWN_LEAD_PREDICATE, [user.get("id"), user.get("id")]
-
-
-def require_own_lead(user: dict, lead: dict) -> None:
-    """403 when a sales rep reads or writes a lead they do not own.
-
-    Ownership matches the Leads tab: `assigned_to` or `created_by` is the
-    caller. No-op for every other role. A proposal-render token is already
-    pinned to one lead id by require_auth, so it is admitted here too.
-    """
-    if user.get("scope") == "proposal_render":
-        return
-    if not is_sales_rep(user.get("role")):
-        return
-    uid = user.get("id")
-    if uid and (lead.get("assigned_to") == uid or lead.get("created_by") == uid):
-        return
-    raise HTTPException(
-        status_code=403,
-        detail="You can only access your own leads.",
-    )
 
 
 def is_estimating_only(role: Optional[str]) -> bool:
@@ -226,15 +178,11 @@ def require_sales_performance_access(user: dict) -> None:
 
 
 def require_analytics_dashboard(user: dict) -> None:
-    """403 unless the role may open the analytics dashboard.
-
-    Allowed: sales (including legacy outside_sales), inside_sales, admin,
-    and management. Sales row counts are scoped separately via own_lead_filter.
-    """
+    """403 unless the role is admin or management."""
     if normalize_role(user.get("role")) not in ANALYTICS_DASHBOARD_ROLES:
         raise HTTPException(
             status_code=403,
-            detail="You cannot access the analytics dashboard.",
+            detail="The analytics dashboard is limited to admin and management.",
         )
 
 

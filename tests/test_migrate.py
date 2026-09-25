@@ -1418,11 +1418,10 @@ class TestMigration063:
 
 
 class TestMigration067:
-    """067 moves legacy sales roles to maintenance_sales, and Michelle Cady to vp_sales.
+    """067 moves legacy sales roles to maintenance_sales.
 
-    Detector keys on the migration's own effect: no users left on sales or
-    outside_sales. The SQL file is the only new migration in this change;
-    065 and 066 stay reserved for the commissions PR.
+    vp_sales is granted only for one exact Michelle Cady name match. The
+    detector keys on the schema_migrations row, not on current roles.
     """
 
     PATH = REPO / "sql" / "migrations" / "067_legacy_sales_roles.sql"
@@ -1434,43 +1433,44 @@ class TestMigration067:
         assert self.MID in M._DETECT
         assert M._DETECT[self.MID] is M.detect_067
 
-    def test_detect_false_when_users_table_absent(self, monkeypatch):
-        monkeypatch.setattr(M, "table_exists", lambda conn, t: False)
+    def test_detect_false_when_not_recorded(self, monkeypatch):
+        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
         assert M.detect_067(None) is False
 
-    def test_detect_false_while_legacy_sales_rows_remain(self, monkeypatch):
-        monkeypatch.setattr(M, "table_exists", lambda conn, t: t == "users")
-        monkeypatch.setattr(M, "_fetch_one", lambda conn, sql, params=(): {"cnt": 3})
+    def test_detect_ignores_current_roles(self, monkeypatch):
+        """No legacy sales rows is not evidence the migration ran."""
+        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
+        monkeypatch.setattr(M, "table_exists", lambda conn, t: True)
+        monkeypatch.setattr(M, "_fetch_one", lambda *a, **k: {"cnt": 0})
         assert M.detect_067(None) is False
 
-    def test_detect_true_when_no_legacy_sales_rows_remain(self, monkeypatch):
-        monkeypatch.setattr(M, "table_exists", lambda conn, t: t == "users")
+    def test_detect_true_only_when_migration_is_recorded(self, monkeypatch):
         seen = {}
 
-        def fetch(conn, sql, params=()):
-            seen["sql"] = sql
-            return {"cnt": 0}
+        def tracked(conn, mid):
+            seen["id"] = mid
+            return {"id": mid, "detected": 0}
 
-        monkeypatch.setattr(M, "_fetch_one", fetch)
+        monkeypatch.setattr(M, "get_tracked", tracked)
         assert M.detect_067(None) is True
-        assert "sales" in seen["sql"] and "outside_sales" in seen["sql"]
+        assert seen["id"] == self.MID
 
-    def test_name_and_email_match_rules(self):
-        assert M.matches_michelle_cady("Michelle Cady", "other@example.com")
-        assert M.matches_michelle_cady("  michelle   cady  ", None)
-        assert M.matches_michelle_cady("Cady, Michelle", None)
-        assert M.matches_michelle_cady("cady,michelle", None)
-        assert M.matches_michelle_cady("cady ,  michelle", None)
-        assert M.matches_michelle_cady("Someone Else", "Michelle.Cady@juniper.example")
-        assert M.matches_michelle_cady("Someone Else", "  MCADY@juniper.example ")
-        # Full-name match is exact, so a longer surname is not Michelle Cady.
-        assert M.matches_michelle_cady("Michelle Cadwell", "michelle.cadwell@example.com") is False
-        assert M.matches_michelle_cady("Rodrigo Leon", "rodrigo.leon@juniper.example") is False
-        assert M.matches_michelle_cady(None, None) is False
+    def test_exact_name_matches_and_lookalikes_do_not(self):
+        assert M.matches_michelle_cady("Michelle Cady")
+        assert M.matches_michelle_cady("  michelle   cady  ")
+        assert M.matches_michelle_cady("CADY, MICHELLE")
+        assert M.matches_michelle_cady("cady, michelle")
+        assert M.matches_michelle_cady("Michelle Cadwell") is False
+        assert M.matches_michelle_cady("Michelle Ann Cady") is False
+        assert M.matches_michelle_cady("Michelle Cady Jr") is False
+        assert M.matches_michelle_cady("M. Cady") is False
+        assert M.matches_michelle_cady("Rodrigo Leon") is False
+        assert M.matches_michelle_cady(None) is False
+        assert M.matches_michelle_cady("") is False
 
-    def test_unique_michelle_becomes_vp_and_rodrigo_becomes_maintenance(self):
+    def test_exact_match_grants_vp_sales(self):
         users = [
-            {"id": "mich", "name": "  Michelle Cady ", "email": "mc@juniper.example", "role": "sales"},
+            {"id": "mich", "name": "Michelle Cady", "email": "arcady@example.com", "role": "sales"},
             {"id": "rod", "name": "Rodrigo Leon", "email": "rodrigo.leon@juniper.example", "role": "outside_sales"},
             {"id": "ada", "name": "Ada Admin", "email": "ada@juniper.example", "role": "admin"},
             {"id": "mgr", "name": "Mo Manager", "email": "mo@juniper.example", "role": "manager"},
@@ -1480,127 +1480,157 @@ class TestMigration067:
             {"id": "vp", "name": "Already VP", "email": "vp@juniper.example", "role": "vp_sales"},
             {"id": "ms", "name": "Already Maint", "email": "ms@juniper.example", "role": "maintenance_sales"},
         ]
-        updates, warning = M.plan_legacy_sales_migration(users)
-        assert warning is None
+        updates, error = M.plan_legacy_sales_migration(users)
+        assert error is None
         assert updates == {"mich": "vp_sales", "rod": "maintenance_sales"}
 
-    def test_email_only_match_promotes_when_unique(self):
-        users = [
-            {"id": "mich", "name": "M. Cady", "email": "michelle.cady@juniper.example", "role": "outside_sales"},
-            {"id": "other", "name": "Pat Sales", "email": "pat@juniper.example", "role": "sales"},
-        ]
-        updates, warning = M.plan_legacy_sales_migration(users)
-        assert warning is None
-        assert updates["mich"] == "vp_sales"
-        assert updates["other"] == "maintenance_sales"
-
-    def test_zero_matches_warns_and_moves_everyone_to_maintenance(self):
+    def test_zero_matches_grant_nothing(self):
         users = [
             {"id": "rod", "name": "Rodrigo Leon", "email": "rodrigo.leon@juniper.example", "role": "sales"},
             {"id": "pat", "name": "Pat Sales", "email": "pat@juniper.example", "role": "outside_sales"},
-            {"id": "ada", "name": "Ada Admin", "email": "ada@juniper.example", "role": "admin"},
+            {"id": "ada", "name": "Ada Admin", "email": "mcady@coralbay.com", "role": "admin"},
         ]
-        updates, warning = M.plan_legacy_sales_migration(users)
-        assert warning is not None
-        assert "0" in warning
+        updates, error = M.plan_legacy_sales_migration(users)
+        assert error is not None
+        assert "ERROR" in error
+        assert "0" in error
+        assert "vp_sales" in error
+        assert "vp_sales" not in updates.values()
         assert updates == {"rod": "maintenance_sales", "pat": "maintenance_sales"}
 
-    def test_ambiguous_matches_are_left_unchanged(self):
+    def test_multiple_exact_matches_grant_nothing(self):
         users = [
             {"id": "mich", "name": "Michelle Cady", "email": "michelle@juniper.example", "role": "sales"},
-            {"id": "bob", "name": "Bob Smith", "email": "bob.cady@juniper.example", "role": "outside_sales"},
+            {"id": "mich2", "name": "Cady, Michelle", "email": "other@juniper.example", "role": "outside_sales"},
             {"id": "rod", "name": "Rodrigo Leon", "email": "rodrigo.leon@juniper.example", "role": "sales"},
-            {"id": "ins", "name": "Michelle Cady", "email": "inside.cady@juniper.example", "role": "inside_sales"},
+            {"id": "ins", "name": "Michelle Cady", "email": "inside@juniper.example", "role": "inside_sales"},
         ]
-        updates, warning = M.plan_legacy_sales_migration(users)
-        assert warning is not None
-        assert "2" in warning
-        assert "mich" not in updates
-        assert "bob" not in updates
-        assert "ins" not in updates
-        assert updates == {"rod": "maintenance_sales"}
+        updates, error = M.plan_legacy_sales_migration(users)
+        assert error is not None
+        assert "2" in error
+        assert "vp_sales" not in updates.values()
+        assert updates == {
+            "mich": "maintenance_sales",
+            "mich2": "maintenance_sales",
+            "rod": "maintenance_sales",
+        }
 
-    def test_sql_encodes_the_match_rule_and_stays_idempotent(self):
+    def test_similar_emails_grant_nothing(self):
+        users = [
+            {"id": "ari", "name": "Ari Stone", "email": "arcady@example.com", "role": "sales"},
+            {"id": "m2", "name": "Michelle Cadwell", "email": "mcady2@example.com", "role": "outside_sales"},
+            {"id": "dot", "name": "M. Cady", "email": "michelle.cady@juniper.example", "role": "sales"},
+        ]
+        updates, error = M.plan_legacy_sales_migration(users)
+        assert error is not None
+        assert "vp_sales" not in updates.values()
+        assert set(updates) == {"ari", "m2", "dot"}
+        assert set(updates.values()) == {"maintenance_sales"}
+
+    def test_sql_file_cannot_grant_vp_sales(self):
         text = self.PATH.read_text(encoding="utf-8")
-        assert text.count(M.MICHELLE_CADY_PREDICATE) == 3
-        assert "065" not in self.PATH.name and "066" not in self.PATH.name
         stmts = M.split_statements(text)
-        assert [s.split()[0].upper() for s in stmts] == ["SET", "UPDATE", "UPDATE"]
-        maintenance, promote = stmts[1], stmts[2]
-        for stmt in (maintenance, promote):
-            assert "role IN ('sales', 'outside_sales')" in stmt
-        assert "SET role = 'maintenance_sales'" in maintenance
-        assert "AND NOT" in maintenance
-        assert "SET role = 'vp_sales'" in promote
-        assert "@michelle_matches = 1" in promote
-        joined = "\n".join(stmts).lower()
-        assert "set role = 'admin'" not in joined
-        assert "set role = 'sales'" not in joined
+        assert [s.split()[0].upper() for s in stmts] == ["UPDATE"]
+        stmt = stmts[0]
+        assert "SET role = 'maintenance_sales'" in stmt
+        assert "role IN ('sales', 'outside_sales')" in stmt
+        upper = stmt.upper()
+        assert "VP_SALES" not in upper
+        assert "LIKE" not in upper
+        assert "REGEXP" not in upper
+        assert "MICHELLE" not in upper
+        # The name rule is not copied into the SQL file.
+        assert not hasattr(M, "MICHELLE_CADY_PREDICATE")
 
-    def test_apply_warns_unless_exactly_one_match_and_still_executes(self, monkeypatch, capsys):
+    def test_apply_grants_only_the_exact_id(self, monkeypatch, capsys):
+        grants = []
         executed = []
-        monkeypatch.setattr(M, "table_exists", lambda conn, t: t == "users")
+        monkeypatch.setattr(
+            M, "_select_legacy_sales_users",
+            lambda conn: [{
+                "id": "mich",
+                "name": "Michelle Cady",
+                "email": "mcady2@example.com",
+                "role": "sales",
+            }],
+        )
+        monkeypatch.setattr(
+            M, "_execute",
+            lambda conn, sql, params=(): grants.append((sql, params)),
+        )
         monkeypatch.setattr(M, "exec_file", lambda conn, path, verbose=False: executed.append(path))
 
-        def fetch_factory(count):
-            def fetch(conn, sql, params=()):
-                assert "role IN ('sales', 'outside_sales')" in sql
-                assert M.MICHELLE_CADY_PREDICATE in sql
-                assert params == ()
-                return {"cnt": count}
-            return fetch
-
-        for count in (0, 2, 5):
-            executed.clear()
-            monkeypatch.setattr(M, "_fetch_one", fetch_factory(count))
-            M.apply_067(None, self.PATH, verbose=False)
-            err = capsys.readouterr().err
-            assert f"matched {count} legacy sales user" in err
-            assert executed == [self.PATH]
-
-        monkeypatch.setattr(M, "_fetch_one", fetch_factory(1))
-        executed.clear()
-        M.apply_067(None, self.PATH, verbose=False)
+        M.apply_067(None, self.PATH)
         assert capsys.readouterr().err == ""
+        assert grants == [(M._VP_SALES_GRANT_SQL, ("mich",))]
+        assert "LIKE" not in grants[0][0].upper()
+        assert "%s" in grants[0][0]
         assert executed == [self.PATH]
 
-    def test_apply_skips_the_count_when_users_is_missing(self, monkeypatch, capsys):
+    def test_apply_logs_error_and_grants_nothing_for_zero_or_many(self, monkeypatch, capsys):
+        cases = [
+            [],
+            [
+                {"id": "a", "name": "Ari Stone", "email": "arcady@example.com", "role": "sales"},
+                {"id": "b", "name": "Bo Stone", "email": "mcady2@example.com", "role": "sales"},
+            ],
+            [
+                {"id": "m1", "name": "Michelle Cady", "email": "a@example.com", "role": "sales"},
+                {"id": "m2", "name": "Michelle Cady", "email": "b@example.com", "role": "sales"},
+            ],
+        ]
+        for users in cases:
+            grants = []
+            executed = []
+            monkeypatch.setattr(M, "_select_legacy_sales_users", lambda conn, users=users: users)
+            monkeypatch.setattr(
+                M, "_execute",
+                lambda conn, sql, params=(): grants.append((sql, params)),
+            )
+            monkeypatch.setattr(
+                M, "exec_file", lambda conn, path, verbose=False: executed.append(path),
+            )
+            M.apply_067(None, self.PATH)
+            err = capsys.readouterr().err
+            assert err.startswith("ERROR:")
+            assert "vp_sales was not granted" in err
+            assert grants == []
+            assert executed == [self.PATH]
+
+    def test_apply_with_no_users_table_grants_nothing(self, monkeypatch, capsys):
         monkeypatch.setattr(M, "table_exists", lambda conn, t: False)
-        monkeypatch.setattr(M, "_fetch_one", lambda *a, **k: (_ for _ in ()).throw(AssertionError("counted")))
+        grants = []
+        monkeypatch.setattr(M, "_execute", lambda *a, **k: grants.append(True))
         called = []
         monkeypatch.setattr(M, "exec_file", lambda conn, path, verbose=False: called.append(path))
-        M.apply_067(None, self.PATH)
+        M.apply_067(MagicMock(), self.PATH)
+        err = capsys.readouterr().err
+        assert "ERROR:" in err
+        assert "0" in err
+        assert grants == []
         assert called == [self.PATH]
-        assert capsys.readouterr().err == ""
 
-    def _patch_legacy_count(self, monkeypatch, count: int):
-        # _DETECT stores the detect_067 function object, so the step tests
-        # drive it through the helpers it actually calls.
-        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
-        monkeypatch.setattr(M, "table_exists", lambda conn, t: t == "users")
-        monkeypatch.setattr(M, "_fetch_one", lambda conn, sql, params=(): {"cnt": count})
-
-    def test_step_skips_when_already_detected(self, monkeypatch, tmp_path):
+    def test_step_skips_only_when_recorded(self, monkeypatch, tmp_path):
         sql_file = tmp_path / f"{self.MID}.sql"
-        sql_file.write_text("UPDATE users SET role = 'maintenance_sales'")
-        self._patch_legacy_count(monkeypatch, 0)
+        sql_file.write_text("UPDATE users SET role = 'maintenance_sales' WHERE role IN ('sales', 'outside_sales')")
+        monkeypatch.setattr(
+            M, "get_tracked",
+            lambda conn, mid: {"checksum": M.file_checksum(sql_file), "detected": 0},
+        )
         applied = []
         recorded = []
         monkeypatch.setattr(M, "apply_067", lambda *a, **k: applied.append(True))
-        monkeypatch.setattr(
-            M, "record_migration",
-            lambda conn, mid, cs, detected: recorded.append((mid, detected)),
-        )
+        monkeypatch.setattr(M, "record_migration", lambda *a, **k: recorded.append(True))
         tag, msg = M._step(MagicMock(), self.MID, sql_file, dry_run=False, verbose=False)
         assert tag == "ok"
-        assert "detected" in msg
+        assert "already-applied" in msg
         assert applied == []
-        assert recorded == [(self.MID, True)]
+        assert recorded == []
 
-    def test_step_applies_and_records_when_legacy_rows_remain(self, monkeypatch, tmp_path):
+    def test_step_applies_when_untracked_even_with_no_legacy_roles(self, monkeypatch, tmp_path):
         sql_file = tmp_path / f"{self.MID}.sql"
         sql_file.write_text("UPDATE users SET role = 'maintenance_sales'")
-        self._patch_legacy_count(monkeypatch, 4)
+        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
         applied = []
         recorded = []
         monkeypatch.setattr(M, "apply_067", lambda conn, path, verbose=False: applied.append(path))
@@ -1617,7 +1647,7 @@ class TestMigration067:
     def test_step_dry_run_does_not_apply(self, monkeypatch, tmp_path):
         sql_file = tmp_path / f"{self.MID}.sql"
         sql_file.write_text("UPDATE users SET role = 'maintenance_sales'")
-        self._patch_legacy_count(monkeypatch, 2)
+        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
         applied = []
         recorded = []
         monkeypatch.setattr(M, "apply_067", lambda *a, **k: applied.append(True))
@@ -1627,3 +1657,5 @@ class TestMigration067:
         assert msg == "will-apply"
         assert applied == []
         assert recorded == []
+
+

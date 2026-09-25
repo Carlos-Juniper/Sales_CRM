@@ -791,107 +791,127 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
-# users.name is the full display name. There is no first/last column.
-# Email match is a substring so "michelle.cady@…" and "mcady@…" both qualify.
-# Exactly one legacy-sales row may match; zero or several is not a promotion.
-MICHELLE_CADY_PREDICATE = """(
-    LOWER(TRIM(name)) REGEXP '^michelle[[:space:]]+cady$'
-    OR LOWER(TRIM(name)) REGEXP '^cady[[:space:]]*,[[:space:]]*michelle$'
-    OR LOWER(email) LIKE '%cady%'
-)"""
-
-_MICHELLE_NAME_RE = re.compile(r"^michelle\s+cady$")
-_MICHELLE_REVERSED_RE = re.compile(r"^cady\s*,\s*michelle$")
+# users.name is one display-name column. There is no first_name or last_name.
+# No users seed records Michelle Cady's login email (mcady@coralbay.com is a
+# client_references contact, not a users row), so email is never a match key.
+_MICHELLE_FIRST = "michelle"
+_MICHELLE_LAST = "cady"
 _LEGACY_SALES_ROLES = frozenset({"sales", "outside_sales"})
+_MIGRATION_067 = "067_legacy_sales_roles"
+_VP_SALES_GRANT_SQL = (
+    "UPDATE users SET role = 'vp_sales' "
+    "WHERE id = %s AND role IN ('sales', 'outside_sales')"
+)
 
 
-def matches_michelle_cady(name: Optional[str], email: Optional[str]) -> bool:
-    """True when a users row is Michelle Cady by full name or email.
+def exact_first_last(name: Optional[str]) -> Optional[tuple[str, str]]:
+    """Return (first, last) when the display name is exactly two name tokens.
 
-    Mirrors MICHELLE_CADY_PREDICATE. Name is trimmed and case-insensitive:
-    "Michelle Cady" or "Cady, Michelle". Email matches when it contains
-    "cady". Role is not considered here.
+    "Michelle Cady" and "Cady, Michelle" both yield those two tokens.
+    Extra words, punctuation glued to a token, and substrings do not match.
+    Comparison is case-insensitive. Email is not read here.
     """
-    normalized = (name or "").strip().lower()
-    if _MICHELLE_NAME_RE.match(normalized) or _MICHELLE_REVERSED_RE.match(normalized):
-        return True
-    return "cady" in (email or "").strip().lower()
+    text = " ".join((name or "").split())
+    if not text or text.count(",") > 1:
+        return None
+    if "," in text:
+        last, first = text.split(",", 1)
+        last_parts = last.split()
+        first_parts = first.split()
+        if len(last_parts) != 1 or len(first_parts) != 1:
+            return None
+        return first_parts[0].casefold(), last_parts[0].casefold()
+    parts = text.split()
+    if len(parts) != 2:
+        return None
+    return parts[0].casefold(), parts[1].casefold()
 
 
-def michelle_match_warning(match_count: int) -> str:
+def matches_michelle_cady(name: Optional[str]) -> bool:
+    """True only for the exact first and last name Michelle Cady."""
+    return exact_first_last(name) == (_MICHELLE_FIRST, _MICHELLE_LAST)
+
+
+def michelle_match_error(match_count: int) -> str:
     return (
-        f"WARNING: migration 067 matched {match_count} legacy sales user(s) "
-        "as Michelle Cady (need exactly 1). She was left unchanged; other "
-        "sales/outside_sales users still move to maintenance_sales."
+        f"ERROR: migration 067 matched {match_count} legacy sales user(s) "
+        "with the exact name Michelle Cady (need exactly 1). "
+        "vp_sales was not granted to anyone. "
+        "Remaining sales/outside_sales users move to maintenance_sales."
     )
 
 
 def plan_legacy_sales_migration(
     users: list[dict],
 ) -> tuple[dict[str, str], Optional[str]]:
-    """Return ({user id: new role}, warning) for migration 067.
+    """Return ({user id: new role}, error) for migration 067.
 
-    Only role sales and outside_sales change. When exactly one of those
-    rows matches Michelle Cady, that row becomes vp_sales. Otherwise every
-    match stays on its current role and a warning is returned. Every other
-    legacy sales row becomes maintenance_sales. Other roles are omitted.
+    The Michelle Cady rule lives only in matches_michelle_cady. Email is
+    ignored. Exactly one eligible match becomes vp_sales. Zero or several
+    matches grant vp_sales to nobody and return an error; those rows still
+    become maintenance_sales. Other roles are omitted.
     """
     eligible = [u for u in users if (u.get("role") or "") in _LEGACY_SALES_ROLES]
-    matches = [u for u in eligible if matches_michelle_cady(u.get("name"), u.get("email"))]
-    warning = None
+    matches = [u for u in eligible if matches_michelle_cady(u.get("name"))]
+    error = None
     promote_id = None
     if len(matches) == 1:
         promote_id = matches[0].get("id")
     else:
-        warning = michelle_match_warning(len(matches))
-    match_ids = {u.get("id") for u in matches}
+        error = michelle_match_error(len(matches))
     updates: dict[str, str] = {}
     for user in eligible:
         user_id = user.get("id")
         if user_id == promote_id:
             updates[user_id] = "vp_sales"
-        elif user_id in match_ids:
-            continue
         else:
             updates[user_id] = "maintenance_sales"
-    return updates, warning
+    return updates, error
 
 
 def detect_067(conn) -> bool:
-    """067 applied ↔ no users remain on role sales or outside_sales.
+    """067 applied ↔ schema_migrations already has this migration id.
 
-    That is this migration's own effect. A database that already has none
-    (fresh, or already migrated) is detected and skipped. When Michelle Cady
-    is not a unique match she stays on her legacy role, so this stays False
-    until those rows are gone. A recorded schema_migrations row still skips
-    later deploys; the legacy sales role code keeps authorizing her.
+    A data rewrite has no schema artifact. Role values are not evidence it
+    ran: a database with no sales/outside_sales rows must not be marked
+    detected and skipped. _step checks this same tracking row first.
     """
+    return get_tracked(conn, _MIGRATION_067) is not None
+
+
+def _select_legacy_sales_users(conn) -> list[dict]:
     if not table_exists(conn, "users"):
-        return False
-    row = _fetch_one(
-        conn,
-        "SELECT COUNT(*) AS cnt FROM users WHERE role IN ('sales', 'outside_sales')",
-    )
-    return bool(row) and int(row["cnt"]) == 0
+        return []
+    with conn.cursor() as cur:
+        _run(
+            cur,
+            "SELECT id, name, email, role FROM users "
+            "WHERE role IN ('sales', 'outside_sales')",
+            (),
+        )
+        return list(cur.fetchall() or [])
 
 
 def apply_067(conn, path: Path, verbose: bool = False) -> None:
-    """Apply 067 and warn when Michelle Cady is not a unique legacy-sales match.
+    """Grant vp_sales only for one exact Michelle Cady, then run 067's SQL.
 
-    The SQL file performs the writes. A non-unique match does not fail the
-    deploy: those rows stay on sales/outside_sales and the legacy role code
-    keeps authorizing them.
+    The name rule is plan_legacy_sales_migration. The grant is a parameterized
+    update by id. The SQL file only rewrites remaining legacy sales roles to
+    maintenance_sales and cannot grant vp_sales. A missing or ambiguous match
+    logs an error and still does not grant vp_sales.
     """
-    if table_exists(conn, "users"):
-        row = _fetch_one(
-            conn,
-            "SELECT COUNT(*) AS cnt FROM users "
-            "WHERE role IN ('sales', 'outside_sales') AND "
-            + MICHELLE_CADY_PREDICATE,
+    updates, error = plan_legacy_sales_migration(_select_legacy_sales_users(conn))
+    if error:
+        print(error, file=sys.stderr)
+    promotions = [uid for uid, role in updates.items() if role == "vp_sales"]
+    if error is None and len(promotions) == 1:
+        _execute(conn, _VP_SALES_GRANT_SQL, (promotions[0],))
+    elif promotions:
+        print(
+            "ERROR: migration 067 refused to grant vp_sales "
+            f"({len(promotions)} candidate ids).",
+            file=sys.stderr,
         )
-        match_count = int(row["cnt"]) if row else 0
-        if match_count != 1:
-            print(michelle_match_warning(match_count), file=sys.stderr)
     exec_file(conn, path, verbose)
 
 

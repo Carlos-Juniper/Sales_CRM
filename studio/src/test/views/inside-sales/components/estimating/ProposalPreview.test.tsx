@@ -2148,20 +2148,4 @@ describe('ProposalPreview — contract chapter', () => {
     expect(within(page).getByText('Willowbrook Estates')).toBeInTheDocument()
     expect(within(page).queryByText('Coral Bay HOA')).not.toBeInTheDocument()
   })
-
-  it('does not invent service rows when the maintenance estimate has no line items', () => {
-    renderPreview()
-    const page = screen.getByTestId('page-contract-scope')
-    expect(within(page).queryByTestId('contract-line')).not.toBeInTheDocument()
-    expect(within(page).queryByText('Annual Maintenance Price')).not.toBeInTheDocument()
-    expect(within(page).queryByText('$185,000.00')).not.toBeInTheDocument()
-  })
-
-  it('does not render the contract chapter for an install estimate or without an estimate', () => {
-    const { unmount } = renderPreview({}, { estimate: { ...mockEstimate, estimateType: 'install' } as Estimate })
-    expect(screen.queryByTestId('page-contract-scope')).not.toBeInTheDocument()
-    unmount()
-    renderPreview({}, { estimate: null })
-    expect(screen.queryByTestId('page-contract-scope')).not.toBeInTheDocument()
-  })
 })

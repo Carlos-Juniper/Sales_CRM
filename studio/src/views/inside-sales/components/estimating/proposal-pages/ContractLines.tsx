@@ -7,11 +7,6 @@
 // Maintenance Price total row, followed by a separate Optional Services table
 // (Frequency / Cost per Occ. / Annual Cost) for one-time line items. Neither
 // table carries scope narrative — that's ContractScopeNarrative's job.
-//
-// Each recurring row also shows that service's own price, in the same
-// right-aligned currency cell the annual total uses. The amount is the
-// extended price the total already sums. A row with no unit sell price leaves
-// the cell blank.
 // ---------------------------------------------------------------------------
 
 import { buildContractRows, buildContractTotals } from '@/lib/proposal/contract'
@@ -37,24 +32,20 @@ export function ContractLines({ estimate }: { estimate: Estimate }) {
             <tr>
               <th>Description of Services</th>
               <th className="num">Frequency</th>
-              <th className="num">Price</th>
             </tr>
           </thead>
           <tbody>
             <tr className="group-row">
-              <td colSpan={3}>General Maintenance Services</td>
+              <td colSpan={2}>General Maintenance Services</td>
             </tr>
             {recurringRows.map((row, i) => (
-              <tr key={i} data-testid="contract-line" data-label={row.label}>
+              <tr key={i}>
                 <td>{row.label}</td>
-                <td className="num" data-testid="contract-line-frequency">{row.occurs ?? ''}</td>
-                <td className="num" data-testid="contract-line-price">
-                  {row.servicePriceCents == null ? '' : formatCurrency(row.servicePriceCents)}
-                </td>
+                <td className="num">{row.occurs ?? ''}</td>
               </tr>
             ))}
-            <tr className="total-row" data-testid="contract-total">
-              <td colSpan={2}>Annual Maintenance Price</td>
+            <tr className="total-row">
+              <td>Annual Maintenance Price</td>
               <td className="num">{formatCurrency(annualMaintenancePriceCents)}</td>
             </tr>
           </tbody>

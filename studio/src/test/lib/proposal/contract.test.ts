@@ -20,7 +20,7 @@ function makeEstimate(
     services: Array<{
       label: string
       qty: number
-      unitSellCents: number | null
+      unitSellCents: number
       complexityPct: number
       billingType?: 'recurring' | 'one_time' | null
     }>
@@ -139,42 +139,6 @@ describe('buildContractRows', () => {
 
     expect(rows[0].priceEachCents).toBe(5500)
     expect(rows[0].extPriceCents).toBe(66000)
-  })
-
-  it('sets the per-service price to the extended amount, and leaves it unset when there is no unit sell price', () => {
-    const estimate = makeEstimate([
-      {
-        squareFeet: 10000,
-        services: [
-          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
-          { label: 'Unpriced', qty: 4, unitSellCents: null, complexityPct: 0 },
-        ],
-      },
-    ])
-
-    const rows = buildContractRows(estimate)
-
-    expect(rows[0].servicePriceCents).toBe(60000)
-    expect(rows[1].servicePriceCents).toBeNull()
-    expect(rows[1].extPriceCents).toBe(0)
-  })
-
-  it('uses the extended price when price-each times quantity would not sum to the annual total', () => {
-    const estimate = makeEstimate([
-      {
-        squareFeet: 1001,
-        services: [
-          { label: 'Detail work', qty: 3, unitSellCents: 333, complexityPct: 0 },
-        ],
-      },
-    ])
-
-    const rows = buildContractRows(estimate)
-    const annual = buildContractTotals(rows.filter((row) => row.isRecurring)).extPriceCents
-
-    expect(rows[0].priceEachCents * rows[0].occurs!).not.toBe(rows[0].extPriceCents)
-    expect(rows[0].servicePriceCents).toBe(rows[0].extPriceCents)
-    expect(rows[0].servicePriceCents).toBe(annual)
   })
 })
 

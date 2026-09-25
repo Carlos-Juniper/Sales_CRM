@@ -39,6 +39,7 @@ import {
 import type { Property } from '@/types/estimating'
 import {
   DUE_BACK_PAST_MESSAGE,
+  defaultDueBackDate,
   isPastCalendarDate,
   localDateOnly,
   toDateOnly,
@@ -324,10 +325,12 @@ export function MaintenanceIntakeModal({
     setSubmitting(true)
 
     try {
-      // due_back_date is a SQL DATE. The date input is already YYYY-MM-DD in
-      // the user's local calendar; a blank field means today (a rush). Do not
-      // run it through toISOString — that shifts the day off UTC.
-      const dueBackDate = form.neededBack ? form.neededBack.slice(0, 10) : localDateOnly()
+      // due_back_date is a SQL DATE. The date input is already YYYY-MM-DD.
+      // A blank field is business today plus the SLA return window (not
+      // today, which would be a rush). Do not run it through toISOString.
+      const dueBackDate = form.neededBack
+        ? form.neededBack.slice(0, 10)
+        : defaultDueBackDate(slaWindowDays)
 
       const winProbability = Math.min(1.0, Math.max(0.2, Number(form.winProbabilityPct) / 100))
 

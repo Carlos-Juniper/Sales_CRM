@@ -30,6 +30,50 @@ export const SLA_CONFIG: SlaConfig = {
 /** Server 400 detail when dueBackDate is before today. */
 export const DUE_BACK_PAST_MESSAGE = 'dueBackDate cannot be in the past'
 
+/**
+ * Juniper's business calendar. company_settings has no timezone column, and
+ * the API uses this same zone for "today" so an evening same-day date is not
+ * compared against UTC.
+ */
+export const BUSINESS_TIME_ZONE = 'America/New_York'
+
+/** Calendar date in the business timezone, as YYYY-MM-DD. */
+export function businessDateOnly(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now)
+  const year = parts.find((part) => part.type === 'year')?.value
+  const month = parts.find((part) => part.type === 'month')?.value
+  const day = parts.find((part) => part.type === 'day')?.value
+  return `${year}-${month}-${day}`
+}
+
+/** Calendar date `days` after a YYYY-MM-DD string. */
+export function addCalendarDays(day: string, days: number): string {
+  const [y, m, d] = day.split('-').map(Number)
+  return localDateOnly(new Date(y, m - 1, d + days))
+}
+
+/**
+ * Blank needed-back / internal deadline.
+ *
+ * Business today plus the SLA return window (fallback 14). That date is on
+ * the window boundary, so the estimate is not a rush.
+ */
+export function defaultDueBackDate(
+  windowDays: number = SLA_CONFIG.returnWindowDays,
+  today: string = businessDateOnly(),
+): string {
+  const days =
+    Number.isFinite(windowDays) && windowDays >= 0
+      ? Math.trunc(windowDays)
+      : SLA_CONFIG.returnWindowDays
+  return addCalendarDays(today, days)
+}
+
 export type SlaState = 'ok' | 'at_risk' | 'breached'
 
 const DAY_MS = 86400000

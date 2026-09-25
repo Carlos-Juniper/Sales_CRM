@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { estimatingApi } from '@/api/estimating'
 import { apiClient, ApiError } from '@/api/client'
 import { server } from '@/mocks/server'
-import { DUE_BACK_PAST_MESSAGE, SLA_CONFIG, localDateOnly } from '@/lib/estimating/sla'
+import { DUE_BACK_PAST_MESSAGE, SLA_CONFIG, addCalendarDays, businessDateOnly } from '@/lib/estimating/sla'
 import {
   buildMaintenanceEstimate,
   buildInstallEstimate,
@@ -456,8 +456,7 @@ describe('estimateType immutability guard (§2)', () => {
 })
 
 function calendarShift(days: number): string {
-  const [y, m, d] = localDateOnly().split('-').map(Number)
-  return localDateOnly(new Date(y, m - 1, d + days))
+  return addCalendarDays(businessDateOnly(), days)
 }
 
 describe('dueBackDate rush contract (MSW)', () => {

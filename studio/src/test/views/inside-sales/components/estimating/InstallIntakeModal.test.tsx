@@ -23,7 +23,7 @@ import { EstimatingToastProvider } from '@/views/inside-sales/components/estimat
 import { InstallIntakeModal } from '@/views/inside-sales/components/estimating/InstallIntakeModal'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 import type { CreateEstimatePayload } from '@/api/estimating'
-import { DUE_BACK_PAST_MESSAGE, localDateOnly } from '@/lib/estimating/sla'
+import { DUE_BACK_PAST_MESSAGE, SLA_CONFIG, businessDateOnly, defaultDueBackDate, isRushWindowDate, localDateOnly } from '@/lib/estimating/sla'
 
 /** Local calendar date offset. Avoids `toISOString()` shifting the day off UTC. */
 function calendarShift(days: number): string {
@@ -660,7 +660,10 @@ describe('InstallIntakeModal — Send to Estimating (AC §3 bullet 4)', () => {
     fireEvent.click(screen.getByRole('button', { name: /send to estimating/i }))
 
     await waitFor(() => expect(created).toHaveLength(1))
-    expect(created[0].dueBackDate).toBe(localDateOnly())
+    expect(created[0].dueBackDate).toBe(defaultDueBackDate())
+    expect(
+      isRushWindowDate(created[0].dueBackDate, SLA_CONFIG.returnWindowDays, businessDateOnly()),
+    ).toBe(false)
     expect(created[0]).not.toHaveProperty('isRush')
   })
 

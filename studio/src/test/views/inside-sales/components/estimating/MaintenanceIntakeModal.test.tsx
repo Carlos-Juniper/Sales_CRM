@@ -24,7 +24,7 @@ import { MaintenanceIntakeModal } from '@/views/inside-sales/components/estimati
 import { InstallIntakeModal } from '@/views/inside-sales/components/estimating/InstallIntakeModal'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 import type { CreateEstimatePayload } from '@/api/estimating'
-import { DUE_BACK_PAST_MESSAGE, localDateOnly } from '@/lib/estimating/sla'
+import { DUE_BACK_PAST_MESSAGE, SLA_CONFIG, defaultDueBackDate, isRushWindowDate, businessDateOnly, localDateOnly } from '@/lib/estimating/sla'
 
 /** Local calendar date offset. Avoids `toISOString()` shifting the day off UTC. */
 function calendarShift(days: number): string {
@@ -741,8 +741,36 @@ describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
     await user.click(screen.getByRole('button', { name: /submit/i }))
 
     await waitFor(() => expect(created).toHaveLength(1))
-    expect(created[0].dueBackDate).toBe(localDateOnly())
+    expect(created[0].dueBackDate).toBe(defaultDueBackDate())
+    expect(
+      isRushWindowDate(created[0].dueBackDate, SLA_CONFIG.returnWindowDays, businessDateOnly()),
+    ).toBe(false)
     expect(created[0]).not.toHaveProperty('isRush')
+  })
+
+  it('uses the company SLA window when needed-back is left blank', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    server.use(
+      http.get('/api/settings/company', () =>
+        HttpResponse.json({ id: 1, sla_return_window_days: 7 }),
+      ),
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json(buildMaintenanceEstimate({ id: 'sla-blank' }), { status: 201 })
+      }),
+    )
+    renderModal()
+    const input = screen.getByLabelText(/needed back/i)
+    // Window 14 would still show the rush note at +10. Window 7 hides it.
+    fireEvent.change(input, { target: { value: calendarShift(10) } })
+    await waitFor(() => expect(screen.queryByTestId('rush-window-note')).not.toBeInTheDocument())
+    fireEvent.change(input, { target: { value: '' } })
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].dueBackDate).toBe(defaultDueBackDate(7))
   })
 
   it('routes to the editor tab with the new estimate after successful submit', async () => {

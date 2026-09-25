@@ -8,7 +8,7 @@
 // Submitting creates an install estimate with:
 //   estimateType = 'install' (immutable)
 //   status       = 'new_from_sales'
-//   dueBackDate  = internal deadline, or today when that field is left blank
+//   dueBackDate  = internal deadline, or business today + the SLA window when blank
 //
 // BRD II-6.1: proposal request form; II-6.2: RFI rule; II-9.1: bid intake.
 // Reference: New Install Proposal Request Form.xlsx.
@@ -32,7 +32,8 @@ import { estimatingApi, estimatingConfigApi } from '@/api/estimating'
 import { ApiError } from '@/api/client'
 import type { Property } from '@/types/estimating'
 import { DEFAULT_SERVICE_LINE } from '@/lib/estimating/aspireOptions'
-import { DUE_BACK_PAST_MESSAGE, isPastCalendarDate, localDateOnly, toDateOnly } from '@/lib/estimating/sla'
+import { DUE_BACK_PAST_MESSAGE, defaultDueBackDate, isPastCalendarDate, toDateOnly } from '@/lib/estimating/sla'
+import { useSlaReturnWindowDays } from '@/hooks/useCompanySettings'
 import { useAuthStore } from '@/store/authStore'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
@@ -72,6 +73,7 @@ export interface InstallIntakeModalProps {
 
 export function InstallIntakeModal({ open, onClose, onCreated, initialProperty = null }: InstallIntakeModalProps) {
   const { openEstimateAt } = useEstimatingShell()
+  const slaWindowDays = useSlaReturnWindowDays()
   const { show } = useToast()
   const { upload: uploadFile, lastUploadError } = useAttachmentUpload()
   // Sales-author identity is no longer collected in the form. Submit still
@@ -379,11 +381,12 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
     setSubmitting(true)
 
     try {
-      // due_back_date is a SQL DATE. The date input is already local YYYY-MM-DD;
-      // a blank field means today. Do not convert through toISOString.
+      // due_back_date is a SQL DATE. The date input is already YYYY-MM-DD.
+      // A blank field is business today plus the SLA return window, not
+      // today (that made every blank intake a rush). Do not use toISOString.
       const dueBackDate = form.internalDeadline
         ? form.internalDeadline.slice(0, 10)
-        : localDateOnly()
+        : defaultDueBackDate(slaWindowDays)
 
       const winProbability = Math.min(1.0, Math.max(0.2, Number(form.winProbabilityPct) / 100))
 

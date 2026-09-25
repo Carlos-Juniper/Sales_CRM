@@ -22,7 +22,8 @@ import logging
 import math
 import os
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Optional
 
@@ -428,6 +429,45 @@ def _iso(v: Any) -> Any:
 # a validation error — the window is no longer a minimum lead time.
 SLA_RETURN_WINDOW_DAYS = 14
 
+# company_settings has no timezone column. branches.time_zone is per-branch
+# and often null, so it is not a company calendar. Juniper's business day is
+# US Eastern. Cloud Run evaluates date.today() in UTC, which is already the
+# next calendar day after 8pm Eastern — a same-day needed-back date was
+# rejected as past, and a blank date defaulted to that UTC day.
+BUSINESS_TZ = ZoneInfo("America/New_York")
+
+
+def _business_now() -> datetime:
+    return datetime.now(BUSINESS_TZ)
+
+
+def _business_today(now: Optional[datetime] = None) -> date:
+    """Calendar date in the business timezone.
+
+    ``now`` is for tests. A naive datetime is treated as UTC, the same clock
+    Cloud Run uses when the zone is unset.
+    """
+    moment = now if now is not None else _business_now()
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(BUSINESS_TZ).date()
+
+
+def _default_due_back_date(window_days: int, *, today: Optional[date] = None) -> str:
+    """Blank needed-back: business today plus the SLA return window.
+
+    A date exactly ``window_days`` out meets the SLA, so the default is not
+    a rush and is not already at-risk.
+    """
+    start = today if today is not None else _business_today()
+    try:
+        days = int(window_days)
+    except (TypeError, ValueError):
+        days = SLA_RETURN_WINDOW_DAYS
+    if days < 0:
+        days = SLA_RETURN_WINDOW_DAYS
+    return (start + timedelta(days=days)).isoformat()
+
 
 def _coerce_date(value: Any) -> Optional[date]:
     """Calendar date from a SQL DATE, datetime, or YYYY-MM-DD string.
@@ -457,7 +497,8 @@ def _require_due_back_not_past(value: Any, *, today: Optional[date] = None) -> N
     estimates.due_back_date column (maintenance "Needed back", install
     "Internal deadline") through create and PATCH. Dates inside the SLA
     window are accepted; they are flagged isRush instead of blocked.
-    Omitted or blank is allowed — create defaults the column to today.
+    Omitted or blank is allowed — create defaults the column to business
+    today plus the SLA return window.
     """
     if value is None or value == "":
         return
@@ -467,7 +508,7 @@ def _require_due_back_not_past(value: Any, *, today: Optional[date] = None) -> N
             status_code=400,
             detail="dueBackDate must be a YYYY-MM-DD date",
         )
-    if due < (today or date.today()):
+    if due < (today if today is not None else _business_today()):
         raise HTTPException(
             status_code=400,
             detail="dueBackDate cannot be in the past",
@@ -492,7 +533,7 @@ def _is_rush(
     due = _coerce_date(due_value)
     if due is None:
         return False
-    days_out = (due - (today or date.today())).days
+    days_out = (due - (today if today is not None else _business_today())).days
     return 0 <= days_out < window_days
 
 
@@ -613,7 +654,7 @@ def _estimate_out(
         "homesBudget": _budget_out(r.get("homes_budget")),
         "commonAreaBudget": _budget_out(r.get("common_area_budget")),
         "acreage": _num(r["acreage"]),
-        # Yearly maintenance visit counts (migration 061). Null when the rep
+        # Yearly maintenance visit counts (migration 064). Null when the rep
         # left the field blank, on install estimates, and on rows created
         # before the columns existed (.get keeps those rows working).
         "mowingOccurrences": _int_or_none(r.get("mowing_occurrences")),
@@ -1445,8 +1486,10 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
     provides estLsCents / estIrCents explicitly — those always win.
     """
     project_id = _new_id("itb")
-    today = date.today()
-    due = body.get("dueBackDate") or today.isoformat()
+    today = _business_today()
+    # create_estimate fills a blank dueBackDate before this runs. The
+    # fallback matches that default when a caller skips the fill.
+    due = body.get("dueBackDate") or _default_due_back_date(SLA_RETURN_WINDOW_DAYS, today=today)
     total = int(body.get("contractValueCents") or 0)
     est_ls = body.get("estLsCents")
     est_ir = body.get("estIrCents")
@@ -1891,8 +1934,9 @@ def register(app, require_auth) -> None:
         # (they store NULL); a value that is sent is held to the same range.
         _validate_occurrence_counts(body)
         # Needed-back may be inside the SLA window (a rush). Only a past
-        # date is rejected, and the check runs before any INSERT. Maintenance
-        # and install share this column.
+        # date is rejected, and the check runs before any INSERT or settings
+        # read. Maintenance and install share this column. "Today" is
+        # America/New_York, not UTC.
         _require_due_back_not_past(body.get("dueBackDate"))
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
@@ -1906,6 +1950,13 @@ def register(app, require_auth) -> None:
         # are not the priced contract value — contract_value_cents, the ITB
         # split, commissions, and Aspire stay on their own numbers.
         homes_budget, common_area_budget = _resolve_contract_budgets(body)
+        # Blank needed-back defaults to business today plus the company SLA
+        # window (fallback 14). That date sits on the window boundary, so it
+        # is not rush. The settings read happens only after validation, so a
+        # 400/422 persists nothing and issues no query.
+        raw_due = body.get("dueBackDate")
+        if raw_due is None or raw_due == "":
+            body["dueBackDate"] = _default_due_back_date(await _sla_return_window_days())
         estimate_id = _new_id("est")
         # Auto-assign the next sequential estimate number (contract generator).
         next_num_row = await query("SELECT COALESCE(MAX(estimate_number), 0) + 1 AS next_num FROM estimates")
@@ -1940,7 +1991,7 @@ def register(app, require_auth) -> None:
                 body.get("priority", "medium"),
                 body.get("winProbability", 0.20),
                 body.get("siteWalkDate"),
-                body.get("dueBackDate") or date.today().isoformat(),
+                body.get("dueBackDate"),
                 body.get("anticipatedCloseDate"),
                 body.get("serviceStartDate"),
                 body.get("assignedLsEstimator"),

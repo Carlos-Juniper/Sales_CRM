@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import HTTPException
@@ -41,6 +42,16 @@ _TODAY = date(2026, 9, 24)
 
 def _iso_in(days: int, today: date = _TODAY) -> str:
     return (today + timedelta(days=days)).isoformat()
+
+
+def _today() -> date:
+    """Business calendar date. HTTP tests must not use the UTC clock."""
+    return est._business_today()
+
+
+# 23:30 America/New_York is 03:30 UTC the next day. A same-day Eastern date
+# is still "yesterday" on a UTC clock.
+_EASTERN_EVENING = datetime(2026, 9, 24, 23, 30, tzinfo=ZoneInfo("America/New_York"))
 
 
 class MemoryDb:
@@ -165,7 +176,7 @@ class TestRushRule:
 
 class TestMaintenanceIntake:
     def test_six_day_due_date_accepted_as_rush(self, db):
-        due = _iso_in(6, date.today())
+        due = _iso_in(6, _today())
         resp = client.post("/api/estimating/estimates", json=_body("maintenance", due))
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -174,7 +185,7 @@ class TestMaintenanceIntake:
         assert db.estimates[body["id"]]["due_back_date"] == due
 
     def test_twenty_day_due_date_is_not_rush(self, db):
-        due = _iso_in(20, date.today())
+        due = _iso_in(20, _today())
         resp = client.post("/api/estimating/estimates", json=_body("maintenance", due, "Long Lead"))
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -182,7 +193,7 @@ class TestMaintenanceIntake:
         assert body["isRush"] is False
 
     def test_past_due_date_rejected_and_not_stored(self, db):
-        due = _iso_in(-1, date.today())
+        due = _iso_in(-1, _today())
         resp = client.post("/api/estimating/estimates", json=_body("maintenance", due))
         assert resp.status_code == 400
         assert "past" in resp.json()["detail"]
@@ -192,11 +203,11 @@ class TestMaintenanceIntake:
     def test_patch_six_days_becomes_rush_and_past_is_rejected(self, db):
         created = client.post(
             "/api/estimating/estimates",
-            json=_body("maintenance", _iso_in(20, date.today())),
+            json=_body("maintenance", _iso_in(20, _today())),
         ).json()
         assert created["isRush"] is False
 
-        rushed = _iso_in(6, date.today())
+        rushed = _iso_in(6, _today())
         resp = client.patch(
             f"/api/estimating/estimates/{created['id']}",
             json={"dueBackDate": rushed},
@@ -211,15 +222,15 @@ class TestMaintenanceIntake:
 
         past = client.patch(
             f"/api/estimating/estimates/{created['id']}",
-            json={"dueBackDate": _iso_in(-1, date.today())},
+            json={"dueBackDate": _iso_in(-1, _today())},
         )
         assert past.status_code == 400
         assert "past" in past.json()["detail"]
         assert db.estimates[created["id"]]["due_back_date"] == rushed
 
     def test_queue_list_flags_rush_ahead_of_a_longer_lead(self, db):
-        short = _iso_in(6, date.today())
-        long = _iso_in(20, date.today())
+        short = _iso_in(6, _today())
+        long = _iso_in(20, _today())
         client.post("/api/estimating/estimates", json=_body("maintenance", long, "Long Lead"))
         client.post("/api/estimating/estimates", json=_body("maintenance", short, "Rush RFP"))
 
@@ -237,7 +248,7 @@ class TestMaintenanceIntake:
 
 class TestInstallIntake:
     def test_six_day_internal_deadline_accepted_as_rush(self, db):
-        due = _iso_in(6, date.today())
+        due = _iso_in(6, _today())
         resp = client.post("/api/estimating/estimates", json=_body("install", due, "Install Rush"))
         assert resp.status_code == 201, resp.text
         assert resp.json()["estimateType"] == "install"
@@ -247,7 +258,7 @@ class TestInstallIntake:
     def test_past_internal_deadline_rejected(self, db):
         resp = client.post(
             "/api/estimating/estimates",
-            json=_body("install", _iso_in(-1, date.today()), "Install Late"),
+            json=_body("install", _iso_in(-1, _today()), "Install Late"),
         )
         assert resp.status_code == 400
         assert "past" in resp.json()["detail"]
@@ -256,10 +267,10 @@ class TestInstallIntake:
     def test_patch_twenty_days_clears_rush(self, db):
         created = client.post(
             "/api/estimating/estimates",
-            json=_body("install", _iso_in(6, date.today()), "Install Rush"),
+            json=_body("install", _iso_in(6, _today()), "Install Rush"),
         ).json()
         assert created["isRush"] is True
-        due = _iso_in(20, date.today())
+        due = _iso_in(20, _today())
         resp = client.patch(
             f"/api/estimating/estimates/{created['id']}",
             json={"dueBackDate": due},
@@ -273,14 +284,75 @@ class TestSlaWindowFromCompanySettings:
     def test_configured_window_overrides_the_fallback(self, db):
         """A 6-day date is not a rush when the company window is 5 days."""
         db.sla_days = 5
-        due = _iso_in(6, date.today())
+        due = _iso_in(6, _today())
         resp = client.post("/api/estimating/estimates", json=_body("maintenance", due))
         assert resp.status_code == 201, resp.text
         assert resp.json()["isRush"] is False
 
     def test_missing_settings_row_uses_the_shared_constant(self, db):
         db.sla_days = None
-        due = _iso_in(6, date.today())
+        due = _iso_in(6, _today())
         resp = client.post("/api/estimating/estimates", json=_body("maintenance", due))
         assert resp.status_code == 201, resp.text
         assert resp.json()["isRush"] is True
+
+
+class TestEasternEvening:
+    """23:30 Eastern is 03:30 UTC the next day.
+
+    The old check compared the client's calendar date to date.today() in
+    UTC, so a same-day needed-back date was a spurious 400 and a blank
+    date became that UTC day (a rush).
+    """
+
+    def test_clock_is_the_next_utc_day(self):
+        utc = _EASTERN_EVENING.astimezone(timezone.utc)
+        assert utc == datetime(2026, 9, 25, 3, 30, tzinfo=timezone.utc)
+        assert est._business_today(_EASTERN_EVENING) == date(2026, 9, 24)
+        assert est._business_today(utc) == date(2026, 9, 24)
+        assert utc.date() == date(2026, 9, 25)
+
+    def test_same_day_needed_back_is_accepted_and_rush(self, db):
+        with patch("api.estimating._business_now", return_value=_EASTERN_EVENING):
+            resp = client.post(
+                "/api/estimating/estimates",
+                json=_body("maintenance", "2026-09-24", "Same Day"),
+            )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["dueBackDate"] == "2026-09-24"
+        assert body["isRush"] is True
+        assert db.estimates[body["id"]]["due_back_date"] == "2026-09-24"
+
+    def test_blank_needed_back_defaults_to_sla_window_and_is_not_rush(self, db):
+        with patch("api.estimating._business_now", return_value=_EASTERN_EVENING):
+            resp = client.post(
+                "/api/estimating/estimates",
+                json=_body("maintenance", None, "Blank Window"),
+            )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["dueBackDate"] == "2026-10-08"
+        assert body["isRush"] is False
+
+    def test_blank_string_uses_the_company_window(self, db):
+        db.sla_days = 21
+        payload = _body("install", None, "Blank Install")
+        payload["dueBackDate"] = ""
+        with patch("api.estimating._business_now", return_value=_EASTERN_EVENING):
+            resp = client.post("/api/estimating/estimates", json=payload)
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["dueBackDate"] == "2026-10-15"
+        assert body["isRush"] is False
+        assert body["estimateType"] == "install"
+
+    def test_day_before_eastern_today_is_still_rejected(self, db):
+        with patch("api.estimating._business_now", return_value=_EASTERN_EVENING):
+            resp = client.post(
+                "/api/estimating/estimates",
+                json=_body("maintenance", "2026-09-23"),
+            )
+        assert resp.status_code == 400
+        assert "past" in resp.json()["detail"]
+        assert db.estimates == {}

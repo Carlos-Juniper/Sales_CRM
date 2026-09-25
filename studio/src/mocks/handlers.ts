@@ -66,9 +66,10 @@ import {
 import {
   DUE_BACK_PAST_MESSAGE,
   SLA_CONFIG,
+  businessDateOnly,
+  defaultDueBackDate,
   isPastCalendarDate,
   isRushWindowDate,
-  localDateOnly,
 } from '@/lib/estimating/sla'
 
 const API = '/api'
@@ -215,14 +216,18 @@ function withRush(estimate: Estimate): Estimate {
   delete (copy as { isRush?: boolean }).isRush
   return {
     ...copy,
-    isRush: isRushWindowDate(estimate.dueBackDate ?? '', SLA_CONFIG.returnWindowDays),
+    isRush: isRushWindowDate(
+      estimate.dueBackDate ?? '',
+      SLA_CONFIG.returnWindowDays,
+      businessDateOnly(),
+    ),
   }
 }
 
-/** 400 when a written dueBackDate is before the user's local today. Blank is allowed. */
+/** 400 when a written dueBackDate is before business today. Blank is allowed. */
 function pastDueResponse(dueBackDate: string | null | undefined) {
   if (!dueBackDate) return null
-  if (isPastCalendarDate(dueBackDate)) {
+  if (isPastCalendarDate(dueBackDate, businessDateOnly())) {
     return HttpResponse.json({ detail: DUE_BACK_PAST_MESSAGE }, { status: 400 })
   }
   return null
@@ -847,8 +852,8 @@ const allHandlers = [
     const created = withRush({
       ...estimateBody,
       ...occurrenceColumns(estimateBody),
-      // Omitted on create defaults to today, which is inside the rush window.
-      dueBackDate: estimateBody.dueBackDate || localDateOnly(),
+      // Omitted on create defaults to business today + the SLA window, not a rush.
+      dueBackDate: estimateBody.dueBackDate || defaultDueBackDate(),
       id,
       sections,
       homesBudget: budgets.homesBudget,

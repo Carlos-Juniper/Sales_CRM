@@ -6,7 +6,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   SLA_CONFIG,
+  businessDateOnly,
   calendarDaysOut,
+  defaultDueBackDate,
   isPastCalendarDate,
   isRushWindowDate,
   localDateOnly,
@@ -121,5 +123,24 @@ describe('local calendar dates', () => {
     expect(isRushWindowDate('2026-10-08', 14, today)).toBe(false)
     expect(isRushWindowDate('2026-09-23', 14, today)).toBe(false)
     expect(isRushWindowDate('', 14, today)).toBe(false)
+  })
+})
+
+describe('business timezone today', () => {
+  // 23:30 Eastern is 03:30 UTC the next day. A same-day date is not past,
+  // and a blank needed-back date lands on the SLA boundary, not today.
+  const evening = new Date('2026-09-25T03:30:00Z')
+
+  it('uses America/New_York when UTC has already rolled to the next day', () => {
+    expect(businessDateOnly(evening)).toBe('2026-09-24')
+    expect(isPastCalendarDate('2026-09-24', businessDateOnly(evening))).toBe(false)
+    expect(isRushWindowDate('2026-09-24', 14, businessDateOnly(evening))).toBe(true)
+  })
+
+  it('defaults a blank needed-back date to today plus the return window', () => {
+    expect(defaultDueBackDate(14, businessDateOnly(evening))).toBe('2026-10-08')
+    expect(defaultDueBackDate(7, '2026-09-24')).toBe('2026-10-01')
+    expect(isRushWindowDate(defaultDueBackDate(14, '2026-09-24'), 14, '2026-09-24')).toBe(false)
+    expect(defaultDueBackDate(Number.NaN, '2026-09-24')).toBe('2026-10-08')
   })
 })

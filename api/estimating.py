@@ -35,6 +35,7 @@ from db import execute, query
 from api import aspire_sync
 from api import authz
 from api.commission_calc import (
+    STANDARD_PLAN_KEY,
     build_installment_rows,
     close_date_of,
     compute_plan_amount,
@@ -91,12 +92,58 @@ _UNRESOLVED_CLIENT_NOTE = (
 )
 
 
+async def _lookup_payout_schedule(plan_key: str, estimate_type: str, *, fallback: bool) -> Optional[str]:
+    """Read payout_schedule for a plan and estimate type.
+
+    An assigned plan with no schedule falls back once to the standard plan.
+    A miss is logged and returns None so the commission is stored without
+    invented installment dates.
+    """
+    rows = await query(
+        """
+        SELECT payout_schedule
+        FROM commission_plan_rules
+        WHERE plan_key = %s
+          AND estimate_type = %s
+          AND effective_date <= CURDATE()
+          AND payout_schedule IS NOT NULL
+        ORDER BY effective_date DESC
+        LIMIT 1
+        """,
+        [plan_key, estimate_type],
+    )
+    if rows and rows[0].get("payout_schedule"):
+        return str(rows[0]["payout_schedule"])
+    if fallback and plan_key != STANDARD_PLAN_KEY:
+        return await _lookup_payout_schedule(STANDARD_PLAN_KEY, estimate_type, fallback=False)
+    logger.warning(
+        "No payout_schedule for plan %s estimate type %s",
+        plan_key, estimate_type,
+    )
+    return None
+
+
+async def _payout_schedule_for(
+    plan_key: Optional[str],
+    estimate_type: str,
+    rules: list[dict],
+) -> Optional[str]:
+    """Schedule from the matched rules, else from the plan, else standard."""
+    for rule in rules:
+        schedule = rule.get("payout_schedule")
+        if schedule:
+            return str(schedule)
+    return await _lookup_payout_schedule(plan_key or STANDARD_PLAN_KEY, estimate_type, fallback=True)
+
+
 async def _insert_commission_installments(commission_id: str, rows: list[dict]) -> None:
-    """Persist both payout installments. Cadence is not plan-specific."""
-    if len(rows) != 2:
+    """Persist the payout installments for this rule's schedule (one or two)."""
+    if not rows:
         return
     params: list[Any] = []
+    placeholders: list[str] = []
     for row in rows:
+        placeholders.append("(%s, %s, %s, %s, %s, %s, 'scheduled')")
         params.extend([
             str(uuid.uuid4()),
             commission_id,
@@ -105,30 +152,38 @@ async def _insert_commission_installments(commission_id: str, rows: list[dict]) 
             row["payout_date"].isoformat(),
             row["amount_cents"],
         ])
+    values_sql = ", ".join(placeholders)
     await execute(
-        """
+        f"""
         INSERT INTO commission_installments
             (id, commission_id, installment_number, payout_period_label,
              payout_date, amount_cents, status)
-        VALUES (%s, %s, %s, %s, %s, %s, 'scheduled'),
-               (%s, %s, %s, %s, %s, %s, 'scheduled')
+        VALUES {values_sql}
         """,
         params,
     )
 
 
 async def _create_commission_on_won(estimate_id: str) -> None:
-    """Insert a commission and its two payout installments when an estimate is won.
+    """Insert a commission and its payout installments when an estimate is won.
 
     No-ops when the estimate has no lead or the lead has no crm_rep. Idempotent
     — the UNIQUE KEY on estimate_id makes a duplicate won transition a no-op.
 
-    Rate precedence (the two-installment cadence applies in every branch):
+    Rate precedence:
       1. Active user_commission_plans row → that plan's rules.
       2. Else an active commission_rates row → today's flat rate on
-         contract_value_cents, plan_key left NULL.
+         contract_value_cents, plan_key left NULL. Payout timing still comes
+         from the standard plan rule for this estimate type.
       3. Else a sales-rep role → the standard plan.
       4. Else no-op.
+
+    Installment count and dates follow the matched rule's payout_schedule.
+    Maintenance is two lagged checks. Install is one check on the last day of
+    the won quarter. Enhancement is one check on the first day of the next
+    month. Those install and enhancement dates stand in for billing and
+    collections until that data exists. A missing schedule is logged and the
+    commission is inserted with no installment rows.
 
     Maintenance standard basis is first-year annual revenue.
     contract_value_cents on a maintenance estimate is already that annual
@@ -224,7 +279,7 @@ async def _create_commission_on_won(estimate_id: str) -> None:
             )
         rule_rows = await query(
             """
-            SELECT tier_min_cents, tier_max_cents, rate, basis
+            SELECT tier_min_cents, tier_max_cents, rate, basis, payout_schedule
             FROM commission_plan_rules
             WHERE plan_key = %s
               AND estimate_type = %s
@@ -263,8 +318,17 @@ async def _create_commission_on_won(estimate_id: str) -> None:
         commission_amount_cents = amount
         commission_rate = effective_rate(amount, contract_value_cents)
         stored_plan_key = plan_key
+        schedule_rules = rule_rows
+        schedule_plan_key = plan_key
 
-    installments = build_installment_rows(now_utc, commission_amount_cents)
+    if mode == "legacy":
+        schedule_rules = []
+        schedule_plan_key = None
+    schedule = await _payout_schedule_for(schedule_plan_key, estimate_type, schedule_rules)
+    if schedule:
+        installments = build_installment_rows(now_utc, commission_amount_cents, schedule)
+    else:
+        installments = []
     commission_id = str(uuid.uuid4())
     inserted = await execute(
         """

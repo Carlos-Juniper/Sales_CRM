@@ -1,18 +1,27 @@
 -- ---------------------------------------------------------------------------
 -- Migration 065 — commission payout installments and standard plan rules.
 --
--- Payout cadence is universal (not a plan setting): each commission is paid
--- in two equal installments, one quarter apart, lagging the close quarter.
+-- Payout cadence is data on commission_plan_rules.payout_schedule:
+--   maintenance_split_lagged — two installments, half at the start of the
+--     next quarter and half at the start of the quarter after that
+--   quarter_end — one installment on the last day of the close quarter
+--     (install / construction)
+--   month_after_quarter_end — one installment on the first day of the month
+--     after the close quarter (enhancement)
 -- Close date is commissions.created_at evaluated in America/New_York.
--- Plan tables hold rates only. No per-user plan rows are inserted here;
--- individual plans (including any regional salesperson or VP of Sales) stay
--- unassigned, and existing commission_rates rows are not modified.
+-- Install and enhancement dates use that won date. The CRM has no billing or
+-- collections dates, so this is an approximation until that data exists.
+-- No per-user plan rows are inserted here. Individual plans stay unassigned,
+-- and existing commission_rates rows are not modified. A legacy rate still
+-- controls the amount. Timing follows the standard rule for the estimate type.
 --
 -- Idempotent: CREATE TABLE IF NOT EXISTS, information_schema-guarded ALTERs,
--- INSERT IGNORE seeds, and a NOT EXISTS backfill. detect_065 keys on the
--- tables, the commissions snapshot columns, the unique indexes, the standard
--- maintenance / new-client / enhancement seed rows, and a complete installment
--- backfill (every commission has installment 1).
+-- INSERT ... ON DUPLICATE KEY UPDATE for the standard plan and its rules,
+-- NOT EXISTS backfill, a corrective DELETE of installment 2 on non-maintenance
+-- commissions, and an UPDATE of installment 1 to the schedule date and the
+-- full amount. detect_065 keys on the tables, payout_schedule, the commissions
+-- snapshot columns, the unique indexes, the three seeded schedules, and a
+-- complete installment backfill (every commission has installment 1).
 --
 -- Backfill treats created_at as UTC when converting to Eastern, matching the
 -- application (naive timestamps are UTC). If the named time zone is not
@@ -38,6 +47,7 @@ CREATE TABLE IF NOT EXISTS commission_plan_rules (
   tier_max_cents BIGINT NULL,
   rate DECIMAL(6,5) NOT NULL,
   basis VARCHAR(80) NOT NULL,
+  payout_schedule VARCHAR(40) NOT NULL,
   effective_date DATE NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -133,32 +143,49 @@ PREPARE stmt_add_installment_unique FROM @add_installment_unique;
 EXECUTE stmt_add_installment_unique;
 DEALLOCATE PREPARE stmt_add_installment_unique;
 
-INSERT IGNORE INTO commission_plans (plan_key, name, description, active) VALUES (
+SET @add_payout_schedule = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = 'commission_plan_rules'
+       AND column_name = 'payout_schedule') > 0,
+    'SELECT 1',
+    'ALTER TABLE `commission_plan_rules` ADD COLUMN `payout_schedule` VARCHAR(40) NULL'
+);
+PREPARE stmt_add_payout_schedule FROM @add_payout_schedule;
+EXECUTE stmt_add_payout_schedule;
+DEALLOCATE PREPARE stmt_add_payout_schedule;
+
+INSERT INTO commission_plans (plan_key, name, description, active) VALUES (
   'standard',
   'Standard Sales Commission',
-  'Default company plan. Maintenance: 3 percent of first-year annual contract value. Construction: marginal calendar-year tiers for new clients (0.4 percent to $1M, 0.8 percent to $2M, 1.2 percent above) and existing clients (0 percent on the first $3M, 0.4 percent above). Enhancement rules are stored for configuration and are not calculated until gross-profit data exists. Payout timing is not part of the plan.',
+  'Default company plan. Maintenance: 3 percent of first-year annual contract value, paid maintenance_split_lagged. Construction: marginal calendar-year tiers for new clients (0.4 percent to $1M, 0.8 percent to $2M, 1.2 percent above) and existing clients (0 percent on the first $3M, 0.4 percent above), paid quarter_end. Enhancement rules are stored for configuration and are not calculated until gross-profit data exists, paid month_after_quarter_end. Install and enhancement dates use the won quarter until billing and collections data exists.',
   1
-);
+)
+ON DUPLICATE KEY UPDATE
+  name = VALUES(name),
+  description = VALUES(description);
 
 -- Rates are data. tier_max_cents is exclusive. Dollars converted to cents:
 -- $1M = 100000000, $2M = 200000000, $3M = 300000000.
 -- Enhancement dollar gates are "over" the threshold, so the min is one cent past it.
-INSERT IGNORE INTO commission_plan_rules
-  (id, plan_key, estimate_type, client_type, tier_min_cents, tier_max_cents, rate, basis, effective_date)
+-- Re-runs fill payout_schedule without rewriting rates.
+INSERT INTO commission_plan_rules
+  (id, plan_key, estimate_type, client_type, tier_min_cents, tier_max_cents, rate, basis, payout_schedule, effective_date)
 VALUES
-  ('rule-standard-maint', 'standard', 'maintenance', NULL, 0, NULL, 0.03000, 'first_year_revenue', '2024-03-13'),
-  ('rule-standard-install-new-0', 'standard', 'install', 'new', 0, 100000000, 0.00400, 'calendar_year_cumulative_revenue', '2024-03-13'),
-  ('rule-standard-install-new-1m', 'standard', 'install', 'new', 100000000, 200000000, 0.00800, 'calendar_year_cumulative_revenue', '2024-03-13'),
-  ('rule-standard-install-new-2m', 'standard', 'install', 'new', 200000000, NULL, 0.01200, 'calendar_year_cumulative_revenue', '2024-03-13'),
-  ('rule-standard-install-existing-0', 'standard', 'install', 'existing', 0, 300000000, 0.00000, 'calendar_year_cumulative_revenue', '2024-03-13'),
-  ('rule-standard-install-existing-3m', 'standard', 'install', 'existing', 300000000, NULL, 0.00400, 'calendar_year_cumulative_revenue', '2024-03-13'),
-  ('rule-standard-enh-new-gp55', 'standard', 'enhancement', 'new', 0, NULL, 0.03000, 'enhancement_collected_gp_gte_55', '2024-03-08'),
-  ('rule-standard-enh-gp50-over-5k', 'standard', 'enhancement', NULL, 500001, NULL, 0.01500, 'enhancement_collected_gp_gte_50', '2024-03-08'),
-  ('rule-standard-enh-gp45-over-10k', 'standard', 'enhancement', NULL, 1000001, NULL, 0.01500, 'enhancement_collected_gp_gte_45', '2024-03-08');
+  ('rule-standard-maint', 'standard', 'maintenance', NULL, 0, NULL, 0.03000, 'first_year_revenue', 'maintenance_split_lagged', '2024-03-13'),
+  ('rule-standard-install-new-0', 'standard', 'install', 'new', 0, 100000000, 0.00400, 'calendar_year_cumulative_revenue', 'quarter_end', '2024-03-13'),
+  ('rule-standard-install-new-1m', 'standard', 'install', 'new', 100000000, 200000000, 0.00800, 'calendar_year_cumulative_revenue', 'quarter_end', '2024-03-13'),
+  ('rule-standard-install-new-2m', 'standard', 'install', 'new', 200000000, NULL, 0.01200, 'calendar_year_cumulative_revenue', 'quarter_end', '2024-03-13'),
+  ('rule-standard-install-existing-0', 'standard', 'install', 'existing', 0, 300000000, 0.00000, 'calendar_year_cumulative_revenue', 'quarter_end', '2024-03-13'),
+  ('rule-standard-install-existing-3m', 'standard', 'install', 'existing', 300000000, NULL, 0.00400, 'calendar_year_cumulative_revenue', 'quarter_end', '2024-03-13'),
+  ('rule-standard-enh-new-gp55', 'standard', 'enhancement', 'new', 0, NULL, 0.03000, 'enhancement_collected_gp_gte_55', 'month_after_quarter_end', '2024-03-08'),
+  ('rule-standard-enh-gp50-over-5k', 'standard', 'enhancement', NULL, 500001, NULL, 0.01500, 'enhancement_collected_gp_gte_50', 'month_after_quarter_end', '2024-03-08'),
+  ('rule-standard-enh-gp45-over-10k', 'standard', 'enhancement', NULL, 1000001, NULL, 0.01500, 'enhancement_collected_gp_gte_45', 'month_after_quarter_end', '2024-03-08')
+ON DUPLICATE KEY UPDATE
+  payout_schedule = VALUES(payout_schedule);
 
--- One row per installment. Paid commissions mark both installments paid.
--- Cancelled commissions mark both cancelled. Everyone else stays scheduled;
--- due vs upcoming is derived at read time.
+-- Maintenance: two lagged installments. Paid commissions mark both paid.
+-- Cancelled commissions mark both cancelled. Everyone else stays scheduled.
 INSERT IGNORE INTO commission_installments
   (id, commission_id, installment_number, payout_period_label, payout_date, amount_cents, status, paid_at)
 SELECT
@@ -201,6 +228,7 @@ FROM (
     END AS installment_status,
     CASE WHEN c.status = 'paid' THEN c.paid_at ELSE NULL END AS paid_at
   FROM commissions c
+  LEFT JOIN estimates e ON e.id = c.estimate_id
   JOIN (
     SELECT
       id,
@@ -212,9 +240,115 @@ FROM (
     UNION ALL
     SELECT 2
   ) n
+  WHERE COALESCE(e.estimate_type, '') = 'maintenance'
 ) src
 WHERE NOT EXISTS (
   SELECT 1 FROM commission_installments existing
   WHERE existing.commission_id = src.id
     AND existing.installment_number = src.installment_number
 );
+
+-- Install, enhancement, and any other non-maintenance type: one installment
+-- for the full amount. Enhancement pays the month after the quarter.
+-- Everything else pays on the last day of the close quarter.
+INSERT IGNORE INTO commission_installments
+  (id, commission_id, installment_number, payout_period_label, payout_date, amount_cents, status, paid_at)
+SELECT
+  UUID(),
+  src.id,
+  1,
+  CONCAT(
+    ELT(MONTH(src.payout_date),
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'),
+    ' ',
+    YEAR(src.payout_date)
+  ),
+  src.payout_date,
+  src.amount_cents,
+  src.installment_status,
+  src.paid_at
+FROM (
+  SELECT
+    c.id,
+    c.commission_amount_cents AS amount_cents,
+    CASE
+      WHEN COALESCE(e.estimate_type, '') = 'enhancement' AND QUARTER(d.close_date) = 1 THEN DATE(CONCAT(YEAR(d.close_date), '-04-01'))
+      WHEN COALESCE(e.estimate_type, '') = 'enhancement' AND QUARTER(d.close_date) = 2 THEN DATE(CONCAT(YEAR(d.close_date), '-07-01'))
+      WHEN COALESCE(e.estimate_type, '') = 'enhancement' AND QUARTER(d.close_date) = 3 THEN DATE(CONCAT(YEAR(d.close_date), '-10-01'))
+      WHEN COALESCE(e.estimate_type, '') = 'enhancement' THEN DATE(CONCAT(YEAR(d.close_date) + 1, '-01-01'))
+      WHEN QUARTER(d.close_date) = 1 THEN DATE(CONCAT(YEAR(d.close_date), '-03-31'))
+      WHEN QUARTER(d.close_date) = 2 THEN DATE(CONCAT(YEAR(d.close_date), '-06-30'))
+      WHEN QUARTER(d.close_date) = 3 THEN DATE(CONCAT(YEAR(d.close_date), '-09-30'))
+      ELSE DATE(CONCAT(YEAR(d.close_date), '-12-31'))
+    END AS payout_date,
+    CASE
+      WHEN c.status = 'paid' THEN 'paid'
+      WHEN c.status = 'cancelled' THEN 'cancelled'
+      ELSE 'scheduled'
+    END AS installment_status,
+    CASE WHEN c.status = 'paid' THEN c.paid_at ELSE NULL END AS paid_at
+  FROM commissions c
+  LEFT JOIN estimates e ON e.id = c.estimate_id
+  JOIN (
+    SELECT
+      id,
+      DATE(COALESCE(CONVERT_TZ(created_at, '+00:00', 'America/New_York'), created_at)) AS close_date
+    FROM commissions
+  ) d ON d.id = c.id
+  WHERE COALESCE(e.estimate_type, '') <> 'maintenance'
+) src
+WHERE NOT EXISTS (
+  SELECT 1 FROM commission_installments existing
+  WHERE existing.commission_id = src.id
+    AND existing.installment_number = 1
+);
+
+-- A previous draft of this migration wrote two lagged rows for every
+-- commission. Drop the second row wherever the sale is not maintenance.
+DELETE i
+FROM commission_installments i
+JOIN commissions c ON c.id = i.commission_id
+LEFT JOIN estimates e ON e.id = c.estimate_id
+WHERE i.installment_number = 2
+  AND COALESCE(e.estimate_type, '') <> 'maintenance';
+
+-- And put installment 1 on the schedule date for the full amount.
+-- The date is computed in the joined subquery so the label can read it.
+-- A SET clause cannot read a column assigned earlier in the same statement.
+UPDATE commission_installments i
+JOIN (
+  SELECT
+    c.id AS commission_id,
+    c.commission_amount_cents,
+    CASE
+      WHEN COALESCE(e.estimate_type, '') = 'enhancement' AND QUARTER(d.close_date) = 1 THEN DATE(CONCAT(YEAR(d.close_date), '-04-01'))
+      WHEN COALESCE(e.estimate_type, '') = 'enhancement' AND QUARTER(d.close_date) = 2 THEN DATE(CONCAT(YEAR(d.close_date), '-07-01'))
+      WHEN COALESCE(e.estimate_type, '') = 'enhancement' AND QUARTER(d.close_date) = 3 THEN DATE(CONCAT(YEAR(d.close_date), '-10-01'))
+      WHEN COALESCE(e.estimate_type, '') = 'enhancement' THEN DATE(CONCAT(YEAR(d.close_date) + 1, '-01-01'))
+      WHEN QUARTER(d.close_date) = 1 THEN DATE(CONCAT(YEAR(d.close_date), '-03-31'))
+      WHEN QUARTER(d.close_date) = 2 THEN DATE(CONCAT(YEAR(d.close_date), '-06-30'))
+      WHEN QUARTER(d.close_date) = 3 THEN DATE(CONCAT(YEAR(d.close_date), '-09-30'))
+      ELSE DATE(CONCAT(YEAR(d.close_date), '-12-31'))
+    END AS payout_date
+  FROM commissions c
+  LEFT JOIN estimates e ON e.id = c.estimate_id
+  JOIN (
+    SELECT
+      id,
+      DATE(COALESCE(CONVERT_TZ(created_at, '+00:00', 'America/New_York'), created_at)) AS close_date
+    FROM commissions
+  ) d ON d.id = c.id
+  WHERE COALESCE(e.estimate_type, '') <> 'maintenance'
+) src ON src.commission_id = i.commission_id
+SET
+  i.amount_cents = src.commission_amount_cents,
+  i.payout_date = src.payout_date,
+  i.payout_period_label = CONCAT(
+    ELT(MONTH(src.payout_date),
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'),
+    ' ',
+    YEAR(src.payout_date)
+  )
+WHERE i.installment_number = 1;

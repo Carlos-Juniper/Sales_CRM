@@ -1,8 +1,15 @@
 """Pure commission cadence and plan math.
 
-Payout timing is universal: two equal installments, one quarter apart, with a
-one-quarter lag. Plan rules change only the amount. Nothing in this module
-reads the database — callers pass rows in and get cents and dates out.
+Payout timing comes from the plan rule's payout_schedule, not from one global
+cadence. maintenance_split_lagged pays half at the start of the next quarter
+and half at the start of the quarter after that. quarter_end pays the full
+amount on the last day of the close quarter (install). month_after_quarter_end
+pays the full amount on the first day of the month after that quarter
+(enhancement). The CRM has no billing or collections dates, so the install and
+enhancement schedules use the won date as the close.
+
+Nothing in this module reads the database — callers pass rows in and get cents
+and dates out.
 
 Close timestamps are evaluated in America/New_York. Naive datetimes are UTC,
 which matches a TIMESTAMP read back on a UTC session (Cloud SQL default).
@@ -27,6 +34,12 @@ _MONTHS = (
 # migration 065 is the source of truth for the name.
 STANDARD_PLAN_KEY = "standard"
 STANDARD_PLAN_NAME = "Standard Sales Commission"
+
+# Stored on commission_plan_rules.payout_schedule. Callers pass the value
+# through; this module does not pick a schedule on its own.
+MAINTENANCE_SPLIT_LAGGED = "maintenance_split_lagged"
+QUARTER_END = "quarter_end"
+MONTH_AFTER_QUARTER_END = "month_after_quarter_end"
 
 
 @dataclass(frozen=True)
@@ -85,7 +98,7 @@ def close_quarter_label(value: Any) -> str:
 
 
 def payout_dates_for_close(closed: date) -> tuple[date, date]:
-    """First and second payout dates for a sale that closed on `closed`.
+    """Maintenance pair: half at the start of Q+1, half at the start of Q+2.
 
     Q1 → April 1 / July 1. Q2 → July 1 / October 1.
     Q3 → October 1 / January 1 next year. Q4 → January 1 / April 1 next year.
@@ -112,27 +125,67 @@ def split_installment_amounts(total_cents: int) -> tuple[int, int]:
     return first, total_cents - first
 
 
-def build_installment_rows(close_at: Any, total_cents: int) -> list[dict]:
-    """Two installment dicts for a commission closed at `close_at`.
+def quarter_end_date(closed: date) -> date:
+    """Last calendar day of the close quarter (install payout date)."""
+    quarter = (closed.month - 1) // 3 + 1
+    year = closed.year
+    if quarter == 1:
+        return date(year, 3, 31)
+    if quarter == 2:
+        return date(year, 6, 30)
+    if quarter == 3:
+        return date(year, 9, 30)
+    return date(year, 12, 31)
 
-    Amounts reconcile to `total_cents`. Status stored in the database is
-    `scheduled`; paid/due/upcoming/cancelled are derived at read time.
+
+def month_after_quarter_end(closed: date) -> date:
+    """First day of the month after the close quarter (enhancement payout date).
+
+    Q1 → April 1. Q2 → July 1. Q3 → October 1. Q4 → January 1 next year.
+    """
+    quarter = (closed.month - 1) // 3 + 1
+    year = closed.year
+    if quarter == 1:
+        return date(year, 4, 1)
+    if quarter == 2:
+        return date(year, 7, 1)
+    if quarter == 3:
+        return date(year, 10, 1)
+    return date(year + 1, 1, 1)
+
+
+def _installment_row(number: int, payout: date, amount_cents: int) -> dict:
+    return {
+        "installment_number": number,
+        "payout_period": period_label(payout),
+        "payout_date": payout,
+        "amount_cents": amount_cents,
+    }
+
+
+def build_installment_rows(close_at: Any, total_cents: int, payout_schedule: str) -> list[dict]:
+    """Installment dicts for a commission closed at `close_at`.
+
+    `payout_schedule` is the plan rule value. maintenance_split_lagged returns
+    two rows whose amounts reconcile to `total_cents`. quarter_end and
+    month_after_quarter_end return one row for the full amount. Status stored
+    in the database is `scheduled`; paid/due/upcoming/cancelled are derived at
+    read time.
     """
     closed = close_date_of(close_at)
-    first_amount, second_amount = split_installment_amounts(int(total_cents))
-    first_date, second_date = payout_dates_for_close(closed)
-    rows = []
-    for number, payout, amount in (
-        (1, first_date, first_amount),
-        (2, second_date, second_amount),
-    ):
-        rows.append({
-            "installment_number": number,
-            "payout_period": period_label(payout),
-            "payout_date": payout,
-            "amount_cents": amount,
-        })
-    return rows
+    total = int(total_cents)
+    if payout_schedule == MAINTENANCE_SPLIT_LAGGED:
+        first_amount, second_amount = split_installment_amounts(total)
+        first_date, second_date = payout_dates_for_close(closed)
+        return [
+            _installment_row(1, first_date, first_amount),
+            _installment_row(2, second_date, second_amount),
+        ]
+    if payout_schedule == QUARTER_END:
+        return [_installment_row(1, quarter_end_date(closed), total)]
+    if payout_schedule == MONTH_AFTER_QUARTER_END:
+        return [_installment_row(1, month_after_quarter_end(closed), total)]
+    raise ValueError(f"Unknown payout_schedule {payout_schedule!r}")
 
 
 def derive_installment_status(

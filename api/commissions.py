@@ -5,9 +5,10 @@ entered manually by administrators. Commissions are inserted by
 api/estimating.py (_create_commission_on_won) when an estimate transitions to
 'won' — no DB trigger.
 
-Payout cadence is universal: two installments, quarterly, with a one-quarter
-lag. Plan assignment changes rates only. Due vs upcoming is derived at read
-time from America/New_York today and is not stored.
+Payout cadence is the plan rule's payout_schedule. Maintenance sales get two
+lagged installments. Install pays once at the close quarter's end, and
+enhancement pays once on the first day of the following month. Due vs upcoming
+is derived at read time from America/New_York today and is not stored.
 
 Backs the Commissions page in the inside-sales studio. Mirrors the module
 pattern used by api/estimating.py and api/proposals.py.
@@ -353,12 +354,9 @@ def register(app, require_auth) -> None:
             """,
             [row["commission_id"]],
         )
-        numbers = {int(s["installment_number"]) for s in siblings}
-        if numbers >= {1, 2} and all(s.get("status") == "paid" for s in siblings):
-            final = next(
-                (s.get("payout_period_label") for s in siblings if int(s["installment_number"]) == 2),
-                row.get("payout_period_label"),
-            )
+        if siblings and all(s.get("status") == "paid" for s in siblings):
+            final_row = max(siblings, key=lambda s: int(s["installment_number"]))
+            final = final_row.get("payout_period_label") or row.get("payout_period_label")
             await execute(
                 """
                 UPDATE commissions

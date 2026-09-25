@@ -791,6 +791,110 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
+# users.name is the full display name. There is no first/last column.
+# Email match is a substring so "michelle.cady@…" and "mcady@…" both qualify.
+# Exactly one legacy-sales row may match; zero or several is not a promotion.
+MICHELLE_CADY_PREDICATE = """(
+    LOWER(TRIM(name)) REGEXP '^michelle[[:space:]]+cady$'
+    OR LOWER(TRIM(name)) REGEXP '^cady[[:space:]]*,[[:space:]]*michelle$'
+    OR LOWER(email) LIKE '%cady%'
+)"""
+
+_MICHELLE_NAME_RE = re.compile(r"^michelle\s+cady$")
+_MICHELLE_REVERSED_RE = re.compile(r"^cady\s*,\s*michelle$")
+_LEGACY_SALES_ROLES = frozenset({"sales", "outside_sales"})
+
+
+def matches_michelle_cady(name: Optional[str], email: Optional[str]) -> bool:
+    """True when a users row is Michelle Cady by full name or email.
+
+    Mirrors MICHELLE_CADY_PREDICATE. Name is trimmed and case-insensitive:
+    "Michelle Cady" or "Cady, Michelle". Email matches when it contains
+    "cady". Role is not considered here.
+    """
+    normalized = (name or "").strip().lower()
+    if _MICHELLE_NAME_RE.match(normalized) or _MICHELLE_REVERSED_RE.match(normalized):
+        return True
+    return "cady" in (email or "").strip().lower()
+
+
+def michelle_match_warning(match_count: int) -> str:
+    return (
+        f"WARNING: migration 067 matched {match_count} legacy sales user(s) "
+        "as Michelle Cady (need exactly 1). She was left unchanged; other "
+        "sales/outside_sales users still move to maintenance_sales."
+    )
+
+
+def plan_legacy_sales_migration(
+    users: list[dict],
+) -> tuple[dict[str, str], Optional[str]]:
+    """Return ({user id: new role}, warning) for migration 067.
+
+    Only role sales and outside_sales change. When exactly one of those
+    rows matches Michelle Cady, that row becomes vp_sales. Otherwise every
+    match stays on its current role and a warning is returned. Every other
+    legacy sales row becomes maintenance_sales. Other roles are omitted.
+    """
+    eligible = [u for u in users if (u.get("role") or "") in _LEGACY_SALES_ROLES]
+    matches = [u for u in eligible if matches_michelle_cady(u.get("name"), u.get("email"))]
+    warning = None
+    promote_id = None
+    if len(matches) == 1:
+        promote_id = matches[0].get("id")
+    else:
+        warning = michelle_match_warning(len(matches))
+    match_ids = {u.get("id") for u in matches}
+    updates: dict[str, str] = {}
+    for user in eligible:
+        user_id = user.get("id")
+        if user_id == promote_id:
+            updates[user_id] = "vp_sales"
+        elif user_id in match_ids:
+            continue
+        else:
+            updates[user_id] = "maintenance_sales"
+    return updates, warning
+
+
+def detect_067(conn) -> bool:
+    """067 applied ↔ no users remain on role sales or outside_sales.
+
+    That is this migration's own effect. A database that already has none
+    (fresh, or already migrated) is detected and skipped. When Michelle Cady
+    is not a unique match she stays on her legacy role, so this stays False
+    until those rows are gone. A recorded schema_migrations row still skips
+    later deploys; the legacy sales role code keeps authorizing her.
+    """
+    if not table_exists(conn, "users"):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM users WHERE role IN ('sales', 'outside_sales')",
+    )
+    return bool(row) and int(row["cnt"]) == 0
+
+
+def apply_067(conn, path: Path, verbose: bool = False) -> None:
+    """Apply 067 and warn when Michelle Cady is not a unique legacy-sales match.
+
+    The SQL file performs the writes. A non-unique match does not fail the
+    deploy: those rows stay on sales/outside_sales and the legacy role code
+    keeps authorizing them.
+    """
+    if table_exists(conn, "users"):
+        row = _fetch_one(
+            conn,
+            "SELECT COUNT(*) AS cnt FROM users "
+            "WHERE role IN ('sales', 'outside_sales') AND "
+            + MICHELLE_CADY_PREDICATE,
+        )
+        match_count = int(row["cnt"]) if row else 0
+        if match_count != 1:
+            print(michelle_match_warning(match_count), file=sys.stderr)
+    exec_file(conn, path, verbose)
+
+
 def detect_064(conn) -> bool:
     """064 applied ↔ estimates.irrigation_occurrences column exists.
 
@@ -889,6 +993,7 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
+    "067_legacy_sales_roles":                     detect_067,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
@@ -992,14 +1097,19 @@ def _step(
                          apply_fn=lambda: apply_004(conn, path, verbose, branch=branch),
                          suffix=_BRANCH_LABEL.get(branch, ""))
 
-    # ── standard detection (005–012) ──────────────────────────────────────────
+    # ── standard detection ────────────────────────────────────────────────────
     detect_fn = _DETECT.get(migration_id)
     if detect_fn and detect_fn(conn):
         if not dry_run:
             record_migration(conn, migration_id, checksum, detected=True)
         return "ok", "already-applied (detected — schema present, no tracking row)"
 
-    return _do_apply(conn, migration_id, path, checksum, dry_run, verbose)
+    apply_fn = None
+    if migration_id == "067_legacy_sales_roles":
+        apply_fn = lambda: apply_067(conn, path, verbose)
+    return _do_apply(
+        conn, migration_id, path, checksum, dry_run, verbose, apply_fn=apply_fn
+    )
 
 
 def run(

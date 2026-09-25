@@ -74,6 +74,7 @@ for at least one real deploy cycle.
 - **062** — adds `owner_user_id` to `team_members` and `client_references` (guarded). Not the same change as 058.
 - **063** — nullable `estimates.homes_budget` / `common_area_budget`. Renumbered from 059 so it does not share a number with the branch-manager migration on `integrate/staging-proposals`.
 - **064** — yearly maintenance occurrence counts on `estimates`. Renumbered from 061 for the same reason.
+- **067** — data-only: users on `sales` or `outside_sales` become `maintenance_sales`, except Michelle Cady, who becomes `vp_sales` when exactly one legacy-sales row matches (full `users.name` is "Michelle Cady" or "Cady, Michelle", case-insensitive and trimmed, and/or `users.email` contains `cady`). Any other match count leaves her unchanged and the runner prints a warning; the deploy continues. Other roles are not updated. Numbered 067 because the commissions PR uses 065 and 066. Detector: no `users` rows left with role `sales` or `outside_sales`.
 
 ### Numbering history
 

@@ -56,7 +56,7 @@ const summary: CommissionSummary = {
 }
 
 describe('useCommissionPayoutSchedule', () => {
-  it('loads the schedule for the requested rep and close year', async () => {
+  it('loads the schedule for the requested rep and close-date window', async () => {
     const urls: string[] = []
     server.use(
       http.get('/api/commissions/payout-schedule', ({ request }) => {
@@ -66,7 +66,11 @@ describe('useCommissionPayoutSchedule', () => {
     )
     const { wrapper } = createWrapper()
     const { result } = renderHook(
-      () => useCommissionPayoutSchedule({ user_id: 'rep-1', year: 2026 }),
+      () => useCommissionPayoutSchedule({
+        user_id: 'rep-1',
+        start_date: '2026-01-01',
+        end_date: '2026-09-25',
+      }),
       { wrapper },
     )
 
@@ -74,7 +78,9 @@ describe('useCommissionPayoutSchedule', () => {
     expect(result.current.data?.quarters[0].close_quarter).toBe('2026-Q2')
     expect(result.current.data?.by_payout_period[0].amount_cents).toBe(15_000)
     expect(urls[0]).toContain('user_id=rep-1')
-    expect(urls[0]).toContain('year=2026')
+    expect(urls[0]).toContain('start_date=2026-01-01')
+    expect(urls[0]).toContain('end_date=2026-09-25')
+    expect(urls[0]).not.toContain('year=')
   })
 
   it('refetches list, summary, and the payout schedule after marking an installment paid', async () => {
@@ -103,7 +109,11 @@ describe('useCommissionPayoutSchedule', () => {
     const { wrapper } = createWrapper()
     const { result } = renderHook(
       () => ({
-        schedule: useCommissionPayoutSchedule({ user_id: 'rep-1', year: 2026 }),
+        schedule: useCommissionPayoutSchedule({
+          user_id: 'rep-1',
+          start_date: '2026-01-01',
+          end_date: '2026-09-25',
+        }),
         list: useCommissionsList({ user_id: 'rep-1' }),
         summary: useCommissionSummary({ user_id: 'rep-1' }),
         mark: useMarkInstallmentPaid(),

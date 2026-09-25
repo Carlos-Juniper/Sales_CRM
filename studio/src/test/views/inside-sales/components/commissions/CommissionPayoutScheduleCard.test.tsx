@@ -57,11 +57,7 @@ const schedule: CommissionPayoutSchedule = {
 describe('CommissionPayoutScheduleCard', () => {
   it('shows each closed quarter with payout month, amount, and status', () => {
     render(
-      <CommissionPayoutScheduleCard
-        schedule={schedule}
-        isLoading={false}
-        scopeNote="Deals closed in 2026."
-      />,
+      <CommissionPayoutScheduleCard schedule={schedule} isLoading={false} />,
     )
 
     expect(screen.getByRole('heading', { name: 'Payout schedule' })).toBeInTheDocument()
@@ -76,11 +72,7 @@ describe('CommissionPayoutScheduleCard', () => {
 
   it('renders pending billing data without a date or a stand-in amount', () => {
     render(
-      <CommissionPayoutScheduleCard
-        schedule={schedule}
-        isLoading={false}
-        scopeNote="Deals closed in 2026."
-      />,
+      <CommissionPayoutScheduleCard schedule={schedule} isLoading={false} />,
     )
 
     const knownAmount = screen.getByTestId('quarter-2026-Q2-payment-2-unscheduled-none')
@@ -99,14 +91,21 @@ describe('CommissionPayoutScheduleCard', () => {
 
   it('marks a mixed quarter total as known dollars plus pending', () => {
     render(
-      <CommissionPayoutScheduleCard
-        schedule={schedule}
-        isLoading={false}
-        scopeNote="Deals closed in 2026."
-      />,
+      <CommissionPayoutScheduleCard schedule={schedule} isLoading={false} />,
     )
 
     const partial = screen.getByTestId('quarter-2026-Q2-payment-1-dated-2026-04-30')
     expect(partial).toHaveTextContent('$150.00 + pending')
+  })
+
+  it('says the period has no closed deals when the schedule is empty', () => {
+    render(
+      <CommissionPayoutScheduleCard
+        schedule={{ user_id: 'rep-1', year: 2026, quarters: [], by_payout_period: [] }}
+        isLoading={false}
+      />,
+    )
+
+    expect(screen.getByText('No closed deals in this period')).toBeInTheDocument()
   })
 })

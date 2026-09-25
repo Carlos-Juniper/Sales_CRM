@@ -14,13 +14,11 @@ import { InstallmentStatusBadge } from './InstallmentStatusBadge'
 interface CommissionPayoutScheduleCardProps {
   schedule: CommissionPayoutSchedule | undefined
   isLoading: boolean
-  scopeNote: string
 }
 
 export function CommissionPayoutScheduleCard({
   schedule,
   isLoading,
-  scopeNote,
 }: CommissionPayoutScheduleCardProps) {
   const quarters = schedule?.quarters ?? []
 
@@ -32,7 +30,6 @@ export function CommissionPayoutScheduleCard({
             <CalendarClock className="h-4 w-4 text-[hsl(var(--muted-fg))]" />
             <h2 className="text-sm font-semibold text-[hsl(var(--fg))]">Payout schedule</h2>
           </div>
-          <p className="text-xs text-[hsl(var(--muted-fg))] mt-1">{scopeNote}</p>
         </div>
 
         {isLoading && (
@@ -44,7 +41,7 @@ export function CommissionPayoutScheduleCard({
 
         {!isLoading && quarters.length === 0 && (
           <p className="px-4 py-8 text-sm text-center text-[hsl(var(--muted-fg))]">
-            No closed deals in {schedule?.year ?? 'this year'}
+            No closed deals in this period
           </p>
         )}
 

@@ -16,11 +16,9 @@ import { useAuthStore } from '@/store/authStore'
 import { formatCents } from '@/lib/estimating/maintenance'
 import {
   closedCommissionLabel,
-  closeYearForPeriod,
   formatPayoutDate,
   formatRate,
   getCommissionPeriodDates,
-  scheduleScopeNote,
 } from '@/lib/commissions'
 import type { Period } from '@/lib/commissions'
 import type { CommissionFilters } from '@/types/commissions'
@@ -56,14 +54,13 @@ export default function CommissionsPage() {
     ...getCommissionPeriodDates(period),
     user_id: canViewRepSelector ? selectedUserId : undefined,
   }
-  const scheduleYear = closeYearForPeriod(period)
-
   const { data: summary, isLoading: summaryLoading } = useCommissionSummary(queryFilters)
   const { data: commissions, isLoading: commissionsLoading } = useCommissionsList(queryFilters)
   const { data: reps } = useCommissionReps()
   const { data: schedule, isLoading: scheduleLoading } = useCommissionPayoutSchedule({
     user_id: queryFilters.user_id,
-    year: scheduleYear,
+    start_date: queryFilters.start_date,
+    end_date: queryFilters.end_date,
   })
 
   const approvedCount = (commissions ?? []).filter(c => c.status === 'approved').length
@@ -235,7 +232,6 @@ export default function CommissionsPage() {
           <CommissionPayoutScheduleCard
             schedule={schedule}
             isLoading={scheduleLoading}
-            scopeNote={scheduleScopeNote(period, schedule?.year ?? scheduleYear)}
           />
 
           <CommissionPayoutPeriodView

@@ -85,31 +85,6 @@ export function getCommissionPeriodDates(period: Period, now = new Date()): { st
   return getPeriodDates(period, now)
 }
 
-/**
- * Close year for GET /commissions/payout-schedule.
- * The schedule endpoint takes a close year, not a month.
- */
-export function closeYearForPeriod(period: Period, now = new Date()): number {
-  const year = now.getUTCFullYear()
-  const month = now.getUTCMonth()
-  if (period === 'last_quarter' && month < 3) return year - 1
-  if (period === 'last_month' && month === 0) return year - 1
-  return year
-}
-
-export function scheduleScopeNote(period: Period, year: number): string {
-  if (period === 'this_month' || period === 'last_month') {
-    return `The month filter applies to the deal list and close totals. This schedule is every deal closed in ${year}.`
-  }
-  if (period === 'all_time') {
-    return `All Time includes every close in the deal list. This schedule is only ${year}.`
-  }
-  if (period === 'last_quarter' || period === 'this_quarter') {
-    return `Deals closed in ${year}. The quarter filter narrows the deal list and close totals; this schedule is the full close year.`
-  }
-  return `Deals closed in ${year}. A check can fall in a later month. Blank amounts and dates stay blank until billing data is on file.`
-}
-
 export function closedCommissionLabel(period: Period): string {
   if (period === 'this_year') return 'Closed this year'
   if (period === 'all_time') return 'All closed commission'

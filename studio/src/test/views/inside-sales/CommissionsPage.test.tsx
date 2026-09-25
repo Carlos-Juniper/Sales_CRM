@@ -156,6 +156,7 @@ describe('CommissionsPage rep picker', () => {
     await waitFor(() => {
       expect(screen.getByText('No closed deals in this period')).toBeInTheDocument()
     })
+    expect(screen.getByText('No checks in this period')).toBeInTheDocument()
     expect(screen.queryByText('$625.00')).not.toBeInTheDocument()
     expect(
       calls.some(

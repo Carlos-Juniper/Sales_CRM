@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useAuthStore } from '@/store/authStore'
 import { useRole, normalizeRole } from '@/hooks/useRole'
-import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES } from '@/lib/roles'
+import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES, REP_SELECTOR_ROLES } from '@/lib/roles'
 import { CANONICAL_ROLES } from '@/types'
 import { makeUser } from '@/test/utils'
 
@@ -42,6 +42,12 @@ describe('roles.ts — canonical role constants (mirrors api/authz.py)', () => {
 
   it('CROSS_BRANCH_ROLES: org-wide visibility (CROSS_BRANCH_ROLES in authz.py)', () => {
     expect([...CROSS_BRANCH_ROLES].sort()).toEqual(['admin', 'ceo', 'vice_president'].sort())
+  })
+
+  it('REP_SELECTOR_ROLES mirrors api/authz.py REP_VIEWER_ROLES', () => {
+    expect([...REP_SELECTOR_ROLES].sort()).toEqual(
+      ['admin', 'ceo', 'manager', 'regional_director', 'vice_president'].sort(),
+    )
   })
 })
 
@@ -137,5 +143,23 @@ describe('useRole', () => {
     const { result } = renderHook(() => useRole())
     expect(result.current.role).toBeNull()
     expect(result.current.canAccess('sales')).toBe(false)
+    expect(result.current.canViewRepSelector).toBe(false)
+  })
+
+  it('canViewRepSelector follows REP_SELECTOR_ROLES (api/authz.py REP_VIEWER_ROLES)', () => {
+    for (const role of CANONICAL_ROLES) {
+      expect(withRole(role).canViewRepSelector).toBe(REP_SELECTOR_ROLES.includes(role))
+    }
+    expect(withRole('admin').canViewRepSelector).toBe(true)
+    expect(withRole('vice_president').canViewRepSelector).toBe(true)
+    expect(withRole('ceo').canViewRepSelector).toBe(true)
+    expect(withRole('manager').canViewRepSelector).toBe(true)
+    expect(withRole('regional_director').canViewRepSelector).toBe(true)
+    expect(withRole('sales').canViewRepSelector).toBe(false)
+    expect(withRole('inside_sales').canViewRepSelector).toBe(false)
+    expect(withRole('procurement').canViewRepSelector).toBe(false)
+    expect(withRole('marketing').canViewRepSelector).toBe(false)
+    expect(withRole('maintenance_estimating').canViewRepSelector).toBe(false)
+    expect(withRole('install_estimating').canViewRepSelector).toBe(false)
   })
 })

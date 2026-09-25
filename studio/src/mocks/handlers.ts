@@ -1413,4 +1413,42 @@ allHandlers.push(
   ),
 )
 
+// Commissions + sales performance. Rep lists are only fetched by roles in
+// REP_SELECTOR_ROLES (api/authz.py REP_VIEWER_ROLES); summary and list
+// endpoints auto-scope when no user_id is supplied.
+const mockReps = [
+  {
+    id: 'rep-1',
+    name: 'Alex Rivera',
+    email: 'alex.rivera@example.com',
+    commission_rate: 0.05,
+    effective_date: '2026-01-01',
+  },
+]
+
+allHandlers.push(
+  http.get(`${API}/commissions/reps`, () => HttpResponse.json(mockReps)),
+  http.get(`${API}/commissions/summary`, () =>
+    HttpResponse.json({ scheduled_ytd_cents: 125_000, paid_ytd_cents: 80_000 }),
+  ),
+  http.get(`${API}/commissions/list`, () => HttpResponse.json([])),
+  http.get(`${API}/sales-performance/reps`, () =>
+    HttpResponse.json(mockReps.map(({ id, name, email }) => ({ id, name, email }))),
+  ),
+  http.get(`${API}/sales-performance/summary`, () =>
+    HttpResponse.json({
+      won_count: 2,
+      won_total_cents: 500_000,
+      won_avg_cents: 250_000,
+      lost_count: 1,
+      lost_total_cents: 100_000,
+      lost_avg_cents: 100_000,
+      win_rate: 0.67,
+      loss_categories: [],
+    }),
+  ),
+  http.get(`${API}/sales-performance/won-deals`, () => HttpResponse.json([])),
+  http.get(`${API}/sales-performance/lost-deals`, () => HttpResponse.json([])),
+)
+
 export const handlers = import.meta.env.DEV ? allHandlers : []

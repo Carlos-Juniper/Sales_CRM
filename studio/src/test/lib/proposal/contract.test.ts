@@ -20,7 +20,7 @@ function makeEstimate(
     services: Array<{
       label: string
       qty: number
-      unitSellCents: number
+      unitSellCents: number | null
       complexityPct: number
       billingType?: 'recurring' | 'one_time' | null
     }>
@@ -140,6 +140,86 @@ describe('buildContractRows', () => {
     expect(rows[0].priceEachCents).toBe(5500)
     expect(rows[0].extPriceCents).toBe(66000)
   })
+
+  it('sets servicePriceCents to the annual extended price when the unit price is known', () => {
+    const estimate = makeEstimate([
+      {
+        squareFeet: 10000,
+        services: [
+          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
+          { label: 'Edging', qty: 6, unitSellCents: 200, complexityPct: 0.1 },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+
+    expect(rows[0].servicePriceCents).toBe(rows[0].extPriceCents)
+    expect(rows[0].servicePriceCents).toBe(60000)
+    expect(rows[1].servicePriceCents).toBe(rows[1].extPriceCents)
+    expect(rows[1].servicePriceCents).toBe(13200)
+  })
+
+  it('leaves servicePriceCents null when the service has no unit price', () => {
+    const estimate = makeEstimate([
+      {
+        squareFeet: 10000,
+        services: [
+          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
+          { label: 'Unpriced', qty: 4, unitSellCents: null, complexityPct: 0 },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+    const unpriced = rows.find((r) => r.label === 'Unpriced')
+
+    expect(unpriced?.servicePriceCents).toBeNull()
+    expect(unpriced?.extPriceCents).toBe(0)
+  })
+
+  it('keeps a real zero unit price as $0 rather than a blank', () => {
+    const estimate = makeEstimate([
+      {
+        squareFeet: 10000,
+        services: [
+          { label: 'Included', qty: 12, unitSellCents: 0, complexityPct: 0 },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+
+    expect(rows[0].servicePriceCents).toBe(0)
+  })
+
+  it('sums recurring service prices to the annual maintenance total', () => {
+    const estimate = makeEstimate([
+      {
+        squareFeet: 342000,
+        services: [
+          { label: 'Mowing', qty: 12, unitSellCents: 350, complexityPct: 0 },
+          { label: 'Unpriced', qty: 4, unitSellCents: null, complexityPct: 0 },
+          { label: 'Mulch', qty: 1, unitSellCents: 420000, complexityPct: 0, billingType: 'one_time' },
+        ],
+      },
+      {
+        squareFeet: 28500,
+        services: [
+          { label: 'Irrigation', qty: 12, unitSellCents: 1000, complexityPct: 0 },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+    const recurring = rows.filter((r) => r.isRecurring)
+    const priced = recurring.reduce((sum, r) => sum + (r.servicePriceCents ?? 0), 0)
+    const annual = buildContractTotals(recurring).extPriceCents
+
+    expect(priced).toBe(annual)
+    expect(rows.find((r) => r.label === 'Mulch')?.isRecurring).toBe(false)
+    expect(rows.find((r) => r.label === 'Unpriced')?.servicePriceCents).toBeNull()
+  })
 })
 
 describe('buildContractTotals', () => {
@@ -149,6 +229,7 @@ describe('buildContractTotals', () => {
         label: 'Mowing',
         occurs: 12,
         priceEachCents: 5000,
+        servicePriceCents: 60000,
         extPriceCents: 60000,
         salesTaxCents: 0,
         totalPriceCents: 60000,
@@ -158,6 +239,7 @@ describe('buildContractTotals', () => {
         label: 'Mulch',
         occurs: null,
         priceEachCents: 1500,
+        servicePriceCents: 1500,
         extPriceCents: 1500,
         salesTaxCents: 0,
         totalPriceCents: 1500,
@@ -179,6 +261,7 @@ describe('buildPaymentSchedule', () => {
         label: 'Mowing',
         occurs: 12,
         priceEachCents: 5000,
+        servicePriceCents: 60000,
         extPriceCents: 60000,
         salesTaxCents: 0,
         totalPriceCents: 60000,
@@ -198,6 +281,7 @@ describe('buildPaymentSchedule', () => {
         label: 'Mowing',
         occurs: 12,
         priceEachCents: 5000,
+        servicePriceCents: 60000,
         extPriceCents: 60000,
         salesTaxCents: 0,
         totalPriceCents: 60000,
@@ -217,6 +301,7 @@ describe('buildPaymentSchedule', () => {
         label: 'Mowing',
         occurs: 12,
         priceEachCents: 5000,
+        servicePriceCents: 60000,
         extPriceCents: 60000,
         salesTaxCents: 0,
         totalPriceCents: 60000,

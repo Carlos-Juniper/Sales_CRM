@@ -3,10 +3,11 @@
 // Maintenance Agreement's first page.
 //
 // Matches the reference (business docs/Pointe Jupiter Yacht Club.pdf, p.37):
-// one table of recurring services with a Frequency column and a bold Annual
-// Maintenance Price total row, followed by a separate Optional Services table
-// (Frequency / Cost per Occ. / Annual Cost) for one-time line items. Neither
-// table carries scope narrative — that's ContractScopeNarrative's job.
+// one table of recurring services with Frequency and Price columns and a bold
+// Annual Maintenance Price total row, followed by a separate Optional Services
+// table (Frequency / Cost per Occ. / Annual Cost) for one-time line items.
+// Neither table carries scope narrative — that's ContractScopeNarrative's job.
+// A recurring row whose service has no unit price leaves the Price cell blank.
 // ---------------------------------------------------------------------------
 
 import { buildContractRows, buildContractTotals } from '@/lib/proposal/contract'
@@ -32,20 +33,24 @@ export function ContractLines({ estimate }: { estimate: Estimate }) {
             <tr>
               <th>Description of Services</th>
               <th className="num">Frequency</th>
+              <th className="num">Price</th>
             </tr>
           </thead>
           <tbody>
             <tr className="group-row">
-              <td colSpan={2}>General Maintenance Services</td>
+              <td colSpan={3}>General Maintenance Services</td>
             </tr>
             {recurringRows.map((row, i) => (
-              <tr key={i}>
+              <tr key={i} data-testid="contract-line" data-label={row.label}>
                 <td>{row.label}</td>
-                <td className="num">{row.occurs ?? ''}</td>
+                <td className="num" data-testid="contract-line-frequency">{row.occurs ?? ''}</td>
+                <td className="num" data-testid="contract-line-price">
+                  {row.servicePriceCents == null ? '' : formatCurrency(row.servicePriceCents)}
+                </td>
               </tr>
             ))}
-            <tr className="total-row">
-              <td>Annual Maintenance Price</td>
+            <tr className="total-row" data-testid="contract-total">
+              <td colSpan={2}>Annual Maintenance Price</td>
               <td className="num">{formatCurrency(annualMaintenancePriceCents)}</td>
             </tr>
           </tbody>

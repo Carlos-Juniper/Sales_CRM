@@ -7,9 +7,13 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+  approvedTotalCents,
+  buildApprovedPaymentSchedule,
   buildContractRows,
   buildContractTotals,
   buildPaymentSchedule,
+  scaleRowsToContractValue,
+  type ContractRow,
 } from '@/lib/proposal/contract'
 import type { Estimate } from '@/types/estimating'
 
@@ -264,6 +268,154 @@ describe('buildContractRows', () => {
     expect(recurring.every((row) => row.hasUnitPrice)).toBe(true)
     expect(shown).toBe(4_001_400)
     expect(buildContractTotals(recurring).extPriceCents).toBe(4_001_400)
+  })
+})
+
+function contractRow(partial: Partial<ContractRow> & Pick<ContractRow, 'label' | 'extPriceCents'>): ContractRow {
+  return {
+    occurs: 12,
+    priceEachCents: partial.extPriceCents,
+    hasUnitPrice: true,
+    salesTaxCents: 0,
+    totalPriceCents: partial.extPriceCents,
+    isRecurring: true,
+    ...partial,
+  }
+}
+
+describe('scaleRowsToContractValue', () => {
+  it('scales priced rows so the cents sum exactly to the target', () => {
+    const rows = [
+      contractRow({ label: 'Mowing', extPriceCents: 6_000 }),
+      contractRow({ label: 'Edging', extPriceCents: 4_000 }),
+    ]
+
+    const scaled = scaleRowsToContractValue(rows, 20_000)
+
+    expect(scaled.map((row) => row.extPriceCents)).toEqual([12_000, 8_000])
+    expect(scaled.reduce((sum, row) => sum + row.extPriceCents, 0)).toBe(20_000)
+    expect(scaled[0].totalPriceCents).toBe(12_000)
+    expect(rows[0].extPriceCents).toBe(6_000)
+  })
+
+  it('uses largest-remainder rounding and breaks remainder ties by earlier row', () => {
+    const rows = [
+      contractRow({ label: 'A', extPriceCents: 1 }),
+      contractRow({ label: 'B', extPriceCents: 1 }),
+      contractRow({ label: 'C', extPriceCents: 1 }),
+    ]
+
+    const scaled = scaleRowsToContractValue(rows, 100)
+
+    expect(scaled.map((row) => row.extPriceCents)).toEqual([34, 33, 33])
+    expect(scaled.reduce((sum, row) => sum + row.extPriceCents, 0)).toBe(100)
+  })
+
+  it('gives the extra cent to the larger fractional remainder', () => {
+    const rows = [
+      contractRow({ label: 'Small', extPriceCents: 1 }),
+      contractRow({ label: 'Large', extPriceCents: 2 }),
+    ]
+
+    const scaled = scaleRowsToContractValue(rows, 10)
+
+    expect(scaled.map((row) => row.extPriceCents)).toEqual([3, 7])
+  })
+
+  it('does not scale a row that has no unit price', () => {
+    const rows = [
+      contractRow({ label: 'Mowing', extPriceCents: 100 }),
+      contractRow({ label: 'Unpriced', extPriceCents: 0, hasUnitPrice: false, priceEachCents: 0 }),
+    ]
+
+    const scaled = scaleRowsToContractValue(rows, 50)
+
+    expect(scaled[0].extPriceCents).toBe(50)
+    expect(scaled[1]).toBe(rows[1])
+    expect(scaled[1].hasUnitPrice).toBe(false)
+    expect(scaled[1].extPriceCents).toBe(0)
+  })
+
+  it('changes nothing when the target is null', () => {
+    const rows = [contractRow({ label: 'Mowing', extPriceCents: 6_000 })]
+
+    expect(scaleRowsToContractValue(rows, null)).toBe(rows)
+  })
+
+  it('changes nothing when the target already equals the line sum', () => {
+    const rows = [
+      contractRow({ label: 'Mowing', extPriceCents: 6_000 }),
+      contractRow({ label: 'Edging', extPriceCents: 4_000 }),
+    ]
+
+    expect(scaleRowsToContractValue(rows, 10_000)).toBe(rows)
+  })
+
+  it('leaves a zero line sum unchanged and still reports the approved total', () => {
+    const rows = [
+      contractRow({ label: 'Mowing', extPriceCents: 0 }),
+      contractRow({ label: 'Unpriced', extPriceCents: 0, hasUnitPrice: false }),
+    ]
+
+    expect(scaleRowsToContractValue(rows, 4_800_000)).toBe(rows)
+    expect(approvedTotalCents(rows, 4_800_000)).toBe(4_800_000)
+    expect(rows[0].extPriceCents).toBe(0)
+  })
+
+  it('scales the same way when the approved value is below the line sum', () => {
+    const rows = [
+      contractRow({ label: 'Mowing', extPriceCents: 6_000 }),
+      contractRow({ label: 'Edging', extPriceCents: 4_000 }),
+    ]
+
+    const scaled = scaleRowsToContractValue(rows, 2_500)
+
+    expect(scaled.map((row) => row.extPriceCents)).toEqual([1_500, 1_000])
+    expect(scaled.reduce((sum, row) => sum + row.extPriceCents, 0)).toBe(2_500)
+    expect(scaled.every((row, i) => row.extPriceCents < rows[i].extPriceCents)).toBe(true)
+  })
+
+  it('scales the seeded Coral Bay recurring lines to the $48,000 approved value', () => {
+    const estimate = makeEstimate(
+      [
+        {
+          squareFeet: 342_000,
+          services: [
+            { label: 'Mowing & Edging', qty: 12, unitSellCents: 350, complexityPct: 0 },
+            { label: 'Landscape Bed Maintenance', qty: 12, unitSellCents: 200, complexityPct: 0 },
+            { label: 'Fertilization', qty: 4, unitSellCents: 300, complexityPct: 0 },
+            { label: 'Weed Control', qty: 6, unitSellCents: 200, complexityPct: 0 },
+            { label: 'Tree Canopy Trimming', qty: 4, unitSellCents: 250, complexityPct: 0 },
+          ],
+        },
+        {
+          squareFeet: 28_500,
+          services: [
+            { label: 'Shrub & Hedge Trimming', qty: 6, unitSellCents: 1400, complexityPct: 0 },
+            { label: 'Irrigation System Maint.', qty: 12, unitSellCents: 1000, complexityPct: 0 },
+            { label: 'Mulch Application', qty: 1, unitSellCents: 420_000, complexityPct: 0, billingType: 'one_time' },
+            { label: 'Annual Flower Installation', qty: 1, unitSellCents: 860_000, complexityPct: 0, billingType: 'one_time' },
+          ],
+        },
+      ],
+    )
+    estimate.contractValueCents = 4_800_000
+
+    const rows = buildContractRows(estimate)
+    const recurring = rows.filter((row) => row.isRecurring)
+    const scaled = scaleRowsToContractValue(recurring, estimate.contractValueCents)
+
+    expect(scaled.reduce((sum, row) => sum + row.extPriceCents, 0)).toBe(4_800_000)
+    expect(approvedTotalCents(recurring, estimate.contractValueCents)).toBe(4_800_000)
+    expect(scaled[0].extPriceCents).toBe(1_723_077)
+    expect(rows.filter((row) => !row.isRecurring).map((row) => row.extPriceCents)).toEqual([
+      11_970_000,
+      24_510_000,
+    ])
+
+    const schedule = buildApprovedPaymentSchedule(rows, estimate.contractValueCents, null)
+    expect(schedule.reduce((sum, month) => sum + month.amountCents, 0)).toBe(4_800_000)
+    expect(schedule.every((month) => month.amountCents === 400_000)).toBe(true)
   })
 })
 

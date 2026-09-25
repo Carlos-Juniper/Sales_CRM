@@ -9,10 +9,16 @@
 // recurring table was added at Carlos's request; it is not in that reference.
 // Neither table carries scope narrative — that's ContractScopeNarrative's job.
 // A row whose service has no unit price leaves its money cells blank. A stored
-// zero still prints $0.00.
+// zero still prints $0.00. When the estimate carries an approved contract
+// value, recurring line prices are scaled so they sum to that value. Optional
+// one-time rows are not part of that total and are left on their line prices.
 // ---------------------------------------------------------------------------
 
-import { buildContractRows, buildContractTotals } from '@/lib/proposal/contract'
+import {
+  approvedTotalCents,
+  buildContractRows,
+  scaleRowsToContractValue,
+} from '@/lib/proposal/contract'
 import { formatCents } from '@/lib/proposal/formatCents'
 import type { Estimate } from '@/types/estimating'
 
@@ -20,9 +26,15 @@ export function ContractLines({ estimate }: { estimate: Estimate }) {
   const rows = buildContractRows(estimate)
   if (rows.length === 0) return null
 
-  const recurringRows = rows.filter((r) => r.isRecurring)
+  // contractValueCents is the approved contract number. It matches the
+  // recurring maintenance the customer pays (Annual Maintenance Price and
+  // the payment schedule), not the optional one-time table. Scale only
+  // those rows so the printed total equals the approved value to the cent.
+  const unscaledRecurring = rows.filter((r) => r.isRecurring)
   const oneTimeRows = rows.filter((r) => !r.isRecurring)
-  const { extPriceCents: annualMaintenancePriceCents } = buildContractTotals(recurringRows)
+  const approvedCents = estimate.contractValueCents ?? null
+  const recurringRows = scaleRowsToContractValue(unscaledRecurring, approvedCents)
+  const annualMaintenancePriceCents = approvedTotalCents(unscaledRecurring, approvedCents)
 
   return (
     <div className="contract-lines">

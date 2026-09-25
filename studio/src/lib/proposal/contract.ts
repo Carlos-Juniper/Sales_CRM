@@ -7,7 +7,7 @@
 // without coupling to component lifecycle.
 // ---------------------------------------------------------------------------
 
-import { contractTotal, priceEachCents, maintServiceLine } from '@/lib/estimating/calc'
+import { priceEachCents, maintServiceLine } from '@/lib/estimating/calc'
 import type { Estimate } from '@/types/estimating'
 
 export interface ContractRow {
@@ -19,9 +19,8 @@ export interface ContractRow {
   priceEachCents: number
   /**
    * True when the service has a unit sell price, including a real zero.
-   * False leaves the Price cell blank. The displayed annual price is then
-   * derived from extPriceCents — see displayedServicePriceCents — so the
-   * cell and the Annual Maintenance Price cannot be stored as two numbers.
+   * False leaves the money cells blank. The rate still falls through to 0
+   * for the extended price, so a missing price adds nothing to the total.
    */
   hasUnitPrice: boolean
   /** Extended price in cents (qty × priceEach, computed from maintServiceLine) */
@@ -63,11 +62,8 @@ export function buildContractRows(estimate: Estimate): ContractRow[] {
     const sortedServices = [...section.services].sort((a, b) => a.sortOrder - b.sortOrder)
 
     for (const svc of sortedServices) {
-      // A missing unit price is not a zero price. The extended amount stays 0
-      // and the Price cell stays blank — the missing dollars are not invented
-      // and not taken from the other rows.
-      const unitSellCents = svc.unitSellCents
-      const hasUnitPrice = unitSellCents != null
+      const hasUnitPrice = svc.unitSellCents != null
+      const rate = svc.unitSellCents ?? 0
       const complexity = svc.complexityPct ?? 0
       // All maintenance work bundles into the contract cost and is broken into
       // the 12-month payment schedule. One-time is the marked exception, not
@@ -79,18 +75,12 @@ export function buildContractRows(estimate: Estimate): ContractRow[] {
       // still counting it in the contract total.
       const isRecurring = svc.billingType !== 'one_time'
 
-      // An unknown rate is not passed in as 0. Both figures stay 0 so a
-      // missing price cannot grow out of square footage alone.
-      // extPriceCents comes from maintServiceLine with the full qty, never
-      // from priceEach × qty, so per-occurrence rounding cannot drift the total.
-      const priceEach =
-        unitSellCents == null
-          ? 0
-          : priceEachCents(section.squareFeet, unitSellCents, complexity)
-      const extPrice =
-        unitSellCents == null
-          ? 0
-          : maintServiceLine(section.squareFeet, unitSellCents, svc.qty, complexity)
+      // priceEachCents = maintServiceLine(..., qty=1, ...)
+      const priceEach = priceEachCents(section.squareFeet, rate, complexity)
+
+      // extPriceCents must come from maintServiceLine directly (with full qty),
+      // never as priceEach × qty, to avoid rounding drift.
+      const extPrice = maintServiceLine(section.squareFeet, rate, svc.qty, complexity)
 
       rows.push({
         label: svc.label,
@@ -116,81 +106,6 @@ export function buildContractTotals(rows: ContractRow[]): ContractTotals {
   const salesTaxCents = rows.reduce((sum, r) => sum + r.salesTaxCents, 0)
   const totalPriceCents = rows.reduce((sum, r) => sum + r.totalPriceCents, 0)
   return { extPriceCents, salesTaxCents, totalPriceCents }
-}
-
-/**
- * Annual price printed on one recurring service row.
- * This is extPriceCents when the service has a unit price, and null when it
- * does not. It is not a second stored amount, and it is not priceEach × qty
- * (that product can differ by a cent from maintServiceLine).
- */
-export function displayedServicePriceCents(row: ContractRow): number | null {
-  return row.hasUnitPrice ? row.extPriceCents : null
-}
-
-export interface AnnualMaintenancePrice {
-  /**
-   * Printed Annual Maintenance Price. Sum of recurring extPriceCents — the
-   * same figure buildContractTotals returns and the payment schedule divides
-   * across 12 months.
-   */
-  totalCents: number
-  /** Sum of the Price column. Blank cells add nothing. */
-  pricedRowsCents: number
-  /** Recurring rows whose Price cell is blank. */
-  blankRowCount: number
-  /**
-   * Recurring extended cents with no Price cell. Part of totalCents, not of
-   * pricedRowsCents. buildContractRows keeps this at 0: a missing unit price
-   * has no extended amount. A row built any other way can still carry cents
-   * here; they stay in the total and are not spread across the priced rows.
-   */
-  undisplayedCents: number
-  /**
-   * estimate.contractValueCents minus the full line rollup (contractTotal),
-   * or null when no estimate is passed. Approver adjustments write
-   * contractValueCents and do not rewrite section lines. The delta is not
-   * added to totalCents and is not allocated onto rows.
-   */
-  contractValueAdjustmentCents: number | null
-}
-
-/**
- * Relate the Price column to the Annual Maintenance Price.
- *
- * Both come from each recurring row's extPriceCents. A row with a unit price
- * contributes that amount to the column and to the total. A row without one
- * contributes its extPriceCents only to the total (0 for rows from
- * buildContractRows) and prints a blank cell. An estimate-level contract-value
- * adjustment is reported beside the total and does not change either number.
- */
-export function annualMaintenancePrice(
-  recurringRows: ContractRow[],
-  estimate?: Estimate,
-): AnnualMaintenancePrice {
-  let pricedRowsCents = 0
-  let undisplayedCents = 0
-  let blankRowCount = 0
-
-  for (const row of recurringRows) {
-    const shown = displayedServicePriceCents(row)
-    if (shown == null) {
-      blankRowCount += 1
-      undisplayedCents += row.extPriceCents
-    } else {
-      pricedRowsCents += shown
-    }
-  }
-
-  return {
-    totalCents: pricedRowsCents + undisplayedCents,
-    pricedRowsCents,
-    blankRowCount,
-    undisplayedCents,
-    contractValueAdjustmentCents: estimate
-      ? estimate.contractValueCents - contractTotal(estimate)
-      : null,
-  }
 }
 
 /**

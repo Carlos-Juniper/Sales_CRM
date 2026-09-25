@@ -33,11 +33,14 @@ export type LeadStatus =
   | 'op_review'
   | 'approved'
 
-// The ten canonical business roles — one role vocabulary,
-// mirrored by backend validation in api/authz.py.
+// Canonical business roles — one role vocabulary, mirrored by backend
+// validation in api/authz.py. `maintenance_sales` and `install_sales` match
+// legacy `sales` for access; intake type is a separate server field.
 export type UserRole =
   | 'procurement'
   | 'sales'
+  | 'maintenance_sales'
+  | 'install_sales'
   | 'inside_sales'
   | 'admin'
   | 'manager'
@@ -54,6 +57,8 @@ export type UserRole =
 export const CANONICAL_ROLES: readonly UserRole[] = [
   'procurement',
   'sales',
+  'maintenance_sales',
+  'install_sales',
   'inside_sales',
   'admin',
   'manager',
@@ -64,6 +69,9 @@ export const CANONICAL_ROLES: readonly UserRole[] = [
   'ceo',
   'marketing',
 ] as const
+
+/** Intake forms a session may open. Comes from the server, not from the role. */
+export type IntakeType = 'maintenance' | 'install'
 
 // Legacy auth role still present in older JWTs / un-migrated rows; it
 // normalizes to `sales` (see useRole/normalizeRole and sql/migrations/004).
@@ -191,6 +199,12 @@ export interface AuthUser {
   branch_id: string
   avatar_initials: string
   token?: string
+  /**
+   * Intake buttons this session may open (`GET /api/auth/me` and the Entra
+   * session responses). Absent on an older backend — the UI then shows both
+   * buttons. Do not derive this from `role` on the client.
+   */
+  allowed_intake_types?: IntakeType[]
 }
 
 // ── Microsoft Graph / Calendar ────────────────────────────────────────────────

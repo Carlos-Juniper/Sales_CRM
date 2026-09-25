@@ -134,6 +134,9 @@ describe('AuthCallbackPage — Entra sign-in completion', () => {
     // BranchManagerPage removed in Slice 12; managers land on settings.
     // Analytics stays in the nav for them.
     ['manager', '/settings'],
+    // Split field-sales roles, and legacy sales, land on the pipeline.
+    ['maintenance_sales', '/inside-sales/pipeline'],
+    ['install_sales', '/inside-sales/pipeline'],
   ])('navigates %s users to %s', async (role, route) => {
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })
     mockEntraComplete.mockResolvedValue(makeUser({ role: role as 'inside_sales' }))

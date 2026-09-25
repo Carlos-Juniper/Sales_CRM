@@ -43,6 +43,7 @@ import { PropertySelector } from './PropertySelector'
 import { ServiceLineSelect } from './AspirePickers'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
+import { intakeDeniedMessage } from '@/lib/intakeAccess'
 import type { BranchOption, Estimate, MaintenanceCustomerType } from '@/types/estimating'
 import { FileAttachRow, type AttachedFile } from './IntakeFileAttachRow'
 import { useAttachmentUpload } from '@/lib/estimating/useAttachmentUpload'
@@ -430,7 +431,7 @@ export function MaintenanceIntakeModal({
         const named = OCCURRENCE_COUNT_FIELDS.find((field) => err.message.startsWith(field.key))
         if (named) setOccurrenceErrors({ [named.key]: err.message })
       } else {
-        show('Failed to create estimate — please try again.')
+        show(intakeDeniedMessage(err, 'Failed to create estimate — please try again.'))
       }
     } finally {
       setSubmitting(false)

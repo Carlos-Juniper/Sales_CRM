@@ -11,10 +11,11 @@ import { cn } from '@/lib/utils'
 import { AssigneeAvatar } from '@/components/shared/AssigneeAvatar'
 import {
   SALES_NAV_ROLES,
+  ANALYTICS_NAV_ROLES,
   PUBLIC_LEADS_NAV_ROLES,
   ESTIMATING_NAV_ROLES,
-  ANALYTICS_NAV_ROLES,
 } from '@/lib/roles'
+import { roleLabel } from '@/lib/roleLabels'
 import type { User, UserRole } from '@/types'
 
 interface NavItem {
@@ -141,7 +142,7 @@ export function Sidebar() {
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-[var(--sidebar-fg)] truncate">{user_.name}</p>
-                <p className="text-[10px] text-[var(--sidebar-fg)] opacity-50 capitalize truncate">{user_.role.replace('_', ' ')}</p>
+                <p className="text-[10px] text-[var(--sidebar-fg)] opacity-50 truncate">{roleLabel(user_.role)}</p>
               </div>
             )}
             {!collapsed && (

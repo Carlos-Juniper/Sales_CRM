@@ -224,7 +224,8 @@ export const settingsApi = {
 
   /**
    * Authorize a picked person into `users`. 422 (with the exact §2.8 copy) when
-   * role='sales' has no resolvable aspire_rep_id — surfaced verbatim by the UI.
+   * a field-sales role (`sales`, `maintenance_sales`, `install_sales`) has no
+   * resolvable aspire_rep_id — surfaced verbatim by the UI.
    */
   authorizeUser: (body: AuthorizeUserBody) =>
     apiClient.post<AdminUser>('/settings/users', body),

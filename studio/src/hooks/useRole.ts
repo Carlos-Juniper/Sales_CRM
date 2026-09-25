@@ -5,6 +5,7 @@ import {
   ESTIMATING_ONLY_ROLES,
   APPROVER_ROLES,
   CROSS_BRANCH_ROLES,
+  FIELD_SALES_ROLES,
   REP_SELECTOR_ROLES,
   ANALYTICS_NAV_ROLES,
   ROSTER_REP_PICKER_ROLES,
@@ -27,7 +28,7 @@ export function useRole() {
 
   return {
     role,
-    isSales: role === 'sales',
+    isSales: role !== null && FIELD_SALES_ROLES.includes(role),
     // `admin` is the super-role; `manager` narrows to its approval tier.
     isAdmin: role === 'admin',
     isManager: role === 'manager',

@@ -47,6 +47,8 @@ import { useEstimates } from '@/hooks/useEstimate'
 import { SyncStatusBadge } from './SyncStatusBadge'
 import { acresFromSqft } from '@/lib/estimating/calc'
 import { SLA_CONFIG, slaCountdownLabel, slaDaysLeft, slaStateFor, type SlaState } from '@/lib/estimating/sla'
+import { useAuthStore } from '@/store/authStore'
+import { canStartIntake } from '@/lib/intakeAccess'
 import { useUsers } from '@/hooks/useUsers'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { formatOptionalBudget } from '@/lib/estimating/contractBudgets'
@@ -142,6 +144,7 @@ export function EstimateQueue({
   const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
   const { findUser } = useUsers()
+  const user = useAuthStore((s) => s.user)
 
   // Branch scope is applied server-side from the session — no branch param.
   const { data: estimatesData, isError, refetch } = useEstimates()
@@ -254,21 +257,25 @@ export function EstimateQueue({
           ))}
         </div>
 
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 text-xs gap-1.5"
-          onClick={handleMaintenanceIntake}
-        >
-          <Repeat className="h-3.5 w-3.5" /> Maintenance intake
-        </Button>
-        <Button
-          size="sm"
-          className="h-8 text-xs gap-1.5 bg-[#2E7D52] hover:bg-[#256844] text-white"
-          onClick={handleInstallIntake}
-        >
-          <Hammer className="h-3.5 w-3.5" /> {installCtaLabel}
-        </Button>
+        {canStartIntake(user, 'maintenance') && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs gap-1.5"
+            onClick={handleMaintenanceIntake}
+          >
+            <Repeat className="h-3.5 w-3.5" /> Maintenance intake
+          </Button>
+        )}
+        {canStartIntake(user, 'install') && (
+          <Button
+            size="sm"
+            className="h-8 text-xs gap-1.5 bg-[#2E7D52] hover:bg-[#256844] text-white"
+            onClick={handleInstallIntake}
+          >
+            <Hammer className="h-3.5 w-3.5" /> {installCtaLabel}
+          </Button>
+        )}
       </div>
 
       {/* Queue cards */}

@@ -11,6 +11,7 @@ function roleDefaultRoute(role: string) {
   const canonical = normalizeRole(role)
   // BranchManagerPage removed in Slice 12; managers land on settings.
   // They can open Analytics from the nav — this is a page they are allowed to see.
+  // Field sales, including the maintenance/install split, land via defaultRouteForRole.
   if (canonical === 'manager') return '/settings'
   return defaultRouteForRole(canonical)
 }

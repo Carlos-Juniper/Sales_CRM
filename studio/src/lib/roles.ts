@@ -74,27 +74,47 @@ export const FULL_ACCESS_ROLES: readonly UserRole[] = [
 ]
 
 /**
+ * Field sales: legacy `sales` plus the maintenance/install split.
+ * Same access as `sales` (own leads, proposals, self-scoped performance).
+ * Not the rep-selector viewer list, and not Public Leads.
+ * Mirrors api/authz.py FIELD_SALES_ROLES.
+ */
+export const FIELD_SALES_ROLES: readonly UserRole[] = [
+  'sales',
+  'maintenance_sales',
+  'install_sales',
+]
+
+/**
  * Analytics nav item and `/inside-sales` (GET /api/dashboard/inside-sales).
  *
  * Defined once as FULL_ACCESS_ROLES: admin, manager, regional_director,
- * vice_president, and ceo. REP_SELECTOR_ROLES happens to list the same five
- * people, but that constant is the sales-performance / commission rep picker
- * (api/authz.py REP_VIEWER_ROLES). The backend keeps those permissions
- * separate (ANALYTICS_DASHBOARD_ROLES = FULL_ACCESS_ROLES), so this alias
- * does too.
+ * vice_president, and ceo. Field sales, including maintenance_sales and
+ * install_sales, are not on this list — they use the pipeline. REP_SELECTOR_ROLES
+ * happens to list the same five people, but that constant is the
+ * sales-performance / commission rep picker (api/authz.py REP_VIEWER_ROLES).
  */
 export const ANALYTICS_NAV_ROLES: readonly UserRole[] = FULL_ACCESS_ROLES
 
-/** Shared sales tabs (leads / pipeline / proposals / calendar / accounts / map / commissions / sales-performance). Analytics is ANALYTICS_NAV_ROLES. */
-export const SALES_NAV_ROLES: readonly UserRole[] = ['sales', ...FULL_ACCESS_ROLES]
+/** Shared sales tabs (pipeline / own leads / proposals / calendar / accounts / map / commissions / sales-performance). Analytics is ANALYTICS_NAV_ROLES. */
+export const SALES_NAV_ROLES: readonly UserRole[] = [...FIELD_SALES_ROLES, ...FULL_ACCESS_ROLES]
 
 /** Public Leads (the inside-sales qualification queue). */
 export const PUBLIC_LEADS_NAV_ROLES: readonly UserRole[] = ['inside_sales', ...FULL_ACCESS_ROLES]
 
 /** Anyone who can land on the Estimating page at all (sees at least the queue). */
 export const ESTIMATING_NAV_ROLES: readonly UserRole[] = [
-  'sales', 'procurement', 'maintenance_estimating', 'install_estimating', ...FULL_ACCESS_ROLES,
+  ...FIELD_SALES_ROLES,
+  'procurement',
+  'maintenance_estimating',
+  'install_estimating',
+  ...FULL_ACCESS_ROLES,
 ]
+
+/** Aspire ContactID is required for the same roles that stamp SalesRepID. */
+export function requiresAspireSalesRep(role: string): boolean {
+  return (FIELD_SALES_ROLES as readonly string[]).includes(role)
+}
 
 /**
  * Each role's own reachable landing page — used as RoleGate's `redirectTo`
@@ -104,10 +124,12 @@ export function defaultRouteForRole(role: UserRole | null): string {
   if (role === 'inside_sales') return '/inside-sales/leads'
   if (role === 'maintenance_estimating' || role === 'install_estimating' || role === 'procurement')
     return '/inside-sales/estimating'
-  // Sales can use the rest of the sales workspace, but not Analytics.
-  // Pipeline is their landing page so a denied visit to /inside-sales
-  // does not bounce back onto itself.
-  if (role === 'sales') return '/inside-sales/pipeline'
+  // Field sales share the sales workspace but not Analytics. Pipeline is a
+  // page they can open, so a denied visit to /inside-sales does not bounce
+  // back onto itself.
+  if (role === 'sales' || role === 'maintenance_sales' || role === 'install_sales') {
+    return '/inside-sales/pipeline'
+  }
   // Management and admin land on Analytics. Any other role (marketing, null,
   // unknown) has no inside-sales access — redirect to /settings, which is
   // open to every authenticated user, to avoid an infinite redirect loop.

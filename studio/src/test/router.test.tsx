@@ -250,6 +250,27 @@ describe('Per-route workspace guards (role-scoped navigation)', () => {
     expect(screen.getByText('Pipeline')).toBeInTheDocument()
   })
 
+  // ── Split field sales: sales workspace, not Analytics or Public Leads ──
+
+  it('maintenance_sales can access Pipeline and Estimating', () => {
+    renderRoute(['/inside-sales/pipeline'], makeUser({ role: 'maintenance_sales' }))
+    expect(screen.getByText('Pipeline')).toBeInTheDocument()
+    renderRoute(['/inside-sales/estimating'], makeUser({ role: 'maintenance_sales' }))
+    expect(screen.getByText('Estimating')).toBeInTheDocument()
+  })
+
+  it('install_sales is redirected from Analytics to Pipeline', () => {
+    renderRoute(['/inside-sales'], makeUser({ role: 'install_sales' }))
+    expect(screen.queryByText('Analytics Dashboard')).not.toBeInTheDocument()
+    expect(screen.getByText('Pipeline')).toBeInTheDocument()
+  })
+
+  it('maintenance_sales is redirected from Public Leads to Pipeline', () => {
+    renderRoute(['/inside-sales/leads'], makeUser({ role: 'maintenance_sales' }))
+    expect(screen.queryByText('Public Leads')).not.toBeInTheDocument()
+    expect(screen.getByText('Pipeline')).toBeInTheDocument()
+  })
+
   // ── inside_sales: blocked from Estimating entirely ─────────────────────
 
   it('inside_sales is redirected from Estimating to Public Leads (not the queue)', () => {

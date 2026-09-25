@@ -3,9 +3,9 @@ import { RequireAuth, RoleGate } from '@/views/auth/RoleGate'
 import { useRole } from '@/hooks/useRole'
 import {
   SALES_NAV_ROLES,
+  ANALYTICS_NAV_ROLES,
   PUBLIC_LEADS_NAV_ROLES,
   ESTIMATING_NAV_ROLES,
-  ANALYTICS_NAV_ROLES,
   defaultRouteForRole,
 } from '@/lib/roles'
 
@@ -17,7 +17,7 @@ import {
 // nav). A denied role redirects to its own landing page via
 // defaultRouteForRole() instead of /login.
 
-/** `/inside-sales` — management and admin only. */
+/** `/inside-sales` — management and admin only. Split field-sales roles are not in this list. */
 export function AnalyticsGuard({ children }: { children: React.ReactNode }) {
   const { role } = useRole()
   return (

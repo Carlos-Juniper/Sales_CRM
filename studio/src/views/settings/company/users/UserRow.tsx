@@ -3,6 +3,8 @@ import type { AdminUser, ManageableBranch } from '@/api/settings'
 import type { UserRole } from '@/types'
 import { CANONICAL_ROLES } from '@/types'
 import { useLinkAspireRep, useUpdateUser } from '@/hooks/useUserAdmin'
+import { requiresAspireSalesRep } from '@/lib/roles'
+import { roleLabel } from '@/lib/roleLabels'
 import { RoleSelect } from './RoleSelect'
 import { BranchMultiSelect } from './BranchMultiSelect'
 import { isUserActive } from './userDisplay'
@@ -40,7 +42,7 @@ export function UserRow({ user, branches }: { user: AdminUser; branches: Managea
             )}
           </p>
           <p className="text-xs opacity-60">{user.email}</p>
-          <p className="mt-0.5 text-xs opacity-70">Role: {user.role}</p>
+          <p className="mt-0.5 text-xs opacity-70">Role: {roleLabel(user.role)}</p>
         </div>
 
         <div className="flex flex-shrink-0 gap-2">
@@ -134,9 +136,9 @@ function UserRowEditor({
         />
       </div>
 
-      {/* For a sales user with no resolved Aspire rep, hint that the link is
-          needed before estimates push correctly to Aspire. */}
-      {role === 'sales' && user.aspire_rep_id == null && (
+      {/* Field sales (legacy sales and the maintenance/install split) need an
+          Aspire contact before estimates push with a sales rep. */}
+      {requiresAspireSalesRep(role) && user.aspire_rep_id == null && (
         <p
           data-testid={`aspire-rep-hint-${user.id}`}
           className="text-xs text-amber-700"

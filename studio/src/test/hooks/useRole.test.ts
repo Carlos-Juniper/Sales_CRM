@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
 // Canonical 10-role model on the frontend.
 //
-//   * UserRole covers the ten business roles, including `inside_sales`; only
+//   * UserRole covers the canonical business roles, including `inside_sales`
+//     and the field-sales split (`maintenance_sales`, `install_sales`); only
 //     the retired `outside_sales` normalizes to `sales`.
 //   * `admin` is the frontend super-role (canAccess always true); `manager`
 //     narrows to its approval-tier role.
@@ -86,6 +87,8 @@ describe('defaultRouteForRole', () => {
     expect(defaultRouteForRole('ceo')).toBe('/inside-sales')
 
     expect(defaultRouteForRole('sales')).toBe('/inside-sales/pipeline')
+    expect(defaultRouteForRole('maintenance_sales')).toBe('/inside-sales/pipeline')
+    expect(defaultRouteForRole('install_sales')).toBe('/inside-sales/pipeline')
     expect(defaultRouteForRole('inside_sales')).toBe('/inside-sales/leads')
     expect(defaultRouteForRole('maintenance_estimating')).toBe('/inside-sales/estimating')
     expect(defaultRouteForRole('install_estimating')).toBe('/inside-sales/estimating')
@@ -103,8 +106,10 @@ describe('canonical role set', () => {
         'admin',
         'ceo',
         'install_estimating',
+        'install_sales',
         'inside_sales',
         'maintenance_estimating',
+        'maintenance_sales',
         'manager',
         'marketing',
         'procurement',
@@ -187,7 +192,7 @@ describe('useRole', () => {
     for (const role of ['admin', 'manager', 'regional_director', 'vice_president', 'ceo'] as const) {
       expect(withRole(role).canViewAnalytics).toBe(true)
     }
-    for (const role of ['sales', 'inside_sales', 'maintenance_estimating', 'install_estimating', 'procurement', 'marketing'] as const) {
+    for (const role of ['sales', 'maintenance_sales', 'install_sales', 'inside_sales', 'maintenance_estimating', 'install_estimating', 'procurement', 'marketing'] as const) {
       expect(withRole(role).canViewAnalytics).toBe(false)
     }
   })
@@ -206,6 +211,15 @@ describe('useRole', () => {
     expect(withRole('admin').canPickRosterRep).toBe(true)
     expect(withRole('sales').canPickRosterRep).toBe(false)
     expect(withRole('manager').canPickRosterRep).toBe(false)
+  })
+
+  it('treats the split field-sales roles as sales, not as rep-selector viewers', () => {
+    expect(withRole('maintenance_sales').isSales).toBe(true)
+    expect(withRole('install_sales').isSales).toBe(true)
+    expect(withRole('sales').isSales).toBe(true)
+    expect(withRole('maintenance_sales').canViewRepSelector).toBe(false)
+    expect(withRole('install_sales').canViewRepSelector).toBe(false)
+    expect(withRole('inside_sales').isSales).toBe(false)
   })
 
   it('returns null role when logged out', () => {

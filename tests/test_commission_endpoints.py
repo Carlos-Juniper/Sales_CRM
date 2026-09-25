@@ -194,6 +194,68 @@ class TestCommissionEndpoints:
         assert allowed.json()["user_id"] == "rep-9"
         assert allowed.json()["quarters"] == []
 
+    def test_payout_schedule_period_uses_close_date_like_list(self, as_role, monkeypatch):
+        """start_date/end_date bound commissions.created_at, same as list.
+
+        The default close-year clip does not also apply, so a period in
+        another year is not dropped. Rep scoping is unchanged.
+        """
+        monkeypatch.setattr("api.commissions.et_today", lambda: date(2026, 9, 25))
+        in_period = datetime(2025, 11, 2, 16, 0, tzinfo=timezone.utc)
+        rows = [{
+            "commission_id": "c-old",
+            "commission_amount_cents": 40,
+            "commission_status": "approved",
+            "created_at": in_period,
+            "installment_id": "i-old",
+            "installment_number": 1,
+            "payout_period_label": "December 2025",
+            "payout_date": date(2025, 12, 31),
+            "amount_cents": 40,
+            "installment_status": "scheduled",
+        }]
+
+        as_role("sales", user_id="rep-1")
+        with patch("api.commissions.query", new_callable=AsyncMock, return_value=rows) as denied_q:
+            denied = client.get(
+                "/api/commissions/payout-schedule?user_id=other"
+                "&start_date=2025-01-01&end_date=2025-12-31"
+            )
+        assert denied.status_code == 403
+        denied_q.assert_not_awaited()
+
+        captured = {}
+
+        async def fake_query(sql, params=None):
+            captured["sql"] = sql
+            captured["params"] = list(params or [])
+            return rows
+
+        with patch("api.commissions.query", new=fake_query):
+            resp = client.get(
+                "/api/commissions/payout-schedule?start_date=2025-01-01&end_date=2025-12-31"
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert captured["params"] == ["rep-1", "2025-01-01", "2025-12-31"]
+        assert "c.created_at >= %s" in captured["sql"]
+        assert "c.created_at <= %s" in captured["sql"]
+        assert "c.user_id = %s" in captured["sql"]
+        assert body["quarters"][0]["close_quarter"] == "2025-Q4"
+        assert body["quarters"][0]["sales_count"] == 1
+        assert body["by_payout_period"][0]["amount_cents"] == 40
+
+        async def start_only(sql, params=None):
+            assert list(params) == ["rep-1", "2026-06-01"]
+            assert "c.created_at >= %s" in sql
+            assert "c.created_at <= %s" not in sql
+            return []
+
+        with patch("api.commissions.query", new=start_only):
+            open_ended = client.get("/api/commissions/payout-schedule?start_date=2026-06-01")
+        assert open_ended.status_code == 200
+        assert open_ended.json()["quarters"] == []
+
     def test_reps_include_plan_fields(self, as_role):
         as_role("admin")
 

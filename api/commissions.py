@@ -307,21 +307,41 @@ def register(app, require_auth) -> None:
     async def get_payout_schedule(
         user_id: Optional[str] = Query(default=None),
         year: Optional[int] = Query(default=None),
+        start_date: Optional[str] = Query(default=None),
+        end_date: Optional[str] = Query(default=None),
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Closed quarters and the checks they hit. `year` is the close year.
+        """Closed quarters and the checks they hit.
+
+        start_date and end_date select deals by close date, the same bounds
+        list and summary use on commissions.created_at. Either bound may be
+        omitted. When neither is sent, `year` is the Eastern close year
+        (defaulting to this year). A period bound replaces that year clip so
+        the page period is the filter.
 
         amount_cents is null when every installment in the group has no
         amount. amount_partial is true when the total omits unknown amounts.
         Undated rows are split: bucket `unscheduled` (amount known) and
-        bucket `pending_billing_data` (amount unknown).
+        bucket `pending_billing_data` (amount unknown). Undated periods sort
+        last.
         """
         target_user_id = user_id or user["id"]
         _require_own_or_viewer(user, target_user_id)
         close_year = year if year is not None else et_today().year
+        # Same truthiness as list: an empty query value is not a bound.
+        period_bounds = bool(start_date) or bool(end_date)
         today = et_today()
+        conditions = ["c.user_id = %s", "c.status != 'cancelled'"]
+        params: list[Any] = [target_user_id]
+        if start_date:
+            conditions.append("c.created_at >= %s")
+            params.append(start_date)
+        if end_date:
+            conditions.append("c.created_at <= %s")
+            params.append(end_date)
+        where_clause = " AND ".join(conditions)
         rows = await query(
-            """
+            f"""
             SELECT
                 c.id AS commission_id,
                 c.commission_amount_cents,
@@ -337,17 +357,16 @@ def register(app, require_auth) -> None:
                 i.collected_amount_cents
             FROM commissions c
             LEFT JOIN commission_installments i ON i.commission_id = c.id
-            WHERE c.user_id = %s
-              AND c.status != 'cancelled'
+            WHERE {where_clause}
             ORDER BY c.created_at, i.installment_number
             """,
-            [target_user_id],
+            params,
         )
         deals_by_id: dict[str, dict] = {}
         for row in rows:
             if row.get("created_at") is None or row.get("commission_id") is None:
                 continue
-            if calendar_date(row["created_at"]).year != close_year:
+            if not period_bounds and calendar_date(row["created_at"]).year != close_year:
                 continue
             deal = deals_by_id.get(row["commission_id"])
             if deal is None:

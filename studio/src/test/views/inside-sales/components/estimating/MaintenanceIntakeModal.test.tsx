@@ -493,28 +493,36 @@ describe('MaintenanceIntakeModal — home count', () => {
 })
 
 const OCCURRENCE_LABELS = [
-  'Mowing occurrences per year',
-  'Pruning occurrences per year',
-  'Turf Fert occurrences per year',
-  'Shrub Fert occurrences per year',
-  'IPM occurrences per year',
-  'Irrigation occurrences per year',
+  'Mowing',
+  'Pruning',
+  'Turf Fert',
+  'Shrub Fert',
+  'IPM',
+  'Irrigation',
 ] as const
 
 describe('MaintenanceIntakeModal — yearly occurrence counts', () => {
   it('renders the six occurrence inputs for maintenance, above the optional notes', () => {
     renderModal()
-    const group = screen.getByRole('group', { name: /occurrences per year/i })
+    expect(screen.getByText('Scope and dates')).toBeInTheDocument()
+    expect(screen.queryByText('Occurrences per year')).not.toBeInTheDocument()
+    const hint = screen.getByText(
+      /Leave a field blank if it is unknown; enter 0 if that service is not in the contract/i,
+    )
     for (const label of OCCURRENCE_LABELS) {
-      const input = within(group).getByLabelText(label)
+      const input = screen.getByLabelText(label)
       expect(input).toHaveAttribute('type', 'number')
       expect(input).toHaveAttribute('min', '0')
       expect(input).toHaveAttribute('max', '366')
       expect(input).toHaveAttribute('step', '1')
+      expect(input).toHaveAttribute('aria-describedby', 'mi-occ-hint')
       expect(input).not.toBeRequired()
     }
+    expect(screen.queryByLabelText(/per year/i)).not.toBeInTheDocument()
     const notes = screen.getByLabelText(/additional scope notes/i)
-    expect(group.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const mowing = screen.getByLabelText('Mowing')
+    expect(mowing.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(mowing.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('does not render the occurrence inputs on install intake', () => {
@@ -525,8 +533,9 @@ describe('MaintenanceIntakeModal — yearly occurrence counts', () => {
         </EstimatingShellContext.Provider>
       </EstimatingToastProvider>,
     )
-    expect(screen.queryByRole('group', { name: /occurrences per year/i })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText(/mowing occurrences per year/i)).not.toBeInTheDocument()
+    expect(screen.queryByText('Scope and dates')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Mowing')).not.toBeInTheDocument()
+    expect(screen.queryByText(/leave a field blank if it is unknown/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/additional scope notes/i)).not.toBeInTheDocument()
   })
 
@@ -543,10 +552,10 @@ describe('MaintenanceIntakeModal — yearly occurrence counts', () => {
 
     renderModal()
     await fillMinimumFields(user)
-    fireEvent.input(screen.getByLabelText('Mowing occurrences per year'), { target: { value: '0' } })
-    fireEvent.input(screen.getByLabelText('Turf Fert occurrences per year'), { target: { value: '6' } })
-    fireEvent.input(screen.getByLabelText('Shrub Fert occurrences per year'), { target: { value: '366' } })
-    fireEvent.input(screen.getByLabelText('Irrigation occurrences per year'), { target: { value: '52' } })
+    fireEvent.input(screen.getByLabelText('Mowing'), { target: { value: '0' } })
+    fireEvent.input(screen.getByLabelText('Turf Fert'), { target: { value: '6' } })
+    fireEvent.input(screen.getByLabelText('Shrub Fert'), { target: { value: '366' } })
+    fireEvent.input(screen.getByLabelText('Irrigation'), { target: { value: '52' } })
     fireEvent.input(screen.getByLabelText(/additional scope notes/i), {
       target: { value: 'Seasonal color at the entry' },
     })
@@ -586,7 +595,7 @@ describe('MaintenanceIntakeModal — yearly occurrence counts', () => {
 
     renderModal()
     await fillMinimumFields(user)
-    const input = screen.getByLabelText('Mowing occurrences per year') as HTMLInputElement
+    const input = screen.getByLabelText('Mowing') as HTMLInputElement
     fireEvent.input(input, { target: { value } })
     await user.click(screen.getByRole('button', { name: /submit/i }))
 
@@ -629,7 +638,7 @@ describe('MaintenanceIntakeModal — yearly occurrence counts', () => {
 
     renderModal()
     await fillMinimumFields(user)
-    fireEvent.input(screen.getByLabelText('IPM occurrences per year'), { target: { value: '4' } })
+    fireEvent.input(screen.getByLabelText('IPM'), { target: { value: '4' } })
     await user.click(screen.getByRole('button', { name: /submit/i }))
 
     // The toast sits outside the dialog, which Radix marks aria-hidden.

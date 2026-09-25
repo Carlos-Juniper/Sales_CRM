@@ -77,7 +77,7 @@ const QUEUE_ROLES = ESTIMATING_NAV_ROLES
 export const ESTIMATING_TABS: EstimatingTabConfig[] = [
   { key: 'queue', label: 'Estimate Queue', shortLabel: 'Queue', icon: ClipboardList, visibleForTypes: BOTH, visibleForRoles: QUEUE_ROLES },
   { key: 'editor', label: 'Line-Item Editor', shortLabel: 'Editor', icon: Calculator, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
-  { key: 'takeoff', label: 'Takeoff Insert', shortLabel: 'Takeoff', icon: Image, visibleForTypes: ['maintenance'], visibleForRoles: ESTIMATING_ROLES },
+  { key: 'takeoff', label: 'Takeoff', shortLabel: 'Takeoff', icon: Image, visibleForTypes: ['maintenance'], visibleForRoles: ESTIMATING_ROLES },
   { key: 'materials', label: 'Materials Calculator', shortLabel: 'Materials', icon: Ruler, visibleForTypes: ['install'], visibleForRoles: ESTIMATING_ROLES },
   { key: 'margins', label: 'Margin Analysis', shortLabel: 'Margins', icon: BarChart2, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
   { key: 'discrepancy', label: 'Discrepancy Review', shortLabel: 'Discrepancy', icon: TriangleAlert, visibleForTypes: ['install'], visibleForRoles: ESTIMATING_ROLES },

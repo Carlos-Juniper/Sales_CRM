@@ -7,10 +7,12 @@
 export interface CommissionInstallment {
   id: string
   installment_number: number
-  payout_period: string
-  payout_date: string
-  amount_cents: number
-  status: 'paid' | 'cancelled' | 'due' | 'upcoming'
+  payout_period: string | null
+  payout_date: string | null
+  amount_cents: number | null
+  status: 'paid' | 'cancelled' | 'due' | 'upcoming' | 'pending_billing_data'
+  billing_installment_number: number | null
+  collected_amount_cents: number | null
 }
 
 export interface Commission {
@@ -41,6 +43,7 @@ export interface Commission {
   close_quarter: string | null
   plan_key: string | null
   client_type: string | null
+  contract_start_date: string | null
   installments: CommissionInstallment[]
 }
 
@@ -70,10 +73,10 @@ export interface CommissionRep {
 
 export interface CommissionQuarterInstallment {
   installment_number: number
-  payout_period: string
-  payout_date: string
-  amount_cents: number
-  status: 'paid' | 'cancelled' | 'due' | 'upcoming'
+  payout_period: string | null
+  payout_date: string | null
+  amount_cents: number | null
+  status: 'paid' | 'cancelled' | 'due' | 'upcoming' | 'pending_billing_data'
 }
 
 export interface CommissionCloseQuarter {
@@ -84,10 +87,10 @@ export interface CommissionCloseQuarter {
 }
 
 export interface CommissionPayoutPeriod {
-  payout_period: string
-  payout_date: string
-  amount_cents: number
-  status: 'paid' | 'cancelled' | 'due' | 'upcoming'
+  payout_period: string | null
+  payout_date: string | null
+  amount_cents: number | null
+  status: 'paid' | 'cancelled' | 'due' | 'upcoming' | 'pending_billing_data'
 }
 
 export interface CommissionPayoutSchedule {

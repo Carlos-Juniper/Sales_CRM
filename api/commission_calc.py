@@ -1,12 +1,13 @@
 """Pure commission cadence and plan math.
 
-Payout timing comes from the plan rule's payout_schedule, not from one global
-cadence. maintenance_split_lagged pays half at the start of the next quarter
-and half at the start of the quarter after that. quarter_end pays the full
-amount on the last day of the close quarter (install). month_after_quarter_end
-pays the full amount on the first day of the month after that quarter
-(enhancement). The CRM has no billing or collections dates, so the install and
-enhancement schedules use the won date as the close.
+Payout timing comes from the plan rule's payout_schedule.
+
+maintenance_3_payment follows the maintenance program: payment 1 is 3% of 50%
+of contract value at the end of the quarter the contract starts in; payment 2
+is 3% of the other 50% and waits on the 6th billing installment; payment 3 is
+3% of additional revenue through 12 months and waits on the 12th installment.
+construction_billing_quarterly and enhancement_month_after_quarter wait on
+billing and collections. This module does not invent those dates.
 
 Nothing in this module reads the database — callers pass rows in and get cents
 and dates out.
@@ -37,9 +38,13 @@ STANDARD_PLAN_NAME = "Standard Sales Commission"
 
 # Stored on commission_plan_rules.payout_schedule. Callers pass the value
 # through; this module does not pick a schedule on its own.
-MAINTENANCE_SPLIT_LAGGED = "maintenance_split_lagged"
-QUARTER_END = "quarter_end"
-MONTH_AFTER_QUARTER_END = "month_after_quarter_end"
+MAINTENANCE_3_PAYMENT = "maintenance_3_payment"
+CONSTRUCTION_BILLING_QUARTERLY = "construction_billing_quarterly"
+ENHANCEMENT_MONTH_AFTER_QUARTER = "enhancement_month_after_quarter"
+PENDING_BILLING_DATA = "pending_billing_data"
+
+# Standard-plan estimate types. Resolution uses the estimate, not a role name.
+PLAN_ESTIMATE_TYPES = frozenset({"maintenance", "install", "enhancement"})
 
 
 @dataclass(frozen=True)
@@ -97,32 +102,28 @@ def close_quarter_label(value: Any) -> str:
     return f"{closed.year}-Q{quarter}"
 
 
-def payout_dates_for_close(closed: date) -> tuple[date, date]:
-    """Maintenance pair: half at the start of Q+1, half at the start of Q+2.
-
-    Q1 → April 1 / July 1. Q2 → July 1 / October 1.
-    Q3 → October 1 / January 1 next year. Q4 → January 1 / April 1 next year.
-    """
-    quarter = (closed.month - 1) // 3 + 1
-    year = closed.year
-    if quarter == 1:
-        return date(year, 4, 1), date(year, 7, 1)
-    if quarter == 2:
-        return date(year, 7, 1), date(year, 10, 1)
-    if quarter == 3:
-        return date(year, 10, 1), date(year + 1, 1, 1)
-    return date(year + 1, 1, 1), date(year + 1, 4, 1)
-
-
 def period_label(payout: date) -> str:
     """`April 2026`, matching commissions.payment_period."""
     return f"{_MONTHS[payout.month - 1]} {payout.year}"
 
 
-def split_installment_amounts(total_cents: int) -> tuple[int, int]:
-    """First installment is floor(total/2); the second keeps the remainder."""
-    first = total_cents // 2
-    return first, total_cents - first
+def maintenance_known_halves(annual_commission_cents: int) -> tuple[int, int]:
+    """Payments 1 and 2 of a maintenance commission.
+
+    Each is 3% of 50% of contract value, which together are the full annual
+    commission already calculated from the contract. Payment 1 rounds half-up.
+    Payment 2 keeps the remainder so the pair sums to that annual amount.
+    Payment 3 is additional billed revenue and is not included here.
+    """
+    total = int(annual_commission_cents)
+    first = int(
+        (Decimal(total) * Decimal("0.5")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+    if first > total:
+        first = total
+    if first < 0:
+        first = 0
+    return first, total - first
 
 
 def quarter_end_date(closed: date) -> date:
@@ -138,53 +139,57 @@ def quarter_end_date(closed: date) -> date:
     return date(year, 12, 31)
 
 
-def month_after_quarter_end(closed: date) -> date:
-    """First day of the month after the close quarter (enhancement payout date).
-
-    Q1 → April 1. Q2 → July 1. Q3 → October 1. Q4 → January 1 next year.
-    """
-    quarter = (closed.month - 1) // 3 + 1
-    year = closed.year
-    if quarter == 1:
-        return date(year, 4, 1)
-    if quarter == 2:
-        return date(year, 7, 1)
-    if quarter == 3:
-        return date(year, 10, 1)
-    return date(year + 1, 1, 1)
-
-
-def _installment_row(number: int, payout: date, amount_cents: int) -> dict:
+def _pending_row(
+    number: int,
+    amount_cents: Optional[int],
+    billing_installment_number: Optional[int] = None,
+) -> dict:
     return {
         "installment_number": number,
-        "payout_period": period_label(payout),
-        "payout_date": payout,
+        "payout_period": None,
+        "payout_date": None,
         "amount_cents": amount_cents,
+        "status": PENDING_BILLING_DATA,
+        "billing_installment_number": billing_installment_number,
+        "collected_amount_cents": None,
     }
 
 
-def build_installment_rows(close_at: Any, total_cents: int, payout_schedule: str) -> list[dict]:
-    """Installment dicts for a commission closed at `close_at`.
+def build_installment_rows(
+    close_at: Any,
+    total_cents: int,
+    payout_schedule: str,
+    contract_start: Any = None,
+) -> list[dict]:
+    """Installment dicts for one won commission.
 
-    `payout_schedule` is the plan rule value. maintenance_split_lagged returns
-    two rows whose amounts reconcile to `total_cents`. quarter_end and
-    month_after_quarter_end return one row for the full amount. Status stored
-    in the database is `scheduled`; paid/due/upcoming/cancelled are derived at
-    read time.
+    `payout_schedule` is the plan rule value. Maintenance returns three rows.
+    Payment 1 is scheduled on the last day of the quarter that contains
+    `contract_start`, or the won date when the contract has no start date.
+    Payments 2 and 3, and every construction or enhancement payout, stay
+    `pending_billing_data` with a null payout date. Construction and
+    enhancement payout amounts stay null: those checks depend on collections.
     """
-    closed = close_date_of(close_at)
     total = int(total_cents)
-    if payout_schedule == MAINTENANCE_SPLIT_LAGGED:
-        first_amount, second_amount = split_installment_amounts(total)
-        first_date, second_date = payout_dates_for_close(closed)
+    if payout_schedule == MAINTENANCE_3_PAYMENT:
+        anchor = close_date_of(contract_start) if contract_start is not None else close_date_of(close_at)
+        pay_on = quarter_end_date(anchor)
+        first_amount, second_amount = maintenance_known_halves(total)
         return [
-            _installment_row(1, first_date, first_amount),
-            _installment_row(2, second_date, second_amount),
+            {
+                "installment_number": 1,
+                "payout_period": period_label(pay_on),
+                "payout_date": pay_on,
+                "amount_cents": first_amount,
+                "status": "scheduled",
+                "billing_installment_number": None,
+                "collected_amount_cents": None,
+            },
+            _pending_row(2, second_amount, 6),
+            _pending_row(3, None, 12),
         ]
-    if payout_schedule == QUARTER_END:
-        return [_installment_row(1, quarter_end_date(closed), total)]
-    if payout_schedule == MONTH_AFTER_QUARTER_END:
-        return [_installment_row(1, month_after_quarter_end(closed), total)]
+    if payout_schedule in (CONSTRUCTION_BILLING_QUARTERLY, ENHANCEMENT_MONTH_AFTER_QUARTER):
+        return [_pending_row(1, None)]
     raise ValueError(f"Unknown payout_schedule {payout_schedule!r}")
 
 
@@ -192,18 +197,20 @@ def derive_installment_status(
     *,
     stored_status: str,
     commission_status: str,
-    payout_date: date,
+    payout_date: Optional[date],
     today: date,
 ) -> str:
-    """Read-time status: paid, cancelled, due, or upcoming.
+    """Read-time status: paid, cancelled, pending_billing_data, due, or upcoming.
 
-    `stored_status` is the installment ENUM (scheduled/paid/cancelled).
-    Due vs upcoming uses America/New_York `today` and is not stored.
+    Due vs upcoming uses America/New_York `today` and is not stored. A null
+    payout date stays pending_billing_data.
     """
     if stored_status == "paid" or commission_status == "paid":
         return "paid"
     if stored_status == "cancelled" or commission_status == "cancelled":
         return "cancelled"
+    if stored_status == PENDING_BILLING_DATA or payout_date is None:
+        return PENDING_BILLING_DATA
     if payout_date <= today:
         return "due"
     return "upcoming"
@@ -211,21 +218,28 @@ def derive_installment_status(
 
 def public_installment(row: dict, commission_status: str, today: date) -> dict:
     """API installment object. `payout_period` is the check label."""
-    payout = calendar_date(row.get("payout_date"))
+    raw_date = row.get("payout_date")
+    payout = None if raw_date is None else calendar_date(raw_date)
+    raw_amount = row.get("amount_cents")
+    amount = None if raw_amount is None else int(raw_amount)
+    raw_billing = row.get("billing_installment_number")
+    raw_collected = row.get("collected_amount_cents")
     stored = row.get("status") or row.get("installment_status") or "scheduled"
     parent = row.get("commission_status") or commission_status or "approved"
     return {
         "id": row.get("id") or row.get("installment_id"),
         "installment_number": int(row.get("installment_number") or 0),
         "payout_period": row.get("payout_period_label") or row.get("payout_period"),
-        "payout_date": payout.isoformat(),
-        "amount_cents": int(row.get("amount_cents") or 0),
+        "payout_date": None if payout is None else payout.isoformat(),
+        "amount_cents": amount,
         "status": derive_installment_status(
             stored_status=stored,
             commission_status=parent,
             payout_date=payout,
             today=today,
         ),
+        "billing_installment_number": None if raw_billing is None else int(raw_billing),
+        "collected_amount_cents": None if raw_collected is None else int(raw_collected),
     }
 
 
@@ -242,6 +256,8 @@ def rollup_status(statuses: Sequence[str]) -> str:
         return "paid"
     if any(s == "due" for s in active):
         return "due"
+    if any(s == PENDING_BILLING_DATA for s in active):
+        return PENDING_BILLING_DATA
     return "upcoming"
 
 
@@ -307,8 +323,9 @@ def build_payout_schedule(deals: Sequence[dict]) -> dict:
                 "_statuses": [],
             })
             agg["_statuses"].append(inst.get("status"))
-            if inst.get("status") != "cancelled":
-                agg["amount_cents"] += int(inst.get("amount_cents") or 0)
+            raw_amount = inst.get("amount_cents")
+            if inst.get("status") != "cancelled" and raw_amount is not None:
+                agg["amount_cents"] += int(raw_amount)
             period_key = inst.get("payout_date") or ""
             period = periods.setdefault(period_key, {
                 "payout_period": inst.get("payout_period"),
@@ -317,8 +334,8 @@ def build_payout_schedule(deals: Sequence[dict]) -> dict:
                 "_statuses": [],
             })
             period["_statuses"].append(inst.get("status"))
-            if inst.get("status") != "cancelled":
-                period["amount_cents"] += int(inst.get("amount_cents") or 0)
+            if inst.get("status") != "cancelled" and raw_amount is not None:
+                period["amount_cents"] += int(raw_amount)
 
     quarter_rows = []
     for quarter in sorted(quarters):
@@ -448,22 +465,22 @@ def effective_rate(amount_cents: int, base_cents: int) -> Decimal:
 def resolve_rate_source(
     assignment_plan_key: Optional[str],
     has_legacy_rate: bool,
-    role: Optional[str],
-    sales_rep_roles: Sequence[str],
+    estimate_type: Optional[str],
 ) -> tuple[str, Optional[str]]:
     """Which rate structure applies. Payout cadence is not decided here.
 
     Returns (`plan`, plan_key), (`legacy`, None), or (`none`, None).
 
     An explicit plan assignment wins. Otherwise an active commission_rates
-    row keeps today's flat-rate behaviour. Otherwise a sales-rep role uses
-    the standard plan. Anyone else with neither earns nothing.
+    row keeps today's flat-rate amount. Otherwise a maintenance, install, or
+    enhancement estimate uses the standard plan. The user's role is not
+    consulted: generic `sales` is not a gate.
     """
     if assignment_plan_key:
         return "plan", assignment_plan_key
     if has_legacy_rate:
         return "legacy", None
-    if role in sales_rep_roles:
+    if estimate_type in PLAN_ESTIMATE_TYPES:
         return "plan", STANDARD_PLAN_KEY
     return "none", None
 

@@ -37,6 +37,7 @@ from api import authz
 from api.commission_calc import (
     STANDARD_PLAN_KEY,
     build_installment_rows,
+    calendar_date,
     close_date_of,
     compute_plan_amount,
     effective_rate,
@@ -137,27 +138,32 @@ async def _payout_schedule_for(
 
 
 async def _insert_commission_installments(commission_id: str, rows: list[dict]) -> None:
-    """Persist the payout installments for this rule's schedule (one or two)."""
+    """Persist payout installments. Dates and amounts may be null."""
     if not rows:
         return
     params: list[Any] = []
     placeholders: list[str] = []
     for row in rows:
-        placeholders.append("(%s, %s, %s, %s, %s, %s, 'scheduled')")
+        placeholders.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s)")
+        payout = row.get("payout_date")
         params.extend([
             str(uuid.uuid4()),
             commission_id,
             row["installment_number"],
-            row["payout_period"],
-            row["payout_date"].isoformat(),
-            row["amount_cents"],
+            row.get("payout_period"),
+            None if payout is None else payout.isoformat(),
+            row.get("amount_cents"),
+            row.get("status") or "scheduled",
+            row.get("billing_installment_number"),
+            row.get("collected_amount_cents"),
         ])
     values_sql = ", ".join(placeholders)
     await execute(
         f"""
         INSERT INTO commission_installments
             (id, commission_id, installment_number, payout_period_label,
-             payout_date, amount_cents, status)
+             payout_date, amount_cents, status, billing_installment_number,
+             collected_amount_cents)
         VALUES {values_sql}
         """,
         params,
@@ -170,20 +176,21 @@ async def _create_commission_on_won(estimate_id: str) -> None:
     No-ops when the estimate has no lead or the lead has no crm_rep. Idempotent
     — the UNIQUE KEY on estimate_id makes a duplicate won transition a no-op.
 
-    Rate precedence:
+    Rate precedence (the user's role is not a gate):
       1. Active user_commission_plans row → that plan's rules.
       2. Else an active commission_rates row → today's flat rate on
          contract_value_cents, plan_key left NULL. Payout timing still comes
          from the standard plan rule for this estimate type.
-      3. Else a sales-rep role → the standard plan.
+      3. Else a maintenance, install, or enhancement estimate → the standard plan.
       4. Else no-op.
 
-    Installment count and dates follow the matched rule's payout_schedule.
-    Maintenance is two lagged checks. Install is one check on the last day of
-    the won quarter. Enhancement is one check on the first day of the next
-    month. Those install and enhancement dates stand in for billing and
-    collections until that data exists. A missing schedule is logged and the
-    commission is inserted with no installment rows.
+    Installment rows follow the matched rule's payout_schedule. Maintenance
+    writes three rows. Payment 1 is scheduled at the end of the quarter that
+    contains estimates.service_start_date, or the won date when that is null.
+    Payments 2 and 3 stay pending_billing_data with null payout dates.
+    Construction and enhancement write one pending row with a null payout date
+    and a null payout amount. A missing schedule is logged and the commission
+    is inserted with no installment rows.
 
     Maintenance standard basis is first-year annual revenue.
     contract_value_cents on a maintenance estimate is already that annual
@@ -195,7 +202,7 @@ async def _create_commission_on_won(estimate_id: str) -> None:
     rows = await query(
         """
         SELECT e.contract_value_cents, e.lead_id, e.estimate_type,
-               l.crm_rep AS crm_rep_id
+               e.service_start_date, l.crm_rep AS crm_rep_id
         FROM estimates e
         JOIN leads l ON l.id = e.lead_id
         WHERE e.id = %s
@@ -236,19 +243,18 @@ async def _create_commission_on_won(estimate_id: str) -> None:
         """,
         [crm_rep_id],
     )
-    role_rows = await query("SELECT role FROM users WHERE id = %s", [crm_rep_id])
-    role = role_rows[0].get("role") if role_rows else None
     assignment_key = assignment_rows[0].get("plan_key") if assignment_rows else None
     mode, plan_key = resolve_rate_source(
         assignment_key,
         bool(rate_rows),
-        role,
-        authz.SALES_REP_DB_ROLES,
+        estimate_type,
     )
     if mode == "none":
         return
 
     now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+    raw_start = row.get("service_start_date")
+    contract_start = calendar_date(raw_start) if raw_start else None
     client_type = None
     notes = None
     if mode == "legacy":
@@ -326,7 +332,9 @@ async def _create_commission_on_won(estimate_id: str) -> None:
         schedule_plan_key = None
     schedule = await _payout_schedule_for(schedule_plan_key, estimate_type, schedule_rules)
     if schedule:
-        installments = build_installment_rows(now_utc, commission_amount_cents, schedule)
+        installments = build_installment_rows(
+            now_utc, commission_amount_cents, schedule, contract_start,
+        )
     else:
         installments = []
     commission_id = str(uuid.uuid4())
@@ -335,13 +343,15 @@ async def _create_commission_on_won(estimate_id: str) -> None:
         INSERT IGNORE INTO commissions
             (id, estimate_id, lead_id, user_id, contract_value_cents,
              commission_rate, commission_amount_cents, status, approved_at,
-             plan_key, client_type, notes, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved', %s, %s, %s, %s, %s)
+             plan_key, client_type, notes, contract_start_date, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved', %s, %s, %s, %s, %s, %s)
         """,
         [
             commission_id, estimate_id, lead_id, crm_rep_id, contract_value_cents,
             commission_rate, commission_amount_cents, now_utc,
-            stored_plan_key, client_type, notes, now_utc,
+            stored_plan_key, client_type, notes,
+            None if contract_start is None else contract_start.isoformat(),
+            now_utc,
         ],
     )
     if not inserted:

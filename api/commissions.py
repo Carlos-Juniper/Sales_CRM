@@ -5,10 +5,11 @@ entered manually by administrators. Commissions are inserted by
 api/estimating.py (_create_commission_on_won) when an estimate transitions to
 'won' — no DB trigger.
 
-Payout cadence is the plan rule's payout_schedule. Maintenance sales get two
-lagged installments. Install pays once at the close quarter's end, and
-enhancement pays once on the first day of the following month. Due vs upcoming
-is derived at read time from America/New_York today and is not stored.
+Payout cadence is the plan rule's payout_schedule. Maintenance has three
+installments: the first is scheduled at the end of the contract-start quarter,
+and the other two wait on billing. Construction and enhancement payouts stay
+pending_billing_data until collections exist. Due vs upcoming is derived at
+read time from America/New_York today and is not stored.
 
 Backs the Commissions page in the inside-sales studio. Mirrors the module
 pattern used by api/estimating.py and api/proposals.py.
@@ -160,7 +161,6 @@ def register(app, require_auth) -> None:
         public = [
             public_installment(row, row.get("commission_status") or "approved", today)
             for row in inst_rows
-            if row.get("payout_date") is not None and row.get("amount_cents") is not None
         ]
         open_money = summarize_open_installments(public)
         return {
@@ -208,7 +208,7 @@ def register(app, require_auth) -> None:
                 c.contract_value_cents, c.commission_rate, c.commission_amount_cents,
                 c.status, c.approved_at, c.paid_at, c.payment_period,
                 c.notes, c.created_at, c.updated_at,
-                c.plan_key, c.client_type,
+                c.plan_key, c.client_type, c.contract_start_date,
                 u.name AS rep_name, u.email AS rep_email,
                 l.property_name,
                 e.estimate_number, e.aspire_number, e.estimate_type
@@ -228,7 +228,8 @@ def register(app, require_auth) -> None:
             inst_rows = await query(
                 f"""
                 SELECT id, commission_id, installment_number, payout_period_label,
-                       payout_date, amount_cents, status
+                       payout_date, amount_cents, status,
+                       billing_installment_number, collected_amount_cents
                 FROM commission_installments
                 WHERE commission_id IN ({placeholders})
                 ORDER BY installment_number
@@ -241,8 +242,6 @@ def register(app, require_auth) -> None:
                 cid = inst.get("commission_id")
                 if not cid or cid not in inst_by:
                     continue
-                if inst.get("payout_date") is None or inst.get("amount_cents") is None:
-                    continue
                 inst_by[cid].append(
                     public_installment(inst, status_by_id.get(cid, "approved"), today)
                 )
@@ -252,6 +251,7 @@ def register(app, require_auth) -> None:
             created = row.get("created_at")
             item["close_quarter"] = close_quarter_label(created) if created else None
             item["plan_key"] = row.get("plan_key")
+            item["contract_start_date"] = item.get("contract_start_date")
             item["installments"] = inst_by.get(row.get("id"), []) if row.get("id") else []
             out.append(item)
         return out
@@ -279,7 +279,9 @@ def register(app, require_auth) -> None:
                 i.payout_period_label,
                 i.payout_date,
                 i.amount_cents,
-                i.status AS installment_status
+                i.status AS installment_status,
+                i.billing_installment_number,
+                i.collected_amount_cents
             FROM commissions c
             LEFT JOIN commission_installments i ON i.commission_id = c.id
             WHERE c.user_id = %s
@@ -302,7 +304,7 @@ def register(app, require_auth) -> None:
                     "installments": [],
                 }
                 deals_by_id[row["commission_id"]] = deal
-            if row.get("installment_id") and row.get("payout_date") is not None:
+            if row.get("installment_id"):
                 shaped = dict(row)
                 shaped["id"] = row["installment_id"]
                 shaped["status"] = row.get("installment_status") or "scheduled"

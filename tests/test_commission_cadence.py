@@ -20,7 +20,7 @@ os.environ.setdefault("ENTRA_CLIENT_ID", "x")
 os.environ.setdefault("ENTRA_TENANT_ID", "x")
 
 from api.server import app, require_auth  # noqa: E402
-from api import authz, commissions, estimating  # noqa: E402
+from api import commissions, estimating  # noqa: E402
 from api.commission_calc import (  # noqa: E402
     CommissionTier,
     build_installment_rows,
@@ -30,7 +30,7 @@ from api.commission_calc import (  # noqa: E402
     derive_installment_status,
     effective_rate,
     resolve_rate_source,
-    split_installment_amounts,
+    maintenance_known_halves,
     sum_prior_install_cents,
 )
 import scripts.migrate as M  # noqa: E402
@@ -48,12 +48,12 @@ EXISTING_TIERS = [
     CommissionTier(300_000_000, None, Decimal("0.004")),
 ]
 NEW_RULES = [
-    {"tier_min_cents": 0, "tier_max_cents": 100_000_000, "rate": Decimal("0.00400"), "basis": "calendar_year_cumulative_revenue", "payout_schedule": "quarter_end"},
-    {"tier_min_cents": 100_000_000, "tier_max_cents": 200_000_000, "rate": Decimal("0.00800"), "basis": "calendar_year_cumulative_revenue", "payout_schedule": "quarter_end"},
-    {"tier_min_cents": 200_000_000, "tier_max_cents": None, "rate": Decimal("0.01200"), "basis": "calendar_year_cumulative_revenue", "payout_schedule": "quarter_end"},
+    {"tier_min_cents": 0, "tier_max_cents": 100_000_000, "rate": Decimal("0.00400"), "basis": "calendar_year_cumulative_revenue", "payout_schedule": "construction_billing_quarterly"},
+    {"tier_min_cents": 100_000_000, "tier_max_cents": 200_000_000, "rate": Decimal("0.00800"), "basis": "calendar_year_cumulative_revenue", "payout_schedule": "construction_billing_quarterly"},
+    {"tier_min_cents": 200_000_000, "tier_max_cents": None, "rate": Decimal("0.01200"), "basis": "calendar_year_cumulative_revenue", "payout_schedule": "construction_billing_quarterly"},
 ]
 MAINT_RULES = [
-    {"tier_min_cents": 0, "tier_max_cents": None, "rate": Decimal("0.03000"), "basis": "first_year_revenue", "payout_schedule": "maintenance_split_lagged"},
+    {"tier_min_cents": 0, "tier_max_cents": None, "rate": Decimal("0.03000"), "basis": "first_year_revenue", "payout_schedule": "maintenance_3_payment"},
 ]
 
 
@@ -85,25 +85,43 @@ def _marginal(cumulative: int, deal: int, tiers: list[CommissionTier]) -> int:
 # ── quarter → installments ───────────────────────────────────────────────────
 
 class TestPayoutCadence:
-    def test_all_four_quarters_and_year_rollover(self):
+    def test_maintenance_three_payments_follow_the_start_quarter(self):
         cases = [
-            (datetime(2026, 1, 1, 0, 10, tzinfo=ET), "2026-Q1", date(2026, 4, 1), date(2026, 7, 1), "April 2026", "July 2026"),
-            (datetime(2026, 3, 31, 23, 30, tzinfo=ET), "2026-Q1", date(2026, 4, 1), date(2026, 7, 1), "April 2026", "July 2026"),
-            (datetime(2026, 4, 1, 0, 10, tzinfo=ET), "2026-Q2", date(2026, 7, 1), date(2026, 10, 1), "July 2026", "October 2026"),
-            (datetime(2026, 6, 30, 23, 59, tzinfo=ET), "2026-Q2", date(2026, 7, 1), date(2026, 10, 1), "July 2026", "October 2026"),
-            (datetime(2026, 9, 30, 12, 0, tzinfo=ET), "2026-Q3", date(2026, 10, 1), date(2027, 1, 1), "October 2026", "January 2027"),
-            (datetime(2026, 12, 31, 23, 30, tzinfo=ET), "2026-Q4", date(2027, 1, 1), date(2027, 4, 1), "January 2027", "April 2027"),
+            (datetime(2026, 1, 1, 0, 10, tzinfo=ET), "2026-Q1", date(2026, 3, 31), "March 2026"),
+            (datetime(2026, 3, 31, 23, 30, tzinfo=ET), "2026-Q1", date(2026, 3, 31), "March 2026"),
+            (datetime(2026, 4, 1, 0, 10, tzinfo=ET), "2026-Q2", date(2026, 6, 30), "June 2026"),
+            (datetime(2026, 6, 30, 23, 59, tzinfo=ET), "2026-Q2", date(2026, 6, 30), "June 2026"),
+            (datetime(2026, 9, 30, 12, 0, tzinfo=ET), "2026-Q3", date(2026, 9, 30), "September 2026"),
+            (datetime(2026, 12, 31, 23, 30, tzinfo=ET), "2026-Q4", date(2026, 12, 31), "December 2026"),
         ]
-        for close_at, quarter, first, second, first_label, second_label in cases:
+        for close_at, quarter, payout, label in cases:
             assert close_quarter_label(close_at) == quarter
-            rows = build_installment_rows(close_at, 100, "maintenance_split_lagged")
-            assert rows[0]["installment_number"] == 1
-            assert rows[1]["installment_number"] == 2
-            assert rows[0]["payout_date"] == first
-            assert rows[1]["payout_date"] == second
-            assert rows[0]["payout_period"] == first_label
-            assert rows[1]["payout_period"] == second_label
-            assert rows[0]["payout_date"].isoformat() == first.isoformat()
+            rows = build_installment_rows(close_at, 300, "maintenance_3_payment")
+            assert [row["installment_number"] for row in rows] == [1, 2, 3]
+            assert rows[0]["status"] == "scheduled"
+            assert rows[0]["payout_date"] == payout
+            assert rows[0]["payout_period"] == label
+            assert rows[0]["amount_cents"] == 150
+            assert rows[1]["status"] == "pending_billing_data"
+            assert rows[1]["payout_date"] is None
+            assert rows[1]["amount_cents"] == 150
+            assert rows[1]["billing_installment_number"] == 6
+            assert rows[2]["status"] == "pending_billing_data"
+            assert rows[2]["payout_date"] is None
+            assert rows[2]["amount_cents"] is None
+            assert rows[2]["billing_installment_number"] == 12
+
+    def test_contract_start_dates_payment_one(self):
+        rows = build_installment_rows(
+            datetime(2026, 1, 15, tzinfo=ET),
+            300,
+            "maintenance_3_payment",
+            contract_start=date(2026, 8, 1),
+        )
+        assert rows[0]["payout_date"] == date(2026, 9, 30)
+        assert rows[0]["payout_period"] == "September 2026"
+        assert rows[1]["payout_date"] is None
+        assert rows[2]["payout_date"] is None
 
     def test_et_utc_boundary_mar_31_and_apr_1(self):
         q1_et = datetime(2026, 3, 31, 23, 30, tzinfo=ET)
@@ -129,44 +147,30 @@ class TestPayoutCadence:
         q4_utc = q4_et.astimezone(timezone.utc)
         assert q4_utc.year == 2027
         assert close_quarter_label(q4_utc) == "2026-Q4"
-        rows = build_installment_rows(q4_utc, 5, "maintenance_split_lagged")
-        assert rows[0]["payout_date"] == date(2027, 1, 1)
-        assert rows[1]["payout_date"] == date(2027, 4, 1)
-        assert rows[0]["payout_period"] == "January 2027"
-        assert rows[1]["payout_period"] == "April 2027"
+        rows = build_installment_rows(q4_utc, 300, "maintenance_3_payment")
+        assert rows[0]["payout_date"] == date(2026, 12, 31)
+        assert rows[0]["payout_period"] == "December 2026"
+        assert rows[1]["payout_date"] is None
+        assert rows[2]["payout_date"] is None
 
-    def test_odd_cent_split_reconciles(self):
+    def test_known_halves_reconcile_to_the_annual_commission(self):
         for total in (0, 1, 2, 5, 100, 101, 999, 2_400_000):
-            first, second = split_installment_amounts(total)
-            assert first == total // 2
+            first, second = maintenance_known_halves(total)
             assert first + second == total
-            assert second >= first
-        rows = build_installment_rows(datetime(2026, 5, 1, tzinfo=ET), 101, "maintenance_split_lagged")
-        assert rows[0]["amount_cents"] == 50
-        assert rows[1]["amount_cents"] == 51
-        assert rows[0]["amount_cents"] + rows[1]["amount_cents"] == 101
+        rows = build_installment_rows(datetime(2026, 5, 1, tzinfo=ET), 101, "maintenance_3_payment")
+        assert rows[0]["amount_cents"] == 51
+        assert rows[1]["amount_cents"] == 50
+        assert rows[2]["amount_cents"] is None
 
-    def test_install_and_enhancement_are_one_full_payment(self):
-        cases = [
-            (datetime(2026, 2, 15, tzinfo=ET), "quarter_end", date(2026, 3, 31), "March 2026"),
-            (datetime(2026, 5, 15, tzinfo=ET), "quarter_end", date(2026, 6, 30), "June 2026"),
-            (datetime(2026, 8, 1, tzinfo=ET), "quarter_end", date(2026, 9, 30), "September 2026"),
-            (datetime(2026, 12, 31, 23, 30, tzinfo=ET), "quarter_end", date(2026, 12, 31), "December 2026"),
-            (datetime(2026, 1, 1, tzinfo=ET), "month_after_quarter_end", date(2026, 4, 1), "April 2026"),
-            (datetime(2026, 4, 1, tzinfo=ET), "month_after_quarter_end", date(2026, 7, 1), "July 2026"),
-            (datetime(2026, 9, 30, tzinfo=ET), "month_after_quarter_end", date(2026, 10, 1), "October 2026"),
-            (datetime(2026, 12, 31, 23, 30, tzinfo=ET), "month_after_quarter_end", date(2027, 1, 1), "January 2027"),
-        ]
-        for close_at, schedule, payout, label in cases:
-            rows = build_installment_rows(close_at, 101, schedule)
+    def test_construction_and_enhancement_wait_on_billing(self):
+        for schedule in ("construction_billing_quarterly", "enhancement_month_after_quarter"):
+            rows = build_installment_rows(datetime(2026, 5, 15, tzinfo=ET), 101, schedule)
             assert len(rows) == 1
             assert rows[0]["installment_number"] == 1
-            assert rows[0]["amount_cents"] == 101
-            assert rows[0]["payout_date"] == payout
-            assert rows[0]["payout_period"] == label
-        q1_install = build_installment_rows(datetime(2026, 3, 31, 23, 30, tzinfo=ET), 100, "quarter_end")
-        assert q1_install[0]["payout_date"] == date(2026, 3, 31)
-        assert q1_install[0]["payout_date"] != date(2026, 4, 1)
+            assert rows[0]["status"] == "pending_billing_data"
+            assert rows[0]["payout_date"] is None
+            assert rows[0]["amount_cents"] is None
+            assert rows[0]["payout_period"] is None
 
     def test_unknown_schedule_is_rejected(self):
         with pytest.raises(ValueError):
@@ -184,6 +188,10 @@ class TestInstallmentStatus:
             stored_status="scheduled", commission_status="approved",
             payout_date=date(2026, 4, 1), today=today,
         ) == "due"
+        assert derive_installment_status(
+            stored_status="pending_billing_data", commission_status="approved",
+            payout_date=None, today=today,
+        ) == "pending_billing_data"
         assert derive_installment_status(
             stored_status="scheduled", commission_status="approved",
             payout_date=date(2026, 3, 1), today=today,
@@ -230,8 +238,8 @@ class TestPlanMath:
             rules=MAINT_RULES,
         )
         assert odd == 3
-        first, second = split_installment_amounts(odd)
-        assert (first, second) == (1, 2)
+        first, second = maintenance_known_halves(odd)
+        assert (first, second) == (2, 1)
 
     def test_new_client_three_million_is_24k(self):
         amount = _marginal(0, 300_000_000, NEW_TIERS)
@@ -290,16 +298,16 @@ class TestPlanMath:
         )
         assert amount is None
 
-    def test_plan_resolution_precedence(self):
-        roles = authz.SALES_REP_DB_ROLES
-        assert resolve_rate_source(None, False, "sales", roles) == ("plan", "standard")
-        assert resolve_rate_source(None, False, "outside_sales", roles) == ("plan", "standard")
-        assert resolve_rate_source(None, False, "maintenance_sales", roles) == ("plan", "standard")
-        assert resolve_rate_source(None, True, "sales", roles) == ("legacy", None)
-        assert resolve_rate_source("custom", True, "sales", roles) == ("plan", "custom")
-        assert resolve_rate_source("custom", False, "procurement", roles) == ("plan", "custom")
-        assert resolve_rate_source(None, False, "procurement", roles) == ("none", None)
-        assert resolve_rate_source(None, True, "procurement", roles) == ("legacy", None)
+    def test_plan_resolution_follows_estimate_type(self):
+        assert resolve_rate_source(None, False, "maintenance") == ("plan", "standard")
+        assert resolve_rate_source(None, False, "install") == ("plan", "standard")
+        assert resolve_rate_source(None, False, "enhancement") == ("plan", "standard")
+        assert resolve_rate_source(None, True, "install") == ("legacy", None)
+        assert resolve_rate_source("custom", True, "maintenance") == ("plan", "custom")
+        assert resolve_rate_source("custom", False, "sales") == ("plan", "custom")
+        assert resolve_rate_source(None, False, "sales") == ("none", None)
+        assert resolve_rate_source(None, False, None) == ("none", None)
+        assert resolve_rate_source(None, True, None) == ("legacy", None)
 
 
 # ── creation on won ──────────────────────────────────────────────────────────
@@ -369,6 +377,10 @@ class TestCreateCommissionOnWon:
         assert None in commission_params  # client_type
         assert "commission_installments" in execs[1][0]
         assert execs[1][1].count(150_000) == 2
+        assert execs[1][1].count("scheduled") == 1
+        assert execs[1][1].count("pending_billing_data") == 2
+        assert 6 in execs[1][1]
+        assert 12 in execs[1][1]
 
     @pytest.mark.asyncio
     async def test_legacy_rate_keeps_amount_and_uses_plan_schedule(self):
@@ -390,7 +402,7 @@ class TestCreateCommissionOnWon:
                 return [{"role": "sales"}]
             if "payout_schedule" in sql:
                 assert list(params) == ["standard", "install"]
-                return [{"payout_schedule": "quarter_end"}]
+                return [{"payout_schedule": "construction_billing_quarterly"}]
             raise AssertionError(sql)
 
         execs = []
@@ -408,10 +420,10 @@ class TestCreateCommissionOnWon:
         assert "standard" not in params
         assert params.count(None) >= 1  # plan_key
         installment = execs[1][1]
-        assert installment.count(1_000) == 1
+        assert "pending_billing_data" in installment
+        assert 1_000 not in installment
         assert 500 not in installment
-        assert "2026-06-30" in installment
-        assert "June 2026" in installment
+        assert "2026-06-30" not in installment
 
     async def test_legacy_maintenance_rate_still_splits(self):
         frozen = datetime(2026, 2, 15, 15, 0, tzinfo=timezone.utc)
@@ -432,7 +444,7 @@ class TestCreateCommissionOnWon:
                 return [{"role": "maintenance_sales"}]
             if "payout_schedule" in sql:
                 assert list(params) == ["standard", "maintenance"]
-                return [{"payout_schedule": "maintenance_split_lagged"}]
+                return [{"payout_schedule": "maintenance_3_payment"}]
             raise AssertionError(sql)
 
         execs = []
@@ -446,8 +458,10 @@ class TestCreateCommissionOnWon:
             await _run_create(fake_query, fake_exec)
         installment = execs[1][1]
         assert installment.count(150) == 2
-        assert "2026-04-01" in installment
-        assert "2026-07-01" in installment
+        assert "2026-03-31" in installment
+        assert "March 2026" in installment
+        assert "2026-04-01" not in installment
+        assert installment.count("pending_billing_data") == 2
 
     async def test_missing_schedule_inserts_commission_without_installments(self):
         async def fake_query(sql, params=None):
@@ -501,7 +515,7 @@ class TestCreateCommissionOnWon:
                     "tier_max_cents": None,
                     "rate": Decimal("0.10000"),
                     "basis": "first_year_revenue",
-                    "payout_schedule": "maintenance_split_lagged",
+                    "payout_schedule": "maintenance_3_payment",
                 }]
             raise AssertionError(sql)
 
@@ -517,15 +531,16 @@ class TestCreateCommissionOnWon:
         assert 500 not in params
         assert "custom" in params
         assert execs[1][1].count(500) == 2
+        assert execs[1][1].count("pending_billing_data") == 2
 
     @pytest.mark.asyncio
-    async def test_non_sales_without_rate_or_plan_is_a_no_op(self):
+    async def test_unknown_estimate_type_without_rate_or_plan_is_a_no_op(self):
         async def fake_query(sql, params=None):
             if "FROM estimates" in sql:
                 return [{
                     "contract_value_cents": 10_000,
                     "lead_id": "lead-1",
-                    "estimate_type": "maintenance",
+                    "estimate_type": "other",
                     "crm_rep_id": "rep-1",
                 }]
             if "FROM user_commission_plans" in sql:
@@ -533,7 +548,7 @@ class TestCreateCommissionOnWon:
             if "FROM commission_rates" in sql:
                 return []
             if "FROM users" in sql:
-                return [{"role": "procurement"}]
+                raise AssertionError("plan resolution must not read users.role")
             raise AssertionError(sql)
 
         execs = []
@@ -544,6 +559,36 @@ class TestCreateCommissionOnWon:
 
         await _run_create(fake_query, fake_exec)
         assert execs == []
+
+    async def test_maintenance_plan_does_not_require_sales_role(self):
+        async def fake_query(sql, params=None):
+            if "FROM estimates" in sql:
+                return [{
+                    "contract_value_cents": 10_000_000,
+                    "lead_id": "lead-1",
+                    "estimate_type": "maintenance",
+                    "crm_rep_id": "rep-1",
+                }]
+            if "FROM user_commission_plans" in sql:
+                return []
+            if "FROM commission_rates" in sql:
+                return []
+            if "FROM users" in sql:
+                raise AssertionError("plan resolution must not read users.role")
+            if "commission_plan_rules" in sql:
+                return MAINT_RULES
+            raise AssertionError(sql)
+
+        execs = []
+
+        async def fake_exec(sql, params=None):
+            execs.append((sql, list(params or [])))
+            return 1
+
+        await _run_create(fake_query, fake_exec)
+        assert len(execs) == 2
+        assert "standard" in execs[0][1]
+        assert execs[1][1].count(150_000) == 2
 
     @pytest.mark.asyncio
     async def test_install_uses_provisional_new_tiers_and_year_cumulative(self):
@@ -586,7 +631,8 @@ class TestCreateCommissionOnWon:
         # client_type stored NULL (the unresolved signal), not the word "new".
         assert "new" not in params
         assert len(execs) == 2
-        assert execs[1][1].count(1_200_000) == 1
+        assert "pending_billing_data" in execs[1][1]
+        assert 1_200_000 not in execs[1][1]
         assert 600_000 not in execs[1][1]
 
     @pytest.mark.asyncio
@@ -625,7 +671,8 @@ class TestCreateCommissionOnWon:
         await _run_create(fake_query, fake_exec)
         # First $1M of a fresh year is 0.4% = $4,000 = 400_000 cents.
         assert 400_000 in execs[0][1]
-        assert execs[1][1].count(400_000) == 1
+        assert "pending_billing_data" in execs[1][1]
+        assert 400_000 not in execs[1][1]
         assert 200_000 not in execs[1][1]
 
 
@@ -937,6 +984,57 @@ class TestCommissionEndpoints:
         assert commission_params[0] == "June 2026"
         assert commission_params[1] == "c1"
 
+        queries["n"] = 0
+
+        async def third_still_pending(sql, params=None):
+            queries["n"] += 1
+            if queries["n"] == 1:
+                return [{
+                    "id": "i2",
+                    "commission_id": "c1",
+                    "status": "scheduled",
+                    "payout_period_label": None,
+                    "commission_status": "approved",
+                }]
+            return [
+                {"installment_number": 1, "status": "paid", "payout_period_label": "March 2026"},
+                {"installment_number": 2, "status": "paid", "payout_period_label": None},
+                {"installment_number": 3, "status": "pending_billing_data", "payout_period_label": None},
+            ]
+
+        with patch("api.commissions.query", new=third_still_pending), \
+             patch("api.commissions.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
+            waiting = client.post("/api/commissions/installments/i2/mark-paid")
+        assert waiting.status_code == 200
+        assert exec_mock.await_count == 1
+
+        queries["n"] = 0
+
+        async def all_three_paid(sql, params=None):
+            queries["n"] += 1
+            if queries["n"] == 1:
+                return [{
+                    "id": "i3",
+                    "commission_id": "c1",
+                    "status": "pending_billing_data",
+                    "payout_period_label": None,
+                    "commission_status": "approved",
+                }]
+            return [
+                {"installment_number": 1, "status": "paid", "payout_period_label": "March 2026"},
+                {"installment_number": 2, "status": "paid", "payout_period_label": None},
+                {"installment_number": 3, "status": "paid", "payout_period_label": "December 2026"},
+            ]
+
+        with patch("api.commissions.query", new=all_three_paid), \
+             patch("api.commissions.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
+            done = client.post("/api/commissions/installments/i3/mark-paid")
+        assert done.status_code == 200
+        assert exec_mock.await_count == 2
+        commission_sql, commission_params = exec_mock.await_args_list[1].args
+        assert "UPDATE commissions" in commission_sql
+        assert commission_params[0] == "December 2026"
+
     @pytest.mark.asyncio
     async def test_cancel_commission_cancels_unpaid_installments(self):
         with patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
@@ -1012,6 +1110,22 @@ class TestMigration065:
 
         monkeypatch.setattr(M, "column_exists", lambda conn, table, column: True)
         monkeypatch.setattr(
+            M, "table_exists",
+            lambda conn, name: name != "commission_billing_events",
+        )
+        assert M.detect_065(None) is False
+
+        monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
+        monkeypatch.setattr(
+            M, "column_exists",
+            lambda conn, table, column: not (
+                table == "commissions" and column == "contract_start_date"
+            ),
+        )
+        assert M.detect_065(None) is False
+
+        monkeypatch.setattr(M, "column_exists", lambda conn, table, column: True)
+        monkeypatch.setattr(
             M, "index_exists",
             lambda conn, table, index: index != "uq_commission_installment",
         )
@@ -1060,13 +1174,20 @@ class TestMigration065:
         assert "INSERT IGNORE INTO USER_COMMISSION_PLANS" not in upper
         assert "INSERT INTO COMMISSION_RATES" not in upper
         assert "UPDATE COMMISSION_RATES" not in upper
-        assert "'maintenance_split_lagged'" in sql
-        assert "'quarter_end'" in sql
-        assert "'month_after_quarter_end'" in sql
+        assert "'maintenance_3_payment'" in sql
+        assert "'construction_billing_quarterly'" in sql
+        assert "'enhancement_month_after_quarter'" in sql
+        assert "pending_billing_data" in sql
+        assert "commission_billing_events" in sql
+        assert "contract_start_date" in sql
+        assert "billing_installment_number" in sql
+        assert "collected_amount_cents" in sql
+        assert "INSERT INTO COMMISSION_BILLING_EVENTS" not in upper
         assert "COALESCE(e.estimate_type, '') = 'maintenance'" in sql
         assert "COALESCE(e.estimate_type, '') <> 'maintenance'" in sql
-        assert sql.upper().count("SELECT 2") == 1
-        assert "i.installment_number = 2" in sql
+        assert "SELECT 3" in upper
+        assert "maintenance_split_lagged" not in sql
+        assert "'quarter_end'" not in sql
         assert "0.03000" in sql
         assert "0.00400" in sql
         assert "0.00800" in sql

@@ -792,25 +792,29 @@ def detect_041(conn) -> bool:
     return column_exists(conn, "properties", "units")
 
 def detect_065(conn) -> bool:
-    """065 applied ↔ plan tables, payout schedules, seed rules, and backfill.
+    """065 applied ↔ plan tables, billing ledger, schedules, and backfill.
 
-    Keys on this migration's own effects, not on a sibling table: the four new
-    tables, commission_plan_rules.payout_schedule, commissions.plan_key and
-    commissions.client_type, both unique indexes, the standard maintenance /
-    new-client / enhancement seed rows (each with its schedule), and zero
-    commissions missing installment 1. A partial apply stays undetected. The
-    file is safe to re-run: CREATE IF NOT EXISTS, information_schema PREPARE,
-    ON DUPLICATE KEY UPDATE for the schedule column, NOT EXISTS inserts, a
-    DELETE of non-maintenance installment 2, and an UPDATE of installment 1.
+    Keys on this migration's own effects: the plan tables, the empty
+    commission_billing_events ledger, payout_schedule, contract_start_date,
+    the installment basis columns, both snapshot columns, both unique indexes,
+    the standard maintenance / new-client / enhancement seed rows (each with
+    its schedule), and zero commissions missing installment 1. A partial apply
+    stays undetected so the file can re-run. The installment rebuild deletes
+    and rewrites payout rows; do not re-apply it after Aspire billing has been
+    written onto those rows.
     """
     schema_ok = (
         table_exists(conn, "commission_plans")
         and table_exists(conn, "commission_plan_rules")
         and table_exists(conn, "user_commission_plans")
         and table_exists(conn, "commission_installments")
+        and table_exists(conn, "commission_billing_events")
         and column_exists(conn, "commission_plan_rules", "payout_schedule")
         and column_exists(conn, "commissions", "plan_key")
         and column_exists(conn, "commissions", "client_type")
+        and column_exists(conn, "commissions", "contract_start_date")
+        and column_exists(conn, "commission_installments", "billing_installment_number")
+        and column_exists(conn, "commission_installments", "collected_amount_cents")
         and index_exists(conn, "user_commission_plans", "uq_user_commission_plans_user_effective")
         and index_exists(conn, "commission_installments", "uq_commission_installment")
     )
@@ -828,19 +832,19 @@ _SEED_MAINT_065 = (
     "SELECT COUNT(*) AS cnt FROM commission_plan_rules "
     "WHERE plan_key = 'standard' AND estimate_type = 'maintenance' "
     "AND basis = 'first_year_revenue' AND rate = 0.03000 "
-    "AND payout_schedule = 'maintenance_split_lagged'"
+    "AND payout_schedule = 'maintenance_3_payment'"
 )
 _SEED_INSTALL_065 = (
     "SELECT COUNT(*) AS cnt FROM commission_plan_rules "
     "WHERE plan_key = 'standard' AND estimate_type = 'install' "
     "AND client_type = 'new' AND rate = 0.01200 "
-    "AND payout_schedule = 'quarter_end'"
+    "AND payout_schedule = 'construction_billing_quarterly'"
 )
 _SEED_ENH_065 = (
     "SELECT COUNT(*) AS cnt FROM commission_plan_rules "
     "WHERE plan_key = 'standard' AND estimate_type = 'enhancement' "
     "AND basis = 'enhancement_collected_gp_gte_55' "
-    "AND payout_schedule = 'month_after_quarter_end'"
+    "AND payout_schedule = 'enhancement_month_after_quarter'"
 )
 _BACKFILL_065 = (
     "SELECT COUNT(*) AS cnt FROM commissions c "

@@ -294,6 +294,88 @@ describe('attachment API round-trip (GCS feature)', () => {
   })
 })
 
+describe('contract-structure budgets (MSW contract)', () => {
+  function payloadWithoutBudgets(name: string) {
+    const payload = toCreatePayload(buildMaintenanceEstimate({ name }))
+    delete payload.homesBudget
+    delete payload.commonAreaBudget
+    return payload
+  }
+
+  it('stores null when both budgets are omitted', async () => {
+    const created = await estimatingApi.create(payloadWithoutBudgets('Omitted budgets'))
+    expect(created.homesBudget).toBeNull()
+    expect(created.commonAreaBudget).toBeNull()
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.homesBudget).toBeNull()
+    expect(fetched.commonAreaBudget).toBeNull()
+    const listed = await estimatingApi.list()
+    const row = listed.find((e) => e.id === created.id)
+    expect(row?.homesBudget).toBeNull()
+    expect(row?.commonAreaBudget).toBeNull()
+  })
+
+  it('stores null for blank strings and 0 for a typed zero', async () => {
+    const created = await estimatingApi.create({
+      ...payloadWithoutBudgets('Blank and zero'),
+      intake: { payload: { homesBudget: '   ', commonAreaBudget: '0' } },
+    })
+    expect(created.homesBudget).toBeNull()
+    expect(created.commonAreaBudget).toBe(0)
+    const [submission] = await estimatingApi.listIntake(created.id)
+    expect(submission.payload.homesBudget).toBeNull()
+    expect(submission.payload.commonAreaBudget).toBe(0)
+  })
+
+  it('stores typed dollar amounts and lets a top-level value win', async () => {
+    const created = await estimatingApi.create({
+      ...payloadWithoutBudgets('Top-level wins'),
+      homesBudget: 120000,
+      commonAreaBudget: 10.005,
+      intake: { payload: { homesBudget: 1, commonAreaBudget: '' } },
+    })
+    expect(created.homesBudget).toBe(120000)
+    expect(created.commonAreaBudget).toBe(10.01)
+    const [submission] = await estimatingApi.listIntake(created.id)
+    expect(submission.payload.homesBudget).toBe(120000)
+    expect(submission.payload.commonAreaBudget).toBe(10.01)
+  })
+
+  it('returns 400 and inserts nothing for a negative or non-numeric budget', async () => {
+    await expect(
+      estimatingApi.create({ ...payloadWithoutBudgets('Negative budget'), homesBudget: -1 }),
+    ).rejects.toMatchObject({ status: 400 })
+    await expect(
+      estimatingApi.create({
+        ...payloadWithoutBudgets('Non-numeric budget'),
+        commonAreaBudget: 'abc' as unknown as number,
+      }),
+    ).rejects.toMatchObject({ status: 400 })
+    const listed = await estimatingApi.list()
+    expect(listed.some((e) => e.name === 'Negative budget' || e.name === 'Non-numeric budget')).toBe(false)
+  })
+
+  it('PATCH clears with null, keeps an omitted field, stores 0, and 400s on a negative', async () => {
+    const created = await estimatingApi.create({
+      ...payloadWithoutBudgets('Patch budgets'),
+      homesBudget: 500,
+      commonAreaBudget: 80,
+    })
+    const cleared = await estimatingApi.update(created.id, { homesBudget: null })
+    expect(cleared.homesBudget).toBeNull()
+    expect(cleared.commonAreaBudget).toBe(80)
+    const zeroed = await estimatingApi.update(created.id, { commonAreaBudget: 0 })
+    expect(zeroed.homesBudget).toBeNull()
+    expect(zeroed.commonAreaBudget).toBe(0)
+    await expect(
+      estimatingApi.update(created.id, { homesBudget: -2 }),
+    ).rejects.toMatchObject({ status: 400 })
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.homesBudget).toBeNull()
+    expect(fetched.commonAreaBudget).toBe(0)
+  })
+})
+
 describe('estimateType immutability guard (§2)', () => {
   it('client update() exposes no estimateType update path and throws if one is smuggled in', async () => {
     const created = await estimatingApi.create(toCreatePayload(buildMaintenanceEstimate()))

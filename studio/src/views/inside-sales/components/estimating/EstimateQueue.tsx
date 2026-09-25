@@ -49,6 +49,7 @@ import { acresFromSqft } from '@/lib/estimating/calc'
 import { SLA_CONFIG, slaCountdownLabel, slaDaysLeft, slaStateFor, type SlaState } from '@/lib/estimating/sla'
 import { useUsers } from '@/hooks/useUsers'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
+import { formatOptionalBudget } from '@/lib/estimating/contractBudgets'
 import type { Estimate, EstimatePriority, EstimateStatus } from '@/types/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
@@ -387,6 +388,26 @@ function QueueCard({
                 </span>
               )}
             </div>
+
+            {estimate.estimateType === 'maintenance' && (
+              <div
+                data-testid="queue-contract-budgets"
+                className="flex flex-wrap items-center gap-3 mt-1"
+              >
+                <span className="text-xs text-[hsl(var(--muted-fg))]">
+                  Homes budget{' '}
+                  <span className="font-medium text-[hsl(var(--fg))]">
+                    {formatOptionalBudget(estimate.homesBudget)}
+                  </span>
+                </span>
+                <span className="text-xs text-[hsl(var(--muted-fg))]">
+                  Common area budget{' '}
+                  <span className="font-medium text-[hsl(var(--fg))]">
+                    {formatOptionalBudget(estimate.commonAreaBudget)}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Right column: SLA countdown + assigned rep */}

@@ -46,6 +46,7 @@ import {
   IllegalTransitionError,
   type StatusTransitionRecord,
 } from '@/lib/estimating/transitions'
+import { coerceBudgetPatch, resolveContractBudgets } from '@/lib/estimating/contractBudgets'
 import {
   APPROVAL_TIER_SEED,
   ITB_SCOPE_SEED,
@@ -678,6 +679,13 @@ const allHandlers = [
         { status: 400 },
       )
     }
+    // Dollars, not cents. Blank / omitted / null → null. 0 stays 0.
+    // Top-level homesBudget / commonAreaBudget win over intake.payload.
+    // Reject before insert so a 400 persists nothing.
+    const budgets = resolveContractBudgets(body)
+    if (!budgets.ok) {
+      return HttpResponse.json({ detail: budgets.error }, { status: 400 })
+    }
     const id = eid('est')
     const now = new Date().toISOString()
     const sections: EstimateSection[] = (body.sections ?? []).map((section, si) => {
@@ -714,6 +722,8 @@ const allHandlers = [
       ...estimateBody,
       id,
       sections,
+      homesBudget: budgets.homesBudget,
+      commonAreaBudget: budgets.commonAreaBudget,
       aspireOpportunityId: null,
       aspireSyncStatus: 'pending',
       createdAt: now,
@@ -761,6 +771,12 @@ const allHandlers = [
     const idx = estimates.findIndex((e) => e.id === params.id)
     if (idx === -1) return notFound()
     const body = (await request.json()) as UpdateEstimatePayload & { estimateType?: string }
+    // Same budget rules as create. Absent keys are left absent (keep).
+    // Null or blank clears. A bad value 400s without mutating the row.
+    const budgetPatch = coerceBudgetPatch(body as Record<string, unknown>)
+    if (!budgetPatch.ok) {
+      return HttpResponse.json({ detail: budgetPatch.error }, { status: 400 })
+    }
     if (body.estimateType !== undefined && body.estimateType !== estimates[idx].estimateType) {
       return HttpResponse.json(
         { error: 'estimate_type is immutable and cannot be changed after creation' },
@@ -889,6 +905,10 @@ const allHandlers = [
         { error: 'estimateType must be maintenance or install' },
         { status: 400 },
       )
+    }
+    const draftBudgets = coerceBudgetPatch(body.payload)
+    if (!draftBudgets.ok) {
+      return HttpResponse.json({ detail: draftBudgets.error }, { status: 400 })
     }
     if (body.draftId) {
       const existing = intakeDrafts.find((d) => d.id === body.draftId)

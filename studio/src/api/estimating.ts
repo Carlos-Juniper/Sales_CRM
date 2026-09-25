@@ -38,8 +38,19 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
  */
 export type CreateEstimatePayload = DistributiveOmit<
   Estimate,
-  'id' | 'createdAt' | 'updatedAt' | 'aspireOpportunityId' | 'aspireSyncStatus'
+  | 'id'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'aspireOpportunityId'
+  | 'aspireSyncStatus'
+  // Optional on create: omit stores null. A sent 0 stays 0.
+  | 'homesBudget'
+  | 'commonAreaBudget'
 > & {
+  /** Homes budget in dollars. Omit or null → unknown. 0 stays 0. */
+  homesBudget?: number | null
+  /** Common-area budget in dollars. Omit or null → unknown. 0 stays 0. */
+  commonAreaBudget?: number | null
   /**
    * Opportunity service line (→ Aspire DivisionID). Not persisted on the estimate
    * row; the backend reads it to build the opportunity payload. Defaults per type.
@@ -99,6 +110,13 @@ export type UpdateEstimatePayload = Partial<{
    * persisted display column; the backend stores it for the write-back + sweep.
    */
   lostReasonId: number
+  /**
+   * Homes budget in dollars. Omit to keep the stored value. Null or blank
+   * clears it back to unknown. 0 stores 0. Estimator-owned.
+   */
+  homesBudget: number | null
+  /** Common-area budget in dollars. Same omit / null / 0 rules as homesBudget. */
+  commonAreaBudget: number | null
 }>
 
 /** Body for POST /api/estimating/intake/drafts. */

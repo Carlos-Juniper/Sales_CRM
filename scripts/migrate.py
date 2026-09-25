@@ -854,6 +854,104 @@ _BACKFILL_065 = (
 )
 
 
+# Fixed so a re-run cannot open a second user_commission_plans row.
+# Keep this literal identical to sql/migrations/066_assign_standard_commission_plan.sql.
+_EFFECTIVE_DATE_066 = "2026-09-25"
+# Union of today's commission-earning roles and the roles migration 067 will
+# write. inside_sales is included because it is in authz.SALES_REP_DB_ROLES.
+# vp_sales is included so this file and 067 can apply in either order.
+_SALES_ROLES_066 = (
+    "sales",
+    "outside_sales",
+    "maintenance_sales",
+    "install_sales",
+    "inside_sales",
+    "vp_sales",
+)
+_MICHELLE_MATCH_066 = (
+    "(LOWER(TRIM(u.name)) = 'michelle cady' "
+    "OR (LOWER(TRIM(u.name)) LIKE '%michelle%' AND LOWER(TRIM(u.name)) LIKE '%cady%') "
+    "OR LOWER(u.email) LIKE '%cady%')"
+)
+_RODRIGO_MATCH_066 = (
+    "(LOWER(TRIM(u.name)) = 'rodrigo leon' "
+    "OR (LOWER(TRIM(u.name)) LIKE '%rodrigo%' AND LOWER(TRIM(u.name)) LIKE '%leon%') "
+    "OR LOWER(u.email) LIKE '%leon%')"
+)
+
+
+def _roles_sql_066() -> str:
+    return ", ".join(f"'{role}'" for role in _SALES_ROLES_066)
+
+
+def _missing_assignments_sql_066() -> str:
+    """Sales users who should have the standard plan and do not yet."""
+    return (
+        "SELECT COUNT(*) AS cnt FROM users u "
+        f"WHERE u.role IN ({_roles_sql_066()}) "
+        f"AND NOT {_MICHELLE_MATCH_066} "
+        f"AND NOT {_RODRIGO_MATCH_066} "
+        "AND NOT EXISTS ("
+        "SELECT 1 FROM user_commission_plans existing "
+        "WHERE existing.user_id = u.id "
+        "AND existing.plan_key = 'standard' "
+        f"AND existing.effective_date = '{_EFFECTIVE_DATE_066}'"
+        ")"
+    )
+
+
+def warn_066_name_matches(conn) -> None:
+    """Warn when Michelle Cady or Rodrigo Leon does not match exactly one user.
+
+    The migration still excludes every match. A count of 0 means the exception
+    was not found. A count above 1 means the name or email token was broad.
+    """
+    if not table_exists(conn, "users"):
+        print(
+            "  WARNING: 066 cannot match Michelle Cady or Rodrigo Leon; users table is missing",
+            file=sys.stderr,
+        )
+        return
+    checks = (
+        ("Michelle Cady", _MICHELLE_MATCH_066),
+        ("Rodrigo Leon", _RODRIGO_MATCH_066),
+    )
+    for label, predicate in checks:
+        row = _fetch_one(
+            conn,
+            "SELECT COUNT(*) AS cnt, "
+            "GROUP_CONCAT(CONCAT(u.name, ' <', u.email, '>') SEPARATOR ', ') AS matched "
+            f"FROM users u WHERE {predicate}",
+        )
+        count = int(row["cnt"]) if row and row.get("cnt") is not None else 0
+        matched = (row or {}).get("matched") or ""
+        if count == 0:
+            print(
+                f"  WARNING: 066 expected one user for {label} and matched 0",
+                file=sys.stderr,
+            )
+        elif count > 1:
+            print(
+                f"  WARNING: 066 expected one user for {label} and matched {count}: {matched}",
+                file=sys.stderr,
+            )
+
+
+def detect_066(conn) -> bool:
+    """066 applied ↔ every eligible sales user has the standard plan row.
+
+    Eligible users are the role union in _SALES_ROLES_066, minus anyone who
+    matches Michelle Cady or Rodrigo Leon. The effect is zero of those users
+    missing user_commission_plans (plan_key standard, effective_date
+    2026-09-25). Excluded users are not required to lack a row: a later
+    individual plan must not make this migration look unapplied.
+    """
+    if not table_exists(conn, "user_commission_plans") or not table_exists(conn, "users"):
+        return False
+    missing = _fetch_one(conn, _missing_assignments_sql_066())
+    return bool(missing and int(missing["cnt"]) == 0)
+
+
 def detect_064(conn) -> bool:
     """064 applied ↔ estimates.irrigation_occurrences column exists.
 
@@ -953,6 +1051,7 @@ _DETECT: dict = {
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
     "065_commission_cadence_and_plans":           detect_065,
+    "066_assign_standard_commission_plan":        detect_066,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
@@ -1055,6 +1154,11 @@ def _step(
         return _do_apply(conn, migration_id, path, checksum, dry_run, verbose,
                          apply_fn=lambda: apply_004(conn, path, verbose, branch=branch),
                          suffix=_BRANCH_LABEL.get(branch, ""))
+
+    # 066 prints exclusion warnings on the apply that records the migration.
+    # Once schema_migrations has the row, _step returns above and stays quiet.
+    if migration_id == "066_assign_standard_commission_plan":
+        warn_066_name_matches(conn)
 
     # ── standard detection (005–012) ──────────────────────────────────────────
     detect_fn = _DETECT.get(migration_id)

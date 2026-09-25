@@ -1208,3 +1208,97 @@ class TestMigration065:
         assert "INSERT" in first_words
         assert any("information_schema" in s.lower() for s in stmts)
         assert any("PREPARE" == word for word in first_words)
+
+
+class TestMigration066:
+    def test_detector_registered(self):
+        assert M._DETECT["066_assign_standard_commission_plan"] is M.detect_066
+
+    def test_sql_matches_detector_predicates_and_does_not_touch_rates(self):
+        sql = (M.MIGRATIONS_DIR / "066_assign_standard_commission_plan.sql").read_text()
+        upper = sql.upper()
+        assert M._EFFECTIVE_DATE_066 in sql
+        assert M._roles_sql_066() in sql
+        assert M._MICHELLE_MATCH_066 in sql
+        assert M._RODRIGO_MATCH_066 in sql
+        assert "INSERT IGNORE INTO user_commission_plans" in sql
+        assert "NOT EXISTS" in upper
+        executable = "\n".join(M.split_statements(sql))
+        assert "commission_rates" not in executable
+        assert "DELETE" not in upper
+        stmts = M.split_statements(sql)
+        assert [s.split()[0].upper() for s in stmts] == ["INSERT"]
+        assert "inside_sales" in M._SALES_ROLES_066
+        assert "inside_sales" in sql
+        assert "vp_sales" in sql
+
+    def test_detector_keys_on_missing_standard_assignments(self, monkeypatch):
+        monkeypatch.setattr(M, "table_exists", lambda conn, name: False)
+
+        def boom(*_args, **_kwargs):
+            raise AssertionError("detector queried before the tables existed")
+
+        monkeypatch.setattr(M, "_fetch_one", boom)
+        assert M.detect_066(None) is False
+
+        monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
+        seen = {"cnt": 0}
+
+        def fetch(_conn, sql, params=()):
+            assert "user_commission_plans" in sql
+            assert M._EFFECTIVE_DATE_066 in sql
+            assert "inside_sales" in sql
+            assert "vp_sales" in sql
+            assert "cady" in sql and "leon" in sql
+            assert params == ()
+            return {"cnt": seen["cnt"]}
+
+        monkeypatch.setattr(M, "_fetch_one", fetch)
+        assert M.detect_066(None) is True
+        seen["cnt"] = 4
+        assert M.detect_066(None) is False
+
+    def test_warns_on_zero_or_many_name_matches(self, monkeypatch, capsys):
+        monkeypatch.setattr(M, "table_exists", lambda conn, name: name == "users")
+
+        def fetch(_conn, sql, params=()):
+            if "cady" in sql:
+                return {"cnt": 0, "matched": None}
+            if "leon" in sql:
+                return {"cnt": 2, "matched": "Rodrigo Leon <r@x>, Leon Smith <l@x>"}
+            raise AssertionError(sql)
+
+        monkeypatch.setattr(M, "_fetch_one", fetch)
+        M.warn_066_name_matches(None)
+        err = capsys.readouterr().err
+        assert "Michelle Cady" in err
+        assert "matched 0" in err
+        assert "matched 2" in err
+        assert "Leon Smith" in err
+
+    def test_silent_when_each_person_matches_once(self, monkeypatch, capsys):
+        monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
+        monkeypatch.setattr(
+            M, "_fetch_one",
+            lambda _conn, sql, params=(): {"cnt": 1, "matched": "one"},
+        )
+        M.warn_066_name_matches(None)
+        assert capsys.readouterr().err == ""
+
+    def test_step_warns_before_recording(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
+        monkeypatch.setattr(M, "warn_066_name_matches", lambda conn: calls.append("warn"))
+        monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
+        monkeypatch.setattr(M, "_fetch_one", lambda conn, sql, params=(): {"cnt": 0})
+        monkeypatch.setattr(M, "record_migration", lambda *args, **kwargs: calls.append("record"))
+        tag, message = M._step(
+            None,
+            "066_assign_standard_commission_plan",
+            M.MIGRATIONS_DIR / "066_assign_standard_commission_plan.sql",
+            dry_run=True,
+            verbose=False,
+        )
+        assert calls == ["warn"]
+        assert tag == "ok"
+        assert "already-applied" in message

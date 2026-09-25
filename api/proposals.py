@@ -26,6 +26,14 @@ Amendment A notes baked into this file:
   A.4  TeamMember.title aligns to CANONICAL_ROLES ('manager' not 'branch_manager')
   A.6  null-branch rows (aspire_branch_id IS NULL) are returned IN ADDITION to
        branch matches, never instead — both for team_members and client_references
+
+Region on the team-roster and client-reference pickers:
+  Users have no region column. Region is crm.regions, stored on
+  branches.region_id. A caller's region is the distinct region_id of the
+  branches in their user_branches rows. GET team-members and
+  client-references take region_id: omit it to default to that set, pass a
+  regions.id to pick another, or pass 'all' to turn the filter off. Rows
+  whose region cannot be resolved stay in the list (see _region_match_sql).
 """
 from __future__ import annotations
 
@@ -37,7 +45,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query, Response
 
 from db import execute, query
 from api._serialize import coerce_row
@@ -259,6 +267,171 @@ def _build_address(r: dict) -> str:
     return ", ".join(filter(None, [street, city_state_zip]))
 
 
+# Sentinel for "do not restrict by region". Not a crm.regions.id.
+_REGION_FILTER_ALL = "all"
+
+# Applied filter, for a client that wants to label the default selection.
+# "all" means no region restriction; otherwise comma-separated regions.id
+# values. The JSON body stays an array so existing callers keep working.
+_REGION_FILTER_HEADER = "X-Region-Filter"
+
+
+def _region_id_out(row: dict) -> Optional[str]:
+    """branches.region_id as a slug, or None when the region is unknown."""
+    raw = row.get("region_id")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
+def _set_region_filter_header(response: Response, region_ids: Optional[list[str]]) -> None:
+    response.headers[_REGION_FILTER_HEADER] = (
+        _REGION_FILTER_ALL if not region_ids else ",".join(region_ids)
+    )
+
+
+async def _caller_region_ids(user_id: Optional[str]) -> list[str]:
+    """Distinct regions of the branches assigned to this user.
+
+    Region is not stored on users. It lives on branches.region_id
+    (crm.regions.id). The caller's region is that set for the branches in
+    their user_branches rows — the same assignment table that scopes
+    estimates. A branch with a null or blank region_id does not invent a
+    region for the caller.
+    """
+    if not user_id:
+        return []
+    rows = await query(
+        """
+        SELECT DISTINCT b.region_id AS region_id
+        FROM user_branches ub
+        INNER JOIN branches b ON b.aspire_branch_id = ub.aspire_branch_id
+        WHERE ub.user_id = %s
+          AND b.region_id IS NOT NULL
+          AND b.region_id <> ''
+        ORDER BY b.region_id
+        """,
+        [user_id],
+    )
+    seen: list[str] = []
+    for row in rows:
+        rid = _region_id_out(row)
+        if rid and rid not in seen:
+            seen.append(rid)
+    return seen
+
+
+async def _resolve_region_filter(
+    region_id: Optional[str], user: dict
+) -> Optional[list[str]]:
+    """Region ids to keep, or None when the picker must not restrict by region.
+
+    An omitted region_id defaults to the caller's region(s). When that set
+    is empty — no user_branches rows, or every assigned branch has no
+    region — the default is unrestricted, the same as region_id=all.
+    Restricting those callers to "unknown region only" would hide the
+    people they need to put on a proposal.
+
+    An explicit id is checked against crm.regions. 'all' (any case) turns
+    the filter off so a rep can leave their region.
+    """
+    if region_id is not None:
+        token = region_id.strip()
+        if token.lower() == _REGION_FILTER_ALL:
+            return None
+        if not token or len(token) > 36:
+            raise HTTPException(
+                status_code=400,
+                detail="region_id must be a crm.regions.id or 'all'.",
+            )
+        found = await query("SELECT id FROM regions WHERE id = %s", [token])
+        if not found:
+            raise HTTPException(
+                status_code=400,
+                detail="Unknown region_id. Pass a crm.regions.id or 'all'.",
+            )
+        return [token]
+    caller_regions = await _caller_region_ids(user.get("id"))
+    return caller_regions or None
+
+
+def _region_match_sql(region_ids: Optional[list[str]]) -> tuple[str, list[Any]]:
+    """Predicate for a roster row's region, plus its bound params.
+
+    A row matches when its branch's region is one of region_ids, OR the
+    region cannot be determined. Unknown means the row has no
+    aspire_branch_id (company-wide roster), the branch row is missing, or
+    branches.region_id is null or blank. Those rows stay in the list so
+    missing region data is visible instead of silently dropped. The joined
+    region_id is null in every one of those cases except a blank string,
+    which is matched on its own.
+
+    Returns ("", []) when there is nothing to restrict.
+    """
+    if not region_ids:
+        return "", []
+    placeholders = ", ".join(["%s"] * len(region_ids))
+    clause = (
+        f"(b.region_id IN ({placeholders})"
+        " OR b.region_id IS NULL OR b.region_id = ''"
+        " OR t.aspire_branch_id IS NULL)"
+    )
+    return clause, list(region_ids)
+
+
+async def _fetch_roster(
+    *,
+    table: str,
+    order_by: str,
+    region_ids: Optional[list[str]],
+    aspire_branch_id: Optional[int],
+    team_type: Optional[str] = None,
+    include_user_branch_twins: bool = False,
+) -> list[dict]:
+    """Active roster rows for one picker, with the branch's region joined on.
+
+    table and order_by are fixed literals from the call sites, never request
+    input. include_user_branch_twins is the team-member branch filter's
+    third arm (migration 058): a manager pinned to one city-twin is also
+    returned for the other via user_branches.
+    """
+    conditions = ["t.active = 1"]
+    params: list[Any] = []
+
+    if aspire_branch_id is not None:
+        if include_user_branch_twins:
+            conditions.append(
+                "(t.aspire_branch_id = %s OR t.aspire_branch_id IS NULL"
+                " OR t.user_id IN (SELECT user_id FROM user_branches"
+                " WHERE aspire_branch_id = %s))"
+            )
+            params.extend([aspire_branch_id, aspire_branch_id])
+        else:
+            conditions.append(
+                "(t.aspire_branch_id = %s OR t.aspire_branch_id IS NULL)"
+            )
+            params.append(aspire_branch_id)
+
+    if team_type:
+        conditions.append("t.team_type = %s")
+        params.append(team_type)
+
+    region_sql, region_params = _region_match_sql(region_ids)
+    if region_sql:
+        conditions.append(region_sql)
+        params.extend(region_params)
+
+    where = "WHERE " + " AND ".join(conditions)
+    return await query(
+        f"SELECT t.*, b.region_id "
+        f"FROM {table} t "
+        f"LEFT JOIN branches b ON b.aspire_branch_id = t.aspire_branch_id "
+        f"{where} ORDER BY {order_by}",
+        params or None,
+    )
+
+
 def _team_member_out(r: dict) -> dict:
     """Map a team_members row to TeamMember API shape."""
     return {
@@ -275,6 +448,9 @@ def _team_member_out(r: dict) -> dict:
         "headshotObjectKey": r.get("headshot_object_key"),
         "active": bool(r["active"]),
         "sortOrder": r["sort_order"],
+        # branches.region_id via the roster join. null = company-wide row,
+        # missing branch, or a branch whose region was never set.
+        "regionId": _region_id_out(r),
     }
 
 
@@ -293,6 +469,9 @@ def _client_reference_out(r: dict) -> dict:
         "address": r["address"],
         "clientSinceYear": r["client_since_year"],
         "active": bool(r["active"]),
+        # branches.region_id via the roster join. null when the reference is
+        # company-wide or its branch has no region.
+        "regionId": _region_id_out(r),
     }
 
 
@@ -671,7 +850,8 @@ def register(app, require_auth) -> None:
         ]
 
     # ── GET /api/proposals/config/team-members ─────────────────────────────
-    # Returns TeamMember[] with optional aspire_branch_id and team_type filters.
+    # Returns TeamMember[] with optional aspire_branch_id, team_type, and
+    # region_id filters.
     #
     # Amendment A.6 null-branch-inclusion rule:
     #   When aspire_branch_id is supplied, null-aspire_branch_id rows are returned
@@ -684,62 +864,73 @@ def register(app, require_auth) -> None:
     #   table, migration 019). Migration 057 pins each manager's team_members row
     #   to one twin, so the user_branches subquery surfaces them for the other.
     #   The subquery hits idx_user_branches_branch; the table is small.
+    #
+    # region_id defaults to the caller's region(s). Pass a regions.id to pick
+    # another region, or 'all' to show every region. Rows with no resolvable
+    # region are included either way. X-Region-Filter reports what was applied.
 
     @app.get("/api/proposals/config/team-members")
     async def get_proposal_team_members(
+        response: Response,
         aspire_branch_id: Optional[int] = Query(default=None),
         team_type: Optional[str] = Query(default=None),
+        region_id: Optional[str] = Query(
+            default=None,
+            description=(
+                "crm.regions.id to filter to, or 'all' for every region. "
+                "Omit to default to the caller's region(s), from "
+                "user_branches joined to branches.region_id. Rows with no "
+                "resolvable region are included."
+            ),
+        ),
         _user: dict = Depends(require_auth),
     ) -> list:
-        conditions: list[str] = ["active = 1"]
-        params: list[Any] = []
-
-        if aspire_branch_id is not None:
-            # Include branch-specific, null-branch (company-wide) rows, AND any
-            # row whose linked user holds this branch in user_branches (e.g. a
-            # manager whose team_members row is pinned to the twin branch id).
-            conditions.append(
-                "(aspire_branch_id = %s OR aspire_branch_id IS NULL"
-                " OR user_id IN (SELECT user_id FROM user_branches WHERE aspire_branch_id = %s))"
-            )
-            params.extend([aspire_branch_id, aspire_branch_id])
-
-        if team_type:
-            conditions.append("team_type = %s")
-            params.append(team_type)
-
-        where = "WHERE " + " AND ".join(conditions)
-        rows = await query(
-            f"SELECT * FROM team_members {where} ORDER BY sort_order, name",
-            params or None,
+        region_ids = await _resolve_region_filter(region_id, _user)
+        _set_region_filter_header(response, region_ids)
+        rows = await _fetch_roster(
+            table="team_members",
+            order_by="t.sort_order, t.name",
+            region_ids=region_ids,
+            aspire_branch_id=aspire_branch_id,
+            team_type=team_type,
+            include_user_branch_twins=True,
         )
         return [_team_member_out(r) for r in rows]
 
     # ── GET /api/proposals/config/client-references ─────────────────────────
-    # Returns ClientReference[] with optional aspire_branch_id filter.
+    # Returns ClientReference[] with optional aspire_branch_id and region_id
+    # filters.
     #
     # Amendment A.6 null-branch-inclusion rule:
     #   When aspire_branch_id is supplied, null-aspire_branch_id (company-wide)
     #   rows are returned IN ADDITION to branch-specific matches.
-    #   Omitting the filter returns all active rows.
+    #
+    # region_id behaves the same as on team-members: default is the caller's
+    # region, 'all' disables it, and references with no resolvable region
+    # stay in the list. X-Region-Filter reports what was applied.
 
     @app.get("/api/proposals/config/client-references")
     async def get_proposal_client_references(
+        response: Response,
         aspire_branch_id: Optional[int] = Query(default=None),
+        region_id: Optional[str] = Query(
+            default=None,
+            description=(
+                "crm.regions.id to filter to, or 'all' for every region. "
+                "Omit to default to the caller's region(s), from "
+                "user_branches joined to branches.region_id. Rows with no "
+                "resolvable region are included."
+            ),
+        ),
         _user: dict = Depends(require_auth),
     ) -> list:
-        conditions: list[str] = ["active = 1"]
-        params: list[Any] = []
-
-        if aspire_branch_id is not None:
-            # Include branch-specific AND company-wide (null) rows.
-            conditions.append("(aspire_branch_id = %s OR aspire_branch_id IS NULL)")
-            params.append(aspire_branch_id)
-
-        where = "WHERE " + " AND ".join(conditions)
-        rows = await query(
-            f"SELECT * FROM client_references {where} ORDER BY client_since_year DESC",
-            params or None,
+        region_ids = await _resolve_region_filter(region_id, _user)
+        _set_region_filter_header(response, region_ids)
+        rows = await _fetch_roster(
+            table="client_references",
+            order_by="t.client_since_year DESC",
+            region_ids=region_ids,
+            aspire_branch_id=aspire_branch_id,
         )
         return [_client_reference_out(r) for r in rows]
 

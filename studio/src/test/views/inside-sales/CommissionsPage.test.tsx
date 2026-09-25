@@ -107,5 +107,31 @@ describe('CommissionsPage rep picker', () => {
       calls.some((url) => url.startsWith('/api/commissions/list') && url.includes('user_id=rep-1')),
     ).toBe(true)
     expect(screen.getByRole('heading', { name: "Alex Rivera's Commissions" })).toBeInTheDocument()
+    expect(screen.getByText('Standard Sales Commission')).toBeInTheDocument()
+  })
+
+  it('shows the signed-in rep their plan from the summary', async () => {
+    seed('sales')
+    render(<CommissionsPage />)
+    await waitForSummary()
+
+    expect(screen.getByText('Test User')).toBeInTheDocument()
+    expect(screen.getByText('Standard Sales Commission')).toBeInTheDocument()
+    expect(screen.getByText(/ignore the period filter/)).toBeInTheDocument()
+  })
+
+  it('shows the legacy rate chip when the selected rep has no plan', async () => {
+    seed('manager')
+    const user = userEvent.setup()
+    render(<CommissionsPage />)
+    await waitForSummary()
+
+    await user.click(repPicker()!)
+    await user.click(await screen.findByRole('option', { name: 'Michelle Cady' }))
+
+    expect(await screen.findByText(/4\.00% commission rate/)).toBeInTheDocument()
+    expect(screen.getByText(/effective Jan 1, 2026/)).toBeInTheDocument()
+    expect(screen.queryByText('Standard Sales Commission')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: "Michelle Cady's Commissions" })).toBeInTheDocument()
   })
 })

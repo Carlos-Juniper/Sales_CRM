@@ -111,6 +111,45 @@ def _iso(v: Any) -> Any:
 # the status-change action is recorded in lead_actions, then drop automatically.
 CLOSED_PACKAGE_GRACE_DAYS = 7
 
+# Newest proposal_requests row for the joined lead. created_at is the source of
+# truth: ids are `prop-` plus a random uuid4 fragment, so they only break a
+# timestamp tie. Historical rows stay in the table.
+_LATEST_PACKAGE_PER_LEAD_SQL = (
+    "pr.id = ("
+    "SELECT pr_latest.id FROM proposal_requests pr_latest "
+    "WHERE pr_latest.lead_id = pr.lead_id "
+    "ORDER BY pr_latest.created_at DESC, pr_latest.id DESC "
+    "LIMIT 1)"
+)
+
+
+def _proposal_recency_key(row: dict) -> tuple:
+    """Sort key for 'latest generated proposal': created_at, then id."""
+    created = row.get("created_at")
+    if not isinstance(created, datetime):
+        created = datetime.min
+    return (created, str(row.get("id") or ""))
+
+
+def _latest_package_per_lead(rows: list[dict]) -> list[dict]:
+    """Keep one package row per lead: the newest proposal by created_at.
+
+    The list query applies the same rule in SQL. This pass covers a result
+    that still contains older generations (the unit tests stub the driver).
+    Nothing is deleted. Survivors stay in updated_at order, newest first.
+    """
+    best: dict[Any, dict] = {}
+    for row in rows:
+        lead_id = row.get("lead_id")
+        current = best.get(lead_id)
+        if current is None or _proposal_recency_key(row) > _proposal_recency_key(current):
+            best[lead_id] = row
+    return sorted(
+        best.values(),
+        key=lambda r: r.get("updated_at") if isinstance(r.get("updated_at"), datetime) else datetime.min,
+        reverse=True,
+    )
+
 
 def _package_code(proposal_id: str, created_at: Any) -> str:
     """Stable display code for the proposals list. Not a stored column."""
@@ -916,8 +955,10 @@ def register(app, require_auth) -> None:
 
     # ── GET /api/proposals/packages ────────────────────────────────────────
     # Registered before /api/proposals/{proposal_id} so "packages" is not
-    # captured as a proposal id. One row per saved proposal, joined to the
-    # lead (title, value, status, property) and the latest complete render.
+    # captured as a proposal id. One row per lead — the latest generated
+    # proposal — joined to the lead (title, value, status, property) and the
+    # latest complete render. Older proposal_requests rows are kept; reopen
+    # them through GET /api/proposals?leadId=.
 
     @app.get("/api/proposals/packages")
     async def list_proposal_packages(
@@ -929,21 +970,25 @@ def register(app, require_auth) -> None:
         # Grace window: an excluded-status row is still returned if its terminal
         # status_change was recorded within CLOSED_PACKAGE_GRACE_DAYS days, so
         # reps see recently-won/lost proposals for a week before they disappear.
+        # The latest-per-lead predicate is AND-ed outside that OR group so an
+        # older generation cannot leak back in through the grace window.
         excluded = [s.strip() for s in (exclude_status or "").split(",") if s.strip()]
-        where = ""
         params: list[Any] = []
         if excluded:
             placeholders = ", ".join(["%s"] * len(excluded))
             where = (
-                f"WHERE l.status NOT IN ({placeholders})"
+                f"WHERE {_LATEST_PACKAGE_PER_LEAD_SQL}"
+                f" AND (l.status NOT IN ({placeholders})"
                 " OR COALESCE((SELECT MAX(la.performed_at)"
                 "               FROM lead_actions la"
                 "              WHERE la.lead_id = l.id"
                 "                AND la.action_type = 'status_change'"
                 "                AND la.new_status = l.status), '1970-01-01')"
-                " >= NOW() - INTERVAL %s DAY"
+                " >= NOW() - INTERVAL %s DAY)"
             )
             params = excluded + [CLOSED_PACKAGE_GRACE_DAYS]
+        else:
+            where = f"WHERE {_LATEST_PACKAGE_PER_LEAD_SQL}"
         rows = await query(
             f"""
             SELECT
@@ -990,7 +1035,7 @@ def register(app, require_auth) -> None:
             """,
             params,
         )
-        return [_proposal_package_out(r) for r in rows]
+        return [_proposal_package_out(r) for r in _latest_package_per_lead(rows)]
 
     # ── GET /api/proposals/:id ─────────────────────────────────────────────
     # Reopen / re-edit a persisted proposal.

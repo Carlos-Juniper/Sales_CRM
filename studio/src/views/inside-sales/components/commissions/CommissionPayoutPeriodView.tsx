@@ -51,7 +51,7 @@ export function CommissionPayoutPeriodView({ periods, isLoading }: CommissionPay
 
         {!isLoading && rows.length === 0 && (
           <p className="px-4 py-8 text-sm text-center text-[hsl(var(--muted-fg))]">
-            No checks for this close year
+            No checks in this period
           </p>
         )}
 

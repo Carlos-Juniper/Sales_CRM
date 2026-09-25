@@ -51,6 +51,7 @@ describe('CommissionsPage rep picker', () => {
   afterEach(() => {
     stop()
     useAuthStore.setState({ user: null })
+    vi.useRealTimers()
   })
 
   async function waitForSummary() {
@@ -110,13 +111,12 @@ describe('CommissionsPage rep picker', () => {
     expect(screen.getByText('Standard Sales Commission')).toBeInTheDocument()
   })
 
-  it('keeps the captured close total after the calendar year rolls over', async () => {
+  it('guards the captured close total because mock handlers ignore date params', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2027-01-01T15:00:00Z'))
     seed('sales')
     render(<CommissionsPage />)
     await waitForSummary()
-    vi.useRealTimers()
   })
 
   it('shows the signed-in rep their plan from the summary', async () => {
@@ -184,7 +184,6 @@ describe('CommissionsPage rep picker', () => {
           && !url.includes('year='),
       ),
     ).toBe(true)
-    vi.useRealTimers()
   })
 
   it('shows the legacy rate chip when the selected rep has no plan', async () => {

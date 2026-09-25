@@ -6,14 +6,7 @@ import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockCo
 import { MOCK_BRANCH_COVERAGE } from './proposalRoster'
 import { rosterHandlers } from './rosterHandlers'
 import { CATALOG_ITEM_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
-import {
-  markMockCommissionPaid,
-  markMockInstallmentPaid,
-  mockCommissionList,
-  mockCommissionReps,
-  mockCommissionSummary,
-  mockPayoutSchedule,
-} from './commissions'
+import { commissionHandlers, commissionReps } from './commissionHandlers'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid, UserRole } from '@/types'
 import type { ProposalPackageSummary } from '@/types/proposal'
@@ -592,6 +585,7 @@ const allHandlers = [
   // Rep-scoped team roster and client references (reads, writes, 403/400/404).
   // Reads without rep_id keep the region-filtered shared roster. Portfolio stays unscoped.
   ...rosterHandlers,
+  ...commissionHandlers,
   http.get(`${API}/proposals/config/portfolio`, async () => HttpResponse.json([])),
 
   // GET /api/users
@@ -1658,48 +1652,10 @@ allHandlers.push(
   ),
 )
 
-// Commissions + sales performance. Rep lists are only fetched by roles in
-// REP_SELECTOR_ROLES (api/authz.py REP_VIEWER_ROLES); summary and list
-// endpoints auto-scope when no user_id is supplied.
+// Sales performance rep list. Commission routes live in commissionHandlers.ts.
 allHandlers.push(
-  http.get(`${API}/commissions/reps`, () => HttpResponse.json(mockCommissionReps)),
-  http.get(`${API}/commissions/summary`, ({ request }) => {
-    const url = new URL(request.url)
-    return HttpResponse.json(mockCommissionSummary({
-      user_id: url.searchParams.get('user_id'),
-      start_date: url.searchParams.get('start_date'),
-      end_date: url.searchParams.get('end_date'),
-    }))
-  }),
-  http.get(`${API}/commissions/list`, ({ request }) => {
-    const url = new URL(request.url)
-    return HttpResponse.json(mockCommissionList({
-      user_id: url.searchParams.get('user_id'),
-      status: url.searchParams.get('status'),
-      estimate_type: url.searchParams.get('estimate_type'),
-      start_date: url.searchParams.get('start_date'),
-      end_date: url.searchParams.get('end_date'),
-    }))
-  }),
-  http.get(`${API}/commissions/payout-schedule`, ({ request }) => {
-    const url = new URL(request.url)
-    const yearParam = url.searchParams.get('year')
-    const year = yearParam ? Number(yearParam) : new Date().getUTCFullYear()
-    return HttpResponse.json(mockPayoutSchedule(url.searchParams.get('user_id') ?? 'rep-1', year))
-  }),
-  http.post(`${API}/commissions/installments/:installmentId/mark-paid`, ({ params }) => {
-    const ok = markMockInstallmentPaid(String(params.installmentId))
-    if (!ok) return HttpResponse.json({ detail: 'Installment not found' }, { status: 404 })
-    return HttpResponse.json({ success: true })
-  }),
-  http.post(`${API}/commissions/:commissionId/mark-paid`, async ({ params, request }) => {
-    const body = await request.json() as { payment_period?: string }
-    const ok = markMockCommissionPaid(String(params.commissionId), body.payment_period ?? '')
-    if (!ok) return HttpResponse.json({ detail: 'Commission not found' }, { status: 404 })
-    return HttpResponse.json({ success: true })
-  }),
   http.get(`${API}/sales-performance/reps`, () =>
-    HttpResponse.json(mockCommissionReps.map(({ id, name, email }) => ({ id, name, email }))),
+    HttpResponse.json(commissionReps.map(({ id, name, email }) => ({ id, name, email }))),
   ),
   http.get(`${API}/sales-performance/summary`, () =>
     HttpResponse.json({

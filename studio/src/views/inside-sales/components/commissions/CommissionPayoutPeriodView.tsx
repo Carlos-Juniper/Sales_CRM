@@ -2,30 +2,17 @@ import { Receipt } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import {
+  describePayout,
   formatPayoutDate,
+  PENDING_BILLING_DATA_LABEL,
   payoutAmountLabel,
-  payoutGroupLabel,
 } from '@/lib/commissions'
-import type { CommissionPayoutBucket, CommissionPayoutPeriod } from '@/types/commissions'
+import type { CommissionPayoutPeriod } from '@/types/commissions'
 import { InstallmentStatusBadge } from './InstallmentStatusBadge'
 
 interface CommissionPayoutPeriodViewProps {
   periods: CommissionPayoutPeriod[] | undefined
   isLoading: boolean
-}
-
-const BUCKET_ORDER: Record<CommissionPayoutBucket, number> = {
-  dated: 0,
-  unscheduled: 1,
-  pending_billing_data: 2,
-}
-
-function orderedPeriods(periods: CommissionPayoutPeriod[]): CommissionPayoutPeriod[] {
-  return periods.slice().sort((a, b) => {
-    const bucketDiff = BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket]
-    if (bucketDiff !== 0) return bucketDiff
-    return (a.payout_date ?? '').localeCompare(b.payout_date ?? '')
-  })
 }
 
 function periodKey(period: CommissionPayoutPeriod): string {
@@ -34,7 +21,7 @@ function periodKey(period: CommissionPayoutPeriod): string {
 }
 
 export function CommissionPayoutPeriodView({ periods, isLoading }: CommissionPayoutPeriodViewProps) {
-  const rows = orderedPeriods(periods ?? [])
+  const rows = periods ?? []
   const hasUndated = rows.some((period) => period.bucket !== 'dated')
 
   return (
@@ -71,8 +58,7 @@ export function CommissionPayoutPeriodView({ periods, isLoading }: CommissionPay
         {!isLoading && rows.length > 0 && (
           <ul>
             {rows.map((period) => {
-              const month = payoutGroupLabel(period)
-              const amount = payoutAmountLabel(period)
+              const payout = describePayout(period)
               const key = periodKey(period)
               return (
                 <li
@@ -80,14 +66,18 @@ export function CommissionPayoutPeriodView({ periods, isLoading }: CommissionPay
                   className="flex items-center gap-3 flex-wrap px-4 py-2.5 border-b border-[hsl(var(--border))] last:border-0 text-sm"
                   data-testid={`payout-period-${key}`}
                 >
-                  <span className="min-w-[140px] font-medium text-[hsl(var(--fg))]">{month}</span>
+                  <span className="min-w-[140px] font-medium text-[hsl(var(--fg))]">
+                    {payout.kind === 'pending' ? PENDING_BILLING_DATA_LABEL : payout.month}
+                  </span>
                   {period.payout_date && (
                     <span className="text-xs text-[hsl(var(--muted-fg))]">
                       {formatPayoutDate(period.payout_date)}
                     </span>
                   )}
-                  {amount !== month && (
-                    <span className="ml-auto font-mono text-xs text-[hsl(var(--fg))]">{amount}</span>
+                  {payout.kind === 'known' && payout.amount != null && (
+                    <span className="ml-auto font-mono text-xs text-[hsl(var(--fg))]">
+                      {payoutAmountLabel({ amount_cents: payout.amount, amount_partial: period.amount_partial })}
+                    </span>
                   )}
                   <InstallmentStatusBadge status={period.status} />
                 </li>

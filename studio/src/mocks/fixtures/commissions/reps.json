@@ -1,0 +1,20 @@
+[
+  {
+    "id": "rep-alex",
+    "name": "Alex Rivera",
+    "email": "alex.rivera@example.com",
+    "commission_rate": 0.05,
+    "effective_date": "2026-01-01",
+    "plan_key": "standard",
+    "plan_name": "Standard Sales Commission"
+  },
+  {
+    "id": "rep-cady",
+    "name": "Michelle Cady",
+    "email": "michelle.cady@example.com",
+    "commission_rate": 0.04,
+    "effective_date": "2026-01-01",
+    "plan_key": null,
+    "plan_name": null
+  }
+]

@@ -39,8 +39,14 @@ const periods: CommissionPayoutPeriod[] = [
 ]
 
 describe('CommissionPayoutPeriodView', () => {
-  it('keeps dated checks ahead of separate unscheduled and pending groups', () => {
-    render(<CommissionPayoutPeriodView periods={periods} isLoading={false} />)
+  it('renders by_payout_period in the order the API sent', () => {
+    const apiOrder: CommissionPayoutPeriod[] = [
+      periods[3],
+      periods[2],
+      periods[1],
+      periods[0],
+    ]
+    render(<CommissionPayoutPeriodView periods={apiOrder} isLoading={false} />)
 
     expect(screen.getByRole('heading', { name: 'What hits each check' })).toBeInTheDocument()
 
@@ -71,6 +77,15 @@ describe('CommissionPayoutPeriodView', () => {
     expect(items[1]).toHaveTextContent('September 2026')
     expect(items[2]).toHaveTextContent('Unscheduled (amount known)')
     expect(items[3]).toHaveTextContent('Pending billing data')
+  })
+
+  it('does not reorder an undated row ahead of a later dated check', () => {
+    const sentOrder: CommissionPayoutPeriod[] = [periods[2], periods[3], periods[0]]
+    render(<CommissionPayoutPeriodView periods={sentOrder} isLoading={false} />)
+    const items = screen.getAllByRole('listitem')
+    expect(items[0]).toHaveTextContent('September 2026')
+    expect(items[1]).toHaveTextContent('June 2026')
+    expect(items[2]).toHaveTextContent('Pending billing data')
   })
 
   it('marks a mixed check as known dollars plus pending', () => {

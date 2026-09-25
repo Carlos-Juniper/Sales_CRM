@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom'
 import { beforeAll, afterAll, afterEach } from 'vitest'
 import { server } from '../mocks/server'
-import { resetMockCommissions } from '../mocks/commissions'
 
 // jsdom does not implement ResizeObserver; stub it for all tests
 Object.defineProperty(window, 'ResizeObserver', {
@@ -31,6 +30,5 @@ Object.defineProperty(window, 'matchMedia', {
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => {
   server.resetHandlers()
-  resetMockCommissions()
 })
 afterAll(() => server.close())

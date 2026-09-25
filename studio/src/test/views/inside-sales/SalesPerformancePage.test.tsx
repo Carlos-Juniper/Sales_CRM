@@ -109,18 +109,18 @@ describe('SalesPerformancePage rep picker', () => {
       expect(
         calls.some(
           (url) =>
-            url.startsWith('/api/sales-performance/summary') && url.includes('user_id=rep-1'),
+            url.startsWith('/api/sales-performance/summary') && url.includes('user_id=rep-alex'),
         ),
       ).toBe(true)
     })
     expect(
       calls.some(
-        (url) => url.startsWith('/api/sales-performance/won-deals') && url.includes('user_id=rep-1'),
+        (url) => url.startsWith('/api/sales-performance/won-deals') && url.includes('user_id=rep-alex'),
       ),
     ).toBe(true)
     expect(
       calls.some(
-        (url) => url.startsWith('/api/sales-performance/lost-deals') && url.includes('user_id=rep-1'),
+        (url) => url.startsWith('/api/sales-performance/lost-deals') && url.includes('user_id=rep-alex'),
       ),
     ).toBe(true)
   })

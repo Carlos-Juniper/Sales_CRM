@@ -124,7 +124,7 @@ export function sellRateCentsPer1000Sf(
 }
 
 /**
- * The editors read kits from GET /catalog-items.
+ * The editors read kits from GET /service-kits.
  * Adapts maintenance_hours CatalogItems to the editor's catalog-row shape,
  * keeping the sq-ft-only basis rule: only ACTIVE, sq-ft, production-rated
  * kits are addable (a line seeded from one always passes the save guard).
@@ -245,7 +245,7 @@ export function catalogToService(
 
 /**
  * Default new section, seeded with the core region-template services.
- * `catalog` comes from GET /catalog-items; the literal is the
+ * `catalog` comes from GET /service-kits; the literal is the
  * offline fallback. API catalogs (whose keys are kit ids, not the literal
  * seed keys) seed the first three rows.
  */

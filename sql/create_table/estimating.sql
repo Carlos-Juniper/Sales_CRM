@@ -128,6 +128,9 @@ CREATE TABLE IF NOT EXISTS crm.estimate_sections (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- §3.6 catalog_items / kits -------------------------------------------------------
+-- Baseline name. Migration 065 renames this table to service_kits and
+-- reuses catalog_items for the materials item master. init_db applies this
+-- file BEFORE migrations, so the CREATE below must keep the pre-065 name.
 -- Recreates Aspire kits natively. Editable by authorized non-developer users
 -- (BRD II-9.5). POPULATED by sql/migrations/009_seed_catalog_items.sql
 -- (Handoff 22 — generated from business docs/Juniper_Aspire_Kit_Review.xlsx

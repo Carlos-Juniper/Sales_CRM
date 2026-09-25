@@ -302,11 +302,15 @@ export interface EstimateSection {
 export interface SectionService {
   id: string
   sectionId: string
+  /**
+   * Wire name for section_services.service_kit_id (service_kits.id).
+   * Kept as catalogItemId so existing clients do not change payload shape.
+   */
   catalogItemId: string | null
   /**
    * Per-line LS/IR override for the ITB EST LS $ / EST IR $ split. `null`
-   * derives the discipline from the catalog item's `serviceType` (irrigation
-   * vs. landscape); a manual line with no catalog item defaults to landscape
+   * derives the discipline from the kit's `serviceType` (irrigation
+   * vs. landscape); a manual line with no kit defaults to landscape
    * unless set explicitly here.
    */
   discipline?: 'landscape' | 'irrigation' | null
@@ -329,7 +333,7 @@ export interface SectionService {
   /** Tracked for production planning; does NOT drive price. */
   hours: number | null
   sortOrder: number
-  /** Contract generator fields (from catalog_items, for approved/won maintenance estimates) */
+  /** Contract generator fields (from service_kits, for approved/won maintenance estimates) */
   serviceType?: string | null
   scopeText?: string | null
   /**
@@ -363,6 +367,10 @@ export interface SectionServiceComponent {
 
 export type KitType = 'maintenance_hours' | 'install_quantity'
 
+/**
+ * Priced service kit (`service_kits`, renamed from catalog_items in migration 065).
+ * Not a material SKU. Materials will live in the new catalog_items table.
+ */
 export interface CatalogItem {
   id: string
   description: string
@@ -449,7 +457,7 @@ export interface TakeoffLine {
    * lines that carry a catalogItemId.
    */
   opportunityQty: number
-  /** Nullable kit link enabling the Aspire qty push. */
+  /** Nullable service_kits.id (column takeoff_lines.service_kit_id). */
   catalogItemId?: string | null
 }
 

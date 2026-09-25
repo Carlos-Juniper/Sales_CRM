@@ -305,7 +305,7 @@ function GroupRows({
   onAddComponent: (serviceId: string, kind: ComponentKind) => void
   onGroupLabor: (serviceId: string) => void
   onAddKit: (kitId: string) => void
-  /** Kits from GET /catalog-items (literal = offline fallback). */
+  /** Kits from GET /service-kits (literal = offline fallback). */
   kits: InstallCatalogKit[]
 }) {
   return (
@@ -365,7 +365,7 @@ function GroupRows({
           ))}
         </select>
         <span className="text-[10px] text-[hsl(var(--muted-fg))]">
-          Kit sell / cost / GM% come from catalog_items — cost basis averages live vendor prices.
+          Kit sell / cost / GM% come from the service kit catalog — cost basis averages live vendor prices.
         </span>
       </div>
     </>

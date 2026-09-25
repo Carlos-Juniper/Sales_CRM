@@ -516,20 +516,46 @@ class TestDetectFunctions:
     # ── 009 ───────────────────────────────────────────────────────────────────
 
     def test_detect_009_true_when_seeded_row_exists(self, monkeypatch):
-        monkeypatch.setattr(M, "table_exists", lambda conn, t: True)
+        monkeypatch.setattr(M, "table_exists", lambda conn, t: t == "catalog_items")
+        monkeypatch.setattr(M, "column_exists", lambda conn, t, c: c == "kit_type")
+        monkeypatch.setattr(M, "_fetch_one", lambda conn, sql, params=(): {"cnt": 1})
+        assert M.detect_009(None) is True
+
+    def test_detect_009_true_when_seed_row_is_on_service_kits(self, monkeypatch):
+        """After 065 the seeded kit lives in service_kits, not the materials table."""
+        def tables(conn, t):
+            return t == "service_kits"
+
+        monkeypatch.setattr(M, "table_exists", tables)
+        monkeypatch.setattr(M, "column_exists", lambda conn, t, c: t == "service_kits" and c == "kit_type")
         monkeypatch.setattr(M, "_fetch_one", lambda conn, sql, params=(): {"cnt": 1})
         assert M.detect_009(None) is True
 
     def test_detect_009_false_when_no_seeded_row(self, monkeypatch):
-        monkeypatch.setattr(M, "table_exists", lambda conn, t: True)
+        monkeypatch.setattr(M, "table_exists", lambda conn, t: t == "catalog_items")
+        monkeypatch.setattr(M, "column_exists", lambda conn, t, c: c == "kit_type")
         monkeypatch.setattr(M, "_fetch_one", lambda conn, sql, params=(): {"cnt": 0})
         assert M.detect_009(None) is False
 
     def test_detect_009_false_when_catalog_items_table_absent(self, monkeypatch):
         # Regression: on a fresh prod DB without migration 009 applied,
-        # catalog_items doesn't exist yet.  Must return False, not error.
+        # the kit table doesn't exist yet.  Must return False, not error.
         monkeypatch.setattr(M, "table_exists", lambda conn, t: False)
         assert M.detect_009(None) is False
+
+    def test_detect_009_ignores_materials_catalog_items(self, monkeypatch):
+        """The new catalog_items table has no kit_type and must not be seeded."""
+        monkeypatch.setattr(M, "table_exists", lambda conn, t: t == "catalog_items")
+        monkeypatch.setattr(M, "column_exists", lambda conn, t, c: False)
+        called = {"fetch": False}
+
+        def fetch(conn, sql, params=()):
+            called["fetch"] = True
+            return {"cnt": 0}
+
+        monkeypatch.setattr(M, "_fetch_one", fetch)
+        assert M.detect_009(None) is False
+        assert called["fetch"] is False
 
     # ── 011 ───────────────────────────────────────────────────────────────────
 
@@ -543,6 +569,7 @@ class TestDetectFunctions:
         (M.detect_005, "estimates",    "rfi_status"),
         (M.detect_006, "itb_projects", "estimate_id"),
         (M.detect_008, "takeoff_lines","catalog_item_id"),
+        (M.detect_008, "takeoff_lines","service_kit_id"),
         (M.detect_010, "estimates",    "lead_id"),
         (M.detect_012, "estimates",    "turf_area_acres"),
         (M.detect_019, "estimates",    "aspire_branch_id"),

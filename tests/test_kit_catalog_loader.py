@@ -113,7 +113,7 @@ class TestIdempotency:
         rows = loader.extract_all(WORKBOOK)
         sql = loader.generate_seed_sql(rows)
         assert "ON DUPLICATE KEY UPDATE" in sql
-        assert "INSERT INTO catalog_items" in sql
+        assert "INSERT INTO service_kits" in sql
         # re-running the generator produces byte-identical, reviewable SQL
         assert sql == loader.generate_seed_sql(loader.extract_all(WORKBOOK))
 
@@ -160,7 +160,7 @@ class TestCountValidation:
         rows = loader.extract_all(WORKBOOK)
 
         async def fake_query(sql, params=None):
-            assert "catalog_items" in sql
+            assert "service_kits" in sql
             return [
                 {"kit_type": "install_quantity", "c": 80},
                 {"kit_type": "maintenance_hours",

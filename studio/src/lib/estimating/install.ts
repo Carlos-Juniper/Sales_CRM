@@ -5,7 +5,7 @@
 //   • TP = QTY × unit sell price; each line carries an embedded SUB COST and
 //     a target GM%. GM% is the pricing lever — never an hourly rate.
 //   • HOURS are tracked for production planning only and NEVER move price.
-//   • Cost basis feeds up from catalog_items; live-goods SKUs may carry
+//   • Cost basis feeds up from service_kits; live-goods SKUs may carry
 //     multiple vendor prices averaged into the kit cost (II-6.5).
 //   • Labor/material component split + same-production-rate labor grouping
 //     (II-9.7 — landscape gets the parts/labor split irrigation already has).
@@ -245,7 +245,7 @@ export const INSTALL_KIT_CATALOG: InstallCatalogKit[] = [
 ]
 
 /**
- * The editors read kits from GET /catalog-items.
+ * The editors read kits from GET /service-kits.
  * Adapts install_quantity CatalogItems into the editor's kit shape; the API
  * row carries a single blended unit cost, which stands in as the one vendor
  * quote until per-vendor pricing lands. The INSTALL_KIT_CATALOG literal

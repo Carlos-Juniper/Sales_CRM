@@ -48,7 +48,7 @@ UNRATED_KIT = {
 def db():
     fake = FakeDb()
     for kit in (RATED_KIT, UNRATED_KIT):
-        fake.tables["catalog_items"][kit["id"]] = dict(kit)
+        fake.tables["service_kits"][kit["id"]] = dict(kit)
     with patch("api.estimating.query", new=AsyncMock(side_effect=fake.query)), \
          patch("api.estimating.execute", new=AsyncMock(side_effect=fake.execute)), \
          patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock), \

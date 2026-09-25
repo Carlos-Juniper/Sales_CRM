@@ -242,7 +242,7 @@ class TestSavePushesTakeoffQtys:
             push.assert_awaited_once()
             opp_id, items = push.await_args.args
             assert opp_id == 9001
-            assert [(i.catalog_item_id, i.qty, i.uom) for i in items] == [
+            assert [(i.service_kit_id, i.qty, i.uom) for i in items] == [
                 ("501", 24.0, "ea"),
                 ("502", 1640.0, "FT"),
             ]

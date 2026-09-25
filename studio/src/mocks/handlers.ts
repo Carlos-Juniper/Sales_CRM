@@ -307,6 +307,20 @@ function notesForCreate(raw: unknown): { ok: true; notes: string | null } | { ok
   return { ok: true, notes: trimmed.length > 0 ? trimmed : null }
 }
 
+/** Kit catalog. Registered on /service-kits and the /catalog-items alias. */
+async function listServiceKits({ request }: { request: Request }) {
+  await delay(50)
+  const url = new URL(request.url)
+  const branch = url.searchParams.get('branch')
+  const kitType = url.searchParams.get('kit_type')
+  const active = url.searchParams.get('active')
+  let rows = CATALOG_ITEM_SEED
+  if (branch) rows = rows.filter((r) => r.branch === branch)
+  if (kitType) rows = rows.filter((r) => r.kitType === kitType)
+  if (active !== null) rows = rows.filter((r) => r.active === (active === 'true' || active === '1'))
+  return HttpResponse.json(rows)
+}
+
 const allHandlers = [
   // GET /api/auth/me — mock session so the app shell can boot under VITE_MOCK
   http.get(`${API}/auth/me`, async () => {
@@ -751,20 +765,11 @@ const allHandlers = [
     },
   ),
 
-  // GET /api/estimating/catalog-items — kit catalog (seeded from
+  // GET /api/estimating/service-kits — kit catalog (seeded from
   // the workbook rows; mirrors the backend's branch/kit_type/active filters).
-  http.get(`${API}/estimating/catalog-items`, async ({ request }) => {
-    await delay(50)
-    const url = new URL(request.url)
-    const branch = url.searchParams.get('branch')
-    const kitType = url.searchParams.get('kit_type')
-    const active = url.searchParams.get('active')
-    let rows = CATALOG_ITEM_SEED
-    if (branch) rows = rows.filter((r) => r.branch === branch)
-    if (kitType) rows = rows.filter((r) => r.kitType === kitType)
-    if (active !== null) rows = rows.filter((r) => r.active === (active === 'true' || active === '1'))
-    return HttpResponse.json(rows)
-  }),
+  // /catalog-items stays as an alias so an older frontend bundle still loads kits.
+  http.get(`${API}/estimating/service-kits`, listServiceKits),
+  http.get(`${API}/estimating/catalog-items`, listServiceKits),
 
   // ---------------------------------------------------------------------
   // Estimating — single-source estimate model

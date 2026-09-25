@@ -55,6 +55,7 @@ import { formatOptionalBudget } from '@/lib/estimating/contractBudgets'
 import type { Estimate, EstimatePriority, EstimateStatus } from '@/types/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
+import { RushBadge } from './RushIndicators'
 
 // ----- Badge configs (§3.2 status enum + priority) ----------------------------
 
@@ -367,6 +368,8 @@ function QueueCard({
                 <StatusIcon className="h-2.5 w-2.5" />
                 {statusCfg.label}
               </span>
+              {/* Server flag only. Past-due rows stay on the overdue countdown below; isRush is false for those. */}
+              {estimate.isRush && <RushBadge />}
               <span className="text-[10px] text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))] px-1.5 py-0.5 rounded">
                 {typeTag(estimate)}
               </span>

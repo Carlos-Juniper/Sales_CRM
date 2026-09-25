@@ -226,6 +226,14 @@ export interface EstimateBase {
   siteWalkDate: string | null
   /** SLA clock. */
   dueBackDate: string
+  /**
+   * Server-computed on read (create, list, queue, detail, and PATCH).
+   * True when dueBackDate is today through sla_return_window_days − 1.
+   * False when the date is further out, missing, or already past — a past
+   * date keeps the existing overdue state and is not a rush. Read-only:
+   * never include this on a request payload.
+   */
+  isRush: boolean
   anticipatedCloseDate: string | null
   serviceStartDate: string | null
   /** Landscape estimator user id. */

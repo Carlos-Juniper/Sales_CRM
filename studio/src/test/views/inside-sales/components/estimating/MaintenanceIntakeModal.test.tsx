@@ -24,6 +24,13 @@ import { MaintenanceIntakeModal } from '@/views/inside-sales/components/estimati
 import { InstallIntakeModal } from '@/views/inside-sales/components/estimating/InstallIntakeModal'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 import type { CreateEstimatePayload } from '@/api/estimating'
+import { DUE_BACK_PAST_MESSAGE, localDateOnly } from '@/lib/estimating/sla'
+
+/** Local calendar date offset. Avoids `toISOString()` shifting the day off UTC. */
+function calendarShift(days: number): string {
+  const [y, m, d] = localDateOnly().split('-').map(Number)
+  return localDateOnly(new Date(y, m - 1, d + days))
+}
 
 // jsdom stubs for Radix Dialog
 window.HTMLElement.prototype.hasPointerCapture = vi.fn()
@@ -79,7 +86,7 @@ function renderModal({
 }
 
 /** Fill the minimum required fields for a valid submission.
- *  Note: "Needed back" is not required — defaults to +14 days (SLA clock fallback).
+ *  "Needed back" is not required — a blank field submits as today.
  */
 async function fillMinimumFields(
   user: ReturnType<typeof userEvent.setup>,
@@ -151,8 +158,8 @@ describe('MaintenanceIntakeModal — field rendering (AC §3 bullet 1)', () => {
     expect(screen.getByLabelText(/needed back/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/anticipated close/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/service start/i)).toBeInTheDocument()
-    // Needed back defaults to +14 days when blank (SLA minimum fallback)
-    expect(screen.getByText(/defaults to \+14 days/i)).toBeInTheDocument()
+    expect(screen.queryByText(/defaults to \+14 days/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/14-calendar-day minimum/i)).not.toBeInTheDocument()
   })
 
   it('renders win probability field constrained to 20–100%', () => {
@@ -170,9 +177,10 @@ describe('MaintenanceIntakeModal — field rendering (AC §3 bullet 1)', () => {
     expect(screen.getByText(/attach other files/i)).toBeInTheDocument()
   })
 
-  it('renders the 14-day SLA note', () => {
+  it('does not render the 14-day minimum return window', () => {
     renderModal()
-    expect(screen.getByText(/14-calendar-day minimum return window/i)).toBeInTheDocument()
+    expect(screen.queryByText(/14-calendar-day/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/at least 14/i)).not.toBeInTheDocument()
   })
 
   it('renders Cancel and Submit buttons', () => {
@@ -733,7 +741,8 @@ describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
     await user.click(screen.getByRole('button', { name: /submit/i }))
 
     await waitFor(() => expect(created).toHaveLength(1))
-    expect(created[0].dueBackDate).toBeTruthy()
+    expect(created[0].dueBackDate).toBe(localDateOnly())
+    expect(created[0]).not.toHaveProperty('isRush')
   })
 
   it('routes to the editor tab with the new estimate after successful submit', async () => {
@@ -1198,5 +1207,91 @@ describe('MaintenanceIntakeModal — Aspire-derived maintenance branch', () => {
     await screen.findByRole('option', { name: 'Bradenton, FL' })
     expect(screen.getByRole('option', { name: 'Fort Myers, FL' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Raleigh, NC' })).toBeInTheDocument()
+  })
+})
+
+describe('MaintenanceIntakeModal — needed-back date', () => {
+  it('lets today be selected and blocks yesterday in the picker and on submit', async () => {
+    const user = userEvent.setup()
+    const postCalls: unknown[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        postCalls.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+    renderModal()
+    const input = screen.getByLabelText(/needed back/i) as HTMLInputElement
+    expect(input).toHaveAttribute('min', localDateOnly())
+    expect(calendarShift(-1) < input.min).toBe(true)
+
+    await fillMinimumFields(user)
+
+    fireEvent.change(input, { target: { value: localDateOnly() } })
+    expect(input).toHaveValue(localDateOnly())
+
+    // A value below min is not a picker choice. Submit the form directly so the
+    // handler's past-date check runs even when the browser blocks the button.
+    fireEvent.change(input, { target: { value: calendarShift(-1) } })
+    expect(input).toHaveValue(calendarShift(-1))
+    fireEvent.submit(input.form!)
+    expect(await screen.findByText(DUE_BACK_PAST_MESSAGE)).toBeInTheDocument()
+    expect(postCalls).toHaveLength(0)
+  })
+
+  it('accepts a date inside the old 14-day floor with no 14-day error', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json(buildMaintenanceEstimate({ id: 'short-turn' }), { status: 201 })
+      }),
+    )
+    renderModal()
+    fireEvent.change(screen.getByLabelText(/needed back/i), { target: { value: calendarShift(3) } })
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].dueBackDate).toBe(calendarShift(3))
+    expect(screen.queryByText(/14-calendar-day|at least 14/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the rush note inside the SLA window and hides it outside', async () => {
+    server.use(
+      http.get('/api/settings/company', () =>
+        HttpResponse.json({ id: 1, sla_return_window_days: 7 }),
+      ),
+    )
+    renderModal()
+    const input = screen.getByLabelText(/needed back/i)
+
+    fireEvent.change(input, { target: { value: calendarShift(6) } })
+    expect(await screen.findByTestId('rush-window-note')).toHaveTextContent(/flagged as a rush job/i)
+
+    fireEvent.change(input, { target: { value: localDateOnly() } })
+    expect(screen.getByTestId('rush-window-note')).toBeInTheDocument()
+
+    fireEvent.change(input, { target: { value: calendarShift(7) } })
+    await waitFor(() => expect(screen.queryByTestId('rush-window-note')).not.toBeInTheDocument())
+
+    fireEvent.change(input, { target: { value: '' } })
+    expect(screen.queryByTestId('rush-window-note')).not.toBeInTheDocument()
+  })
+
+  it('surfaces the server detail when a past date is rejected', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/api/estimating/estimates', () =>
+        HttpResponse.json({ detail: DUE_BACK_PAST_MESSAGE }, { status: 400 }),
+      ),
+    )
+    renderModal()
+    fireEvent.change(screen.getByLabelText(/needed back/i), { target: { value: localDateOnly() } })
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+    expect(await screen.findByText(DUE_BACK_PAST_MESSAGE)).toBeInTheDocument()
+    expect(screen.queryByText(/please try again/i)).not.toBeInTheDocument()
   })
 })

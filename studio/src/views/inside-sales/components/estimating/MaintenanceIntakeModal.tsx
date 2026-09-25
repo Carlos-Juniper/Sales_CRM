@@ -37,7 +37,13 @@ import {
   type CrmLeadContext,
 } from '@/lib/estimating/crmLead'
 import type { Property } from '@/types/estimating'
-import { SLA_CONFIG, toDateOnly } from '@/lib/estimating/sla'
+import {
+  DUE_BACK_PAST_MESSAGE,
+  isPastCalendarDate,
+  localDateOnly,
+  toDateOnly,
+} from '@/lib/estimating/sla'
+import { useSlaReturnWindowDays } from '@/hooks/useCompanySettings'
 import { DEFAULT_SERVICE_LINE } from '@/lib/estimating/aspireOptions'
 import { PropertySelector } from './PropertySelector'
 import { ServiceLineSelect } from './AspirePickers'
@@ -46,6 +52,7 @@ import { useToast } from './useToast'
 import { intakeDeniedMessage } from '@/lib/intakeAccess'
 import type { BranchOption, Estimate, MaintenanceCustomerType } from '@/types/estimating'
 import { FileAttachRow, type AttachedFile } from './IntakeFileAttachRow'
+import { RushWindowNote } from './RushIndicators'
 import { useAttachmentUpload } from '@/lib/estimating/useAttachmentUpload'
 import { RFP_FILE_ACCEPT } from '@/lib/estimating/rfpContentTypes'
 import {
@@ -121,6 +128,7 @@ export function MaintenanceIntakeModal({
   initialProperty = null,
 }: MaintenanceIntakeModalProps) {
   const { openEstimateAt } = useEstimatingShell()
+  const slaWindowDays = useSlaReturnWindowDays()
   const { show } = useToast()
   const { isEstimatingOnly } = useRole()
   const { upload: uploadFile, lastUploadError } = useAttachmentUpload()
@@ -275,6 +283,10 @@ export function MaintenanceIntakeModal({
       show('Select or create a property before submitting.')
       return
     }
+    if (form.neededBack && isPastCalendarDate(form.neededBack)) {
+      show(DUE_BACK_PAST_MESSAGE)
+      return
+    }
     // Split budgets are optional dollars. Blank → null (never 0). A typed 0
     // stays 0. Negatives and non-numeric values are rejected before POST.
     let homesBudget: number | null = null
@@ -312,11 +324,10 @@ export function MaintenanceIntakeModal({
     setSubmitting(true)
 
     try {
-      // SLA clock: dueBackDate from the "needed back" field, or +14 days from now.
-      // due_back_date is a SQL DATE column — must stay 'YYYY-MM-DD', not a full timestamp.
-      const dueBackDate = form.neededBack
-        ? toDateOnly(form.neededBack)
-        : toDateOnly(new Date(Date.now() + SLA_CONFIG.returnWindowDays * 86400000))
+      // due_back_date is a SQL DATE. The date input is already YYYY-MM-DD in
+      // the user's local calendar; a blank field means today (a rush). Do not
+      // run it through toISOString — that shifts the day off UTC.
+      const dueBackDate = form.neededBack ? form.neededBack.slice(0, 10) : localDateOnly()
 
       const winProbability = Math.min(1.0, Math.max(0.2, Number(form.winProbabilityPct) / 100))
 
@@ -747,13 +758,12 @@ export function MaintenanceIntakeModal({
                   <Input
                     id="mi-needed-back"
                     type="date"
+                    min={localDateOnly()}
                     value={form.neededBack}
                     onChange={(e) => set('neededBack', e.target.value)}
                     className="h-8 text-xs"
                   />
-                  <p className="text-[10px] text-[hsl(var(--muted-fg))]">
-                    Defaults to +14 days from today if blank (SLA minimum)
-                  </p>
+                  <RushWindowNote date={form.neededBack} windowDays={slaWindowDays} />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="mi-anticipated-close" className="text-xs">
@@ -884,16 +894,6 @@ export function MaintenanceIntakeModal({
               </div>
             </div>
           </section>
-
-          {/* ── SLA note (I-6.2) ──────────────────────────────── */}
-          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700 flex items-start gap-2">
-            <Info className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-            <span>
-              <strong>14-calendar-day minimum return window applies</strong> — SLA clock starts on
-              create. The "Needed back" date must be at least {SLA_CONFIG.returnWindowDays} calendar
-              days from today.
-            </span>
-          </div>
 
           <DialogFooter>
             <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={submitting}>

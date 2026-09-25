@@ -63,6 +63,13 @@ import {
   validateAttachmentSize,
   validateRfpDocument,
 } from '@/lib/estimating/rfpContentTypes'
+import {
+  DUE_BACK_PAST_MESSAGE,
+  SLA_CONFIG,
+  isPastCalendarDate,
+  isRushWindowDate,
+  localDateOnly,
+} from '@/lib/estimating/sla'
 
 const API = '/api'
 
@@ -198,6 +205,25 @@ function occurrenceDetail(body: object): string | null {
     if (!Object.prototype.hasOwnProperty.call(record, key)) continue
     const message = occurrenceCountError(key, record[key])
     if (message) return message
+  }
+  return null
+}
+
+/** Mirror the server: isRush is computed, never trusted from the client. */
+function withRush(estimate: Estimate): Estimate {
+  const copy = { ...estimate }
+  delete (copy as { isRush?: boolean }).isRush
+  return {
+    ...copy,
+    isRush: isRushWindowDate(estimate.dueBackDate ?? '', SLA_CONFIG.returnWindowDays),
+  }
+}
+
+/** 400 when a written dueBackDate is before the user's local today. Blank is allowed. */
+function pastDueResponse(dueBackDate: string | null | undefined) {
+  if (!dueBackDate) return null
+  if (isPastCalendarDate(dueBackDate)) {
+    return HttpResponse.json({ detail: DUE_BACK_PAST_MESSAGE }, { status: 400 })
   }
   return null
 }
@@ -599,6 +625,22 @@ const allHandlers = [
     return HttpResponse.json(mockConnections)
   }),
 
+  // GET /api/settings/company — company_settings singleton (migration 020).
+  // Intake rush notes read sla_return_window_days from here. Tests override
+  // with server.use() when they need a different window.
+  http.get(`${API}/settings/company`, async () => {
+    return HttpResponse.json({
+      id: 1,
+      sla_return_window_days: SLA_CONFIG.returnWindowDays,
+      sla_at_risk_threshold_days: SLA_CONFIG.atRiskThresholdDays,
+      discrepancy_threshold_pct: 0.1,
+      default_target_margin: 0.22,
+      default_win_probability: 0.2,
+      default_priority: 'medium',
+      default_notify_bm_rd_on_return: 1,
+    })
+  }),
+
   // GET /api/settings/branches — the Settings branch-picker source (Slice 9).
   // Scope + roster filtering is server-side; this mock returns two operating
   // branches sorted by name. Tests override with server.use() as needed.
@@ -737,7 +779,7 @@ const allHandlers = [
     if (status) filtered = filtered.filter((e) => e.status === status)
     if (branch) filtered = filtered.filter((e) => e.branchCity === branch)
     if (leadId) filtered = filtered.filter((e) => e.leadId === leadId)
-    return HttpResponse.json(filtered)
+    return HttpResponse.json(filtered.map(withRush))
   }),
 
   // POST /api/estimating/estimates
@@ -752,6 +794,8 @@ const allHandlers = [
     }
     const denied = denyDisallowedIntake(body.estimateType)
     if (denied) return denied
+    const past = pastDueResponse(body.dueBackDate)
+    if (past) return past
     // Dollars, not cents. Blank / omitted / null → null. 0 stays 0.
     // Top-level homesBudget / commonAreaBudget win over intake.payload.
     // Reject before insert so a 400 persists nothing.
@@ -792,12 +836,19 @@ const allHandlers = [
     // Structured intake payload is persisted to its own store — it must NOT ride
     // along on the estimate row (mirrors the server splitting it into
     // intake_submissions). Strip it before building the estimate.
-    const { intake, serviceLine: _serviceLine, ...estimateBody } = body
+    const raw = body as CreateEstimatePayload & { isRush?: boolean }
+    const intake = raw.intake
+    const estimateBody = { ...raw }
+    delete estimateBody.intake
+    delete estimateBody.serviceLine
+    delete estimateBody.isRush
     // Server-managed Aspire fields: create returns pending (the push is async),
     // then flips to synced. Simulate the flip so the UI can exercise both states.
-    const created = {
+    const created = withRush({
       ...estimateBody,
       ...occurrenceColumns(estimateBody),
+      // Omitted on create defaults to today, which is inside the rush window.
+      dueBackDate: estimateBody.dueBackDate || localDateOnly(),
       id,
       sections,
       homesBudget: budgets.homesBudget,
@@ -806,7 +857,7 @@ const allHandlers = [
       aspireSyncStatus: 'pending',
       createdAt: now,
       updatedAt: now,
-    } as Estimate
+    } as Estimate)
     estimates.push(created)
     // Auto-generate the 1:1 ITB project for EITHER intake type.
     itbProjects.push(itbProjectForEstimate(created))
@@ -837,7 +888,7 @@ const allHandlers = [
     await delay(100)
     const estimate = estimates.find((e) => e.id === params.id)
     if (!estimate) return notFound()
-    return HttpResponse.json(estimate)
+    return HttpResponse.json(withRush(estimate))
   }),
 
   // PATCH /api/estimating/estimates/:id
@@ -866,6 +917,9 @@ const allHandlers = [
       )
     }
     delete body.estimateType
+    delete (body as { isRush?: boolean }).isRush
+    const past = pastDueResponse(body.dueBackDate)
+    if (past) return past
     // The mock mirrors the server: every status write walks the
     // ONE transition module. Illegal edges 409 (same shape as approve-handback);
     // re-sending the current status is an idempotent no-op.
@@ -880,11 +934,11 @@ const allHandlers = [
         { status: 409 },
       )
     }
-    estimates[idx] = {
+    estimates[idx] = withRush({
       ...estimates[idx],
       ...body,
       updatedAt: new Date().toISOString(),
-    } as Estimate
+    } as Estimate)
     return HttpResponse.json(estimates[idx])
   }),
 
@@ -902,14 +956,14 @@ const allHandlers = [
       const { patch, records } = approveAndHandBack(estimates[idx], {
         actor: body.actor ?? 'Session Approver',
       })
-      estimates[idx] = {
+      estimates[idx] = withRush({
         ...estimates[idx],
         ...patch,
         ...(body.notifyBmRdOnReturn !== undefined
           ? { approvalSettings: { notifyBmRdOnReturn: body.notifyBmRdOnReturn } }
           : {}),
         updatedAt: new Date().toISOString(),
-      } as Estimate
+      } as Estimate)
       statusTransitions.push(...records)
       return HttpResponse.json({ estimate: estimates[idx], transitions: records })
     } catch (err) {
@@ -1227,7 +1281,7 @@ const allHandlers = [
       return HttpResponse.json({ error: 'to must be bidding or won' }, { status: 400 })
     }
     if (estimate.lifecycle === body.to) {
-      return HttpResponse.json({ estimate, transition: null })
+      return HttpResponse.json({ estimate: withRush(estimate), transition: null })
     }
     const from = estimate.lifecycle
     estimate.lifecycle = body.to
@@ -1241,7 +1295,7 @@ const allHandlers = [
       at: new Date().toISOString(),
     }
     statusTransitions.push(transition)
-    return HttpResponse.json({ estimate, transition })
+    return HttpResponse.json({ estimate: withRush(estimate), transition })
   }),
 
   // ── Takeoff-line CRUD (Discrepancy Review persistence) ────────────────────

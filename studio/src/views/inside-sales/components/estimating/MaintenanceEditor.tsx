@@ -45,6 +45,7 @@ import { useToast } from './useToast'
 import { useEstimatingShell } from './useEstimatingShell'
 import { SectionCard } from './SectionCard'
 import { IntakeAttachmentsPanel } from './IntakeAttachmentsPanel'
+import { RushBadge } from './RushIndicators'
 import { cn } from '@/lib/utils'
 
 const TARGET_MARGIN_DEFAULT = 0.22
@@ -287,6 +288,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="m-0 text-base font-semibold text-[hsl(var(--fg))]">{draft.name}</h3>
+            {draft.isRush && <RushBadge />}
             <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#ecfdf3] text-[#1d6f42] border border-[#b7e4c7]">
               Draft — foundation, not final
             </span>

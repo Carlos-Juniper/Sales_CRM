@@ -394,6 +394,7 @@ const ESTIMATE: Estimate = {
   winProbability: 0.6,
   siteWalkDate: '2026-08-05',
   dueBackDate: '2026-08-20',
+  isRush: false,
   anticipatedCloseDate: '2026-09-15',
   serviceStartDate: '2026-10-01',
   assignedLsEstimator: null,

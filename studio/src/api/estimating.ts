@@ -44,6 +44,8 @@ export type CreateEstimatePayload = DistributiveOmit<
   | 'updatedAt'
   | 'aspireOpportunityId'
   | 'aspireSyncStatus'
+  // Server-computed from dueBackDate. Never sent by the client.
+  | 'isRush'
   // Optional on create: omit stores null. A sent 0 stays 0.
   | 'homesBudget'
   | 'commonAreaBudget'
@@ -231,6 +233,14 @@ function assertNoEstimateTypeMutation(body: object): void {
   }
 }
 
+/** `isRush` is computed by the server. Drop it if a caller still has it. */
+function stripIsRush<T extends object>(body: T): T {
+  if (!('isRush' in body)) return body
+  const copy = { ...body }
+  delete (copy as { isRush?: unknown }).isRush
+  return copy
+}
+
 export const estimatingApi = {
   list: (params?: ListEstimatesParams) => {
     const qs = new URLSearchParams()
@@ -244,10 +254,10 @@ export const estimatingApi = {
   },
   get: (id: string) => apiClient.get<Estimate>(`/estimating/estimates/${id}`),
   create: (body: CreateEstimatePayload) =>
-    apiClient.post<Estimate>('/estimating/estimates', body),
+    apiClient.post<Estimate>('/estimating/estimates', stripIsRush(body)),
   update: async (id: string, body: UpdateEstimatePayload) => {
     assertNoEstimateTypeMutation(body)
-    return apiClient.patch<Estimate>(`/estimating/estimates/${id}`, body)
+    return apiClient.patch<Estimate>(`/estimating/estimates/${id}`, stripIsRush(body))
   },
 
   /**

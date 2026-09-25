@@ -60,6 +60,7 @@ import {
 import { useToast } from './useToast'
 import { useEstimatingShell } from './useEstimatingShell'
 import { IntakeAttachmentsPanel } from './IntakeAttachmentsPanel'
+import { RushBadge } from './RushIndicators'
 import { DisciplineSelect } from './DisciplineSelect'
 
 /** Blue-cell convention: estimator-editable override inputs (legacy Excel). */
@@ -508,6 +509,7 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="m-0 text-base font-semibold text-[hsl(var(--fg))]">{draft.name}</h3>
+            {draft.isRush && <RushBadge />}
             <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#eff6ff] text-[#1d4ed8] border border-[#bfdbfe]">
               Install — quantity-driven kits
             </span>

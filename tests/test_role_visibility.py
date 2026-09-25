@@ -5,6 +5,8 @@ performance, the analytics dashboard, or public leads.
 
 Sales reaches leads, proposals, and its own sales-performance and commission
 rows. It does not reach the public-lead queue or the analytics dashboard.
+maintenance_sales and install_sales follow sales on every check below.
+inside_sales is the existing public-queue role and is not a field-sales role.
 
 Public leads: inside_sales, admin, and management.
 Analytics dashboard: admin and management only. Sales, outside_sales,
@@ -106,6 +108,61 @@ class TestEstimatingDisciplineDenied:
             resp = client.get("/api/estimating/estimates")
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+_FIELD_SALES = ("sales", "maintenance_sales", "install_sales", "outside_sales")
+
+
+class TestFieldSalesMatchSales:
+    """Split roles stay on the sales side of every visibility check."""
+
+    def test_sets(self):
+        for role in ("maintenance_sales", "install_sales", "sales"):
+            assert role not in authz.ESTIMATING_ONLY_ROLES
+            assert role not in authz.PUBLIC_LEADS_ROLES
+            assert role not in authz.ANALYTICS_DASHBOARD_ROLES
+            assert authz.hides_public_lead_queue({"role": role})
+            assert not authz.is_estimating_only(role)
+        assert "inside_sales" in authz.PUBLIC_LEADS_ROLES
+        assert "inside_sales" not in authz.ANALYTICS_DASHBOARD_ROLES
+        assert not authz.hides_public_lead_queue({"role": "inside_sales"})
+
+    @pytest.mark.parametrize("role", _FIELD_SALES)
+    def test_lists_leads_but_not_the_public_queue(self, as_role, role):
+        as_role(role)
+        with patch("api.server.query", new_callable=AsyncMock) as mock_query:
+            mock_query.side_effect = [[{"cnt": 0}], []]
+            resp = client.get("/api/leads")
+        assert resp.status_code == 200, role
+        sql, params = mock_query.call_args_list[0].args
+        assert authz.OWN_LEAD_PREDICATE in sql
+        assert "NOT (source IN (%s, %s) AND assigned_to IS NULL)" in sql
+        assert list(params[-2:]) == ["higher_gov", "sam_gov"]
+        denied = client.get("/api/leads?unassigned_only=true&sources=higher_gov,sam_gov")
+        assert denied.status_code == 403
+
+    @pytest.mark.parametrize("role", ("maintenance_sales", "install_sales", "sales"))
+    def test_cannot_open_a_public_lead_or_the_dashboard(self, as_role, role):
+        as_role(role)
+        with patch("api.server.query", new_callable=AsyncMock, return_value=[_PUBLIC_LEAD]):
+            resp = client.get("/api/leads/lead-pub")
+        assert resp.status_code == 403
+        assert client.get("/api/dashboard/inside-sales").status_code == 403
+
+    @pytest.mark.parametrize("role", ("maintenance_sales", "install_sales"))
+    def test_can_open_own_lead_proposals_and_own_performance(self, as_role, role):
+        as_role(role, user_id="rep-1")
+        with patch("api.server.query", new_callable=AsyncMock, return_value=[_MANUAL_LEAD]):
+            lead = client.get("/api/leads/lead-1")
+        assert lead.status_code == 200
+        with patch("api.proposals.query", new_callable=AsyncMock, return_value=[]):
+            proposals = client.get("/api/proposals")
+        assert proposals.status_code == 200
+        with patch("api.sales_performance.query", new=AsyncMock(return_value=[])):
+            summary = client.get("/api/sales-performance/summary")
+            other = client.get("/api/sales-performance/summary?user_id=someone-else")
+        assert summary.status_code == 200
+        assert other.status_code == 403
 
 
 class TestSalesWorkspace:

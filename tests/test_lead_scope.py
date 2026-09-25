@@ -1,8 +1,10 @@
 """Sales-rep lead scope.
 
-A sales rep's pipeline, analytics counts, and lead mutations are limited to
-leads they are assigned to or created. Admin and manager-type roles, and
-inside_sales' shared public queue, keep the wider access they already had.
+A field-sales rep's pipeline, analytics counts, and lead mutations are limited
+to leads they are assigned to or created. That is `sales` (including legacy
+`outside_sales`), `maintenance_sales`, and `install_sales`. Admin and
+manager-type roles, and the existing `inside_sales` shared public queue, keep
+company-wide visibility.
 
 DB is mocked — patch api.server.query / api.server.execute, and
 api.estimating.query / api.estimating.execute for lead attachments.
@@ -120,10 +122,26 @@ def test_legacy_outside_sales_list_is_scoped(as_user):
     assert params.count(REP_ID) == 2
 
 
+@pytest.mark.parametrize("role", ("maintenance_sales", "install_sales"))
+def test_split_sales_list_is_scoped_like_sales(as_user, role):
+    """The sales split keeps the personal book. inside_sales does not."""
+    sql, params = _list(role, as_user)
+    assert sql.count(authz.OWN_LEAD_PREDICATE) == 1
+    assert params.count(REP_ID) == 2
+    assert OTHER_ID not in params
+
+
 def test_sales_mine_flag_does_not_duplicate_the_predicate(as_user):
     sql, params = _list("sales", as_user, mine="true")
     assert sql.count(authz.OWN_LEAD_PREDICATE) == 1
     assert params.count(REP_ID) == 2
+
+
+@pytest.mark.parametrize("role", ("maintenance_estimating", "install_estimating"))
+def test_estimators_cannot_list_leads(as_user, role):
+    as_user(role)
+    resp = client.get("/api/leads")
+    assert resp.status_code == 403
 
 
 @pytest.mark.parametrize("role", _WIDE_ROLES)
@@ -157,6 +175,35 @@ def test_manager_can_still_opt_into_mine(as_user):
 
 
 # ── Single lead read / update / delete ───────────────────────────────────────
+
+
+@pytest.mark.parametrize("role", ("maintenance_sales", "install_sales"))
+def test_split_sales_cannot_read_another_reps_lead(as_user, role):
+    as_user(role)
+    with patch("api.server.query", new_callable=AsyncMock, return_value=[_lead()]):
+        resp = client.get("/api/leads/lead-1")
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == _FORBIDDEN
+
+
+@pytest.mark.parametrize("role", ("maintenance_sales", "install_sales"))
+def test_split_sales_can_read_a_lead_assigned_to_them(as_user, role):
+    as_user(role)
+    with patch(
+        "api.server.query",
+        new_callable=AsyncMock,
+        return_value=[_lead(assigned_to=REP_ID)],
+    ):
+        resp = client.get("/api/leads/lead-1")
+    assert resp.status_code == 200
+
+
+def test_inside_sales_can_read_another_reps_lead(as_user):
+    """Existing inside_sales stays company-wide, including another rep's lead."""
+    as_user("inside_sales")
+    with patch("api.server.query", new_callable=AsyncMock, return_value=[_lead()]):
+        resp = client.get("/api/leads/lead-1")
+    assert resp.status_code == 200
 
 
 def test_sales_cannot_read_another_reps_lead(as_user):
@@ -311,10 +358,12 @@ def _dashboard(role: str, as_user):
     return mock_query.await_args_list
 
 
-def test_sales_dashboard_is_closed_by_the_management_gate(as_user):
-    """PR #23 keeps the analytics dashboard management-only, so a sales rep
-    never reaches the own-lead count scope on this route."""
-    as_user("sales")
+@pytest.mark.parametrize(
+    "role", ("sales", "maintenance_sales", "install_sales", "inside_sales")
+)
+def test_non_leadership_dashboard_is_denied(as_user, role):
+    """Analytics dashboard is admin/management only, including the sales split."""
+    as_user(role)
     resp = client.get("/api/dashboard/inside-sales")
     assert resp.status_code == 403
 
@@ -335,15 +384,14 @@ def test_sales_cannot_list_attachments_on_another_reps_lead(as_user):
     with patch("api.estimating.query", new_callable=AsyncMock, return_value=[_lead()]) as mock_query:
         resp = client.get("/api/leads/lead-1/attachments")
     assert resp.status_code == 403
-    # Public-queue check and own-lead check each load the lead.
-    assert mock_query.await_count == 2
+    assert mock_query.await_count == 1
 
 
 def test_sales_can_list_attachments_on_their_own_lead(as_user):
     as_user("sales")
     with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
         own = [_lead(created_by=REP_ID, assigned_to=None)]
-        mock_query.side_effect = [own, own, []]
+        mock_query.side_effect = [own, []]
         resp = client.get("/api/leads/lead-1/attachments")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -361,6 +409,6 @@ def test_sales_cannot_delete_an_attachment_on_another_reps_lead(as_user):
 def test_inside_sales_can_still_list_attachments_on_any_lead(as_user):
     as_user("inside_sales")
     with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
-        mock_query.side_effect = [[_lead()], [_lead()], []]
+        mock_query.side_effect = [[_lead()], []]
         resp = client.get("/api/leads/lead-1/attachments")
     assert resp.status_code == 200

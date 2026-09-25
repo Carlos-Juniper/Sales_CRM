@@ -100,10 +100,23 @@ def test_valid_roles_is_the_canonical_vocabulary():
     This previously repeated the full set, so adding a canonical role (marketing,
     437c508) broke two tests in two files for one change and left the vocabulary
     spelled out in three places. The membership check lives in
-    test_rbac.py::test_eleven_canonical_roles; what is worth pinning here is the
+    test_rbac.py::TestRoleModel.test_canonical_roles; what is worth pinning here is the
     alias itself — that seed_auth validates against authz and nothing else.
     """
     assert seed_auth.VALID_ROLES is authz.CANONICAL_ROLES
+
+
+@pytest.mark.parametrize("role", ["maintenance_sales", "install_sales", "sales"])
+def test_provision_accepts_field_sales_roles(role):
+    _, execute_mock = _run(
+        existing=[],
+        email=f"{role}@juniperlandscaping.com",
+        name="Field Rep",
+        role=role,
+        branch_id=None,
+    )
+    params = list(execute_mock.await_args[0][1])
+    assert role in params
 
 
 def test_provision_accepts_new_canonical_roles():

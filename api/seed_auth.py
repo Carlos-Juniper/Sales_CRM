@@ -37,7 +37,8 @@ from typing import Optional
 from db import execute, query
 from api.authz import CANONICAL_ROLES, normalize_role
 
-# The ten canonical business roles (single role vocabulary).
+# The canonical business roles (single role vocabulary, including the
+# maintenance_sales / install_sales split). Legacy `sales` stays valid.
 # The legacy input `outside_sales` is accepted and stored as `sales`.
 VALID_ROLES = CANONICAL_ROLES
 

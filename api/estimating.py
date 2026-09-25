@@ -1797,17 +1797,21 @@ def _adjustment_out(r: dict) -> dict:
 # ── Routes ──────────────────────────────────────────────────────────────────
 
 async def _assert_lead_visible(user: dict, lead_id: str) -> None:
-    """404 when the lead is missing; 403 when a sales rep does not own it.
+    """404 when the lead is missing; 403 when the role may not see it.
 
-    Other roles are unchanged. Sales reps use the same assigned_to / created_by
-    predicate as the pipeline list.
+    Estimators are refused. Unassigned government leads stay on the public
+    queue (inside_sales, admin, management). Field sales (sales,
+    maintenance_sales, install_sales) may only touch a lead they are
+    assigned to or created. inside_sales is not own-lead scoped.
     """
+    authz.require_not_estimating_only(user, "leads")
     rows = await query(
-        "SELECT id, assigned_to, created_by FROM leads WHERE id = %s",
+        "SELECT id, source, assigned_to, created_by FROM leads WHERE id = %s",
         [lead_id],
     )
     if not rows:
         raise HTTPException(status_code=404, detail="Lead not found")
+    authz.require_lead_access(user, rows[0].get("source"), rows[0].get("assigned_to"))
     authz.require_own_lead(user, rows[0])
 
 
@@ -1871,6 +1875,9 @@ def register(app, require_auth) -> None:
         est_type = body.get("estimateType")
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
+        # Split field-sales roles may submit only their intake. Legacy sales,
+        # admin, and manager-tier roles are not locked. Runs before any write.
+        authz.require_intake_type(user, est_type)
         # Branch identity rides on the Aspire BranchID (int), captured at intake.
         # Migration 022 dropped estimates.branch; do not write that column.
         aspire_branch_id = body.get("aspireBranchId")
@@ -2022,6 +2029,9 @@ def register(app, require_auth) -> None:
         est_type = body.get("estimateType")
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
+        # Same intake lock as estimate create. A resume of an existing draft
+        # is also refused when the stored type is one this role cannot submit.
+        authz.require_intake_type(user, est_type)
         payload = body.get("payload")
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="payload must be an object")
@@ -2038,6 +2048,9 @@ def register(app, require_auth) -> None:
             )
             if not rows:
                 raise HTTPException(status_code=404, detail="Draft not found")
+            stored_type = rows[0].get("estimate_type")
+            if stored_type:
+                authz.require_intake_type(user, stored_type)
             await execute(
                 "UPDATE intake_submissions SET payload = %s WHERE id = %s",
                 [json.dumps(payload), draft_id],
@@ -3084,16 +3097,6 @@ def register(app, require_auth) -> None:
     # re-anchors lead-scoped rows to the estimate (two separate statements,
     # not transactional) so the render pipeline finds them via estimate_id as usual.
 
-    async def _require_lead_surface(user: dict, lead_id: str) -> None:
-        """Estimators cannot use lead routes. Public-queue rows stay qualified-only."""
-        authz.require_not_estimating_only(user, "leads")
-        rows = await query(
-            "SELECT source, assigned_to FROM leads WHERE id = %s",
-            [lead_id],
-        )
-        if rows:
-            authz.require_lead_access(user, rows[0].get("source"), rows[0].get("assigned_to"))
-
     # Lead-only attachment presign
     @app.post("/api/leads/{lead_id}/attachments/presign", status_code=201)
     async def presign_lead_attachment(
@@ -3107,9 +3110,8 @@ def register(app, require_auth) -> None:
         Only the three proposal document kinds are accepted; intake/takeoff kinds
         must be uploaded against an estimate (estimate-scoped presign endpoint).
         """
-        # Estimators and the public queue are refused first. A sales rep may
-        # only attach to their own lead, and a missing lead is 404.
-        await _require_lead_surface(user, lead_id)
+        # Estimator deny, public-queue allowlist, and own-lead scope. A missing
+        # lead is 404. Field sales may only attach to a lead they own.
         await _assert_lead_visible(user, lead_id)
 
         # 2. Only proposal kinds are accepted at the lead level.
@@ -3180,7 +3182,6 @@ def register(app, require_auth) -> None:
         Looks up the attachment by both id AND lead_id so a rep cannot confirm
         an attachment belonging to a different lead.
         """
-        await _require_lead_surface(_user, lead_id)
         await _assert_lead_visible(_user, lead_id)
         rows = await query(
             "SELECT ia.* FROM intake_attachments ia WHERE ia.id = %s AND ia.lead_id = %s",
@@ -3250,7 +3251,6 @@ def register(app, require_auth) -> None:
         Returns only the three proposal kinds; intake/takeoff attachments are
         always estimate-scoped and will not appear here.
         """
-        await _require_lead_surface(_user, lead_id)
         await _assert_lead_visible(_user, lead_id)
 
         rows = await query(
@@ -3277,7 +3277,6 @@ def register(app, require_auth) -> None:
         an already-absent object must not block the soft-delete of the row.
         A sales rep cannot delete an attachment on a lead they do not own.
         """
-        await _require_lead_surface(_user, lead_id)
         await _assert_lead_visible(_user, lead_id)
         rows = await query(
             "SELECT * FROM intake_attachments WHERE id = %s AND lead_id = %s",

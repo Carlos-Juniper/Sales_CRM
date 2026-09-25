@@ -1,9 +1,9 @@
 """Canonical role model + server-side authorization.
 
-One role vocabulary for the whole app (ten business roles), the
-estimator/approver ownership split enforced server-side, the approval-tier
-authority ladder, and branch scoping derived from the authenticated user —
-never from a client-supplied query param (BRD I-9.5).
+One role vocabulary for the whole app, the estimator/approver ownership
+split enforced server-side, the approval-tier authority ladder, and branch
+scoping derived from the authenticated user — never from a client-supplied
+query param (BRD I-9.5).
 
 Layered on `require_auth`: handlers call `require_estimator(user)` /
 `require_approver(user)` / `require_approval_authority(user, value)` with the
@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Query
 
 from db import query
 
@@ -23,6 +23,8 @@ from db import query
 CANONICAL_ROLES = frozenset({
     "procurement",
     "sales",
+    "maintenance_sales",
+    "install_sales",
     "inside_sales",
     "admin",
     "manager",
@@ -39,10 +41,46 @@ CANONICAL_ROLES = frozenset({
 })
 
 # `inside_sales` qualifies raw public/government leads and assigns them on to a
-# `sales` CRM, so the two are distinct personas and only inside sales reaches the
-# public lead feed. `outside_sales` remains retired and collapses into `sales`.
+# field-sales CRM, so it stays a distinct persona and only inside sales reaches
+# the public lead feed. `outside_sales` remains retired and collapses into
+# `sales`. `maintenance_sales` and `install_sales` split field sales by the
+# intake they submit; legacy `sales` stays valid until an admin reassigns
+# people — nothing here rewrites existing users.role rows.
 LEGACY_ROLE_MAP = {
     "outside_sales": "sales",
+}
+
+# Field-sales personas. The two split roles inherit every access grant `sales`
+# has (they are members of the same sets, and absent from the same privileged
+# sets). They differ only in which intake type they may submit.
+FIELD_SALES_ROLES = frozenset({"sales", "maintenance_sales", "install_sales"})
+
+# users.role values that identify a sales rep in selector queries (sales
+# performance, commissions) and in GET /api/users?role=sales. Wider than
+# FIELD_SALES_ROLES: inside_sales is included, and outside_sales still sits
+# on un-migrated rows. `?role=sales` matches this whole tuple so the Settings
+# rep dropdown does not need a new query parameter. Any other role value,
+# including inside_sales or maintenance_sales alone, stays an exact match.
+SALES_REP_DB_ROLES = (
+    "sales",
+    "maintenance_sales",
+    "install_sales",
+    "inside_sales",
+    "outside_sales",
+)
+
+# Normalized roles that own client-reference and team-roster rows and may
+# edit the shared portfolio. inside_sales is in this set and stays OUT of
+# FIELD_SALES_ROLES, so its leads remain company-wide. outside_sales is not
+# listed: normalize_role maps it to sales before the check.
+ROSTER_REP_ROLES = FIELD_SALES_ROLES | frozenset({"inside_sales"})
+
+# Intake types a role may submit. Only the split field-sales roles are locked;
+# legacy sales, inside sales, admin, and the manager tier may submit both.
+_INTAKE_TYPES = ("maintenance", "install")
+_INTAKE_TYPE_LOCK = {
+    "maintenance_sales": "maintenance",
+    "install_sales": "install",
 }
 
 # Estimator-owned scope: line items / sections / services / components / takeoff.
@@ -79,23 +117,33 @@ MANAGEMENT_ROLES = frozenset({"manager", "regional_director", "vice_president", 
 FULL_ACCESS_ROLES = MANAGEMENT_ROLES | frozenset({"admin"})
 
 # Public-lead qualification queue (unassigned higher_gov / sam_gov rows).
+# FIELD_SALES_ROLES (sales, maintenance_sales, install_sales) are absent on
+# purpose: they get the same denial as legacy sales. The existing inside_sales
+# role is the qualifier and stays on this list with admin and management.
 PUBLIC_LEADS_ROLES = frozenset({"inside_sales"}) | FULL_ACCESS_ROLES
 
 # Analytics dashboard is management only: admin plus manager, regional
-# director, vice president, and CEO. Sales, inside sales, estimators,
-# procurement, and marketing are refused.
+# director, vice president, and CEO. Field sales (sales, maintenance_sales,
+# install_sales), inside sales, estimators, procurement, and marketing are
+# refused. Reps use their own pipeline, not this dashboard.
 ANALYTICS_DASHBOARD_ROLES = FULL_ACCESS_ROLES
 
 # Scraper sources that feed the public-lead queue. A row leaves the queue once
 # assigned_to is set (it then belongs to that rep's leads).
 PUBLIC_LEAD_SOURCES = ("higher_gov", "sam_gov")
 
-# Handoff 50 §3: roles that may manage the company-wide proposal assets —
-# portfolio_properties, client_references, team_members, org-chart config.
-# Marketing owns these cross-branch; admin retains its super-role access.
-# This is a resource-scoped role gate, deliberately NOT a new branch-scoping
-# mechanism (Carlos's §5.1 call: company-wide, role-gated).
+# Roles that may manage per-rep proposal roster rows (client_references,
+# team_members) for ANY sales rep, and that keep the legacy company-wide /
+# any-branch write path. Admin retains super-role access.
+# Portfolio editing is wider — see PORTFOLIO_EDITOR_ROLES. This is a
+# resource-scoped role gate, deliberately NOT a new branch-scoping mechanism.
 MARKETING_ROLES = frozenset({"marketing", "admin"})
+
+# Shared portfolio (one company-wide set, not owned by a rep). Every roster
+# rep (legacy sales, inside_sales, maintenance_sales, install_sales) and
+# marketing may add and edit; admin keeps super-role access. Other roles
+# stay read-only on the write endpoints.
+PORTFOLIO_EDITOR_ROLES = ROSTER_REP_ROLES | frozenset({"marketing", "admin"})
 
 def normalize_role(role: Optional[str]) -> str:
     """Map a stored/JWT role onto the canonical vocabulary (legacy → sales)."""
@@ -116,17 +164,110 @@ def sees_all_branches(role: Optional[str]) -> bool:
 
 
 def is_marketing_manager(role: Optional[str]) -> bool:
-    """True if the role may manage company-wide proposal assets (§3)."""
+    """True if the role may manage any rep's client references and team roster."""
     return normalize_role(role) in MARKETING_ROLES
 
 
-def is_sales_rep(role: Optional[str]) -> bool:
-    """True for the CRM sales role. Legacy `outside_sales` normalizes to it.
+def is_roster_rep(role: Optional[str]) -> bool:
+    """True for a role that owns its own client references and team roster.
 
-    `inside_sales` stays distinct: that role works the shared public-lead
+    Legacy `sales`, `outside_sales` (normalized to sales), `inside_sales`,
+    `maintenance_sales`, and `install_sales`. This is not the lead-book
+    check: `inside_sales` is a roster rep and is not a field-sales rep.
+    """
+    return normalize_role(role) in ROSTER_REP_ROLES
+
+
+def is_portfolio_editor(role: Optional[str]) -> bool:
+    """True if the role may add or edit the shared portfolio."""
+    return normalize_role(role) in PORTFOLIO_EDITOR_ROLES
+
+
+def coalesce_rep_id(*values: Optional[str]) -> Optional[str]:
+    """Collapse rep_id / user_id / body repId into one owning-rep id.
+
+    Empty strings are ignored. Two different non-empty values are a 400 —
+    the caller named two reps.
+    """
+    present = [v.strip() for v in values if v and str(v).strip()]
+    if not present:
+        return None
+    if len(set(present)) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="rep_id and user_id must be the same rep.",
+        )
+    return present[0]
+
+
+def roster_rep_query(
+    rep_id: Optional[str] = Query(
+        default=None,
+        description=(
+            "Owning sales rep (users.id). On reads, filters client references "
+            "and the team roster to that rep. On creates, the new row is owned "
+            "by that rep. Marketing and admin may name any roster rep "
+            "(sales, outside_sales, inside_sales, maintenance_sales, "
+            "install_sales). A roster rep may name only themselves; omitting "
+            "it on a write assigns the row to the caller. Omitting it on a "
+            "read keeps the existing unscoped list used by proposal generation."
+        ),
+    ),
+    user_id: Optional[str] = Query(
+        default=None,
+        description="Alias of rep_id. When both are sent they must match.",
+    ),
+) -> Optional[str]:
+    """Query dependency: `rep_id` or `user_id` selects which rep's roster."""
+    return coalesce_rep_id(rep_id, user_id)
+
+
+def requires_aspire_sales_rep(role: Optional[str]) -> bool:
+    """True if saving this role must resolve an Aspire ContactID (§2.8).
+
+    Field sales (legacy `sales` and the maintenance/install split) stamp
+    SalesRepID on opportunity push. Other roles save with no Aspire link.
+    """
+    return normalize_role(role) in FIELD_SALES_ROLES
+
+
+def allowed_intake_types(role: Optional[str]) -> list[str]:
+    """Intake types (`maintenance`, `install`) this role may submit.
+
+    `maintenance_sales` and `install_sales` are locked to one type. Every
+    other role — including legacy `sales`, admin, and manager-tier roles —
+    may submit both. An empty or unknown role is not locked, so a missing
+    claim cannot accidentally hide an intake.
+    """
+    locked = _INTAKE_TYPE_LOCK.get(normalize_role(role))
+    if locked is None:
+        return list(_INTAKE_TYPES)
+    return [locked]
+
+
+def require_intake_type(user: dict, estimate_type: str) -> None:
+    """403 when a split sales role submits the other intake type.
+
+    Admins, managers, legacy `sales`, and every non-locked role pass. Callers
+    still reject an estimateType that is neither maintenance nor install.
+    """
+    allowed = allowed_intake_types(user.get("role"))
+    if estimate_type not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Role may only submit {allowed[0]} intakes.",
+        )
+
+
+def is_sales_rep(role: Optional[str]) -> bool:
+    """True for a field-sales role whose leads are a personal book.
+
+    Legacy `sales` and `outside_sales` (which normalizes to `sales`) are
+    included, as are `maintenance_sales` and `install_sales`. The existing
+    `inside_sales` role stays distinct: it works the shared public-lead
     queue and must not be forced onto a personal book.
     """
-    return normalize_role(role) == "sales"
+    return normalize_role(role) in FIELD_SALES_ROLES
 
 
 # Same predicate the Leads tab uses for ?mine=true. The id is always the
@@ -135,12 +276,11 @@ OWN_LEAD_PREDICATE = "(assigned_to = %s OR created_by = %s)"
 
 
 def own_lead_filter(user: dict) -> tuple[str, list]:
-    """SQL predicate + params that limit a sales rep to their own leads.
+    """SQL predicate + params that limit a field-sales rep to their own leads.
 
     Empty for every other role, including admin and manager-type roles
     (manager, regional_director, vice_president, ceo) and inside_sales.
-    Those callers keep the visibility they already have: company-wide
-    unless they opt into ?mine=true.
+    Those callers keep company-wide visibility unless they opt into ?mine=true.
     """
     if not is_sales_rep(user.get("role")):
         return "", []
@@ -148,11 +288,12 @@ def own_lead_filter(user: dict) -> tuple[str, list]:
 
 
 def require_own_lead(user: dict, lead: dict) -> None:
-    """403 when a sales rep reads or writes a lead they do not own.
+    """403 when a field-sales rep reads or writes a lead they do not own.
 
     Ownership matches the Leads tab: `assigned_to` or `created_by` is the
-    caller. No-op for every other role. A proposal-render token is already
-    pinned to one lead id by require_auth, so it is admitted here too.
+    caller. No-op for every other role, including inside_sales. A
+    proposal-render token is already pinned to one lead id by require_auth,
+    so it is admitted here too.
     """
     if user.get("scope") == "proposal_render":
         return
@@ -183,7 +324,12 @@ def hides_public_lead_queue(user: dict) -> bool:
 
 
 def require_not_estimating_only(user: dict, surface: str) -> None:
-    """403 for maintenance/install estimating. Admin and sales roles pass."""
+    """403 for maintenance/install estimating.
+
+    Every other role passes, including admin, inside_sales, and field sales
+    (sales, maintenance_sales, install_sales). The split roles are not listed
+    here: they match sales by staying out of ESTIMATING_ONLY_ROLES.
+    """
     if is_estimating_only(user.get("role")):
         raise HTTPException(
             status_code=403,

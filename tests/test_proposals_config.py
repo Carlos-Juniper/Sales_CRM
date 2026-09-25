@@ -390,6 +390,7 @@ class TestTeamMembers:
             "active": True,
             "sortOrder": 0,
             "regionId": None,
+            "ownerUserId": None,
         }
 
     def test_branch_filter_includes_null_branch_rows(self, authed):
@@ -497,6 +498,7 @@ class TestClientReferences:
             "clientSinceYear": 2021,
             "active": True,
             "regionId": None,
+            "ownerUserId": None,
         }
 
     def test_branch_filter_includes_company_wide_rows(self, authed):

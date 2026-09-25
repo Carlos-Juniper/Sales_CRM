@@ -9,8 +9,8 @@ Mirrors the api/estimating.py facade pattern exactly:
 Slice 3 scope (this file, Amendment A):
   Config read endpoints — project from crm.branches / new proposal config tables:
     GET /api/proposals/config/branches       → BranchProfile[]
-    GET /api/proposals/config/team-members   → TeamMember[]  (+ optional filters)
-    GET /api/proposals/config/client-references → ClientReference[]
+    GET /api/proposals/config/team-members   → TeamMember[]  (+ optional filters, rep_id)
+    GET /api/proposals/config/client-references → ClientReference[]  (+ optional rep_id)
     GET /api/proposals/config/portfolio      → PortfolioProperty[]
     GET /api/proposals/config/insurance      → InsuranceCert (current cert)
     GET /api/proposals/config/licenses       → { licenses[], certifications[] }
@@ -389,6 +389,7 @@ async def _fetch_roster(
     aspire_branch_id: Optional[int],
     team_type: Optional[str] = None,
     include_user_branch_twins: bool = False,
+    owner_user_id: Optional[str] = None,
 ) -> list[dict]:
     """Active roster rows for one picker, with the branch's region joined on.
 
@@ -417,6 +418,10 @@ async def _fetch_roster(
     if team_type:
         conditions.append("t.team_type = %s")
         params.append(team_type)
+
+    if owner_user_id is not None:
+        conditions.append("t.owner_user_id = %s")
+        params.append(owner_user_id)
 
     region_sql, region_params = _region_match_sql(region_ids)
     if region_sql:
@@ -452,6 +457,8 @@ def _team_member_out(r: dict) -> dict:
         # branches.region_id via the roster join. null = company-wide row,
         # missing branch, or a branch whose region was never set.
         "regionId": _region_id_out(r),
+        # Sales rep this roster row belongs to. Null = legacy company/branch row.
+        "ownerUserId": r.get("owner_user_id"),
     }
 
 
@@ -473,7 +480,27 @@ def _client_reference_out(r: dict) -> dict:
         # branches.region_id via the roster join. null when the reference is
         # company-wide or its branch has no region.
         "regionId": _region_id_out(r),
+        # Sales rep this reference belongs to. Null = legacy company/branch row.
+        "ownerUserId": r.get("owner_user_id"),
     }
+
+
+_ROSTER_VIEW_DENIED = (
+    "You can view only your own client references and team roster."
+)
+
+
+async def _authorize_rep_roster_read(user: dict, rep_id: str) -> None:
+    """403 unless the caller may read this rep's roster.
+
+    The rep themselves, plus marketing and admin. A live role re-read gates
+    the cross-rep grant so a demoted token cannot keep it.
+    """
+    if rep_id == user.get("id"):
+        return
+    if authz.is_marketing_manager(await authz._live_role(user)):
+        return
+    raise HTTPException(status_code=403, detail=_ROSTER_VIEW_DENIED)
 
 
 def _portfolio_property_out(r: dict) -> dict:
@@ -890,9 +917,12 @@ def register(app, require_auth) -> None:
                 "resolvable region are included."
             ),
         ),
-        _user: dict = Depends(require_auth),
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
+        user: dict = Depends(require_auth),
     ) -> list:
-        region_ids = await _resolve_region_filter(region_id, _user)
+        if rep_id is not None:
+            await _authorize_rep_roster_read(user, rep_id)
+        region_ids = await _resolve_region_filter(region_id, user)
         _set_region_filter_header(response, region_ids)
         rows = await _fetch_roster(
             table="team_members",
@@ -901,6 +931,7 @@ def register(app, require_auth) -> None:
             aspire_branch_id=aspire_branch_id,
             team_type=team_type,
             include_user_branch_twins=True,
+            owner_user_id=rep_id,
         )
         return [_team_member_out(r) for r in rows]
 
@@ -929,15 +960,19 @@ def register(app, require_auth) -> None:
                 "resolvable region are included."
             ),
         ),
-        _user: dict = Depends(require_auth),
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
+        user: dict = Depends(require_auth),
     ) -> list:
-        region_ids = await _resolve_region_filter(region_id, _user)
+        if rep_id is not None:
+            await _authorize_rep_roster_read(user, rep_id)
+        region_ids = await _resolve_region_filter(region_id, user)
         _set_region_filter_header(response, region_ids)
         rows = await _fetch_roster(
             table="client_references",
             order_by="t.client_since_year DESC",
             region_ids=region_ids,
             aspire_branch_id=aspire_branch_id,
+            owner_user_id=rep_id,
         )
         return [_client_reference_out(r) for r in rows]
 

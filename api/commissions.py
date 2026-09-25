@@ -167,15 +167,16 @@ def register(app, require_auth) -> None:
         if not _can_view_all(user):
             raise HTTPException(status_code=403, detail="Only admin, VP, or CEO can view all reps")
 
-        # Include legacy role aliases (outside_sales → sales) so reps stored
-        # under old role values still appear.
+        # Include legacy role aliases (outside_sales → sales) and the split
+        # field-sales roles so a reassigned rep still appears.
         # v_current_commission_rates (mig 054) owns the active-rate predicate;
         # use it here instead of re-implementing the date filter inline.
         # Correlated subqueries return one rate per user (latest effective_date)
         # as a defensive tie-break; mig 055 adds the UNIQUE constraint that
         # makes multiple active rows structurally impossible.
+        role_placeholders = ", ".join(["%s"] * len(authz.SALES_REP_DB_ROLES))
         rows = await query(
-            """
+            f"""
             SELECT
                 u.id,
                 u.name,
@@ -194,9 +195,10 @@ def register(app, require_auth) -> None:
                 SELECT DISTINCT u2.id, u2.name, u2.email
                 FROM users u2
                 JOIN commissions c ON u2.id = c.user_id
-                WHERE u2.role IN ('sales', 'inside_sales', 'outside_sales')
+                WHERE u2.role IN ({role_placeholders})
             ) u
             ORDER BY u.name
-            """
+            """,
+            list(authz.SALES_REP_DB_ROLES),
         )
         return [_coerce_row(row) for row in rows]

@@ -20,8 +20,7 @@ import type {
   SectionService,
 } from '@/types/estimating'
 import type { LegacyUserRole, UserRole } from '@/types'
-import { normalizeRole } from '@/hooks/useRole'
-import { ADMIN_EQUIVALENT_ROLES } from '@/lib/roles'
+import { APPROVER_ROLES, ESTIMATING_ONLY_ROLES, normalizeRole } from '@/lib/roles'
 import { per1000SfRead } from './calc'
 
 /**
@@ -341,32 +340,20 @@ export function assertCanEdit(role: EstimatingRole, field: OwnedField): void {
 }
 
 /**
- * Map the canonical auth roles (mirrors api/authz.py) onto the
- * estimating ownership roles. Admin-equivalent roles (admin,
- * vp_sales) hold BOTH scopes. regional_director and
- * vice_president stay approver-only. This mapping is advisory for the UI —
- * the server enforces it on every mutation.
+ * Map the canonical auth roles onto the estimating ownership roles.
+ * Estimator scope is ESTIMATING_ONLY_ROLES. Approver scope is APPROVER_ROLES
+ * (manager tier plus admin and vp_sales). This mapping is advisory for the
+ * UI — the server enforces mutations with its own role sets.
  */
 export function estimatingRolesForUser(
   userRole: UserRole | LegacyUserRole,
 ): EstimatingRole[] {
   const role = normalizeRole(userRole)
   const roles: EstimatingRole[] = []
-  const adminEquivalent = (ADMIN_EQUIVALENT_ROLES as readonly string[]).includes(role)
-  if (
-    adminEquivalent ||
-    role === 'maintenance_estimating' ||
-    role === 'install_estimating'
-  ) {
+  if ((ESTIMATING_ONLY_ROLES as readonly string[]).includes(role)) {
     roles.push('estimator')
   }
-  if (
-    adminEquivalent ||
-    role === 'manager' ||
-    role === 'regional_director' ||
-    role === 'vice_president' ||
-    role === 'ceo'
-  ) {
+  if ((APPROVER_ROLES as readonly string[]).includes(role)) {
     roles.push('approver')
   }
   return roles

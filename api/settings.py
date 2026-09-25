@@ -238,8 +238,8 @@ def _audit_scope_for_branch(aspire_branch_id: Optional[int]) -> tuple[str, Optio
 async def _require_active_sales_rep(rep_id: str) -> None:
     """404/400 unless rep_id is an active roster rep.
 
-    A roster rep is sales (stored outside_sales counts), inside_sales,
-    maintenance_sales, or install_sales. Other active users are not targets.
+    A roster rep is any role in ROSTER_REP_ROLES (the sales-rep picker,
+    including vp_sales). Other active users are not targets.
     """
     rows = await query(
         "SELECT id, role, active FROM users WHERE id = %s",
@@ -248,13 +248,7 @@ async def _require_active_sales_rep(rep_id: str) -> None:
     if not rows or not rows[0].get("active"):
         raise HTTPException(status_code=404, detail="Sales rep not found.")
     if not authz.is_roster_rep(rows[0].get("role")):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "rep_id must be an active user with a sales role "
-                "(sales, inside_sales, maintenance_sales, or install_sales)."
-            ),
-        )
+        raise HTTPException(status_code=400, detail=authz.ROSTER_REP_ROLE_DETAIL)
 
 
 async def _authorize_roster_create(
@@ -1250,8 +1244,8 @@ def register(app, require_auth) -> None:
 
         Not "create from scratch": name/email come from the M365 pick, so the
         stored email is exact. Email is lowercased (Entra SSO matches lowercased
-        email). Assignable sales roles are the four in authz.SALES_TEAM_ROLES.
-        `sales` and `outside_sales` are rejected (400). maintenance_sales and
+        email). Assignable roles are authz.ASSIGNABLE_ROLES. `sales` and
+        `outside_sales` are rejected (400). maintenance_sales and
         install_sales trigger the aspire_rep_id hard-block; other roles save
         with no Aspire link and no warning. The authorize and any branch
         set are audited.
@@ -1320,33 +1314,37 @@ def register(app, require_auth) -> None:
         actor = _actor(user)
 
         # ── role ─────────────────────────────────────────────────────────────
+        # An unchanged role skips assignability and the Aspire re-resolve, so
+        # saving branches on a legacy row does not rewrite users.role.
+        # outside_sales is not writable when the role actually changes.
         if body.role is not None:
-            new_role = authz.ensure_assignable_role(
-                body.role, current=current.get("role")
-            )
+            submitted = (body.role or "").strip()
+            stored = (current.get("role") or "").strip()
+            if submitted != stored:
+                new_role = authz.ensure_assignable_role(submitted)
 
-            new_rep_id = current.get("aspire_rep_id")
-            if authz.requires_aspire_sales_rep(new_role):
-                # Block a field-sales role that cannot resolve an Aspire contact
-                # BEFORE writing anything (prevent-don't-repair). An existing
-                # aspire_rep_id is trusted, so reassigning sales → a split role
-                # does not drop the link.
-                new_rep_id = await _require_resolved_sales_rep(
-                    current.get("email") or "", current.get("aspire_rep_id")
+                new_rep_id = current.get("aspire_rep_id")
+                if authz.requires_aspire_sales_rep(new_role):
+                    # Block a field-sales role that cannot resolve an Aspire
+                    # contact BEFORE writing anything (prevent-don't-repair).
+                    # An existing aspire_rep_id is trusted, so reassigning
+                    # sales → a split role does not drop the link.
+                    new_rep_id = await _require_resolved_sales_rep(
+                        current.get("email") or "", current.get("aspire_rep_id")
+                    )
+
+                await execute(
+                    "UPDATE users SET role = %s, aspire_rep_id = %s WHERE id = %s",
+                    [new_role, new_rep_id, user_id],
                 )
-
-            await execute(
-                "UPDATE users SET role = %s, aspire_rep_id = %s WHERE id = %s",
-                [new_role, new_rep_id, user_id],
-            )
-            await _audit(
-                scope_type="company",
-                scope_id=None,
-                setting_key=f"user.{user_id}.role",
-                from_value=current.get("role"),
-                to_value=new_role,
-                actor=actor,
-            )
+                await _audit(
+                    scope_type="company",
+                    scope_id=None,
+                    setting_key=f"user.{user_id}.role",
+                    from_value=stored,
+                    to_value=new_role,
+                    actor=actor,
+                )
 
         # ── active (deactivate/reactivate) ───────────────────────────────────
         if body.active is not None:

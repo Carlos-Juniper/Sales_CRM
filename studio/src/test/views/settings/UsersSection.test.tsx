@@ -241,13 +241,30 @@ describe('UsersSection — enriched backend fields', () => {
     // Branch 101 checkbox must be checked (seeded from real branches).
     const editRole = screen.getByTestId('edit-role-u-carla') as HTMLSelectElement
     expect(editRole.value).toBe('sales')
-    expect(Array.from(editRole.options).map((option) => option.value)).toContain('sales')
-    expect(Array.from(editRole.options).some((option) => option.text === 'Legacy: Sales (reassign)')).toBe(true)
+    const legacy = Array.from(editRole.options).find((option) => option.value === 'sales')
+    expect(legacy?.text).toBe('Legacy: Sales (reassign)')
+    expect(legacy?.disabled).toBe(true)
     const naplesCheck = screen.getByTestId('edit-branch-u-carla-101') as HTMLInputElement
     expect(naplesCheck.checked).toBe(true)
     // Branch 202 must not be checked.
     const sarasotaCheck = screen.getByTestId('edit-branch-u-carla-202') as HTMLInputElement
     expect(sarasotaCheck.checked).toBe(false)
+  })
+
+  it('sends the stored legacy role when the editor saves without changing it', async () => {
+    let patchBody: Record<string, unknown> | null = null
+    server.use(
+      http.patch('*/api/settings/users/:id', async ({ request }) => {
+        patchBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(USERS[0])
+      }),
+    )
+    renderSection()
+    await screen.findByText('Carla Reyes')
+    fireEvent.click(screen.getByRole('button', { name: /edit carla reyes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save carla reyes/i }))
+    await waitFor(() => expect(patchBody).not.toBeNull())
+    expect(patchBody).toEqual({ role: 'sales', branches: [101] })
   })
 
   it('shows the Aspire rep hint for a sales user with a null aspireRepId', async () => {

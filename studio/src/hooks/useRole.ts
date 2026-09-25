@@ -1,5 +1,5 @@
 import { useAuthStore } from '@/store/authStore'
-import type { LegacyUserRole, UserRole } from '@/types'
+import type { UserRole } from '@/types'
 import {
   ADMIN_EQUIVALENT_ROLES,
   ESTIMATOR_ROLES,
@@ -10,18 +10,10 @@ import {
   REP_SELECTOR_ROLES,
   ANALYTICS_NAV_ROLES,
   ROSTER_REP_PICKER_ROLES,
+  normalizeRole,
 } from '@/lib/roles'
 
-// ── Canonical role model (mirrors api/authz.py) ─────────────────
-
-const LEGACY_ROLE_MAP: Record<LegacyUserRole, UserRole> = {
-  outside_sales: 'sales',
-}
-
-/** Map a stored/JWT role onto the canonical vocabulary (legacy → sales). */
-export function normalizeRole(role: UserRole | LegacyUserRole | string): UserRole {
-  return (LEGACY_ROLE_MAP as Record<string, UserRole>)[role] ?? (role as UserRole)
-}
+export { LEGACY_ROLE_MAP, normalizeRole } from '@/lib/roles'
 
 export function useRole() {
   const user = useAuthStore((s) => s.user)

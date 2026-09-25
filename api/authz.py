@@ -45,8 +45,9 @@ CANONICAL_ROLES = frozenset({
 })
 
 # Stored values that still authorize. They are not assignable: create/PATCH
-# of a *new* sales or outside_sales role is rejected. Nothing rewrites
-# existing users.role rows, because maintenance vs install is not knowable.
+# of a new sales or outside_sales role is rejected. Migration 067 rewrites
+# existing sales and outside_sales rows to maintenance_sales. A row still on
+# either value keeps working until an admin changes it in Settings.
 RETIRED_SALES_ROLES = frozenset({"sales", "outside_sales"})
 
 RETIRED_SALES_ASSIGNMENT_DETAIL = (
@@ -54,18 +55,10 @@ RETIRED_SALES_ASSIGNMENT_DETAIL = (
     "Choose Maintenance Sales or Install Sales."
 )
 
-# The four assignable sales roles. Each has its own commission structure
-# and workflow. Legacy sales is not in this set.
-SALES_TEAM_ROLES = frozenset({
-    "inside_sales",
-    "maintenance_sales",
-    "install_sales",
-    "vp_sales",
-})
-
-# Roles an admin may write onto a users row. `sales` stays in CANONICAL_ROLES
-# so existing sessions keep working, and is absent here.
-ASSIGNABLE_ROLES = CANONICAL_ROLES - frozenset({"sales"})
+# Roles an admin may write onto a users row. Retired sales values are
+# excluded. `sales` stays in CANONICAL_ROLES so an existing session still
+# validates; `outside_sales` is not canonical and is not writable.
+ASSIGNABLE_ROLES = CANONICAL_ROLES - RETIRED_SALES_ROLES
 
 # Admin and VP of Sales share every admin grant. Checked instead of
 # `role == "admin"`. regional_director and vice_president are not members.
@@ -102,11 +95,14 @@ SALES_REP_DB_ROLES = (
     "outside_sales",
 )
 
-# Normalized roles that own client-reference and team-roster rows and may
-# edit the shared portfolio. inside_sales is in this set and stays OUT of
-# FIELD_SALES_ROLES, so its leads remain company-wide. outside_sales is not
-# listed: normalize_role maps it to sales before the check.
-ROSTER_REP_ROLES = FIELD_SALES_ROLES | frozenset({"inside_sales"})
+# Anyone who appears in the sales-rep picker can own a client-reference or
+# team-roster row. outside_sales normalizes to sales before the check.
+ROSTER_REP_ROLES = frozenset(SALES_REP_DB_ROLES)
+ROSTER_REP_ROLE_DETAIL = (
+    "rep_id must be an active user with a sales role ("
+    + ", ".join(sorted(ROSTER_REP_ROLES))
+    + ")."
+)
 
 # Intake types a role may submit. Only maintenance_sales and install_sales
 # are locked. Legacy sales, inside sales, the admin-equivalent sales roles,
@@ -197,22 +193,21 @@ def normalize_role(role: Optional[str]) -> str:
     return LEGACY_ROLE_MAP.get(role, role)
 
 
-def ensure_assignable_role(role: str, current: Optional[str] = None) -> str:
+def ensure_assignable_role(role: str) -> str:
     """Return a role that may be written onto a users row.
 
-    Keeping the row's current `sales` or `outside_sales` value is allowed so
-    an edit of branches or active does not force a reassignment. Assigning
-    either retired role to someone else is 400. Any other unknown role is 422.
+    Membership is ASSIGNABLE_ROLES (CANONICAL_ROLES minus RETIRED_SALES_ROLES).
+    sales and outside_sales are 400. Any other value outside that set is 422.
+    An unchanged role is the caller's concern: this function does not compare
+    against the stored row, and it never accepts outside_sales.
     """
     role = (role or "").strip()
-    if current is not None and role == (current or "").strip():
-        return role
     if role in RETIRED_SALES_ROLES:
         raise HTTPException(
             status_code=400,
             detail=RETIRED_SALES_ASSIGNMENT_DETAIL,
         )
-    if role not in CANONICAL_ROLES:
+    if role not in ASSIGNABLE_ROLES:
         raise HTTPException(status_code=422, detail=f"Unknown role {role!r}")
     return role
 
@@ -237,9 +232,9 @@ def is_marketing_manager(role: Optional[str]) -> bool:
 def is_roster_rep(role: Optional[str]) -> bool:
     """True for a role that owns its own client references and team roster.
 
-    Legacy `sales`, `outside_sales` (normalized to sales), `inside_sales`,
-    `maintenance_sales`, and `install_sales`. This is not the lead-book
-    check: `inside_sales` is a roster rep and is not a field-sales rep.
+    Same set as SALES_REP_DB_ROLES, including vp_sales. outside_sales
+    normalizes to sales first. This is not the lead-book check:
+    `inside_sales` and `vp_sales` own a roster and are not field sales.
     """
     return normalize_role(role) in ROSTER_REP_ROLES
 
@@ -273,8 +268,8 @@ def roster_rep_query(
             "Owning sales rep (users.id). On reads, filters client references "
             "and the team roster to that rep. On creates, the new row is owned "
             "by that rep. Marketing and admin may name any roster rep "
-            "(sales, outside_sales, inside_sales, maintenance_sales, "
-            "install_sales). A roster rep may name only themselves; omitting "
+            "(ROSTER_REP_ROLES, the same set as the sales-rep picker). "
+            "A roster rep may name only themselves; omitting "
             "it on a write assigns the row to the caller. On a read, field "
             "sales who omit it are scoped to their own id. Marketing, admin, "
             "and management who omit it keep the unscoped list."
@@ -457,10 +452,10 @@ async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
 
     The maintenance and install ladders carry the same $ bands per role, so
     keying on role_key alone is unambiguous. A role with no tier rows yields
-    0 — it can approve nothing. Admin has no approval_tiers rows (ceiling 0);
-    vp_sales mirrors that exactly (no tier rows are seeded for it).
-    require_approver still admits vp_sales because it sits in APPROVER_ROLES;
-    the value check then rejects anything above 0.
+    0 — it can approve nothing. admin and vp_sales have unbounded rows
+    (max_value_cents NULL), seeded by migration 068, so their ceiling is
+    unlimited. require_approver still admits them because they sit in
+    APPROVER_ROLES.
     """
     rows = await query(
         "SELECT max_value_cents FROM approval_tiers WHERE role_key = %s",

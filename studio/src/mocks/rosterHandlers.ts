@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { ADMIN_EQUIVALENT_ROLES, FIELD_SALES_ROLES } from '@/lib/roles'
+import { ADMIN_EQUIVALENT_ROLES, FIELD_SALES_ROLES, ROSTER_REP_ROLES, normalizeRole } from '@/lib/roles'
 import { useAuthStore } from '@/store/authStore'
 import { mockUsers } from './data'
 import { MOCK_CLIENT_REFERENCES, MOCK_TEAM_MEMBERS, rosterHttpResponse } from './proposalRoster'
@@ -29,7 +29,7 @@ function detail(status: number, message: string): Denied {
 function callerRole(): string | null {
   const role = useAuthStore.getState().user?.role
   if (!role) return null
-  return role === 'outside_sales' ? 'sales' : role
+  return normalizeRole(role)
 }
 
 function callerId(): string | null {
@@ -43,7 +43,7 @@ function isMarketingOrAdminEquivalent(role: string | null): boolean {
   )
 }
 
-const ROSTER_REP_ROLES = new Set<string>([...FIELD_SALES_ROLES, 'inside_sales'])
+const ROSTER_REP_ROLE_SET = new Set<string>(ROSTER_REP_ROLES)
 
 function isFieldSales(role: string | null): boolean {
   return role !== null && (FIELD_SALES_ROLES as readonly string[]).includes(role)
@@ -52,8 +52,7 @@ function isFieldSales(role: string | null): boolean {
 function salesDirectory(id: string): 'ok' | 'missing' | 'not-sales' {
   const user = mockUsers.find((u) => u.id === id)
   if (!user) return 'missing'
-  const role = user.role === 'outside_sales' ? 'sales' : user.role
-  return ROSTER_REP_ROLES.has(role) ? 'ok' : 'not-sales'
+  return ROSTER_REP_ROLE_SET.has(normalizeRole(user.role)) ? 'ok' : 'not-sales'
 }
 
 function coalesceRepId(request: Request, bodyRepId?: string | null): RepIdResult {

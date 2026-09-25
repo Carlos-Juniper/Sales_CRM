@@ -791,128 +791,24 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
-# users.name is one display-name column. There is no first_name or last_name.
-# No users seed records Michelle Cady's login email (mcady@coralbay.com is a
-# client_references contact, not a users row), so email is never a match key.
-_MICHELLE_FIRST = "michelle"
-_MICHELLE_LAST = "cady"
-_LEGACY_SALES_ROLES = frozenset({"sales", "outside_sales"})
-_MIGRATION_067 = "067_legacy_sales_roles"
-_VP_SALES_GRANT_SQL = (
-    "UPDATE users SET role = 'vp_sales' "
-    "WHERE id = %s AND role IN ('sales', 'outside_sales')"
-)
 
+def detect_068(conn) -> bool:
+    """068 applied ↔ admin and vp_sales have an unbounded approval tier.
 
-def exact_first_last(name: Optional[str]) -> Optional[tuple[str, str]]:
-    """Return (first, last) when the display name is exactly two name tokens.
-
-    "Michelle Cady" and "Cady, Michelle" both yield those two tokens.
-    Extra words, punctuation glued to a token, and substrings do not match.
-    Comparison is case-insensitive. Email is not read here.
+    Widens approval_tiers.role_key and inserts a NULL max_value_cents row
+    for each of those roles. Keyed on that effect: the enum contains both
+    role keys and at least one unbounded row exists for each. A re-run is
+    safe (MODIFY to the same enum, INSERT … ON DUPLICATE KEY UPDATE).
     """
-    text = " ".join((name or "").split())
-    if not text or text.count(",") > 1:
-        return None
-    if "," in text:
-        last, first = text.split(",", 1)
-        last_parts = last.split()
-        first_parts = first.split()
-        if len(last_parts) != 1 or len(first_parts) != 1:
-            return None
-        return first_parts[0].casefold(), last_parts[0].casefold()
-    parts = text.split()
-    if len(parts) != 2:
-        return None
-    return parts[0].casefold(), parts[1].casefold()
-
-
-def matches_michelle_cady(name: Optional[str]) -> bool:
-    """True only for the exact first and last name Michelle Cady."""
-    return exact_first_last(name) == (_MICHELLE_FIRST, _MICHELLE_LAST)
-
-
-def michelle_match_error(match_count: int) -> str:
-    return (
-        f"ERROR: migration 067 matched {match_count} legacy sales user(s) "
-        "with the exact name Michelle Cady (need exactly 1). "
-        "vp_sales was not granted to anyone. "
-        "Remaining sales/outside_sales users move to maintenance_sales."
+    values = enum_values(conn, "approval_tiers", "role_key")
+    if not {"admin", "vp_sales"}.issubset(values):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(DISTINCT role_key) AS cnt FROM approval_tiers "
+        "WHERE role_key IN ('admin', 'vp_sales') AND max_value_cents IS NULL",
     )
-
-
-def plan_legacy_sales_migration(
-    users: list[dict],
-) -> tuple[dict[str, str], Optional[str]]:
-    """Return ({user id: new role}, error) for migration 067.
-
-    The Michelle Cady rule lives only in matches_michelle_cady. Email is
-    ignored. Exactly one eligible match becomes vp_sales. Zero or several
-    matches grant vp_sales to nobody and return an error; those rows still
-    become maintenance_sales. Other roles are omitted.
-    """
-    eligible = [u for u in users if (u.get("role") or "") in _LEGACY_SALES_ROLES]
-    matches = [u for u in eligible if matches_michelle_cady(u.get("name"))]
-    error = None
-    promote_id = None
-    if len(matches) == 1:
-        promote_id = matches[0].get("id")
-    else:
-        error = michelle_match_error(len(matches))
-    updates: dict[str, str] = {}
-    for user in eligible:
-        user_id = user.get("id")
-        if user_id == promote_id:
-            updates[user_id] = "vp_sales"
-        else:
-            updates[user_id] = "maintenance_sales"
-    return updates, error
-
-
-def detect_067(conn) -> bool:
-    """067 applied ↔ schema_migrations already has this migration id.
-
-    A data rewrite has no schema artifact. Role values are not evidence it
-    ran: a database with no sales/outside_sales rows must not be marked
-    detected and skipped. _step checks this same tracking row first.
-    """
-    return get_tracked(conn, _MIGRATION_067) is not None
-
-
-def _select_legacy_sales_users(conn) -> list[dict]:
-    if not table_exists(conn, "users"):
-        return []
-    with conn.cursor() as cur:
-        _run(
-            cur,
-            "SELECT id, name, email, role FROM users "
-            "WHERE role IN ('sales', 'outside_sales')",
-            (),
-        )
-        return list(cur.fetchall() or [])
-
-
-def apply_067(conn, path: Path, verbose: bool = False) -> None:
-    """Grant vp_sales only for one exact Michelle Cady, then run 067's SQL.
-
-    The name rule is plan_legacy_sales_migration. The grant is a parameterized
-    update by id. The SQL file only rewrites remaining legacy sales roles to
-    maintenance_sales and cannot grant vp_sales. A missing or ambiguous match
-    logs an error and still does not grant vp_sales.
-    """
-    updates, error = plan_legacy_sales_migration(_select_legacy_sales_users(conn))
-    if error:
-        print(error, file=sys.stderr)
-    promotions = [uid for uid, role in updates.items() if role == "vp_sales"]
-    if error is None and len(promotions) == 1:
-        _execute(conn, _VP_SALES_GRANT_SQL, (promotions[0],))
-    elif promotions:
-        print(
-            "ERROR: migration 067 refused to grant vp_sales "
-            f"({len(promotions)} candidate ids).",
-            file=sys.stderr,
-        )
-    exec_file(conn, path, verbose)
+    return bool(row and int(row["cnt"]) >= 2)
 
 
 def detect_064(conn) -> bool:
@@ -1013,7 +909,7 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
-    "067_legacy_sales_roles":                     detect_067,
+    "068_admin_equivalent_approval_tiers":        detect_068,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
@@ -1124,12 +1020,7 @@ def _step(
             record_migration(conn, migration_id, checksum, detected=True)
         return "ok", "already-applied (detected — schema present, no tracking row)"
 
-    apply_fn = None
-    if migration_id == "067_legacy_sales_roles":
-        apply_fn = lambda: apply_067(conn, path, verbose)
-    return _do_apply(
-        conn, migration_id, path, checksum, dry_run, verbose, apply_fn=apply_fn
-    )
+    return _do_apply(conn, migration_id, path, checksum, dry_run, verbose)
 
 
 def run(

@@ -44,9 +44,10 @@ os.environ.setdefault("ENTRA_TENANT_ID", "x")
 
 from api.authz import (  # noqa: E402
     ASSIGNABLE_ROLES,
+    CANONICAL_ROLES,
     RETIRED_SALES_ASSIGNMENT_DETAIL,
+    RETIRED_SALES_ROLES,
     SALES_REP_DB_ROLES,
-    SALES_TEAM_ROLES,
 )
 from api.server import app, require_auth  # noqa: E402
 
@@ -659,8 +660,6 @@ class TestListUsersEnriched:
 # ── vp_sales ─────────────────────────────────────────────────────────────
 
 
-_ADMIN_EQUIVALENT_SALES = ("vp_sales",)
-
 _COMPANY_ROW = {
     "id": 1,
     "sla_return_window_days": 14,
@@ -677,13 +676,8 @@ class TestRetiredSalesAssignment:
     """sales and outside_sales stay on existing rows and cannot be newly assigned."""
 
     def test_four_sales_roles_are_assignable_and_legacy_sales_is_not(self):
-        assert SALES_TEAM_ROLES == frozenset({
-            "inside_sales",
-            "maintenance_sales",
-            "install_sales",
-            "vp_sales",
-        })
-        for role in SALES_TEAM_ROLES:
+        assert ASSIGNABLE_ROLES == CANONICAL_ROLES - RETIRED_SALES_ROLES
+        for role in ("inside_sales", "maintenance_sales", "install_sales", "vp_sales"):
             assert role in ASSIGNABLE_ROLES
             assert role in SALES_REP_DB_ROLES
         assert "sales" not in ASSIGNABLE_ROLES
@@ -756,8 +750,7 @@ class TestRetiredSalesAssignment:
             c for c in mock_exec.await_args_list
             if "UPDATE users SET role" in c.args[0]
         ]
-        assert len(updates) == 1
-        assert role in updates[0].args[1]
+        assert updates == []
         mock_resolve.assert_not_called()
 
 
@@ -767,14 +760,14 @@ class TestAdminEquivalentRoleAssignment:
         assert "regional_director" not in SALES_REP_DB_ROLES
         assert "vice_president" not in SALES_REP_DB_ROLES
 
-    @pytest.mark.parametrize("role", _ADMIN_EQUIVALENT_SALES)
     @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_create_accepts_role_without_aspire_link(
-        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role, role
+    async def test_create_accepts_vp_sales_without_aspire_link(
+        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role
     ):
+        role = "vp_sales"
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
         mock_query.return_value = []
@@ -793,14 +786,14 @@ class TestAdminEquivalentRoleAssignment:
         mock_resolve.assert_not_called()
         assert SALES_BLOCK_COPY not in r.text
 
-    @pytest.mark.parametrize("role", _ADMIN_EQUIVALENT_SALES)
     @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_patch_accepts_role_without_aspire_link(
-        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role, role
+    async def test_patch_accepts_vp_sales_without_aspire_link(
+        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role
     ):
+        role = "vp_sales"
         as_role("admin")
         mock_authz_query.return_value = _live("admin")
         mock_query.return_value = [
@@ -817,16 +810,15 @@ class TestAdminEquivalentRoleAssignment:
         assert role in updates[0].args[1]
         mock_resolve.assert_not_called()
 
-    @pytest.mark.parametrize("role", _ADMIN_EQUIVALENT_SALES)
     @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_live_role_may_create_users(
-        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role, role
+    async def test_vp_sales_may_create_users(
+        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role
     ):
-        as_role(role)
-        mock_authz_query.return_value = _live(role)
+        as_role("vp_sales")
+        mock_authz_query.return_value = _live("vp_sales")
         mock_query.return_value = []
         r = client.post(
             "/api/settings/users",
@@ -860,15 +852,14 @@ class TestAdminEquivalentRoleAssignment:
 
 
 class TestAdminEquivalentCompanySettings:
-    @pytest.mark.parametrize("role", _ADMIN_EQUIVALENT_SALES)
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_passes_admin_gated_company_settings(
-        self, mock_query, mock_exec, mock_authz_query, as_role, role
+    async def test_vp_sales_passes_admin_gated_company_settings(
+        self, mock_query, mock_exec, mock_authz_query, as_role
     ):
-        as_role(role)
-        mock_authz_query.return_value = _live(role)
+        as_role("vp_sales")
+        mock_authz_query.return_value = _live("vp_sales")
         mock_query.return_value = [_COMPANY_ROW]
         r = client.patch("/api/settings/company", json={"sla_return_window_days": 21})
         assert r.status_code == 200, r.text

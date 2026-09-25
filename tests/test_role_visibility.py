@@ -339,9 +339,8 @@ class TestRepViewerScope:
             resp = client.get("/api/commissions/reps")
         assert resp.status_code == 200
 
-    @pytest.mark.parametrize("role", ["vp_sales"])
-    def test_admin_equivalent_sales_roles_may_list_reps(self, as_role, role):
-        as_role(role, user_id="lead-1")
+    def test_vp_sales_may_list_reps(self, as_role):
+        as_role("vp_sales", user_id="lead-1")
         with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
             reps = client.get("/api/commissions/reps")
         assert reps.status_code == 200
@@ -351,16 +350,15 @@ class TestRepViewerScope:
 
 
 class TestAdminEquivalentSalesRoleSets:
-    @pytest.mark.parametrize("role", ["vp_sales"])
-    def test_viewer_and_not_field_sales(self, role):
-        assert role in authz.REP_VIEWER_ROLES
-        assert role in authz.CROSS_BRANCH_ROLES
-        assert role in authz.APPROVER_ROLES
-        assert role in authz.SALES_REP_DB_ROLES
-        assert role not in authz.FIELD_SALES_ROLES
-        assert not authz.requires_aspire_sales_rep(role)
-        assert not authz.is_sales_rep(role)
-        assert authz.own_lead_filter({"role": role, "id": "lead-1"}) == ("", [])
+    def test_vp_sales_is_a_viewer_and_not_field_sales(self):
+        assert "vp_sales" in authz.REP_VIEWER_ROLES
+        assert "vp_sales" in authz.CROSS_BRANCH_ROLES
+        assert "vp_sales" in authz.APPROVER_ROLES
+        assert "vp_sales" in authz.SALES_REP_DB_ROLES
+        assert "vp_sales" not in authz.FIELD_SALES_ROLES
+        assert not authz.requires_aspire_sales_rep("vp_sales")
+        assert not authz.is_sales_rep("vp_sales")
+        assert authz.own_lead_filter({"role": "vp_sales", "id": "lead-1"}) == ("", [])
 
     def test_regional_director_and_vice_president_unchanged(self):
         assert authz.normalize_role("regional_director") == "regional_director"

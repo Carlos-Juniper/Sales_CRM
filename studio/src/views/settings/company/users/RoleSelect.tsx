@@ -2,13 +2,10 @@ import type { UserRole } from '@/types'
 import { ASSIGNABLE_ROLES } from '@/lib/roles'
 import { LEGACY_SALES_LABEL, ROLE_LABELS } from '@/lib/roleLabels'
 
-export type RoleSelectValue = UserRole | 'outside_sales'
-
 /**
- * Role picker of assignable roles. Legacy `sales` / `outside_sales` are not
- * choices. Pass `currentRole` when editing a row that already has one, so
- * the select can show "Legacy: Sales (reassign)" without offering it to
- * anyone else.
+ * Role picker of assignable roles. A row that already stores `sales` or
+ * `outside_sales` shows that value as a disabled option so the editor can
+ * display it. It is not a choice for a new assignment.
  */
 export function RoleSelect({
   value,
@@ -18,8 +15,8 @@ export function RoleSelect({
   testId,
   ariaLabel,
 }: {
-  value: RoleSelectValue
-  onChange: (role: RoleSelectValue) => void
+  value: string
+  onChange: (role: string) => void
   currentRole?: string
   id?: string
   testId?: string
@@ -33,13 +30,15 @@ export function RoleSelect({
       data-testid={testId}
       aria-label={ariaLabel}
       value={value}
-      onChange={(e) => onChange(e.target.value as RoleSelectValue)}
+      onChange={(e) => onChange(e.target.value)}
       className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
     >
       {legacy && (
-        <option value={legacy}>{LEGACY_SALES_LABEL}</option>
+        <option value={legacy} disabled>
+          {LEGACY_SALES_LABEL}
+        </option>
       )}
-      {ASSIGNABLE_ROLES.map((role) => (
+      {ASSIGNABLE_ROLES.map((role: UserRole) => (
         <option key={role} value={role}>
           {ROLE_LABELS[role]}
         </option>

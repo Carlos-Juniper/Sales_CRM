@@ -1,6 +1,6 @@
 import { http, HttpResponse, delay } from 'msw'
 import { useAuthStore } from '@/store/authStore'
-import { normalizeRole } from '@/hooks/useRole'
+import { SALES_REP_ROLES, normalizeRole } from '@/lib/roles'
 import { ANALYTICS_NAV_ROLES } from '@/lib/roles'
 import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockConnections, mockProposalPackages } from './data'
 import { MOCK_BRANCH_COVERAGE } from './proposalRoster'
@@ -105,15 +105,8 @@ function denyDisallowedIntake(estimateType: string) {
   return HttpResponse.json({ detail }, { status: 403 })
 }
 
-/** `?role=sales` is the four sales roles plus legacy sales / outside_sales. */
-const SALES_GROUP_ROLES = new Set([
-  'inside_sales',
-  'maintenance_sales',
-  'install_sales',
-  'vp_sales',
-  'sales',
-  'outside_sales',
-])
+/** `?role=sales` matches SALES_REP_ROLES (assignable sales roles plus legacy). */
+const SALES_GROUP_ROLES = new Set<string>(SALES_REP_ROLES)
 const leads = [...mockLeads]
 const bids = [...mockBids]
 const proposalPackages: ProposalPackageSummary[] = [...mockProposalPackages]
@@ -594,7 +587,7 @@ const allHandlers = [
     const role = url.searchParams.get('role')
     const branchId = url.searchParams.get('branch_id')
     let users = [...mockUsers]
-    if (role === 'sales' || role === 'outside_sales') {
+    if (role != null && normalizeRole(role) === 'sales') {
       users = users.filter((u) => SALES_GROUP_ROLES.has(u.role))
     } else if (role) {
       users = users.filter((u) => u.role === role)

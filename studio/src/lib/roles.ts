@@ -3,37 +3,47 @@
 // These mirror api/authz.py exactly. Import from here; do NOT redeclare inline.
 // ---------------------------------------------------------------------------
 
-import { CANONICAL_ROLES, type UserRole } from '@/types'
+import { CANONICAL_ROLES, type LegacyUserRole, type UserRole } from '@/types'
 
 /**
- * The four assignable sales roles. Each has its own commission structure
- * and workflow. Mirrors api/authz.py SALES_TEAM_ROLES.
+ * Stored legacy alias. Mirrors api/authz.py LEGACY_ROLE_MAP.
+ * `outside_sales` is not assignable and is not written on a role change.
  */
-export const SALES_TEAM_ROLES: readonly UserRole[] = [
-  'inside_sales',
-  'maintenance_sales',
-  'install_sales',
-  'vp_sales',
-]
+export const LEGACY_ROLE_MAP: Record<string, UserRole> = {
+  outside_sales: 'sales',
+}
+
+/** Map a stored/JWT role onto the canonical vocabulary (legacy → sales). */
+export function normalizeRole(role: UserRole | LegacyUserRole | string): UserRole {
+  return LEGACY_ROLE_MAP[role] ?? (role as UserRole)
+}
 
 /**
- * Roles an admin may assign. Legacy `sales` stays on UserRole for existing
- * sessions and is omitted here. Mirrors api/authz.py ASSIGNABLE_ROLES.
+ * Roles an admin may assign. Mirrors api/authz.py ASSIGNABLE_ROLES
+ * (CANONICAL_ROLES minus retired sales). `outside_sales` is not a UserRole.
  */
 export const ASSIGNABLE_ROLES: readonly UserRole[] = CANONICAL_ROLES.filter(
   (role) => role !== 'sales',
 )
 
 /**
- * users.role values matched by GET /api/users?role=sales. The four sales
- * roles, then legacy sales / outside_sales. Mirrors api/authz.py
- * SALES_REP_DB_ROLES.
+ * users.role values matched by GET /api/users?role=sales. Mirrors
+ * api/authz.py SALES_REP_DB_ROLES.
  */
 export const SALES_REP_ROLES: readonly string[] = [
-  ...SALES_TEAM_ROLES,
+  'inside_sales',
+  'maintenance_sales',
+  'install_sales',
+  'vp_sales',
   'sales',
   'outside_sales',
 ]
+
+/**
+ * Roles that can own a client-reference or team-roster row. Same members as
+ * the sales-rep picker. Mirrors api/authz.py ROSTER_REP_ROLES.
+ */
+export const ROSTER_REP_ROLES: readonly string[] = SALES_REP_ROLES
 
 /**
  * Admin and VP of Sales share every admin grant. Mirrors api/authz.py
@@ -165,8 +175,7 @@ export const ESTIMATING_NAV_ROLES: readonly UserRole[] = [
 
 /** Aspire ContactID is required for the same roles that stamp SalesRepID. */
 export function requiresAspireSalesRep(role: string): boolean {
-  const normalized = role === 'outside_sales' ? 'sales' : role
-  return (FIELD_SALES_ROLES as readonly string[]).includes(normalized)
+  return (FIELD_SALES_ROLES as readonly string[]).includes(normalizeRole(role))
 }
 
 /**

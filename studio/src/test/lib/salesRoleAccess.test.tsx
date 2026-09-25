@@ -10,7 +10,7 @@ import {
   PUBLIC_LEADS_NAV_ROLES,
   REP_SELECTOR_ROLES,
   SALES_NAV_ROLES,
-  SALES_TEAM_ROLES,
+  SALES_REP_ROLES,
   defaultRouteForRole,
   requiresAspireSalesRep,
 } from '@/lib/roles'
@@ -112,16 +112,14 @@ describe('split field-sales role gates', () => {
 
 describe('admin-equivalent sales roles', () => {
   it('lands on Analytics and is not field-sales scoped', () => {
-    for (const role of ['vp_sales'] as const) {
-      expect(defaultRouteForRole(role)).toBe('/inside-sales')
-      expect(ANALYTICS_NAV_ROLES).toContain(role)
-      expect(PUBLIC_LEADS_NAV_ROLES).toContain(role)
-      expect(SALES_NAV_ROLES).toContain(role)
-      expect(REP_SELECTOR_ROLES).toContain(role)
-      expect(withRole(role).isAdmin).toBe(true)
-      expect(withRole(role).isSales).toBe(false)
-      expect(withRole(role).canAccess(ANALYTICS_NAV_ROLES)).toBe(true)
-    }
+    expect(defaultRouteForRole('vp_sales')).toBe('/inside-sales')
+    expect(ANALYTICS_NAV_ROLES).toContain('vp_sales')
+    expect(PUBLIC_LEADS_NAV_ROLES).toContain('vp_sales')
+    expect(SALES_NAV_ROLES).toContain('vp_sales')
+    expect(REP_SELECTOR_ROLES).toContain('vp_sales')
+    expect(withRole('vp_sales').isAdmin).toBe(true)
+    expect(withRole('vp_sales').isSales).toBe(false)
+    expect(withRole('vp_sales').canAccess(ANALYTICS_NAV_ROLES)).toBe(true)
     expect(defaultRouteForRole('regional_director')).toBe('/inside-sales')
     expect(defaultRouteForRole('vice_president')).toBe('/inside-sales')
     expect(withRole('regional_director').isAdmin).toBe(false)
@@ -129,14 +127,9 @@ describe('admin-equivalent sales roles', () => {
   })
 
   it('offers the four sales roles and keeps legacy sales working', () => {
-    expect([...SALES_TEAM_ROLES]).toEqual([
-      'inside_sales',
-      'maintenance_sales',
-      'install_sales',
-      'vp_sales',
-    ])
-    for (const role of SALES_TEAM_ROLES) {
+    for (const role of ['inside_sales', 'maintenance_sales', 'install_sales', 'vp_sales'] as const) {
       expect(ASSIGNABLE_ROLES).toContain(role)
+      expect(SALES_REP_ROLES).toContain(role)
     }
     expect(ASSIGNABLE_ROLES).not.toContain('sales')
     expect(withRole('sales').isSales).toBe(true)

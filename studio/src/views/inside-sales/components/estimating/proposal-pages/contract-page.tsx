@@ -3,8 +3,10 @@
 //
 // Matches the structure of the reference (business docs/Pointe Jupiter Yacht
 // Club.pdf, p.37-42):
-// 1. Description of Services / Frequency table + Annual Maintenance Price,
-//    plus an Optional Services table for one-time line items (ContractLines).
+// 1. Itemized pricing table (description, visits/year, unit price, line total)
+//    + Annual Maintenance Price, plus an Optional Services table for one-time
+//    line items (ContractLines). A maintenance estimate with no section
+//    services keeps a single Annual Maintenance Price lump sum.
 // 2. Services — one scope-of-work paragraph per unique service
 //    (ContractScopeNarrative), paginated.
 // 3. Terms & Conditions — static boilerplate, identical on every contract
@@ -31,7 +33,7 @@ export function ContractPage({
 }) {
   return (
     <>
-      {/* Page 1: Description of Services + Frequency, Optional Services */}
+      {/* Page 1: itemized pricing, or the lump-sum fallback, plus Optional Services */}
       <PrintPage data-testid="page-contract-scope" className="contract">
         <h1 className="page-title">Landscape Maintenance Agreement</h1>
         {lead.property_name && <p className="contract-property">{lead.property_name}</p>}

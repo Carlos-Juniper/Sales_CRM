@@ -2561,21 +2561,6 @@
 .proposal-root .contract-tbl th.num,
 .proposal-root .contract-tbl td.num {
   text-align: right;
-  white-space: nowrap;
-  width: 1%;
-}
-
-/* Repeat the header if a print engine fragments the table, and keep a row
-   intact so a currency figure is not left on the next sheet without its
-   description. The contract sheet itself is one fixed page; numeric columns
-   shrink to their text so the extra price columns stay inside the margins. */
-.proposal-root .contract-tbl thead {
-  display: table-header-group;
-}
-
-.proposal-root .contract-tbl tr {
-  break-inside: avoid;
-  page-break-inside: avoid;
 }
 
 .proposal-root .contract-tbl td {
@@ -2592,11 +2577,6 @@
   background: var(--jn-band);
   font-weight: 700;
   border-bottom: 0.75pt solid var(--jn-hairline);
-}
-
-.proposal-root .contract-tbl .summary-row td {
-  font-weight: 700;
-  border-bottom: none;
 }
 
 .proposal-root .contract-tbl .total-row td {

@@ -2149,12 +2149,12 @@ describe('ProposalPreview — contract chapter', () => {
     expect(within(page).queryByText('Coral Bay HOA')).not.toBeInTheDocument()
   })
 
-  it('keeps a single annual price when the maintenance estimate has no line items', () => {
+  it('does not invent service rows when the maintenance estimate has no line items', () => {
     renderPreview()
     const page = screen.getByTestId('page-contract-scope')
-    expect(within(page).getByTestId('contract-pricing-lump-sum')).toBeInTheDocument()
-    expect(within(page).getByTestId('contract-total')).toHaveTextContent('$185,000.00')
     expect(within(page).queryByTestId('contract-line')).not.toBeInTheDocument()
+    expect(within(page).queryByText('Annual Maintenance Price')).not.toBeInTheDocument()
+    expect(within(page).queryByText('$185,000.00')).not.toBeInTheDocument()
   })
 
   it('does not render the contract chapter for an install estimate or without an estimate', () => {

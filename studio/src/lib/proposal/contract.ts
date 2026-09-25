@@ -18,25 +18,19 @@ export interface ContractRow {
   /** Price per occurrence in cents */
   priceEachCents: number
   /**
-   * Customer-facing unit price (price per occurrence), or null when the
-   * service has no unit sell price. Distinct from priceEachCents, which stays
-   * 0 in that case so older totals math is unchanged.
+   * Per-service amount for the contract row, in cents. This is the extended
+   * price Annual Maintenance Price already sums. Null when the service has no
+   * unit sell price — the cell stays blank instead of showing an invented $0.
    */
-  unitPriceCents?: number | null
+  servicePriceCents?: number | null
   /** Extended price in cents (qty × priceEach, computed from maintServiceLine) */
   extPriceCents: number
-  /** Sales tax in cents (always 0 for v1 — there is no tax field on the estimate) */
+  /** Sales tax in cents (always 0 for v1) */
   salesTaxCents: number
   /** Total price in cents (extPrice + salesTax) */
   totalPriceCents: number
   /** For internal use: whether this row is recurring (affects payment schedule) */
   isRecurring: boolean
-}
-
-export interface PricingFooterLine {
-  kind: 'subtotal' | 'tax' | 'total'
-  label: string
-  amountCents: number
 }
 
 export interface ContractTotals {
@@ -92,7 +86,7 @@ export function buildContractRows(estimate: Estimate): ContractRow[] {
         label: svc.label,
         occurs: isRecurring ? svc.qty : null,
         priceEachCents: priceEach,
-        unitPriceCents: unitKnown ? priceEach : null,
+        servicePriceCents: unitKnown ? extPrice : null,
         extPriceCents: extPrice,
         salesTaxCents: 0, // No tax engine in v1
         totalPriceCents: extPrice, // total = ext + tax
@@ -112,29 +106,6 @@ export function buildContractTotals(rows: ContractRow[]): ContractTotals {
   const salesTaxCents = rows.reduce((sum, r) => sum + r.salesTaxCents, 0)
   const totalPriceCents = rows.reduce((sum, r) => sum + r.totalPriceCents, 0)
   return { extPriceCents, salesTaxCents, totalPriceCents }
-}
-
-/**
- * Footer for the itemized pricing table on the contract's first page.
- *
- * Subtotal is the sum of line totals. Sales tax is included only when the
- * rows actually carry tax (v1 estimates do not). The total is subtotal + tax,
- * which is the Annual Maintenance Price the contract already showed as a lump
- * sum when every row's tax is zero.
- */
-export function buildPricingFooter(totals: ContractTotals): PricingFooterLine[] {
-  const lines: PricingFooterLine[] = [
-    { kind: 'subtotal', label: 'Subtotal', amountCents: totals.extPriceCents },
-  ]
-  if (totals.salesTaxCents !== 0) {
-    lines.push({ kind: 'tax', label: 'Sales Tax', amountCents: totals.salesTaxCents })
-  }
-  lines.push({
-    kind: 'total',
-    label: 'Annual Maintenance Price',
-    amountCents: totals.totalPriceCents,
-  })
-  return lines
 }
 
 /**

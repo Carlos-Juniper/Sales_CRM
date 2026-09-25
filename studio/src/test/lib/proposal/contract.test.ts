@@ -10,7 +10,6 @@ import {
   buildContractRows,
   buildContractTotals,
   buildPaymentSchedule,
-  buildPricingFooter,
 } from '@/lib/proposal/contract'
 import type { Estimate } from '@/types/estimating'
 
@@ -142,7 +141,7 @@ describe('buildContractRows', () => {
     expect(rows[0].extPriceCents).toBe(66000)
   })
 
-  it('exposes a unit price only when the service has a unit sell price', () => {
+  it('sets the per-service price to the extended amount, and leaves it unset when there is no unit sell price', () => {
     const estimate = makeEstimate([
       {
         squareFeet: 10000,
@@ -155,12 +154,12 @@ describe('buildContractRows', () => {
 
     const rows = buildContractRows(estimate)
 
-    expect(rows[0].unitPriceCents).toBe(5000)
-    expect(rows[1].unitPriceCents).toBeNull()
+    expect(rows[0].servicePriceCents).toBe(60000)
+    expect(rows[1].servicePriceCents).toBeNull()
     expect(rows[1].extPriceCents).toBe(0)
   })
 
-  it('keeps the line total on maintServiceLine when price-each times qty would drift', () => {
+  it('uses the extended price when price-each times quantity would not sum to the annual total', () => {
     const estimate = makeEstimate([
       {
         squareFeet: 1001,
@@ -171,9 +170,11 @@ describe('buildContractRows', () => {
     ])
 
     const rows = buildContractRows(estimate)
+    const annual = buildContractTotals(rows.filter((row) => row.isRecurring)).extPriceCents
 
     expect(rows[0].priceEachCents * rows[0].occurs!).not.toBe(rows[0].extPriceCents)
-    expect(rows[0].extPriceCents).toBe(1000)
+    expect(rows[0].servicePriceCents).toBe(rows[0].extPriceCents)
+    expect(rows[0].servicePriceCents).toBe(annual)
   })
 })
 
@@ -204,46 +205,6 @@ describe('buildContractTotals', () => {
 
     expect(totals.extPriceCents).toBe(61500)
     expect(totals.totalPriceCents).toBe(61500)
-  })
-})
-
-describe('buildPricingFooter', () => {
-  it('omits sales tax when the rows carry none, and the total matches the line-item sum', () => {
-    const estimate = makeEstimate([
-      {
-        squareFeet: 10000,
-        services: [
-          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
-          { label: 'Edging', qty: 4, unitSellCents: 200, complexityPct: 0 },
-          { label: 'Mulch', qty: 1, unitSellCents: 300, complexityPct: 0, billingType: 'one_time' },
-        ],
-      },
-    ])
-    const rows = buildContractRows(estimate)
-    const recurring = rows.filter((row) => row.isRecurring)
-    const totals = buildContractTotals(recurring)
-    const footer = buildPricingFooter(totals)
-
-    expect(footer.map((line) => line.kind)).toEqual(['subtotal', 'total'])
-    expect(footer.find((line) => line.kind === 'tax')).toBeUndefined()
-    const lineSum = recurring.reduce((sum, row) => sum + row.extPriceCents, 0)
-    expect(footer.find((line) => line.kind === 'subtotal')?.amountCents).toBe(lineSum)
-    expect(footer.find((line) => line.kind === 'total')?.amountCents).toBe(lineSum)
-    expect(footer.find((line) => line.kind === 'total')?.label).toBe('Annual Maintenance Price')
-    const scheduled = buildPaymentSchedule(rows, null).reduce((sum, month) => sum + month.amountCents, 0)
-    expect(scheduled).toBe(footer.find((line) => line.kind === 'total')?.amountCents)
-  })
-
-  it('includes a tax line only when the totals carry tax, and the total adds it', () => {
-    const footer = buildPricingFooter({
-      extPriceCents: 60000,
-      salesTaxCents: 4200,
-      totalPriceCents: 64200,
-    })
-
-    expect(footer.map((line) => line.kind)).toEqual(['subtotal', 'tax', 'total'])
-    expect(footer.find((line) => line.kind === 'tax')?.amountCents).toBe(4200)
-    expect(footer.find((line) => line.kind === 'total')?.amountCents).toBe(64200)
   })
 })
 

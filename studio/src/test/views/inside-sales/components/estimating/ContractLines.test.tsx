@@ -1,12 +1,13 @@
 // ---------------------------------------------------------------------------
-// ContractLines — itemized pricing on the Landscape Maintenance Agreement's
-// first page, plus the lump-sum fallback when the estimate has no services.
+// ContractLines — per-service price on the existing Description of Services
+// table. The table, its rows, and the Annual Maintenance Price total stay;
+// each recurring row gains a price cell in the same currency style.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from 'vitest'
 import { screen, within } from '@testing-library/react'
 import { render } from '@/test/utils'
-import { buildContractRows, buildContractTotals, buildPaymentSchedule } from '@/lib/proposal/contract'
+import { buildContractRows, buildContractTotals } from '@/lib/proposal/contract'
 import { ContractPage } from '@/views/inside-sales/components/estimating/proposal-pages/contract-page'
 import { ContractLines } from '@/views/inside-sales/components/estimating/proposal-pages/ContractLines'
 import type { Estimate } from '@/types/estimating'
@@ -87,7 +88,11 @@ function line(label: string) {
   return match
 }
 
-describe('ContractLines itemized pricing', () => {
+function cents(text: string): number {
+  return Math.round(Number(text.replace(/[$,]/g, '')) * 100)
+}
+
+describe('ContractLines per-service price', () => {
   const estimate = makeEstimate([
     {
       squareFeet: 10000,
@@ -99,54 +104,47 @@ describe('ContractLines itemized pricing', () => {
     },
   ])
 
-  it('renders one row per recurring service with frequency, unit price, and line total', () => {
+  it('keeps the existing services table and adds each service price beside its frequency', () => {
     render(<ContractPage estimate={estimate} lead={{ property_name: 'Willowbrook Estates' }} />)
     const page = screen.getByTestId('page-contract-scope')
-    const table = within(page).getByTestId('contract-pricing-table')
+    const table = page.querySelector('.services-tbl')
+    expect(table).toBeTruthy()
+    expect(within(table as HTMLElement).getByText('Description of Services')).toBeInTheDocument()
+    expect(within(table as HTMLElement).getByText('Frequency')).toBeInTheDocument()
+    expect(within(table as HTMLElement).getByText('General Maintenance Services')).toBeInTheDocument()
+    expect(within(table as HTMLElement).queryByText('Subtotal')).not.toBeInTheDocument()
+    expect(within(table as HTMLElement).queryByText('Sales Tax')).not.toBeInTheDocument()
+    expect(within(table as HTMLElement).queryByText('Unit Price')).not.toBeInTheDocument()
+    expect(within(table as HTMLElement).queryByText('Line Total')).not.toBeInTheDocument()
 
-    expect(within(table).getByText('Frequency')).toBeInTheDocument()
-    expect(within(table).getByText('Unit Price')).toBeInTheDocument()
-    expect(within(table).getByText('Line Total')).toBeInTheDocument()
+    const mowing = line('Mowing')
+    const edging = line('Edging')
+    expect(within(mowing).getByTestId('contract-line-frequency')).toHaveTextContent('12')
+    expect(within(mowing).getByTestId('contract-line-price')).toHaveTextContent('$600.00')
+    expect(within(edging).getByTestId('contract-line-frequency')).toHaveTextContent('4')
+    expect(within(edging).getByTestId('contract-line-price')).toHaveTextContent('$80.00')
+    expect(within(table as HTMLElement).queryByText('Mulch')).not.toBeInTheDocument()
 
-    const mowing = within(page).getAllByTestId('contract-line').find((el) => el.getAttribute('data-label') === 'Mowing')
-    const edging = within(page).getAllByTestId('contract-line').find((el) => el.getAttribute('data-label') === 'Edging')
-    expect(mowing).toBeTruthy()
-    expect(edging).toBeTruthy()
-    expect(within(mowing!).getByTestId('contract-line-frequency')).toHaveTextContent('12')
-    expect(within(mowing!).getByTestId('contract-line-unit')).toHaveTextContent('$50.00')
-    expect(within(mowing!).getByTestId('contract-line-total')).toHaveTextContent('$600.00')
-    expect(within(edging!).getByTestId('contract-line-frequency')).toHaveTextContent('4')
-    expect(within(edging!).getByTestId('contract-line-unit')).toHaveTextContent('$20.00')
-    expect(within(edging!).getByTestId('contract-line-total')).toHaveTextContent('$80.00')
-
-    expect(within(table).queryByText('Mulch')).not.toBeInTheDocument()
-    const optional = within(page).getByTestId('contract-optional-line')
-    expect(optional).toHaveAttribute('data-label', 'Mulch')
-    expect(optional).toHaveTextContent('$30.00')
+    const optional = page.querySelector('.optional-tbl')
+    expect(optional).toBeTruthy()
+    expect(within(optional as HTMLElement).getByText('Mulch')).toBeInTheDocument()
+    expect(within(optional as HTMLElement).getAllByText('$30.00').length).toBeGreaterThan(0)
+    expect(within(screen.getByTestId('page-contract-summary')).queryByText('Mowing')).not.toBeInTheDocument()
   })
 
-  it('reconciles subtotal and annual price to the recurring line totals and the payment schedule', () => {
-    render(<ContractPage estimate={estimate} lead={{ property_name: 'Willowbrook Estates' }} />)
-    const page = screen.getByTestId('page-contract-scope')
-    const rows = buildContractRows(estimate).filter((row) => row.isRecurring)
-    const totals = buildContractTotals(rows)
-    const scheduled = buildPaymentSchedule(buildContractRows(estimate), new Date('2024-03-01'))
-      .reduce((sum, month) => sum + month.amountCents, 0)
+  it('keeps the annual total and the per-service prices sum to it', () => {
+    render(<ContractLines estimate={estimate} />)
+    const recurring = buildContractRows(estimate).filter((row) => row.isRecurring)
+    const annual = buildContractTotals(recurring).extPriceCents
+    expect(annual).toBe(68000)
 
-    expect(totals.extPriceCents).toBe(68000)
-    expect(scheduled).toBe(68000)
-    expect(within(page).queryByTestId('contract-tax')).not.toBeInTheDocument()
-    expect(within(page).getByTestId('contract-subtotal')).toHaveTextContent('$680.00')
-    expect(within(page).getByTestId('contract-total')).toHaveTextContent('Annual Maintenance Price')
-    expect(within(page).getByTestId('contract-total')).toHaveTextContent('$680.00')
-
-    const summary = screen.getByTestId('page-contract-summary')
-    expect(within(summary).queryByTestId('contract-pricing-table')).not.toBeInTheDocument()
-    const scheduleTotal = within(summary).getAllByText('$680.00')
-    expect(scheduleTotal.length).toBeGreaterThan(0)
+    const shown = screen.getAllByTestId('contract-line-price').map((cell) => cents(cell.textContent ?? ''))
+    expect(shown.reduce((sum, n) => sum + n, 0)).toBe(annual)
+    expect(screen.getByTestId('contract-total')).toHaveTextContent('Annual Maintenance Price')
+    expect(screen.getByTestId('contract-total')).toHaveTextContent('$680.00')
   })
 
-  it('prints the extended line total when price-each times quantity would round differently', () => {
+  it('shows the extended price when price-each times frequency would miss the total', () => {
     const rounded = makeEstimate([
       {
         squareFeet: 1001,
@@ -154,13 +152,11 @@ describe('ContractLines itemized pricing', () => {
       },
     ])
     render(<ContractLines estimate={rounded} />)
-    const row = line('Detail work')
-    expect(within(row).getByTestId('contract-line-unit')).toHaveTextContent('$3.33')
-    expect(within(row).getByTestId('contract-line-total')).toHaveTextContent('$10.00')
+    expect(within(line('Detail work')).getByTestId('contract-line-price')).toHaveTextContent('$10.00')
     expect(screen.getByTestId('contract-total')).toHaveTextContent('$10.00')
   })
 
-  it('leaves unit price blank when the service has no unit sell price', () => {
+  it('leaves the price cell blank when the service has no unit sell price', () => {
     const mixed = makeEstimate([
       {
         squareFeet: 10000,
@@ -172,41 +168,29 @@ describe('ContractLines itemized pricing', () => {
     ])
     render(<ContractLines estimate={mixed} />)
     const hand = line('Hand entered')
-    expect(within(hand).getByTestId('contract-line-unit').textContent).toBe('')
-    expect(within(hand).getByTestId('contract-line-total')).toHaveTextContent('$0.00')
     expect(within(hand).getByTestId('contract-line-frequency')).toHaveTextContent('4')
-  })
-
-  it('omits the unit price column when no line has one', () => {
-    const unpriced = makeEstimate([
-      {
-        squareFeet: 10000,
-        services: [{ label: 'Hand entered', qty: 4, unitSellCents: null, complexityPct: 0 }],
-      },
-    ])
-    render(<ContractLines estimate={unpriced} />)
-    expect(screen.queryByText('Unit Price')).not.toBeInTheDocument()
-    expect(screen.getByTestId('contract-line-frequency')).toHaveTextContent('4')
-    expect(screen.getByTestId('contract-total')).toHaveTextContent('$0.00')
+    expect(within(hand).getByTestId('contract-line-price').textContent).toBe('')
+    expect(screen.getByTestId('contract-total')).toHaveTextContent('$600.00')
+    const shown = screen
+      .getAllByTestId('contract-line-price')
+      .map((cell) => cell.textContent ?? '')
+      .filter((text) => text !== '')
+      .map(cents)
+    expect(shown.reduce((sum, n) => sum + n, 0)).toBe(60000)
   })
 })
 
-describe('ContractLines lump-sum fallback', () => {
-  it('shows the persisted contract total and no invented service rows', () => {
-    const estimate = makeEstimate([], { contractValueCents: 18_500_000 })
-    render(<ContractPage estimate={estimate} lead={{ property_name: 'Coral Bay HOA' }} />)
+describe('ContractLines without services', () => {
+  it('renders no table and does not invent a lump-sum row', () => {
+    render(
+      <ContractPage
+        estimate={makeEstimate([], { contractValueCents: 18_500_000 })}
+        lead={{ property_name: 'Coral Bay HOA' }}
+      />,
+    )
     const page = screen.getByTestId('page-contract-scope')
-    const table = within(page).getByTestId('contract-pricing-lump-sum')
-    expect(within(table).queryByTestId('contract-line')).not.toBeInTheDocument()
-    expect(within(table).queryByTestId('contract-subtotal')).not.toBeInTheDocument()
-    expect(within(table).queryByText('Unit Price')).not.toBeInTheDocument()
-    expect(within(table).getByTestId('contract-total')).toHaveTextContent('$185,000.00')
-    expect(within(table).getByText('Annual Maintenance Price')).toBeInTheDocument()
-  })
-
-  it('renders nothing when there are no line items and no contract value', () => {
-    render(<ContractLines estimate={makeEstimate([], { contractValueCents: 0 })} />)
-    expect(screen.queryByTestId('contract-pricing-lump-sum')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('contract-pricing-table')).not.toBeInTheDocument()
+    expect(page.querySelector('.services-tbl')).toBeNull()
+    expect(within(page).queryByText('Annual Maintenance Price')).not.toBeInTheDocument()
+    expect(within(page).queryByText('$185,000.00')).not.toBeInTheDocument()
   })
 })

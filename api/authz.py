@@ -209,8 +209,9 @@ def roster_rep_query(
             "by that rep. Marketing and admin may name any roster rep "
             "(sales, outside_sales, inside_sales, maintenance_sales, "
             "install_sales). A roster rep may name only themselves; omitting "
-            "it on a write assigns the row to the caller. Omitting it on a "
-            "read keeps the existing unscoped list used by proposal generation."
+            "it on a write assigns the row to the caller. On a read, field "
+            "sales who omit it are scoped to their own id. Marketing, admin, "
+            "and management who omit it keep the unscoped list."
         ),
     ),
     user_id: Optional[str] = Query(

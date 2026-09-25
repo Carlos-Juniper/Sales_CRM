@@ -186,7 +186,7 @@ class TestRepEditsOwnRoster:
         r = client.get("/api/proposals/config/team-members?rep_id=rep-1")
         assert r.status_code == 200
         sql, params = mock_query.call_args.args[0], mock_query.call_args.args[1]
-        assert "owner_user_id = %s" in sql
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
         assert "rep-1" in params
         assert r.json()[0]["ownerUserId"] == "rep-1"
 
@@ -333,19 +333,23 @@ class TestMarketingEditsAnyRep:
         r = client.get("/api/proposals/config/client-references?rep_id=rep-2")
         assert r.status_code == 200
         sql, params = mock_query.call_args.args[0], mock_query.call_args.args[1]
-        assert "owner_user_id = %s" in sql
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
         assert "rep-2" in params
         assert r.json()[0]["ownerUserId"] == "rep-2"
 
     @patch("api.proposals.query", new_callable=AsyncMock)
-    async def test_omitting_rep_id_keeps_the_unscoped_list(self, mock_query, as_role):
-        """Proposal generation still lists every active row when rep_id is omitted."""
+    async def test_omitting_rep_id_scopes_a_field_rep_to_self_and_legacy(
+        self, mock_query, as_role
+    ):
+        """ProposalBuilder omits rep_id. A field rep still must not see other reps."""
         as_role("sales", id="rep-1")
         mock_query.return_value = []
         r = client.get("/api/proposals/config/client-references")
         assert r.status_code == 200
-        sql = mock_query.call_args.args[0]
-        assert "owner_user_id" not in sql
+        sql, params = mock_query.call_args.args[0], mock_query.call_args.args[1]
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
+        assert "rep-1" in params
+        assert "rep-2" not in (params or [])
 
     @patch("api.settings.execute", new_callable=AsyncMock)
     async def test_mismatched_rep_params_are_400(self, mock_exec, as_role):
@@ -514,3 +518,88 @@ class TestSplitRolesAreRosterReps:
             json={"name": "Shared Estate", "cityState": "Naples, FL", "regionId": "east-coast"},
         )
         assert r.status_code == 201, role
+
+
+_FIELD_SALES = ("sales", "maintenance_sales", "install_sales", "outside_sales")
+_ROSTER_READS = (
+    "/api/proposals/config/client-references",
+    "/api/proposals/config/team-members",
+)
+
+
+def _roster_sql(mock_query) -> tuple[str, list]:
+    for call in reversed(mock_query.call_args_list):
+        sql = call.args[0]
+        if "FROM client_references" in sql or "FROM team_members" in sql:
+            return sql, list(call.args[1] or [])
+    raise AssertionError("roster query was not issued")
+
+
+class TestRosterReadIsolation:
+    @pytest.mark.parametrize("role", _FIELD_SALES)
+    @pytest.mark.parametrize("path", _ROSTER_READS)
+    @patch("api.proposals.query", new_callable=AsyncMock)
+    async def test_rep_cannot_see_another_rep_with_or_without_rep_id(
+        self, mock_query, as_role, path, role
+    ):
+        as_role(role, id="rep-a")
+        mock_query.return_value = []
+        omitted = client.get(path)
+        assert omitted.status_code == 200, role
+        sql, params = _roster_sql(mock_query)
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
+        assert "rep-a" in params
+        assert "rep-b" not in params
+
+        denied = client.get(f"{path}?rep_id=rep-b")
+        assert denied.status_code == 403
+        assert denied.json()["detail"] == _VIEW_DENIED
+
+    @pytest.mark.parametrize("role", ("marketing", "admin", "manager", "regional_director"))
+    @patch("api.proposals.query", new_callable=AsyncMock)
+    async def test_wide_roles_without_rep_id_see_every_row(
+        self, mock_query, as_role, role
+    ):
+        as_role(role, id="wide-1")
+        mock_query.return_value = []
+        r = client.get("/api/proposals/config/client-references")
+        assert r.status_code == 200, role
+        sql, _params = _roster_sql(mock_query)
+        assert "owner_user_id" not in sql
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.proposals.query", new_callable=AsyncMock)
+    async def test_marketing_can_scope_by_rep_and_region_keeps_legacy_rows(
+        self, mock_query, mock_authz_query, as_role
+    ):
+        as_role("marketing", id="mkt-1")
+        mock_authz_query.return_value = _live("marketing")
+
+        async def fake(sql, params=None):
+            if "FROM regions" in sql:
+                return [{"id": (params or [None])[0]}]
+            return []
+
+        mock_query.side_effect = fake
+        r = client.get(
+            "/api/proposals/config/team-members?rep_id=rep-b&region_id=east-coast"
+        )
+        assert r.status_code == 200, r.text
+        sql, params = _roster_sql(mock_query)
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
+        assert "b.region_id IN (%s)" in sql
+        assert "rep-b" in params
+        assert "east-coast" in params
+        owner_at = sql.index("owner_user_id")
+        region_at = sql.index("b.region_id IN")
+        assert " AND " in sql[owner_at:region_at]
+
+    @patch("api.proposals.query", new_callable=AsyncMock)
+    async def test_inside_sales_omit_stays_company_wide(self, mock_query, as_role):
+        """inside_sales is a roster rep but not a field-sales role."""
+        as_role("inside_sales", id="in-1")
+        mock_query.return_value = []
+        r = client.get("/api/proposals/config/client-references")
+        assert r.status_code == 200
+        sql, _params = _roster_sql(mock_query)
+        assert "owner_user_id" not in sql

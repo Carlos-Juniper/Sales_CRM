@@ -34,6 +34,13 @@ Region on the team-roster and client-reference pickers:
   client-references take region_id: omit it to default to that set, pass a
   regions.id to pick another, or pass 'all' to turn the filter off. Rows
   whose region cannot be resolved stay in the list (see _region_match_sql).
+
+Per-rep roster reads (client references and team members):
+  Field sales (FIELD_SALES_ROLES) who omit rep_id are limited to their own
+  rows plus legacy rows whose owner_user_id is NULL. Naming another rep is
+  403. Marketing, admin, and management who omit rep_id see every row. A
+  rep_id filter is (owner = that rep OR owner IS NULL) and is AND-ed with
+  the region filter.
 """
 from __future__ import annotations
 
@@ -420,7 +427,10 @@ async def _fetch_roster(
         params.append(team_type)
 
     if owner_user_id is not None:
-        conditions.append("t.owner_user_id = %s")
+        # Own rows plus legacy company-wide rows (owner_user_id NULL) that
+        # predate per-rep ownership. Hiding the NULL rows dropped them from
+        # marketing's Settings view whenever a rep was selected.
+        conditions.append("(t.owner_user_id = %s OR t.owner_user_id IS NULL)")
         params.append(owner_user_id)
 
     region_sql, region_params = _region_match_sql(region_ids)
@@ -501,6 +511,24 @@ async def _authorize_rep_roster_read(user: dict, rep_id: str) -> None:
     if authz.is_marketing_manager(await authz._live_role(user)):
         return
     raise HTTPException(status_code=403, detail=_ROSTER_VIEW_DENIED)
+
+
+def _scope_roster_read(user: dict, rep_id: Optional[str]) -> Optional[str]:
+    """Owner id to filter a roster read by, or None for the full list.
+
+    Field sales who omit rep_id are scoped to themselves so ProposalBuilder
+    cannot read every other rep's references and roster by leaving the
+    parameter off. Naming another rep is 403. Marketing, admin, and
+    management (and every non-field role, including inside_sales) who omit
+    rep_id stay unscoped. A non-field caller who does pass rep_id is still
+    checked by ``_authorize_rep_roster_read``.
+    """
+    if not authz.is_sales_rep(user.get("role")):
+        return rep_id
+    caller_id = user.get("id")
+    if not caller_id or (rep_id is not None and rep_id != caller_id):
+        raise HTTPException(status_code=403, detail=_ROSTER_VIEW_DENIED)
+    return caller_id
 
 
 def _portfolio_property_out(r: dict) -> dict:
@@ -920,8 +948,9 @@ def register(app, require_auth) -> None:
         rep_id: Optional[str] = Depends(authz.roster_rep_query),
         user: dict = Depends(require_auth),
     ) -> list:
-        if rep_id is not None:
-            await _authorize_rep_roster_read(user, rep_id)
+        owner_id = _scope_roster_read(user, rep_id)
+        if owner_id is not None and not authz.is_sales_rep(user.get("role")):
+            await _authorize_rep_roster_read(user, owner_id)
         region_ids = await _resolve_region_filter(region_id, user)
         _set_region_filter_header(response, region_ids)
         rows = await _fetch_roster(
@@ -931,7 +960,7 @@ def register(app, require_auth) -> None:
             aspire_branch_id=aspire_branch_id,
             team_type=team_type,
             include_user_branch_twins=True,
-            owner_user_id=rep_id,
+            owner_user_id=owner_id,
         )
         return [_team_member_out(r) for r in rows]
 
@@ -963,8 +992,9 @@ def register(app, require_auth) -> None:
         rep_id: Optional[str] = Depends(authz.roster_rep_query),
         user: dict = Depends(require_auth),
     ) -> list:
-        if rep_id is not None:
-            await _authorize_rep_roster_read(user, rep_id)
+        owner_id = _scope_roster_read(user, rep_id)
+        if owner_id is not None and not authz.is_sales_rep(user.get("role")):
+            await _authorize_rep_roster_read(user, owner_id)
         region_ids = await _resolve_region_filter(region_id, user)
         _set_region_filter_header(response, region_ids)
         rows = await _fetch_roster(
@@ -972,7 +1002,7 @@ def register(app, require_auth) -> None:
             order_by="t.client_since_year DESC",
             region_ids=region_ids,
             aspire_branch_id=aspire_branch_id,
-            owner_user_id=rep_id,
+            owner_user_id=owner_id,
         )
         return [_client_reference_out(r) for r in rows]
 

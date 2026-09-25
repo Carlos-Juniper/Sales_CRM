@@ -585,7 +585,8 @@ class TestPickerRegionFilter:
         assert "b.region_id IS NULL" in sql
         assert "b.region_id = ''" in sql
         assert "t.aspire_branch_id IS NULL" in sql
-        assert params == ["west-coast"]
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
+        assert params == ["u1", "west-coast"]
 
     @pytest.mark.parametrize("path", _PICKERS)
     def test_caller_spanning_regions_defaults_to_the_union(self, authed, path):
@@ -597,7 +598,8 @@ class TestPickerRegionFilter:
         assert res.headers["x-region-filter"] == "central,west-coast"
         sql, params = _roster_call(mock_q).args[0], _roster_call(mock_q).args[1]
         assert "b.region_id IN (%s, %s)" in sql
-        assert params == ["central", "west-coast"]
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
+        assert params == ["u1", "central", "west-coast"]
 
     @pytest.mark.parametrize("path", _PICKERS)
     def test_unknown_caller_region_shows_everyone(self, authed, path):
@@ -637,7 +639,8 @@ class TestPickerRegionFilter:
         assert not any("user_branches" in sql and "from team_members" not in sql and "from client_references" not in sql for sql in sqls)
         sql, params = _roster_call(mock_q).args[0], _roster_call(mock_q).args[1]
         assert "b.region_id IS NULL" in sql
-        assert params == ["east-coast"]
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
+        assert params == ["u1", "east-coast"]
         assert "west-coast" not in params
 
     @pytest.mark.parametrize("path", _PICKERS)

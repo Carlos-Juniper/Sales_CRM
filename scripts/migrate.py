@@ -764,6 +764,18 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
+def detect_061(conn) -> bool:
+    """061 applied ↔ estimates.irrigation_occurrences column exists.
+
+    061 adds six guarded INT columns to estimates (mowing, pruning, turf fert,
+    shrub fert, IPM, irrigation yearly visit counts). Keyed on
+    irrigation_occurrences, the last ADD: each statement is individually
+    information_schema-guarded, so a True here means all six landed, and a
+    re-run after a partial apply completes the remainder safely.
+    """
+    return column_exists(conn, "estimates", "irrigation_occurrences")
+
+
 def detect_042(conn) -> bool:
     """042 applied ↔ proposal_renders.overflowing_pages column exists.
 
@@ -813,6 +825,7 @@ _DETECT: dict = {
     "040_proposal_chapter_order":                 detect_040,
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
+    "061_estimate_maintenance_occurrence_counts": detect_061,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

@@ -112,6 +112,8 @@ const SALES_GROUP_ROLES = new Set([
   'inside_sales',
   'maintenance_sales',
   'install_sales',
+  'regional_sales_rep',
+  'vp_sales',
 ])
 const leads = [...mockLeads]
 const bids = [...mockBids]

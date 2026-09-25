@@ -27,6 +27,11 @@ CANONICAL_ROLES = frozenset({
     "install_sales",
     "inside_sales",
     "admin",
+    # Distinct from regional_director ("Regional Director") and vice_president
+    # ("Vice President"). Same grants as admin, and still sales people for
+    # commission / sales-performance selectors (SALES_REP_DB_ROLES).
+    "regional_sales_rep",
+    "vp_sales",
     "manager",
     "regional_director",
     "maintenance_estimating",
@@ -39,6 +44,10 @@ CANONICAL_ROLES = frozenset({
     # APPROVER_ROLES below, which it is absent from.
     "marketing",
 })
+
+# Admin and the two sales roles that share every admin grant. Checked instead
+# of `role == "admin"`. regional_director and vice_president are not members.
+ADMIN_EQUIVALENT_ROLES = frozenset({"admin", "regional_sales_rep", "vp_sales"})
 
 # `inside_sales` qualifies raw public/government leads and assigns them on to a
 # field-sales CRM, so it stays a distinct persona and only inside sales reaches
@@ -57,8 +66,10 @@ FIELD_SALES_ROLES = frozenset({"sales", "maintenance_sales", "install_sales"})
 
 # users.role values that identify a sales rep in selector queries (sales
 # performance, commissions) and in GET /api/users?role=sales. Wider than
-# FIELD_SALES_ROLES: inside_sales is included, and outside_sales still sits
-# on un-migrated rows. `?role=sales` matches this whole tuple so the Settings
+# FIELD_SALES_ROLES: inside_sales is included, outside_sales still sits
+# on un-migrated rows, and regional_sales_rep / vp_sales earn commission
+# without being field-sales (no Aspire requirement, not own-lead scoped).
+# `?role=sales` matches this whole tuple so the Settings
 # rep dropdown does not need a new query parameter. Any other role value,
 # including inside_sales or maintenance_sales alone, stays an exact match.
 SALES_REP_DB_ROLES = (
@@ -67,6 +78,8 @@ SALES_REP_DB_ROLES = (
     "install_sales",
     "inside_sales",
     "outside_sales",
+    "regional_sales_rep",
+    "vp_sales",
 )
 
 # Normalized roles that own client-reference and team-roster rows and may
@@ -84,45 +97,57 @@ _INTAKE_TYPE_LOCK = {
 }
 
 # Estimator-owned scope: line items / sections / services / components / takeoff.
-ESTIMATOR_ROLES = frozenset({"maintenance_estimating", "install_estimating", "admin"})
+# Admin-equivalent roles (admin, regional_sales_rep, vp_sales) are included.
+ESTIMATOR_ROLES = frozenset({"maintenance_estimating", "install_estimating"}) | ADMIN_EQUIVALENT_ROLES
 
 # Approver-owned scope: complexity/margin adjustments + approve/hand-back.
-APPROVER_ROLES = frozenset({"manager", "regional_director", "vice_president", "ceo", "admin"})
+# regional_director and vice_president stay on this ladder; the new sales
+# roles join only because they are admin-equivalent.
+APPROVER_ROLES = frozenset({
+    "manager", "regional_director", "vice_president", "ceo",
+}) | ADMIN_EQUIVALENT_ROLES
 
 # Widened edit scope: managers and above may also mutate line items,
 # not just approve them. Approver edit rights and approval-tier ceilings are
 # independently gated — editing and approving are separate checks.
 LINE_ITEM_EDIT_ROLES = ESTIMATOR_ROLES | APPROVER_ROLES
 
-# Roles that see every branch. Default per §5.3: admin/VP/CEO see
-# all; everyone else (incl. regional_director, procurement) is scoped to their
+# Roles that see every branch. Default per §5.3: admin-equivalent roles
+# (admin, regional_sales_rep, vp_sales), vice_president, and CEO see all.
+# Everyone else (incl. regional_director, procurement) is scoped to their
 # own branch until Carlos confirms the cross-branch matrix (§7 open item).
 # NOTE: `marketing` is intentionally absent — its cross-branch reach is limited
 # to the marketing-asset tables (MARKETING_ROLES), NOT to estimate branch scope.
-CROSS_BRANCH_ROLES = frozenset({"admin", "vice_president", "ceo"})
+CROSS_BRANCH_ROLES = frozenset({"vice_president", "ceo"}) | ADMIN_EQUIVALENT_ROLES
 
 # Roles that may view sales performance / commission data for any rep.
 # Broader than CROSS_BRANCH_ROLES — adds manager and regional_director so
 # branch-level leaders can see their team's numbers without gaining full
 # cross-branch write privileges (mark-paid, etc. remain CROSS_BRANCH_ROLES).
-REP_VIEWER_ROLES = frozenset({"admin", "vice_president", "ceo", "manager", "regional_director"})
+REP_VIEWER_ROLES = frozenset({
+    "vice_president", "ceo", "manager", "regional_director",
+}) | ADMIN_EQUIVALENT_ROLES
 
-# Estimating disciplines only. `admin` is an estimator for line-item edits but
-# remains a super-role for every other surface — do not use ESTIMATOR_ROLES here.
+# Estimating disciplines only. Admin-equivalent roles are estimators for
+# line-item edits but remain super-roles for every other surface — do not
+# use ESTIMATOR_ROLES here. regional_sales_rep and vp_sales stay out.
 ESTIMATING_ONLY_ROLES = frozenset({"maintenance_estimating", "install_estimating"})
 
-# Branch and company leadership. Admin is listed separately so public-lead and
-# analytics comments can say "admin and management" without folding them together.
+# Branch and company leadership. Admin-equivalent roles are listed separately
+# so public-lead and analytics comments can say "admin and management"
+# without folding them together. regional_director and vice_president stay
+# in MANAGEMENT_ROLES; the new sales roles do not.
 MANAGEMENT_ROLES = frozenset({"manager", "regional_director", "vice_president", "ceo"})
-FULL_ACCESS_ROLES = MANAGEMENT_ROLES | frozenset({"admin"})
+FULL_ACCESS_ROLES = MANAGEMENT_ROLES | ADMIN_EQUIVALENT_ROLES
 
 # Public-lead qualification queue (unassigned higher_gov / sam_gov rows).
 # FIELD_SALES_ROLES (sales, maintenance_sales, install_sales) are absent on
 # purpose: they get the same denial as legacy sales. The existing inside_sales
-# role is the qualifier and stays on this list with admin and management.
+# role is the qualifier and stays on this list with admin-equivalent roles
+# and management.
 PUBLIC_LEADS_ROLES = frozenset({"inside_sales"}) | FULL_ACCESS_ROLES
 
-# Analytics dashboard is management only: admin plus manager, regional
+# Analytics dashboard is admin-equivalent roles plus manager, regional
 # director, vice president, and CEO. Field sales (sales, maintenance_sales,
 # install_sales), inside sales, estimators, procurement, and marketing are
 # refused. Reps use their own pipeline, not this dashboard.
@@ -134,16 +159,16 @@ PUBLIC_LEAD_SOURCES = ("higher_gov", "sam_gov")
 
 # Roles that may manage per-rep proposal roster rows (client_references,
 # team_members) for ANY sales rep, and that keep the legacy company-wide /
-# any-branch write path. Admin retains super-role access.
+# any-branch write path. Admin-equivalent roles retain super-role access.
 # Portfolio editing is wider — see PORTFOLIO_EDITOR_ROLES. This is a
 # resource-scoped role gate, deliberately NOT a new branch-scoping mechanism.
-MARKETING_ROLES = frozenset({"marketing", "admin"})
+MARKETING_ROLES = frozenset({"marketing"}) | ADMIN_EQUIVALENT_ROLES
 
 # Shared portfolio (one company-wide set, not owned by a rep). Every roster
 # rep (legacy sales, inside_sales, maintenance_sales, install_sales) and
-# marketing may add and edit; admin keeps super-role access. Other roles
-# stay read-only on the write endpoints.
-PORTFOLIO_EDITOR_ROLES = ROSTER_REP_ROLES | frozenset({"marketing", "admin"})
+# marketing may add and edit; admin-equivalent roles keep super-role access.
+# Other roles stay read-only on the write endpoints.
+PORTFOLIO_EDITOR_ROLES = ROSTER_REP_ROLES | frozenset({"marketing"}) | ADMIN_EQUIVALENT_ROLES
 
 def normalize_role(role: Optional[str]) -> str:
     """Map a stored/JWT role onto the canonical vocabulary (legacy → sales)."""
@@ -390,9 +415,11 @@ async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
     where a NULL `max_value_cents` (the top, unbounded tier) means unlimited.
 
     The maintenance and install ladders carry the same $ bands per role, so
-    keying on role_key alone is unambiguous. A role with no tier rows (any
-    non-approver) yields 0 — it can approve nothing; require_approver gates
-    these before the value check is ever reached.
+    keying on role_key alone is unambiguous. A role with no tier rows yields
+    0 — it can approve nothing. Admin has no approval_tiers rows (ceiling 0);
+    regional_sales_rep and vp_sales mirror that exactly (no tier rows are
+    seeded for them). require_approver still admits those roles because they
+    sit in APPROVER_ROLES; the value check then rejects anything above 0.
     """
     rows = await query(
         "SELECT max_value_cents FROM approval_tiers WHERE role_key = %s",
@@ -411,7 +438,8 @@ async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
 def require_estimator(user: dict) -> None:
     """403 unless the JWT role may edit line items/sections/takeoff.
 
-    Allows estimators AND approver-tier roles (manager, RD, VP, CEO, admin).
+    Allows estimators AND approver-tier roles (manager, RD, VP, CEO, and
+    admin-equivalent roles: admin, regional_sales_rep, vp_sales).
     Approval-tier ceilings are separately enforced by require_approval_authority.
     """
     if normalize_role(user.get("role")) not in LINE_ITEM_EDIT_ROLES:
@@ -549,11 +577,12 @@ class BranchScope:
 async def resolve_branch_scope(user: dict) -> BranchScope:
     """Derive the estimate-read scope from the authenticated user (BRD I-9.5).
 
-    Cross-branch roles (admin/VP/CEO) see everything. Every other role —
-    including regional_director, whose reach comes from holding many
-    `user_branches` rows rather than the role set (B.1) — is scoped to the
-    aspire_branch_id list on its `user_branches` assignments. Zero rows → the
-    user sees nothing until Settings > Users assigns a branch.
+    Cross-branch roles (admin-equivalent roles, vice_president, and CEO) see
+    everything. regional_sales_rep and vp_sales are in that set.
+    regional_director is not: its reach comes from holding many
+    `user_branches` rows rather than the role set (B.1), and it is scoped to
+    the aspire_branch_id list on those assignments. Zero rows → the user sees
+    nothing until Settings > Users assigns a branch.
     """
     if sees_all_branches(user.get("role")):
         return BranchScope(kind="all")

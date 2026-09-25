@@ -324,6 +324,36 @@ class TestMarketingEditsAnyRep:
         assert r.status_code == 201
         assert r.json()["ownerUserId"] == "rep-2"
 
+    @pytest.mark.parametrize("role", ("regional_sales_rep", "vp_sales"))
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_admin_equivalent_sales_role_creates_client_reference_for_a_rep(
+        self, mock_query, mock_exec, mock_authz_query, as_role, role
+    ):
+        as_role(role, id="lead-1")
+        mock_authz_query.return_value = _live(role)
+        mock_query.return_value = [{"id": "rep-2", "role": "sales", "active": 1}]
+        r = client.post(
+            "/api/settings/client-references",
+            json=_ref_body(repId="rep-2"),
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["ownerUserId"] == "rep-2"
+
+    def test_new_roles_are_not_field_sales(self):
+        from api import authz
+        for role in ("regional_sales_rep", "vp_sales"):
+            assert role not in authz.FIELD_SALES_ROLES
+            assert not authz.requires_aspire_sales_rep(role)
+            assert not authz.is_sales_rep(role)
+            assert authz.own_lead_filter({"role": role, "id": "lead-1"}) == ("", [])
+            assert role in authz.SALES_REP_DB_ROLES
+        assert "regional_director" not in authz.ADMIN_EQUIVALENT_ROLES
+        assert "vice_president" not in authz.ADMIN_EQUIVALENT_ROLES
+        assert authz.normalize_role("regional_director") == "regional_director"
+        assert authz.normalize_role("vice_president") == "vice_president"
+
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.proposals.query", new_callable=AsyncMock)
     async def test_marketing_lists_a_reps_roster(self, mock_query, mock_authz_query, as_role):
@@ -555,7 +585,13 @@ class TestRosterReadIsolation:
         assert denied.status_code == 403
         assert denied.json()["detail"] == _VIEW_DENIED
 
-    @pytest.mark.parametrize("role", ("marketing", "admin", "manager", "regional_director"))
+    @pytest.mark.parametrize(
+        "role",
+        (
+            "marketing", "admin", "regional_sales_rep", "vp_sales",
+            "manager", "regional_director",
+        ),
+    )
     @patch("api.proposals.query", new_callable=AsyncMock)
     async def test_wide_roles_without_rep_id_see_every_row(
         self, mock_query, as_role, role

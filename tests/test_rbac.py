@@ -62,7 +62,7 @@ class TestRoleModel:
     def test_canonical_roles(self):
         assert authz.CANONICAL_ROLES == frozenset({
             "procurement", "sales", "maintenance_sales", "install_sales",
-            "inside_sales", "admin", "manager",
+            "inside_sales", "admin", "regional_sales_rep", "vp_sales", "manager",
             "regional_director", "maintenance_estimating", "install_estimating",
             "vice_president", "ceo",
             # Handoff 50 §3 (437c508): cross-branch owner of the company-wide
@@ -178,7 +178,8 @@ class TestSplitSalesRoles:
 
     def test_rep_viewer_roles_unchanged(self):
         assert authz.REP_VIEWER_ROLES == frozenset({
-            "admin", "vice_president", "ceo", "manager", "regional_director",
+            "admin", "regional_sales_rep", "vp_sales",
+            "vice_president", "ceo", "manager", "regional_director",
         })
         for role in ("sales", "maintenance_sales", "install_sales"):
             assert role not in authz.REP_VIEWER_ROLES
@@ -807,7 +808,7 @@ class TestBranchScope:
 
     @patch("api.authz.query", new_callable=AsyncMock)
     async def test_exec_roles_see_all(self, mock_authz_query):
-        for role in ("admin", "vice_president", "ceo"):
+        for role in ("admin", "regional_sales_rep", "vp_sales", "vice_president", "ceo"):
             scope = await authz.resolve_branch_scope(_user(role))
             assert scope.kind == "all", role
         # sees_all short-circuits before touching user_branches.
@@ -940,3 +941,90 @@ class TestConfigBranches:
         resp = client.get("/api/estimating/config/branches?kind=install")
         # No auth override set — should 403 (no JWT).
         assert resp.status_code in (401, 403)
+
+
+# ── regional_sales_rep / vp_sales (admin-equivalent, still commission earners)
+
+
+_ADMIN_EQUIVALENT_SALES = ("regional_sales_rep", "vp_sales")
+
+
+class TestAdminEquivalentSalesRoles:
+    """New roles share admin's grants and stay out of the field-sales lock.
+
+    regional_director and vice_president keep their existing meanings.
+    Approval ceilings mirror admin: no approval_tiers rows, so the ceiling is 0.
+    """
+
+    def test_membership(self):
+        assert authz.ADMIN_EQUIVALENT_ROLES == frozenset({
+            "admin", "regional_sales_rep", "vp_sales",
+        })
+        for role in _ADMIN_EQUIVALENT_SALES:
+            assert role in authz.CANONICAL_ROLES
+            assert role in authz.ADMIN_EQUIVALENT_ROLES
+            for set_name in (
+                "ESTIMATOR_ROLES",
+                "APPROVER_ROLES",
+                "LINE_ITEM_EDIT_ROLES",
+                "CROSS_BRANCH_ROLES",
+                "REP_VIEWER_ROLES",
+                "FULL_ACCESS_ROLES",
+                "PUBLIC_LEADS_ROLES",
+                "ANALYTICS_DASHBOARD_ROLES",
+                "MARKETING_ROLES",
+                "PORTFOLIO_EDITOR_ROLES",
+            ):
+                assert role in getattr(authz, set_name), set_name
+            assert role in authz.SALES_REP_DB_ROLES
+            assert role not in authz.ESTIMATING_ONLY_ROLES
+            assert role not in authz.FIELD_SALES_ROLES
+            assert role not in authz.MANAGEMENT_ROLES
+            assert role not in authz.ROSTER_REP_ROLES
+            assert authz.is_estimator(role)
+            assert authz.is_approver(role)
+            assert authz.sees_all_branches(role)
+            assert authz.is_marketing_manager(role)
+            assert authz.is_portfolio_editor(role)
+            assert not authz.is_roster_rep(role)
+            assert not authz.is_estimating_only(role)
+            assert not authz.requires_aspire_sales_rep(role)
+            assert not authz.is_sales_rep(role)
+            assert authz.own_lead_filter(_user(role, id="rep-9")) == ("", [])
+            assert authz.allowed_intake_types(role) == ["maintenance", "install"]
+
+    def test_regional_director_and_vice_president_are_unchanged(self):
+        assert authz.normalize_role("regional_director") == "regional_director"
+        assert authz.normalize_role("vice_president") == "vice_president"
+        assert authz.normalize_role("regional_sales_rep") == "regional_sales_rep"
+        assert authz.normalize_role("vp_sales") == "vp_sales"
+        for role in ("regional_director", "vice_president"):
+            assert role not in authz.ADMIN_EQUIVALENT_ROLES
+            assert role not in authz.SALES_REP_DB_ROLES
+            assert role in authz.APPROVER_ROLES
+            assert role in authz.REP_VIEWER_ROLES
+            assert role in authz.MANAGEMENT_ROLES
+        assert "regional_director" not in authz.CROSS_BRANCH_ROLES
+        assert "vice_president" in authz.CROSS_BRANCH_ROLES
+        assert "admin" in authz.ADMIN_EQUIVALENT_ROLES
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_approval_ceiling_matches_admin_with_no_tier_rows(self, mock_authz_query):
+        mock_authz_query.return_value = []
+        assert await authz.approval_ceiling_cents("admin") == 0
+        assert await authz.approval_ceiling_cents("regional_sales_rep") == 0
+        assert await authz.approval_ceiling_cents("vp_sales") == 0
+        queried = [call.args[1][0] for call in mock_authz_query.await_args_list]
+        assert queried == ["admin", "regional_sales_rep", "vp_sales"]
+        for sql, _params in (call.args for call in mock_authz_query.await_args_list):
+            assert "approval_tiers" in sql
+
+    def test_require_estimator_allows_admin_equivalent_sales_roles(self):
+        for role in _ADMIN_EQUIVALENT_SALES:
+            authz.require_estimator(_user(role))
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_require_approver_allows_admin_equivalent_sales_roles(self, mock_authz_query):
+        for role in _ADMIN_EQUIVALENT_SALES:
+            mock_authz_query.return_value = [{"role": role, "active": 1}]
+            assert await authz.require_approver(_user(role)) == role

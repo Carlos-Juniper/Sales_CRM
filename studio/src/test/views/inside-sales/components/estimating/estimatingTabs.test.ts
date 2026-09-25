@@ -88,7 +88,7 @@ describe('visibleTabs (role-aware visibility — Handoff 50 §2)', () => {
   })
 
   it('manager-tier approver roles see every tab', () => {
-    for (const role of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin'] as const) {
+    for (const role of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin', 'regional_sales_rep', 'vp_sales'] as const) {
       expect(visibleTabs(null, role)).toEqual(ESTIMATING_TABS)
     }
   })

@@ -303,9 +303,23 @@ describe('UsersSection — enriched backend fields', () => {
     fireEvent.click(await screen.findByText('nina.park@juniper.com'))
     const select = screen.getByTestId('authorize-role') as HTMLSelectElement
     const labels = Array.from(select.options).map((option) => option.text)
-    expect(labels).toEqual(expect.arrayContaining(['Maintenance Sales', 'Install Sales']))
+    expect(labels).toEqual(expect.arrayContaining([
+      'Maintenance Sales',
+      'Install Sales',
+      'Regional Sales Rep',
+      'VP of Sales',
+      'Regional Director',
+      'Vice President',
+    ]))
     expect(Array.from(select.options).map((option) => option.value)).toEqual(
-      expect.arrayContaining(['maintenance_sales', 'install_sales']),
+      expect.arrayContaining([
+        'maintenance_sales',
+        'install_sales',
+        'regional_sales_rep',
+        'vp_sales',
+        'regional_director',
+        'vice_president',
+      ]),
     )
   })
 

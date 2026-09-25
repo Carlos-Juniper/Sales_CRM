@@ -43,6 +43,10 @@ export type UserRole =
   | 'install_sales'
   | 'inside_sales'
   | 'admin'
+  // Distinct from regional_director and vice_president. Admin-equivalent
+  // access; still sales people for commission selectors.
+  | 'regional_sales_rep'
+  | 'vp_sales'
   | 'manager'
   | 'regional_director'
   | 'maintenance_estimating'
@@ -61,6 +65,8 @@ export const CANONICAL_ROLES: readonly UserRole[] = [
   'install_sales',
   'inside_sales',
   'admin',
+  'regional_sales_rep',
+  'vp_sales',
   'manager',
   'regional_director',
   'maintenance_estimating',

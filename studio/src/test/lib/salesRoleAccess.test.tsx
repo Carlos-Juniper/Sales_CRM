@@ -67,6 +67,10 @@ describe('split field-sales role gates', () => {
     expect(requiresAspireSalesRep('install_sales')).toBe(true)
     expect(requiresAspireSalesRep('inside_sales')).toBe(false)
     expect(requiresAspireSalesRep('manager')).toBe(false)
+    expect(requiresAspireSalesRep('regional_sales_rep')).toBe(false)
+    expect(requiresAspireSalesRep('vp_sales')).toBe(false)
+    expect(requiresAspireSalesRep('regional_director')).toBe(false)
+    expect(requiresAspireSalesRep('vice_president')).toBe(false)
   })
 
   it('gives the split roles the sales settings group', () => {
@@ -80,6 +84,10 @@ describe('split field-sales role gates', () => {
     expect(roleLabel('maintenance_sales')).toBe('Maintenance Sales')
     expect(roleLabel('install_sales')).toBe('Install Sales')
     expect(roleLabel('sales')).toBe('Sales')
+    expect(roleLabel('regional_sales_rep')).toBe('Regional Sales Rep')
+    expect(roleLabel('vp_sales')).toBe('VP of Sales')
+    expect(roleLabel('regional_director')).toBe('Regional Director')
+    expect(roleLabel('vice_president')).toBe('Vice President')
   })
 
   it('hides Analytics and Public Leads for a maintenance sales rep', () => {
@@ -97,5 +105,24 @@ describe('split field-sales role gates', () => {
     expect(screen.getByRole('link', { name: 'Estimating' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Sales Performance' })).toBeInTheDocument()
     expect(screen.getByText('Maintenance Sales')).toBeInTheDocument()
+  })
+})
+
+describe('admin-equivalent sales roles', () => {
+  it('lands on Analytics and is not field-sales scoped', () => {
+    for (const role of ['regional_sales_rep', 'vp_sales'] as const) {
+      expect(defaultRouteForRole(role)).toBe('/inside-sales')
+      expect(ANALYTICS_NAV_ROLES).toContain(role)
+      expect(PUBLIC_LEADS_NAV_ROLES).toContain(role)
+      expect(SALES_NAV_ROLES).toContain(role)
+      expect(REP_SELECTOR_ROLES).toContain(role)
+      expect(withRole(role).isAdmin).toBe(true)
+      expect(withRole(role).isSales).toBe(false)
+      expect(withRole(role).canAccess(ANALYTICS_NAV_ROLES)).toBe(true)
+    }
+    expect(defaultRouteForRole('regional_director')).toBe('/inside-sales')
+    expect(defaultRouteForRole('vice_president')).toBe('/inside-sales')
+    expect(withRole('regional_director').isAdmin).toBe(false)
+    expect(withRole('vice_president').isAdmin).toBe(false)
   })
 })

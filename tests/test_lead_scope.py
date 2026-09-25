@@ -40,6 +40,8 @@ _FORBIDDEN = "You can only access your own leads."
 # Roles that must keep company-wide lead visibility.
 _WIDE_ROLES = (
     "admin",
+    "regional_sales_rep",
+    "vp_sales",
     "manager",
     "regional_director",
     "vice_president",

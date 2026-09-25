@@ -1,6 +1,7 @@
 import { useAuthStore } from '@/store/authStore'
 import type { LegacyUserRole, UserRole } from '@/types'
 import {
+  ADMIN_EQUIVALENT_ROLES,
   ESTIMATOR_ROLES,
   ESTIMATING_ONLY_ROLES,
   APPROVER_ROLES,
@@ -29,14 +30,17 @@ export function useRole() {
   return {
     role,
     isSales: role !== null && FIELD_SALES_ROLES.includes(role),
-    // `admin` is the super-role; `manager` narrows to its approval tier.
-    isAdmin: role === 'admin',
+    // Admin-equivalent roles (admin, regional_sales_rep, vp_sales) are the
+    // super-role. `manager` narrows to its approval tier. regional_director
+    // and vice_president are not admin-equivalent.
+    isAdmin: role !== null && ADMIN_EQUIVALENT_ROLES.includes(role),
     isManager: role === 'manager',
     // Handoff 50 §3: cross-branch owner of company-wide proposal assets.
     isMarketing: role === 'marketing',
     // May manage company-wide proposal assets (portfolio, references, bios).
-    // Mirrors api/authz.py MARKETING_ROLES (marketing + admin super-role).
-    canManageMarketingAssets: role === 'marketing' || role === 'admin',
+    // Mirrors api/authz.py MARKETING_ROLES (marketing + admin-equivalent).
+    canManageMarketingAssets:
+      role === 'marketing' || (role !== null && ADMIN_EQUIVALENT_ROLES.includes(role)),
     isEstimator: role !== null && ESTIMATOR_ROLES.includes(role),
     // The two estimating disciplines. Admin and management are isEstimator
     // (line-item edits) but can still read leads.
@@ -49,7 +53,7 @@ export function useRole() {
     canPickRosterRep: role !== null && ROSTER_REP_PICKER_ROLES.includes(role),
     canAccess: (requiredRole: UserRole | readonly UserRole[]) => {
       if (!role) return false
-      if (role === 'admin') return true
+      if (ADMIN_EQUIVALENT_ROLES.includes(role)) return true
       const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole]
       return roles.includes(role)
     },

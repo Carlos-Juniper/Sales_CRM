@@ -21,12 +21,13 @@ export interface SettingsGroup {
   id: SettingsGroupId
   label: string
   /**
-   * Roles that may see this group (in ADDITION to admin, who passes every gate
-   * via useRole's super-role). An empty array + `adminOnly: false` means "any
-   * authed user"; an empty array + `adminOnly: true` means "admin only".
+   * Roles that may see this group (in ADDITION to admin-equivalent roles —
+   * admin, regional_sales_rep, vp_sales — who pass every gate via useRole's
+   * super-role). An empty array + `adminOnly: false` means "any authed user";
+   * an empty array + `adminOnly: true` means "admin-equivalent only".
    */
   roles: UserRole[]
-  /** Restrict the group to admin regardless of `roles` (Company config). */
+  /** Restrict the group to admin-equivalent roles regardless of `roles`. */
   adminOnly: boolean
   /** Whether the group's sections are branch-scoped (drive the branch picker). */
   branchScoped: boolean

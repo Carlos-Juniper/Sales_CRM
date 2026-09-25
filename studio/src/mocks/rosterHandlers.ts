@@ -1,4 +1,5 @@
 import { http, HttpResponse } from 'msw'
+import { ADMIN_EQUIVALENT_ROLES } from '@/lib/roles'
 import { useAuthStore } from '@/store/authStore'
 import { mockUsers } from './data'
 import { MOCK_CLIENT_REFERENCES, MOCK_TEAM_MEMBERS, rosterHttpResponse } from './proposalRoster'
@@ -35,6 +36,13 @@ function callerId(): string | null {
   return useAuthStore.getState().user?.id ?? null
 }
 
+function isMarketingOrAdminEquivalent(role: string | null): boolean {
+  return (
+    role === 'marketing' ||
+    (role !== null && (ADMIN_EQUIVALENT_ROLES as readonly string[]).includes(role))
+  )
+}
+
 function salesDirectory(id: string): 'ok' | 'missing' | 'not-sales' {
   const user = mockUsers.find((u) => u.id === id)
   if (!user) return 'missing'
@@ -58,7 +66,7 @@ function authorizeRead(repId: string | null): Response | null {
   if (role === 'sales') {
     return repId === id ? null : detail(403, VIEW_OWN).response
   }
-  if (role === 'marketing' || role === 'admin') {
+  if (isMarketingOrAdminEquivalent(role)) {
     const found = salesDirectory(repId)
     if (found === 'missing') return detail(404, SALES_REP_NOT_FOUND).response
     if (found === 'not-sales') return detail(400, SALES_ROLE_REQUIRED).response
@@ -74,7 +82,7 @@ function authorizeWrite(repId: string | null): WriteAuth {
   if (role === 'sales' && (repId === null || repId === id)) {
     return { ok: true, ownerId: id }
   }
-  if (role === 'marketing' || role === 'admin') {
+  if (isMarketingOrAdminEquivalent(role)) {
     if (!repId) return { ok: true, ownerId: null }
     const found = salesDirectory(repId)
     if (found === 'missing') return detail(404, SALES_REP_NOT_FOUND)
@@ -89,7 +97,7 @@ function authorizeRow(ownerUserId: string | null, requestedRepId: string | null)
   const role = callerRole()
   const id = callerId()
   if (requestedRepId && ownerUserId !== requestedRepId) return detail(403, OTHER_REP).response
-  if (role === 'sales' || (role !== 'marketing' && role !== 'admin')) {
+  if (role === 'sales' || !isMarketingOrAdminEquivalent(role)) {
     if (ownerUserId && ownerUserId !== id) return detail(403, EDIT_OWN).response
   }
   return null

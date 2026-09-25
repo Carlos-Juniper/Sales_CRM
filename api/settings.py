@@ -6,15 +6,18 @@ place those rows are mutated, and every successful write is audited.
 
 Two authorization boundaries, deliberately different:
 
-  * Company writes (Slice 4) are ADMIN-ONLY, and admin is re-read LIVE from the
-    users table by JWT id (Amendment B.2) — a stale/forged `admin` claim on a
-    since-demoted user cannot widen scope. Company settings, margin bands and
-    approval tiers are company-scoped: editing an approval tier moves the REAL
-    403 boundary for approvals (§5.1), so its edit lives behind this guard.
+  * Company writes (Slice 4) are limited to admin-equivalent roles
+    (authz.ADMIN_EQUIVALENT_ROLES: admin, regional_sales_rep, vp_sales),
+    re-read LIVE from the users table by JWT id (Amendment B.2) — a
+    stale/forged claim on a since-demoted user cannot widen scope.
+    regional_director and vice_president are not in that set. Company
+    settings, margin bands and approval tiers are company-scoped: editing an
+    approval tier moves the REAL 403 boundary for approvals (§5.1), so its
+    edit lives behind this guard.
 
   * Branch writes (Slice 5) are scoped by `resolve_branch_scope(user)` — the
     writable branch set comes from the caller's `user_branches` rows, NEVER the
-    path or body. admin (kind='all') may write any branch; a BM/RD may write
+    path or body. Admin-equivalent roles (kind='all') may write any branch; a BM/RD may write
     only a branch in its scope; anyone else 403. A branch id supplied in the
     path/body that is outside the caller's scope still 403s.
 
@@ -126,15 +129,17 @@ def _parse_factors(raw: Any) -> Any:
 # ── Live admin re-read (company writes) ──────────────────────────────────────
 
 async def _require_admin(user: dict) -> None:
-    """403 unless the LIVE users row says admin and active (Amendment B.2).
+    """403 unless the LIVE users row is admin-equivalent and active (B.2).
 
-    Never trusts the JWT `role` claim on the write path: a token that claims
-    admin for a user since demoted or deactivated must not widen scope. Reuses
-    authz._live_role, which reads role+active from users by JWT id and 403s on
-    a missing/inactive row.
+    Admin-equivalent roles are authz.ADMIN_EQUIVALENT_ROLES: admin,
+    regional_sales_rep, and vp_sales. regional_director and vice_president
+    are not included. Never trusts the JWT `role` claim on the write path:
+    a token that claims one of those roles for a user since demoted or
+    deactivated must not widen scope. Reuses authz._live_role, which reads
+    role+active from users by JWT id and 403s on a missing/inactive row.
     """
     live_role = await authz._live_role(user)
-    if live_role != "admin":
+    if live_role not in authz.ADMIN_EQUIVALENT_ROLES:
         raise HTTPException(
             status_code=403,
             detail="Admin role required: company settings are admin-owned.",

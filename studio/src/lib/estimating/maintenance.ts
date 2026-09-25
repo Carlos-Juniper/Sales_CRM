@@ -21,6 +21,7 @@ import type {
 } from '@/types/estimating'
 import type { LegacyUserRole, UserRole } from '@/types'
 import { normalizeRole } from '@/hooks/useRole'
+import { ADMIN_EQUIVALENT_ROLES } from '@/lib/roles'
 import { per1000SfRead } from './calc'
 
 /**
@@ -341,18 +342,31 @@ export function assertCanEdit(role: EstimatingRole, field: OwnedField): void {
 
 /**
  * Map the canonical auth roles (mirrors api/authz.py) onto the
- * estimating ownership roles. `admin` holds BOTH scopes. This mapping is
- * advisory for the UI — the server enforces it on every mutation.
+ * estimating ownership roles. Admin-equivalent roles (admin,
+ * regional_sales_rep, vp_sales) hold BOTH scopes. regional_director and
+ * vice_president stay approver-only. This mapping is advisory for the UI —
+ * the server enforces it on every mutation.
  */
 export function estimatingRolesForUser(
   userRole: UserRole | LegacyUserRole,
 ): EstimatingRole[] {
   const role = normalizeRole(userRole)
   const roles: EstimatingRole[] = []
-  if (['maintenance_estimating', 'install_estimating', 'admin'].includes(role)) {
+  const adminEquivalent = (ADMIN_EQUIVALENT_ROLES as readonly string[]).includes(role)
+  if (
+    adminEquivalent ||
+    role === 'maintenance_estimating' ||
+    role === 'install_estimating'
+  ) {
     roles.push('estimator')
   }
-  if (['manager', 'regional_director', 'vice_president', 'ceo', 'admin'].includes(role)) {
+  if (
+    adminEquivalent ||
+    role === 'manager' ||
+    role === 'regional_director' ||
+    role === 'vice_president' ||
+    role === 'ceo'
+  ) {
     roles.push('approver')
   }
   return roles

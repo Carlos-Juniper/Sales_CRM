@@ -73,6 +73,29 @@ describe('RoleGate', () => {
     expect(screen.getByText('Protected Content')).toBeInTheDocument()
   })
 
+  it.each(['regional_sales_rep', 'vp_sales'] as const)(
+    '%s shares the admin super-role and passes any gate',
+    (role) => {
+      setUser(role)
+      render(
+        <RoleGate roles={['manager']}>
+          <div>Protected Content</div>
+        </RoleGate>,
+      )
+      expect(screen.getByText('Protected Content')).toBeInTheDocument()
+    },
+  )
+
+  it('regional_director is not a super-role', () => {
+    setUser('regional_director')
+    render(
+      <RoleGate roles={['sales']} redirectTo="/inside-sales">
+        <div>Protected Content</div>
+      </RoleGate>,
+    )
+    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
+  })
+
   it('manager is NOT a super-role: denied on gates that exclude it', () => {
     setUser('manager')
     render(

@@ -36,6 +36,8 @@ export const commissionsApi = {
   markInstallmentPaid: (installmentId: string) =>
     apiClient.post<{ success: boolean }>(`/commissions/installments/${installmentId}/mark-paid`, {}),
 
+  // start_date/end_date select deals by close date. When either is set, the
+  // API skips the close-year clip, so this client does not send year.
   getPayoutSchedule: (params?: { user_id?: string; start_date?: string; end_date?: string }) => {
     const qs = new URLSearchParams()
     if (params?.user_id) qs.set('user_id', params.user_id)

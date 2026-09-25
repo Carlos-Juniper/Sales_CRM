@@ -2,14 +2,10 @@ import { CalendarClock } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { formatCents } from '@/lib/estimating/maintenance'
-import {
-  describePayout,
-  formatCloseQuarter,
-  PENDING_BILLING_DATA_LABEL,
-  payoutAmountLabel,
-} from '@/lib/commissions'
+import { describePayout, formatCloseQuarter } from '@/lib/commissions'
 import type { CommissionPayoutSchedule } from '@/types/commissions'
 import { InstallmentStatusBadge } from './InstallmentStatusBadge'
+import { PayoutLine } from './PayoutLine'
 
 interface CommissionPayoutScheduleCardProps {
   schedule: CommissionPayoutSchedule | undefined
@@ -66,7 +62,6 @@ export function CommissionPayoutScheduleCard({
             ) : (
               <ul className="space-y-1.5">
                 {quarter.installments.map((installment) => {
-                  const payout = describePayout(installment)
                   const rowKey = `${installment.installment_number}-${installment.bucket}-${installment.payout_date ?? ''}`
                   return (
                     <li
@@ -77,14 +72,12 @@ export function CommissionPayoutScheduleCard({
                       <span className="w-20 text-[hsl(var(--muted-fg))]">
                         Payment {installment.installment_number}
                       </span>
-                      <span className="text-[hsl(var(--fg))]">
-                        {payout.kind === 'pending' ? PENDING_BILLING_DATA_LABEL : payout.month}
-                      </span>
-                      {payout.kind === 'known' && payout.amount != null && (
-                        <span className="font-mono text-[hsl(var(--fg))]">
-                          {payoutAmountLabel({ amount_cents: payout.amount, amount_partial: installment.amount_partial })}
-                        </span>
-                      )}
+                      <PayoutLine
+                        payout={describePayout(installment)}
+                        amountPartial={installment.amount_partial}
+                        labelClassName="text-[hsl(var(--fg))]"
+                        amountClassName="font-mono text-[hsl(var(--fg))]"
+                      />
                       <InstallmentStatusBadge status={installment.status} />
                     </li>
                   )

@@ -9,8 +9,6 @@ interface CommissionOpenCheckCardsProps {
   dueCents: number | null | undefined
   upcomingCents: number | null | undefined
   isLoading: boolean
-  /** From summary.balances_period_filtered. False shows the short unfiltered label. */
-  balancesPeriodFiltered: boolean
 }
 
 function nextPayoutHint(nextPayout: CommissionNextPayout | null | undefined): string {
@@ -23,13 +21,11 @@ export function CommissionOpenCheckCards({
   dueCents,
   upcomingCents,
   isLoading,
-  balancesPeriodFiltered,
 }: CommissionOpenCheckCardsProps) {
   return (
     <div className="space-y-2">
       <p className="text-xs text-[hsl(var(--muted-fg))]">
-        Open checks with a payout date. Pending billing data is not included.
-        {balancesPeriodFiltered === false && ' Not period-filtered.'}
+        Open checks with a payout date. Pending billing data is not included. Not period-filtered.
       </p>
       {isLoading ? (
         <div className="flex gap-4 flex-wrap">

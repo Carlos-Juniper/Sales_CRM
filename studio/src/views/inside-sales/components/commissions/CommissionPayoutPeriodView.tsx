@@ -1,14 +1,10 @@
 import { Receipt } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
-import {
-  describePayout,
-  formatPayoutDate,
-  PENDING_BILLING_DATA_LABEL,
-  payoutAmountLabel,
-} from '@/lib/commissions'
+import { describePayout, formatPayoutDate } from '@/lib/commissions'
 import type { CommissionPayoutPeriod } from '@/types/commissions'
 import { InstallmentStatusBadge } from './InstallmentStatusBadge'
+import { PayoutLine } from './PayoutLine'
 
 interface CommissionPayoutPeriodViewProps {
   periods: CommissionPayoutPeriod[] | undefined
@@ -58,7 +54,6 @@ export function CommissionPayoutPeriodView({ periods, isLoading }: CommissionPay
         {!isLoading && rows.length > 0 && (
           <ul>
             {rows.map((period) => {
-              const payout = describePayout(period)
               const key = periodKey(period)
               return (
                 <li
@@ -66,19 +61,18 @@ export function CommissionPayoutPeriodView({ periods, isLoading }: CommissionPay
                   className="flex items-center gap-3 flex-wrap px-4 py-2.5 border-b border-[hsl(var(--border))] last:border-0 text-sm"
                   data-testid={`payout-period-${key}`}
                 >
-                  <span className="min-w-[140px] font-medium text-[hsl(var(--fg))]">
-                    {payout.kind === 'pending' ? PENDING_BILLING_DATA_LABEL : payout.month}
-                  </span>
-                  {period.payout_date && (
-                    <span className="text-xs text-[hsl(var(--muted-fg))]">
-                      {formatPayoutDate(period.payout_date)}
-                    </span>
-                  )}
-                  {payout.kind === 'known' && payout.amount != null && (
-                    <span className="ml-auto font-mono text-xs text-[hsl(var(--fg))]">
-                      {payoutAmountLabel({ amount_cents: payout.amount, amount_partial: period.amount_partial })}
-                    </span>
-                  )}
+                  <PayoutLine
+                    payout={describePayout(period)}
+                    amountPartial={period.amount_partial}
+                    labelClassName="min-w-[140px] font-medium text-[hsl(var(--fg))]"
+                    amountClassName="ml-auto font-mono text-xs text-[hsl(var(--fg))]"
+                  >
+                    {period.payout_date && (
+                      <span className="text-xs text-[hsl(var(--muted-fg))]">
+                        {formatPayoutDate(period.payout_date)}
+                      </span>
+                    )}
+                  </PayoutLine>
                   <InstallmentStatusBadge status={period.status} />
                 </li>
               )

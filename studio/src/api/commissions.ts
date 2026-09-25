@@ -1,5 +1,11 @@
 import { apiClient } from './client'
-import type { Commission, CommissionSummary, CommissionRep, CommissionFilters } from '@/types/commissions'
+import type {
+  Commission,
+  CommissionSummary,
+  CommissionRep,
+  CommissionFilters,
+  CommissionPayoutSchedule,
+} from '@/types/commissions'
 
 export const commissionsApi = {
   getSummary: (filters?: CommissionFilters) => {
@@ -26,6 +32,17 @@ export const commissionsApi = {
     apiClient.post<{ success: boolean }>(`/commissions/${commissionId}/mark-paid`, {
       payment_period: paymentPeriod,
     }),
+
+  markInstallmentPaid: (installmentId: string) =>
+    apiClient.post<{ success: boolean }>(`/commissions/installments/${installmentId}/mark-paid`, {}),
+
+  getPayoutSchedule: (params?: { user_id?: string; year?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.user_id) qs.set('user_id', params.user_id)
+    if (params?.year != null) qs.set('year', String(params.year))
+    const q = qs.toString()
+    return apiClient.get<CommissionPayoutSchedule>(`/commissions/payout-schedule${q ? `?${q}` : ''}`)
+  },
 
   getReps: () => apiClient.get<CommissionRep[]>('/commissions/reps'),
 }

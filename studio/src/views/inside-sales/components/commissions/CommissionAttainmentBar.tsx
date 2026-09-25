@@ -17,7 +17,7 @@ export function CommissionAttainmentBar({
 
   return (
     <div className="flex items-center gap-4">
-      <span className="w-28 text-xs text-[hsl(var(--muted-fg))] text-right shrink-0">{label}</span>
+      <span className="w-40 text-xs text-[hsl(var(--muted-fg))] text-right shrink-0">{label}</span>
       <div className="flex-1 h-2 bg-[hsl(var(--muted))] rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-500 ${barColor}`}

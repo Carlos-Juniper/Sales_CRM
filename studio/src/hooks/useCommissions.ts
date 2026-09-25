@@ -22,6 +22,14 @@ export function useCommissionsList(filters?: CommissionFilters) {
   })
 }
 
+export function useCommissionPayoutSchedule(params?: { user_id?: string; year?: number }) {
+  return useQuery({
+    queryKey: [COMMISSIONS_KEY, 'payout-schedule', params?.user_id ?? null, params?.year ?? null],
+    queryFn: () => commissionsApi.getPayoutSchedule(params),
+    staleTime: 30_000,
+  })
+}
+
 export function useCommissionReps() {
   // GET /api/commissions/reps is 403 outside REP_SELECTOR_ROLES
   // (api/authz.py REP_VIEWER_ROLES). Leave the query disabled so non-viewers
@@ -47,5 +55,19 @@ export function useMarkCommissionPaid() {
       toast('Commission marked as paid', { variant: 'success' })
     },
     onError: () => toast('Failed to mark commission as paid', { variant: 'error' }),
+  })
+}
+
+export function useMarkInstallmentPaid() {
+  const qc = useQueryClient()
+  const toast = useUIStore((s) => s.toast)
+
+  return useMutation({
+    mutationFn: (installmentId: string) => commissionsApi.markInstallmentPaid(installmentId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [COMMISSIONS_KEY] })
+      toast('Installment marked as paid', { variant: 'success' })
+    },
+    onError: () => toast('Failed to mark installment as paid', { variant: 'error' }),
   })
 }

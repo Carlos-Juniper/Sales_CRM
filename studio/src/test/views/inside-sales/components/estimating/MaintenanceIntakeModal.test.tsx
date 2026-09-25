@@ -230,6 +230,24 @@ describe('MaintenanceIntakeModal — contract structure (AC §3 bullet 5)', () =
     expect(screen.queryByLabelText(/homes.*budget|budget.*homes/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/common.*area.*budget|budget.*common/i)).not.toBeInTheDocument()
   })
+
+  it('styles split-budget inputs with the shared Input tokens, not a light-only fill', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+
+    const contact = screen.getByLabelText(/contact name/i)
+    const homes = screen.getByLabelText(/homes budget/i)
+    const common = screen.getByLabelText(/common area budget/i)
+
+    for (const input of [homes, common]) {
+      expect(input.className).toContain('bg-[hsl(var(--card))]')
+      expect(input.className).toContain('text-[hsl(var(--fg))]')
+      expect(input.className).not.toContain('bg-[#eff6ff]')
+      expect(input.className).not.toContain('border-[#bfdbfe]')
+    }
+    expect(contact.className).toContain('bg-[hsl(var(--card))]')
+  })
 })
 
 // ---------------------------------------------------------------------------

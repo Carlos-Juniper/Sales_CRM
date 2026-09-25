@@ -529,7 +529,7 @@ export function MaintenanceIntakeModal({
                       onChange={(e) => set('homesBudget', e.target.value)}
                       placeholder="120000"
                       required
-                      className="h-8 text-xs bg-[#eff6ff] border-[#bfdbfe]"
+                      className="h-8 text-xs"
                     />
                   </div>
                   <div className="space-y-1">
@@ -544,7 +544,7 @@ export function MaintenanceIntakeModal({
                       onChange={(e) => set('commonAreaBudget', e.target.value)}
                       placeholder="80000"
                       required
-                      className="h-8 text-xs bg-[#eff6ff] border-[#bfdbfe]"
+                      className="h-8 text-xs"
                     />
                   </div>
                 </div>

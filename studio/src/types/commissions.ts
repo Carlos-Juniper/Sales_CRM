@@ -4,6 +4,15 @@
  * repo convention of types files containing only data shapes.
  */
 
+export interface CommissionInstallment {
+  id: string
+  installment_number: number
+  payout_period: string
+  payout_date: string
+  amount_cents: number
+  status: 'paid' | 'cancelled' | 'due' | 'upcoming'
+}
+
 export interface Commission {
   id: string
   estimate_id: string
@@ -27,11 +36,26 @@ export interface Commission {
   estimate_number?: number
   aspire_number?: string
   estimate_type?: 'maintenance' | 'install'
+
+  // Cadence + plan snapshot (added; existing fields above are unchanged)
+  close_quarter: string | null
+  plan_key: string | null
+  client_type: string | null
+  installments: CommissionInstallment[]
+}
+
+export interface CommissionNextPayout {
+  payout_period: string
+  payout_date: string
+  amount_cents: number
 }
 
 export interface CommissionSummary {
   scheduled_ytd_cents: number
   paid_ytd_cents: number
+  next_payout: CommissionNextPayout | null
+  upcoming_cents: number
+  due_cents: number
 }
 
 export interface CommissionRep {
@@ -40,6 +64,37 @@ export interface CommissionRep {
   email: string
   commission_rate?: number   // null/undefined = no active rate on file
   effective_date?: string
+  plan_key: string
+  plan_name: string
+}
+
+export interface CommissionQuarterInstallment {
+  installment_number: number
+  payout_period: string
+  payout_date: string
+  amount_cents: number
+  status: 'paid' | 'cancelled' | 'due' | 'upcoming'
+}
+
+export interface CommissionCloseQuarter {
+  close_quarter: string
+  sales_count: number
+  commission_total_cents: number
+  installments: CommissionQuarterInstallment[]
+}
+
+export interface CommissionPayoutPeriod {
+  payout_period: string
+  payout_date: string
+  amount_cents: number
+  status: 'paid' | 'cancelled' | 'due' | 'upcoming'
+}
+
+export interface CommissionPayoutSchedule {
+  user_id: string
+  year: number
+  quarters: CommissionCloseQuarter[]
+  by_payout_period: CommissionPayoutPeriod[]
 }
 
 export interface CommissionFilters {

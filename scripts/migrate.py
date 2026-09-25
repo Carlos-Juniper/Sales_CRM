@@ -791,6 +791,60 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
+def detect_065(conn) -> bool:
+    """065 applied ↔ plan tables, snapshot columns, seed rules, and backfill.
+
+    Keys on this migration's own effects, not on a sibling table: the four new
+    tables, commissions.plan_key and commissions.client_type, both unique
+    indexes, the standard maintenance / new-client / enhancement seed rows,
+    and zero commissions missing installment 1. Every statement in the file is
+    guarded (CREATE IF NOT EXISTS, information_schema PREPARE, INSERT IGNORE,
+    NOT EXISTS backfill), so a partial apply stays undetected and a re-run
+    finishes the remainder.
+    """
+    schema_ok = (
+        table_exists(conn, "commission_plans")
+        and table_exists(conn, "commission_plan_rules")
+        and table_exists(conn, "user_commission_plans")
+        and table_exists(conn, "commission_installments")
+        and column_exists(conn, "commissions", "plan_key")
+        and column_exists(conn, "commissions", "client_type")
+        and index_exists(conn, "user_commission_plans", "uq_user_commission_plans_user_effective")
+        and index_exists(conn, "commission_installments", "uq_commission_installment")
+    )
+    if not schema_ok:
+        return False
+    for sql in (_SEED_MAINT_065, _SEED_INSTALL_065, _SEED_ENH_065):
+        row = _fetch_one(conn, sql)
+        if not row or int(row["cnt"]) < 1:
+            return False
+    missing = _fetch_one(conn, _BACKFILL_065)
+    return bool(missing and int(missing["cnt"]) == 0)
+
+
+_SEED_MAINT_065 = (
+    "SELECT COUNT(*) AS cnt FROM commission_plan_rules "
+    "WHERE plan_key = 'standard' AND estimate_type = 'maintenance' "
+    "AND basis = 'first_year_revenue' AND rate = 0.03000"
+)
+_SEED_INSTALL_065 = (
+    "SELECT COUNT(*) AS cnt FROM commission_plan_rules "
+    "WHERE plan_key = 'standard' AND estimate_type = 'install' "
+    "AND client_type = 'new' AND rate = 0.01200"
+)
+_SEED_ENH_065 = (
+    "SELECT COUNT(*) AS cnt FROM commission_plan_rules "
+    "WHERE plan_key = 'standard' AND estimate_type = 'enhancement' "
+    "AND basis = 'enhancement_collected_gp_gte_55'"
+)
+_BACKFILL_065 = (
+    "SELECT COUNT(*) AS cnt FROM commissions c "
+    "LEFT JOIN commission_installments i "
+    "  ON i.commission_id = c.id AND i.installment_number = 1 "
+    "WHERE i.id IS NULL"
+)
+
+
 def detect_064(conn) -> bool:
     """064 applied ↔ estimates.irrigation_occurrences column exists.
 
@@ -889,6 +943,7 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
+    "065_commission_cadence_and_plans":           detect_065,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

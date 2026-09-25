@@ -74,6 +74,7 @@ for at least one real deploy cycle.
 - **062** — adds `owner_user_id` to `team_members` and `client_references` (guarded). Not the same change as 058.
 - **063** — nullable `estimates.homes_budget` / `common_area_budget`. Renumbered from 059 so it does not share a number with the branch-manager migration on `integrate/staging-proposals`.
 - **064** — yearly maintenance occurrence counts on `estimates`. Renumbered from 061 for the same reason.
+- **065** — commission payout installments plus the standard plan (rates as data, not code). Adds `commission_plans`, `commission_plan_rules`, `user_commission_plans`, `commission_installments`, and nullable `commissions.plan_key` / `commissions.client_type`. Backfills two installments per existing commission (paid commissions mark both installments paid). Does not insert per-user plan rows and does not change `commission_rates`. Detector keys on the new tables, both snapshot columns, both unique indexes, the standard maintenance / new-client / enhancement seed rows, and a complete installment-1 backfill.
 
 ### Numbering history
 

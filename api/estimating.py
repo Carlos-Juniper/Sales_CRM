@@ -34,6 +34,14 @@ import api.attachments as _att_mod
 from db import execute, query
 from api import aspire_sync
 from api import authz
+from api.commission_calc import (
+    build_installment_rows,
+    close_date_of,
+    compute_plan_amount,
+    effective_rate,
+    resolve_rate_source,
+    sum_prior_install_cents,
+)
 from api import properties as _props_mod
 from api.aspire_sync import OpportunityInput
 from api.aspire_config import ASPIRE_BRANCH_MAP, ASPIRE_BRANCH_INSTALL_FALLBACKS
@@ -77,16 +85,61 @@ async def _write_back_lead_status(lead_id: Optional[str], status: str) -> None:
     await execute("UPDATE leads SET status = %s WHERE id = %s", [status, lead_id])
 
 
-async def _create_commission_on_won(estimate_id: str) -> None:
-    """Insert a commission record when an estimate transitions to 'won'.
+_UNRESOLVED_CLIENT_NOTE = (
+    "client_type unresolved; provisional new-client construction tiers applied. "
+    "No reliable new-vs-existing signal on the lead, property, or Aspire record."
+)
 
-    No-ops silently when: the estimate has no lead, the lead has no crm_rep,
-    or the rep has no active commission rate. Idempotent — the UNIQUE KEY on
-    estimate_id means a duplicate won transition is a no-op at the DB layer.
+
+async def _insert_commission_installments(commission_id: str, rows: list[dict]) -> None:
+    """Persist both payout installments. Cadence is not plan-specific."""
+    if len(rows) != 2:
+        return
+    params: list[Any] = []
+    for row in rows:
+        params.extend([
+            str(uuid.uuid4()),
+            commission_id,
+            row["installment_number"],
+            row["payout_period"],
+            row["payout_date"].isoformat(),
+            row["amount_cents"],
+        ])
+    await execute(
+        """
+        INSERT INTO commission_installments
+            (id, commission_id, installment_number, payout_period_label,
+             payout_date, amount_cents, status)
+        VALUES (%s, %s, %s, %s, %s, %s, 'scheduled'),
+               (%s, %s, %s, %s, %s, %s, 'scheduled')
+        """,
+        params,
+    )
+
+
+async def _create_commission_on_won(estimate_id: str) -> None:
+    """Insert a commission and its two payout installments when an estimate is won.
+
+    No-ops when the estimate has no lead or the lead has no crm_rep. Idempotent
+    — the UNIQUE KEY on estimate_id makes a duplicate won transition a no-op.
+
+    Rate precedence (the two-installment cadence applies in every branch):
+      1. Active user_commission_plans row → that plan's rules.
+      2. Else an active commission_rates row → today's flat rate on
+         contract_value_cents, plan_key left NULL.
+      3. Else a sales-rep role → the standard plan.
+      4. Else no-op.
+
+    Maintenance standard basis is first-year annual revenue.
+    contract_value_cents on a maintenance estimate is already that annual
+    roll-up (occurrences/year pricing; no multi-year term is stored). Install
+    standard basis is marginal calendar-year cumulative contract value. There
+    is no reliable new-vs-existing client field, so install client_type is
+    stored NULL and the new-client tiers are applied provisionally.
     """
     rows = await query(
         """
-        SELECT e.contract_value_cents, e.lead_id,
+        SELECT e.contract_value_cents, e.lead_id, e.estimate_type,
                l.crm_rep AS crm_rep_id
         FROM estimates e
         JOIN leads l ON l.id = e.lead_id
@@ -99,10 +152,23 @@ async def _create_commission_on_won(estimate_id: str) -> None:
     row = rows[0]
     crm_rep_id = row.get("crm_rep_id")
     lead_id = row.get("lead_id")
-    contract_value_cents = row.get("contract_value_cents") or 0
-    if not crm_rep_id:
+    if not crm_rep_id or not lead_id:
         return
+    contract_value_cents = int(row.get("contract_value_cents") or 0)
+    estimate_type = row.get("estimate_type") or ""
 
+    assignment_rows = await query(
+        """
+        SELECT plan_key
+        FROM user_commission_plans
+        WHERE user_id = %s
+          AND effective_date <= CURDATE()
+          AND (expires_date IS NULL OR expires_date > CURDATE())
+        ORDER BY effective_date DESC
+        LIMIT 1
+        """,
+        [crm_rep_id],
+    )
     rate_rows = await query(
         """
         SELECT commission_rate
@@ -115,21 +181,108 @@ async def _create_commission_on_won(estimate_id: str) -> None:
         """,
         [crm_rep_id],
     )
-    if not rate_rows:
+    role_rows = await query("SELECT role FROM users WHERE id = %s", [crm_rep_id])
+    role = role_rows[0].get("role") if role_rows else None
+    assignment_key = assignment_rows[0].get("plan_key") if assignment_rows else None
+    mode, plan_key = resolve_rate_source(
+        assignment_key,
+        bool(rate_rows),
+        role,
+        authz.SALES_REP_DB_ROLES,
+    )
+    if mode == "none":
         return
-    commission_rate = float(rate_rows[0]["commission_rate"])
-    commission_amount_cents = round(contract_value_cents * commission_rate)
 
-    await execute(
+    now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+    client_type = None
+    notes = None
+    if mode == "legacy":
+        commission_rate = float(rate_rows[0]["commission_rate"])
+        commission_amount_cents = round(contract_value_cents * commission_rate)
+        stored_plan_key = None
+    else:
+        cumulative_before = 0
+        bucket = None
+        if estimate_type == "install":
+            # Provisional new-client bucket. client_type stays NULL on the row.
+            bucket = "new"
+            notes = _UNRESOLVED_CLIENT_NOTE
+            prior_rows = await query(
+                """
+                SELECT c.estimate_id, c.contract_value_cents, c.created_at, c.client_type
+                FROM commissions c
+                JOIN estimates e ON e.id = c.estimate_id
+                WHERE c.user_id = %s
+                  AND c.status != 'cancelled'
+                  AND e.estimate_type = 'install'
+                  AND c.estimate_id <> %s
+                """,
+                [crm_rep_id, estimate_id],
+            )
+            cumulative_before = sum_prior_install_cents(
+                prior_rows, close_date_of(now_utc).year, "new",
+            )
+        rule_rows = await query(
+            """
+            SELECT tier_min_cents, tier_max_cents, rate, basis
+            FROM commission_plan_rules
+            WHERE plan_key = %s
+              AND estimate_type = %s
+              AND effective_date <= CURDATE()
+              AND (
+                    (%s IS NULL AND client_type IS NULL)
+                 OR client_type = %s
+              )
+              AND effective_date = (
+                    SELECT MAX(r2.effective_date)
+                    FROM commission_plan_rules r2
+                    WHERE r2.plan_key = %s
+                      AND r2.estimate_type = %s
+                      AND r2.effective_date <= CURDATE()
+                      AND (
+                            (%s IS NULL AND r2.client_type IS NULL)
+                         OR r2.client_type = %s
+                      )
+              )
+            ORDER BY tier_min_cents ASC
+            """,
+            [plan_key, estimate_type, bucket, bucket, plan_key, estimate_type, bucket, bucket],
+        )
+        amount = compute_plan_amount(
+            estimate_type=estimate_type,
+            contract_value_cents=contract_value_cents,
+            rules=rule_rows,
+            cumulative_before_cents=cumulative_before,
+        )
+        if amount is None:
+            logger.warning(
+                "No computable commission rule for plan %s estimate %s type %s",
+                plan_key, estimate_id, estimate_type,
+            )
+            return
+        commission_amount_cents = amount
+        commission_rate = effective_rate(amount, contract_value_cents)
+        stored_plan_key = plan_key
+
+    installments = build_installment_rows(now_utc, commission_amount_cents)
+    commission_id = str(uuid.uuid4())
+    inserted = await execute(
         """
         INSERT IGNORE INTO commissions
-            (estimate_id, lead_id, user_id, contract_value_cents,
-             commission_rate, commission_amount_cents, status, approved_at)
-        VALUES (%s, %s, %s, %s, %s, %s, 'approved', NOW())
+            (id, estimate_id, lead_id, user_id, contract_value_cents,
+             commission_rate, commission_amount_cents, status, approved_at,
+             plan_key, client_type, notes, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved', %s, %s, %s, %s, %s)
         """,
-        [estimate_id, lead_id, crm_rep_id, contract_value_cents,
-         commission_rate, commission_amount_cents],
+        [
+            commission_id, estimate_id, lead_id, crm_rep_id, contract_value_cents,
+            commission_rate, commission_amount_cents, now_utc,
+            stored_plan_key, client_type, notes, now_utc,
+        ],
     )
+    if not inserted:
+        return
+    await _insert_commission_installments(commission_id, installments)
 
 
 # ── Crew-rate snapshot on transitions (Handoff 38 §2.6 — LOCKED) ─────────────

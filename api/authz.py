@@ -27,10 +27,9 @@ CANONICAL_ROLES = frozenset({
     "install_sales",
     "inside_sales",
     "admin",
-    # regional_sales is field sales (many assigned branches, direct reports).
-    # vp_sales shares admin's grants and still earns commission.
-    # Neither is regional_director or vice_president.
-    "regional_sales",
+    # Distinct from vice_president ("Vice President"). Same grants as admin,
+    # and still a sales person for commission / sales-performance selectors
+    # (SALES_REP_DB_ROLES).
     "vp_sales",
     "manager",
     "regional_director",
@@ -55,13 +54,12 @@ RETIRED_SALES_ASSIGNMENT_DETAIL = (
     "Choose Maintenance Sales or Install Sales."
 )
 
-# The five assignable sales roles. Each has its own commission structure
+# The four assignable sales roles. Each has its own commission structure
 # and workflow. Legacy sales is not in this set.
 SALES_TEAM_ROLES = frozenset({
     "inside_sales",
     "maintenance_sales",
     "install_sales",
-    "regional_sales",
     "vp_sales",
 })
 
@@ -70,8 +68,7 @@ SALES_TEAM_ROLES = frozenset({
 ASSIGNABLE_ROLES = CANONICAL_ROLES - frozenset({"sales"})
 
 # Admin and VP of Sales share every admin grant. Checked instead of
-# `role == "admin"`. regional_sales is field sales, not a member.
-# regional_director and vice_president are not members.
+# `role == "admin"`. regional_director and vice_president are not members.
 ADMIN_EQUIVALENT_ROLES = frozenset({"admin", "vp_sales"})
 
 # `inside_sales` qualifies raw public/government leads and assigns them on to
@@ -83,29 +80,23 @@ LEGACY_ROLE_MAP = {
     "outside_sales": "sales",
 }
 
-# Field-sales personas. maintenance_sales, install_sales, and regional_sales
-# are the assignable ones. Legacy `sales` stays in the set so existing users
-# keep own-lead scoping, both-intake access, and the Aspire rep requirement.
-# regional_sales matches that, and also sees direct reports inside its
-# assigned branches (see lead_scope_clause). outside_sales normalizes to
-# sales before this check.
-FIELD_SALES_ROLES = frozenset({
-    "sales", "maintenance_sales", "install_sales", "regional_sales",
-})
+# Field-sales personas. maintenance_sales and install_sales are the assignable
+# ones. Legacy `sales` stays in the set so existing users keep own-lead
+# scoping, both-intake access, and the Aspire rep requirement. outside_sales
+# normalizes to sales before this check.
+FIELD_SALES_ROLES = frozenset({"sales", "maintenance_sales", "install_sales"})
 
 # users.role values that identify a sales rep in selector queries (sales
-# performance, commissions) and in GET /api/users?role=sales. The five
+# performance, commissions) and in GET /api/users?role=sales. The four
 # assignable sales roles come first. Legacy sales and outside_sales stay so
-# un-migrated rows still appear. regional_sales is a field-sales commission
-# earner (Aspire required, own book plus direct reports). vp_sales earns
-# commission without being field-sales. `?role=sales` matches this whole
-# tuple. Any other role value, including inside_sales or maintenance_sales
-# alone, stays an exact match.
+# un-migrated rows still appear. vp_sales earns commission without being
+# field-sales (no Aspire requirement, not own-lead scoped). `?role=sales`
+# matches this whole tuple. Any other role value, including inside_sales or
+# maintenance_sales alone, stays an exact match.
 SALES_REP_DB_ROLES = (
     "inside_sales",
     "maintenance_sales",
     "install_sales",
-    "regional_sales",
     "vp_sales",
     "sales",
     "outside_sales",
@@ -127,12 +118,12 @@ _INTAKE_TYPE_LOCK = {
 }
 
 # Estimator-owned scope: line items / sections / services / components / takeoff.
-# Admin-equivalent roles (admin, vp_sales) are included. regional_sales is not.
+# Admin-equivalent roles (admin, vp_sales) are included.
 ESTIMATOR_ROLES = frozenset({"maintenance_estimating", "install_estimating"}) | ADMIN_EQUIVALENT_ROLES
 
 # Approver-owned scope: complexity/margin adjustments + approve/hand-back.
 # regional_director and vice_president stay on this ladder. vp_sales joins
-# because it is admin-equivalent. regional_sales does not.
+# only because it is admin-equivalent.
 APPROVER_ROLES = frozenset({
     "manager", "regional_director", "vice_president", "ceo",
 }) | ADMIN_EQUIVALENT_ROLES
@@ -143,7 +134,7 @@ APPROVER_ROLES = frozenset({
 LINE_ITEM_EDIT_ROLES = ESTIMATOR_ROLES | APPROVER_ROLES
 
 # Roles that see every branch. Default per §5.3: admin-equivalent roles
-# (admin, vp_sales), vice_president, and CEO see all. regional_sales does not.
+# (admin, vp_sales), vice_president, and CEO see all.
 # Everyone else (incl. regional_director, procurement) is scoped to their
 # own branch until Carlos confirms the cross-branch matrix (§7 open item).
 # NOTE: `marketing` is intentionally absent — its cross-branch reach is limited
@@ -160,7 +151,7 @@ REP_VIEWER_ROLES = frozenset({
 
 # Estimating disciplines only. Admin-equivalent roles are estimators for
 # line-item edits but remain super-roles for every other surface — do not
-# use ESTIMATOR_ROLES here. vp_sales stays out; regional_sales is field sales.
+# use ESTIMATOR_ROLES here. vp_sales stays out.
 ESTIMATING_ONLY_ROLES = frozenset({"maintenance_estimating", "install_estimating"})
 
 # Branch and company leadership. Admin-equivalent roles are listed separately
@@ -339,170 +330,49 @@ def is_sales_rep(role: Optional[str]) -> bool:
     """True for a field-sales role whose leads are a personal book.
 
     Legacy `sales` and `outside_sales` (which normalizes to `sales`) are
-    included, as are `maintenance_sales`, `install_sales`, and
-    `regional_sales`. The existing `inside_sales` role stays distinct: it
-    works the shared public-lead queue and must not be forced onto a
-    personal book.
+    included, as are `maintenance_sales` and `install_sales`. The existing
+    `inside_sales` role stays distinct: it works the shared public-lead
+    queue and must not be forced onto a personal book.
     """
     return normalize_role(role) in FIELD_SALES_ROLES
-
-
-def is_regional_sales(role: Optional[str]) -> bool:
-    """True for Regional Sales: field sales plus a team and many branches."""
-    return normalize_role(role) == "regional_sales"
 
 
 # Same predicate the Leads tab uses for ?mine=true. The id is always the
 # JWT subject, never a client-supplied user id (BRD I-9.5).
 OWN_LEAD_PREDICATE = "(assigned_to = %s OR created_by = %s)"
 
-# regional_sales: own book plus users.reports_to_user_id = the caller.
-TEAM_LEAD_PREDICATE = (
-    "(assigned_to = %s OR created_by = %s"
-    " OR assigned_to IN (SELECT id FROM users WHERE reports_to_user_id = %s)"
-    " OR created_by IN (SELECT id FROM users WHERE reports_to_user_id = %s))"
-)
-
-# Territories whose maintenance or install Aspire branch is on the caller's
-# user_branches rows. leads.branch_id stores the sales_territories id.
-ASSIGNED_BRANCH_LEAD_PREDICATE = (
-    "branch_id IN ("
-    "SELECT st.id FROM sales_territories st"
-    " JOIN user_branches ub ON ub.user_id = %s"
-    " AND (ub.aspire_branch_id = st.aspire_branch_id_maintenance"
-    " OR ub.aspire_branch_id = st.aspire_branch_id_install))"
-)
-
-OWN_LEAD_DENIED = "You can only access your own leads."
-REGIONAL_LEAD_DENIED = (
-    "You can only access your own leads and your direct reports' leads"
-    " in your assigned branches."
-)
-
 
 def own_lead_filter(user: dict) -> tuple[str, list]:
-    """SQL predicate + params that limit a field-sales rep to their book.
+    """SQL predicate + params that limit a field-sales rep to their own leads.
 
-    Empty for every other role, including admin, vp_sales, and manager-type
-    roles (manager, regional_director, vice_president, ceo) and inside_sales.
+    Empty for every other role, including admin and manager-type roles
+    (manager, regional_director, vice_president, ceo) and inside_sales.
     Those callers keep company-wide visibility unless they opt into ?mine=true.
-
-    regional_sales is own rows plus direct reports, and only leads whose
-    territory maps to one of the caller's user_branches rows.
     """
     if not is_sales_rep(user.get("role")):
         return "", []
-    uid = user.get("id")
-    if is_regional_sales(user.get("role")):
-        return (
-            f"({TEAM_LEAD_PREDICATE} AND {ASSIGNED_BRANCH_LEAD_PREDICATE})",
-            [uid, uid, uid, uid, uid],
-        )
-    return OWN_LEAD_PREDICATE, [uid, uid]
-
-
-def _lead_owned_by(lead: dict, user_id: Optional[str]) -> bool:
-    return bool(
-        user_id
-        and (lead.get("assigned_to") == user_id or lead.get("created_by") == user_id)
-    )
+    return OWN_LEAD_PREDICATE, [user.get("id"), user.get("id")]
 
 
 def require_own_lead(user: dict, lead: dict) -> None:
     """403 when a field-sales rep reads or writes a lead they do not own.
 
     Ownership matches the Leads tab: `assigned_to` or `created_by` is the
-    caller. No-op for every other role, including inside_sales and vp_sales.
-    A proposal-render token is already pinned to one lead id by require_auth,
+    caller. No-op for every other role, including inside_sales. A
+    proposal-render token is already pinned to one lead id by require_auth,
     so it is admitted here too.
-
-    regional_sales is not decided here: direct reports and branch assignment
-    need a query. Callers use `await enforce_lead_visibility`.
     """
     if user.get("scope") == "proposal_render":
         return
-    if is_regional_sales(user.get("role")):
-        return
     if not is_sales_rep(user.get("role")):
         return
-    if _lead_owned_by(lead, user.get("id")):
+    uid = user.get("id")
+    if uid and (lead.get("assigned_to") == uid or lead.get("created_by") == uid):
         return
-    raise HTTPException(status_code=403, detail=OWN_LEAD_DENIED)
-
-
-async def _reports_to_caller(caller_id: str, owner_id: Optional[str]) -> bool:
-    if not owner_id:
-        return False
-    rows = await query(
-        "SELECT id FROM users WHERE id = %s AND reports_to_user_id = %s",
-        [owner_id, caller_id],
+    raise HTTPException(
+        status_code=403,
+        detail="You can only access your own leads.",
     )
-    return bool(rows)
-
-
-async def _lead_in_assigned_branches(user_id: str, lead: dict) -> bool:
-    branch = (lead.get("branch_id") or "").strip()
-    if not branch:
-        return False
-    rows = await query(
-        "SELECT st.id FROM sales_territories st"
-        " JOIN user_branches ub ON ub.user_id = %s"
-        " AND (ub.aspire_branch_id = st.aspire_branch_id_maintenance"
-        " OR ub.aspire_branch_id = st.aspire_branch_id_install)"
-        " WHERE st.id = %s",
-        [user_id, branch],
-    )
-    return bool(rows)
-
-
-async def enforce_lead_visibility(user: dict, lead: dict) -> None:
-    """403 unless this caller may open the lead.
-
-    Field sales other than regional_sales use the sync own-lead check.
-    regional_sales may open a lead they own or that a direct report owns,
-    and only when the lead's territory is one of their assigned branches.
-    """
-    if user.get("scope") == "proposal_render" or not is_regional_sales(user.get("role")):
-        require_own_lead(user, lead)
-        return
-    uid = user.get("id") or ""
-    owned = _lead_owned_by(lead, uid)
-    if not owned:
-        owned = await _reports_to_caller(uid, lead.get("assigned_to")) or (
-            await _reports_to_caller(uid, lead.get("created_by"))
-        )
-    if not owned or not await _lead_in_assigned_branches(uid, lead):
-        raise HTTPException(status_code=403, detail=REGIONAL_LEAD_DENIED)
-
-
-async def assert_can_view_rep(
-    user: dict, requested_user_id: Optional[str], *, surface: str
-) -> Optional[list[str]]:
-    """Who this caller may read on commissions and sales performance.
-
-    Returns None when the caller may see every rep (and omitted a user id).
-    Returns a list of user ids to restrict the query to. 403 when
-    `requested_user_id` is outside that list. regional_sales is limited to
-    themselves and users.reports_to_user_id = them.
-    """
-    if normalize_role(user.get("role")) in REP_VIEWER_ROLES:
-        return [requested_user_id] if requested_user_id else None
-    uid = user.get("id") or ""
-    allowed = [uid]
-    if is_regional_sales(user.get("role")):
-        rows = await query(
-            "SELECT id FROM users WHERE reports_to_user_id = %s",
-            [uid],
-        )
-        allowed.extend(r["id"] for r in rows if r.get("id") and r["id"] not in allowed)
-        detail = "You can only view yourself and your direct reports."
-    else:
-        detail = f"You can only view your own {surface}"
-    if requested_user_id and requested_user_id not in allowed:
-        raise HTTPException(status_code=403, detail=detail)
-    if requested_user_id:
-        return [requested_user_id]
-    return allowed
 
 
 def is_estimating_only(role: Optional[str]) -> bool:
@@ -588,9 +458,9 @@ async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
     The maintenance and install ladders carry the same $ bands per role, so
     keying on role_key alone is unambiguous. A role with no tier rows yields
     0 — it can approve nothing. Admin has no approval_tiers rows (ceiling 0);
-    vp_sales mirrors that exactly (no tier rows are seeded). require_approver
-    still admits vp_sales because it sits in APPROVER_ROLES; the value check
-    then rejects anything above 0. regional_sales is not an approver.
+    vp_sales mirrors that exactly (no tier rows are seeded for it).
+    require_approver still admits vp_sales because it sits in APPROVER_ROLES;
+    the value check then rejects anything above 0.
     """
     rows = await query(
         "SELECT max_value_cents FROM approval_tiers WHERE role_key = %s",
@@ -610,7 +480,7 @@ def require_estimator(user: dict) -> None:
     """403 unless the JWT role may edit line items/sections/takeoff.
 
     Allows estimators AND approver-tier roles (manager, RD, VP, CEO, and
-    admin-equivalent roles: admin and vp_sales). regional_sales is not.
+    admin-equivalent roles: admin, vp_sales).
     Approval-tier ceilings are separately enforced by require_approval_authority.
     """
     if normalize_role(user.get("role")) not in LINE_ITEM_EDIT_ROLES:
@@ -748,10 +618,12 @@ class BranchScope:
 async def resolve_branch_scope(user: dict) -> BranchScope:
     """Derive the estimate-read scope from the authenticated user (BRD I-9.5).
 
-    Cross-branch roles (admin, vp_sales, vice_president, and CEO) see
-    everything. regional_sales is not in that set: like regional_director,
-    its reach comes from holding many `user_branches` rows (B.1). Zero rows
-    means the user sees nothing until Settings > Users assigns a branch.
+    Cross-branch roles (admin-equivalent roles, vice_president, and CEO) see
+    everything. vp_sales is in that set.
+    regional_director is not: its reach comes from holding many
+    `user_branches` rows rather than the role set (B.1), and it is scoped to
+    the aspire_branch_id list on those assignments. Zero rows → the user sees
+    nothing until Settings > Users assigns a branch.
     """
     if sees_all_branches(user.get("role")):
         return BranchScope(kind="all")

@@ -93,11 +93,6 @@ describe('visibleTabs (role-aware visibility — Handoff 50 §2)', () => {
     }
   })
 
-  it('regional_sales sees only the queue, same as field sales', () => {
-    expect(visibleTabs(null, 'regional_sales').map((t) => t.key)).toEqual(['queue'])
-    expect(visibleTabs('maintenance', 'regional_sales').map((t) => t.key)).toEqual(['queue'])
-  })
-
   it('marketing does not reach estimator tabs — sees only the queue at most', () => {
     const keys = visibleTabs(null, 'marketing').map((t) => t.key)
     expect(keys).not.toContain('editor')

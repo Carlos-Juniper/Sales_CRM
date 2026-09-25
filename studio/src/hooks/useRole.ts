@@ -47,10 +47,7 @@ export function useRole() {
     isEstimatingOnly: role !== null && ESTIMATING_ONLY_ROLES.includes(role),
     isApprover: role !== null && APPROVER_ROLES.includes(role),
     seesAllBranches: role !== null && CROSS_BRANCH_ROLES.includes(role),
-    // REP_SELECTOR_ROLES sees every rep. regional_sales gets the same picker
-    // but the API limits it to themselves and their direct reports.
-    canViewRepSelector:
-      role !== null && (REP_SELECTOR_ROLES.includes(role) || role === 'regional_sales'),
+    canViewRepSelector: role !== null && REP_SELECTOR_ROLES.includes(role),
     canViewAnalytics: role !== null && ANALYTICS_NAV_ROLES.includes(role),
     // Proposal settings: marketing/admin pick a rep; a sales rep does not.
     canPickRosterRep: role !== null && ROSTER_REP_PICKER_ROLES.includes(role),

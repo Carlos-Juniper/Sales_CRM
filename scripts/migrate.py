@@ -791,30 +791,6 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
-def detect_066(conn) -> bool:
-    """066 applied ↔ users.reports_to_user_id, its index, and its FK exist.
-
-    066 adds a nullable users.reports_to_user_id (self-FK, ON DELETE SET
-    NULL) so Regional Sales can see direct reports. Numbered 066 because
-    065 is reserved for the open commissions migration. Every statement is
-    information_schema-guarded, so a re-run after a partial apply finishes
-    the remainder. True only when the column, index, and foreign key are
-    all present.
-    """
-    fk = _fetch_one(
-        conn,
-        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS "
-        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s "
-        "AND CONSTRAINT_NAME = %s AND CONSTRAINT_TYPE = 'FOREIGN KEY'",
-        ("users", "fk_users_reports_to"),
-    )
-    return (
-        column_nullable(conn, "users", "reports_to_user_id")
-        and index_exists(conn, "users", "idx_users_reports_to")
-        and bool(fk and fk["cnt"])
-    )
-
-
 def detect_064(conn) -> bool:
     """064 applied ↔ estimates.irrigation_occurrences column exists.
 
@@ -913,7 +889,6 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
-    "066_users_reports_to":                       detect_066,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

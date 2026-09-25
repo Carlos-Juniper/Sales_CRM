@@ -299,7 +299,6 @@ describe('Per-route workspace guards (role-scoped navigation)', () => {
 
   it.each([
     ['sales', 'Pipeline'],
-    ['regional_sales', 'Pipeline'],
     ['inside_sales', 'Public Leads'],
     ['maintenance_estimating', 'Estimating'],
     ['install_estimating', 'Estimating'],
@@ -316,7 +315,6 @@ describe('Per-route workspace guards (role-scoped navigation)', () => {
 
   it.each([
     ['sales', 'Pipeline'],
-    ['regional_sales', 'Pipeline'],
     ['inside_sales', 'Public Leads'],
     ['maintenance_estimating', 'Estimating'],
     ['procurement', 'Estimating'],

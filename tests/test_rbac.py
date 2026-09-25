@@ -63,7 +63,7 @@ class TestRoleModel:
     def test_canonical_roles(self):
         assert authz.CANONICAL_ROLES == frozenset({
             "procurement", "sales", "maintenance_sales", "install_sales",
-            "inside_sales", "admin", "regional_sales", "vp_sales", "manager",
+            "inside_sales", "admin", "vp_sales", "manager",
             "regional_director", "maintenance_estimating", "install_estimating",
             "vice_president", "ceo",
             # Handoff 50 §3 (437c508): cross-branch owner of the company-wide
@@ -815,24 +815,6 @@ class TestBranchScope:
         # sees_all short-circuits before touching user_branches.
         mock_authz_query.assert_not_awaited()
 
-    @patch("api.authz.query", new_callable=AsyncMock)
-    async def test_regional_sales_is_limited_to_assigned_branches(self, mock_authz_query):
-        ids = [1401, 1403, 3696]
-        mock_authz_query.return_value = [{"aspire_branch_id": i} for i in ids]
-        scope = await authz.resolve_branch_scope(_user("regional_sales"))
-        assert scope.kind == "branch"
-        assert scope.ids == ids
-        sql, params = mock_authz_query.await_args.args
-        assert "user_branches" in sql
-        assert params == ["u1"]
-
-    @patch("api.authz.query", new_callable=AsyncMock)
-    async def test_regional_sales_with_no_branches_yields_none(self, mock_authz_query):
-        mock_authz_query.return_value = []
-        scope = await authz.resolve_branch_scope(_user("regional_sales"))
-        assert scope.kind == "none"
-        assert scope.ids == []
-
 
 class TestBranchScopedQueries:
     """The two consuming endpoints build an aspire_branch_id IN (...) clause
@@ -853,24 +835,6 @@ class TestBranchScopedQueries:
         assert resp.status_code == 200
         sql, params = mock_est_query.await_args_list[0].args
         assert "aspire_branch_id IN (%s, %s)" in sql
-        assert 1403 in params and 3696 in params
-
-    @patch("api.authz.query", new_callable=AsyncMock)
-    @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_list_estimates_regional_sales_is_branch_and_team_scoped(
-        self, mock_est_query, mock_authz_query, as_role
-    ):
-        as_role("regional_sales")
-        mock_authz_query.return_value = [
-            {"aspire_branch_id": 1403}, {"aspire_branch_id": 3696}
-        ]
-        mock_est_query.return_value = []
-        resp = client.get("/api/estimating/estimates")
-        assert resp.status_code == 200
-        sql, params = mock_est_query.await_args_list[0].args
-        assert "aspire_branch_id IN (%s, %s)" in sql
-        assert "reports_to_user_id" in sql
-        assert params.count("u1") == 2
         assert 1403 in params and 3696 in params
 
     @patch("api.authz.query", new_callable=AsyncMock)
@@ -980,22 +944,23 @@ class TestConfigBranches:
         assert resp.status_code in (401, 403)
 
 
-# ── vp_sales (admin-equivalent) and regional_sales (field sales)
+# ── vp_sales (admin-equivalent, still a commission earner)
 
 
 _ADMIN_EQUIVALENT_SALES = ("vp_sales",)
 
 
 class TestAdminEquivalentSalesRoles:
-    """vp_sales shares admin's grants. regional_sales is field sales.
+    """vp_sales shares admin's grants and stays out of the field-sales lock.
 
     regional_director and vice_president keep their existing meanings.
-    vp_sales approval ceiling mirrors admin: no approval_tiers rows, so the
-    ceiling is 0. regional_sales is not an approver.
+    Approval ceilings mirror admin: no approval_tiers rows, so the ceiling is 0.
     """
 
     def test_membership(self):
-        assert authz.ADMIN_EQUIVALENT_ROLES == frozenset({"admin", "vp_sales"})
+        assert authz.ADMIN_EQUIVALENT_ROLES == frozenset({
+            "admin", "vp_sales",
+        })
         for role in _ADMIN_EQUIVALENT_SALES:
             assert role in authz.CANONICAL_ROLES
             assert role in authz.ADMIN_EQUIVALENT_ROLES
@@ -1029,48 +994,9 @@ class TestAdminEquivalentSalesRoles:
             assert authz.own_lead_filter(_user(role, id="rep-9")) == ("", [])
             assert authz.allowed_intake_types(role) == ["maintenance", "install"]
 
-    def test_regional_sales_matches_field_sales_with_team_and_branches(self):
-        role = "regional_sales"
-        assert role in authz.CANONICAL_ROLES
-        assert role in authz.FIELD_SALES_ROLES
-        assert role in authz.SALES_REP_DB_ROLES
-        assert role in authz.ASSIGNABLE_ROLES
-        assert role in authz.SALES_TEAM_ROLES
-        assert role in authz.ROSTER_REP_ROLES
-        for set_name in (
-            "ADMIN_EQUIVALENT_ROLES",
-            "ESTIMATOR_ROLES",
-            "APPROVER_ROLES",
-            "LINE_ITEM_EDIT_ROLES",
-            "CROSS_BRANCH_ROLES",
-            "REP_VIEWER_ROLES",
-            "FULL_ACCESS_ROLES",
-            "PUBLIC_LEADS_ROLES",
-            "ANALYTICS_DASHBOARD_ROLES",
-            "MARKETING_ROLES",
-            "ESTIMATING_ONLY_ROLES",
-            "MANAGEMENT_ROLES",
-        ):
-            assert role not in getattr(authz, set_name), set_name
-        # Shared portfolio edits match other field-sales roster owners.
-        assert role in authz.PORTFOLIO_EDITOR_ROLES
-        assert authz.requires_aspire_sales_rep(role)
-        assert authz.is_sales_rep(role)
-        assert authz.is_regional_sales(role)
-        assert not authz.is_estimator(role)
-        assert not authz.is_approver(role)
-        assert not authz.sees_all_branches(role)
-        assert authz.allowed_intake_types(role) == ["maintenance", "install"]
-        sql, params = authz.own_lead_filter(_user(role, id="rep-9"))
-        assert "reports_to_user_id" in sql
-        assert "user_branches" in sql
-        assert "sales_territories" in sql
-        assert params == ["rep-9", "rep-9", "rep-9", "rep-9", "rep-9"]
-
     def test_regional_director_and_vice_president_are_unchanged(self):
         assert authz.normalize_role("regional_director") == "regional_director"
         assert authz.normalize_role("vice_president") == "vice_president"
-        assert authz.normalize_role("regional_sales") == "regional_sales"
         assert authz.normalize_role("vp_sales") == "vp_sales"
         for role in ("regional_director", "vice_president"):
             assert role not in authz.ADMIN_EQUIVALENT_ROLES
@@ -1096,7 +1022,6 @@ class TestAdminEquivalentSalesRoles:
         mock_authz_query.return_value = []
         assert await authz.approval_ceiling_cents("admin") == 0
         assert await authz.approval_ceiling_cents("vp_sales") == 0
-        assert "regional_sales" not in authz.APPROVER_ROLES
         queried = [call.args[1][0] for call in mock_authz_query.await_args_list]
         assert queried == ["admin", "vp_sales"]
         for sql, _params in (call.args for call in mock_authz_query.await_args_list):

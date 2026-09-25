@@ -123,8 +123,6 @@ export interface AdminUser {
   aspire_rep_id?: number | null
   /** aspire_branch_id replace-set. Absent until a list endpoint returns it. */
   branches?: number[]
-  /** Regional Sales manager this field-sales user reports to. */
-  reports_to_user_id?: string | null
 }
 
 /** A M365 directory candidate the admin PICKS (name+email autofill, §2.8). */
@@ -140,8 +138,6 @@ export interface AuthorizeUserBody {
   role: UserRole
   /** Optional aspire_branch_id replace-set. */
   branches?: number[]
-  /** Regional Sales user this person reports to. Field sales roles only. */
-  reports_to_user_id?: string | null
 }
 
 /** Partial user edit: role / branches (replace-set) / active toggle. */
@@ -149,8 +145,6 @@ export interface UserAdminPatch {
   role?: UserRole
   branches?: number[]
   active?: boolean
-  /** Null clears the manager. Omitted leaves the stored value. */
-  reports_to_user_id?: string | null
 }
 
 /** Optional `rep_id` query on roster writes. Portfolio paths never pass one. */

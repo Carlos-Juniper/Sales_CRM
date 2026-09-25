@@ -496,17 +496,14 @@ async def list_leads(
 
     # User-scoped book of leads. The identity comes from the JWT, never from a
     # client-supplied param (BRD I-9.5) — `mine` is a boolean switch, not an id.
-    # Field-sales roles are always scoped, even when the client omits ?mine=true.
-    # regional_sales also includes direct reports and assigned branches.
-    # The pipeline board calls this list that way. Admin, vp_sales,
-    # manager-type, and inside_sales keep the wider list unless ?mine=true.
+    # Field-sales roles (sales, maintenance_sales, install_sales, and legacy
+    # outside_sales) are always scoped, even when the client omits ?mine=true.
+    # The pipeline board and the analytics cards call this list that way.
+    # Admin, manager-type, and inside_sales keep the wider list.
     owner_sql, owner_params = authz.own_lead_filter(_user)
-    if owner_sql:
-        conditions.append(owner_sql)
-        params.extend(owner_params)
-    elif mine:
+    if mine or owner_sql:
         conditions.append(authz.OWN_LEAD_PREDICATE)
-        params.extend([_user["id"], _user["id"]])
+        params.extend(owner_params or [_user["id"], _user["id"]])
 
     # Public Leads review queue: once a rep assigns a lead to a CRM it moves to
     # that CRM's "My Leads" (mine=true) and should drop out of the shared queue.
@@ -557,7 +554,7 @@ async def get_lead(lead_id: str, _user: dict = Depends(require_auth)) -> dict:
     authz.require_not_estimating_only(_user, "leads")
     lead = await _fetch_lead(lead_id)
     authz.require_lead_access(_user, lead.get("source"), lead.get("assigned_to"))
-    await authz.enforce_lead_visibility(_user, lead)
+    authz.require_own_lead(_user, lead)
     return lead
 
 
@@ -634,7 +631,7 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
     authz.require_not_estimating_only(_user, "leads")
     current = await _fetch_lead(lead_id)
     authz.require_lead_access(_user, current.get("source"), current.get("assigned_to"))
-    await authz.enforce_lead_visibility(_user, current)
+    authz.require_own_lead(_user, current)
 
     _PATCHABLE = frozenset({
         "status", "assigned_to", "notes", "priority",
@@ -715,7 +712,7 @@ async def delete_lead(lead_id: str, _user: dict = Depends(require_auth)) -> None
     authz.require_not_estimating_only(_user, "leads")
     lead = await _fetch_lead(lead_id)
     authz.require_lead_access(_user, lead.get("source"), lead.get("assigned_to"))
-    await authz.enforce_lead_visibility(_user, lead)
+    authz.require_own_lead(_user, lead)
     await execute(
         "UPDATE leads SET deleted_at = CURRENT_TIMESTAMP() WHERE id = %s AND deleted_at IS NULL",
         [lead_id],
@@ -775,7 +772,7 @@ async def get_lead_activity(lead_id: str, _user: dict = Depends(require_auth)) -
     )
     if meta:
         authz.require_lead_access(_user, meta[0].get("source"), meta[0].get("assigned_to"))
-        await authz.enforce_lead_visibility(_user, meta[0])
+        authz.require_own_lead(_user, meta[0])
     rows = await query(
         """
         SELECT * FROM lead_actions
@@ -1654,9 +1651,9 @@ async def list_users(
       - ?role=<r>: restrict to that role AND active=1 (assignee pickers must
         exclude deactivated reps; Slice 6 deactivates, never deletes).
         `GET /api/users?role=sales` (and `?role=outside_sales`, the same
-        alias) is the sales-role group: the five assignable sales roles
-        (inside_sales, maintenance_sales, install_sales, regional_sales,
-        vp_sales) plus legacy sales and outside_sales rows. That is the
+        alias) is the sales-role group: the four assignable sales roles
+        (inside_sales, maintenance_sales, install_sales, vp_sales) plus
+        legacy sales and outside_sales rows. That is the
         Settings rep dropdown, the commission /
         sales-performance rep selectors, and the lead-assignee picker. Each item's
         `id` is the `rep_id` (alias `user_id`) to pass when marketing or
@@ -1694,7 +1691,7 @@ async def list_users(
     # The subquery returns NULL when there are no rows; we parse that below.
     rows = await query(
         f"""SELECT u.id, u.name, u.email, u.role, u.branch_id, u.avatar_initials,
-                   u.active, u.aspire_rep_id, u.reports_to_user_id,
+                   u.active, u.aspire_rep_id,
                    (SELECT GROUP_CONCAT(ub.aspire_branch_id ORDER BY ub.aspire_branch_id)
                       FROM user_branches ub WHERE ub.user_id = u.id) AS aspire_branch_ids
               FROM users u {where}""",
@@ -1718,7 +1715,6 @@ async def list_users(
             "active": bool(r.get("active", 1)),
             "aspireRepId": r.get("aspire_rep_id"),
             "branches": branches,
-            "reports_to_user_id": r.get("reports_to_user_id"),
         })
     return result
 
@@ -2100,7 +2096,7 @@ async def schedule_lead_meeting(
     authz.require_not_estimating_only(user, "leads")
     lead = await _fetch_lead(lead_id)
     authz.require_lead_access(user, lead.get("source"), lead.get("assigned_to"))
-    await authz.enforce_lead_visibility(user, lead)
+    authz.require_own_lead(user, lead)
 
     event = await _graph_call(
         _graph.create_event(

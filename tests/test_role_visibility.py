@@ -234,7 +234,7 @@ class TestSalesWorkspace:
             other = client.get("/api/commissions/summary?user_id=someone-else")
         assert ok.status_code == 200
         assert other.status_code == 403
-        assert "rep-1" in captured[0]
+        assert captured[0][0] == "rep-1"
         assert client.get("/api/commissions/reps").status_code == 403
 
     def test_estimator_commissions_stay_self_scoped(self, as_role):
@@ -273,7 +273,7 @@ class TestPublicLeadsAndAnalytics:
         assert "assigned_to IS NULL" in sql
         assert "NOT (source IN" not in sql
 
-    @pytest.mark.parametrize("role", ["sales", "regional_sales", "procurement", "marketing"])
+    @pytest.mark.parametrize("role", ["sales", "procurement", "marketing"])
     def test_other_roles_cannot_open_the_public_queue(self, as_role, role):
         as_role(role)
         assert client.get("/api/leads?unassigned_only=true").status_code == 403
@@ -310,7 +310,7 @@ class TestPublicLeadsAndAnalytics:
 
     @pytest.mark.parametrize(
         "role",
-        ["sales", "outside_sales", "regional_sales", "inside_sales", "procurement", "marketing", "maintenance_estimating", "install_estimating"],
+        ["sales", "outside_sales", "inside_sales", "procurement", "marketing", "maintenance_estimating", "install_estimating"],
     )
     def test_non_management_cannot_open_analytics(self, as_role, role):
         as_role(role)
@@ -339,8 +339,9 @@ class TestRepViewerScope:
             resp = client.get("/api/commissions/reps")
         assert resp.status_code == 200
 
-    def test_vp_sales_may_list_reps_and_read_another_rep(self, as_role):
-        as_role("vp_sales", user_id="lead-1")
+    @pytest.mark.parametrize("role", ["vp_sales"])
+    def test_admin_equivalent_sales_roles_may_list_reps(self, as_role, role):
+        as_role(role, user_id="lead-1")
         with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
             reps = client.get("/api/commissions/reps")
         assert reps.status_code == 200
@@ -348,46 +349,10 @@ class TestRepViewerScope:
             summary = client.get("/api/sales-performance/summary?user_id=someone-else")
         assert summary.status_code == 200
 
-    def test_regional_sales_picker_is_self_and_direct_reports(self, as_role):
-        as_role("regional_sales", user_id="lead-1")
-        with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]) as mock_query:
-            reps = client.get("/api/commissions/reps")
-        assert reps.status_code == 200
-        sql, params = mock_query.await_args.args
-        assert "reports_to_user_id" in sql
-        assert params == ["lead-1", "lead-1"]
-
-        with patch("api.sales_performance.query", new_callable=AsyncMock, return_value=[]) as perf:
-            listed = client.get("/api/sales-performance/reps")
-        assert listed.status_code == 200
-        sql, params = perf.await_args.args
-        assert "reports_to_user_id" in sql
-        assert params == ["lead-1", "lead-1"]
-
-        with patch("api.authz.query", new_callable=AsyncMock, return_value=[]):
-            denied = client.get("/api/sales-performance/summary?user_id=someone-else")
-        assert denied.status_code == 403
-        assert denied.json()["detail"] == "You can only view yourself and your direct reports."
-
-        captured: list[list] = []
-
-        async def fake_query(sql, params=None):
-            captured.append(list(params or []))
-            return []
-
-        with (
-            patch("api.authz.query", new_callable=AsyncMock, return_value=[{"id": "rep-9"}]),
-            patch("api.sales_performance.query", new=AsyncMock(side_effect=fake_query)),
-        ):
-            allowed = client.get("/api/sales-performance/summary?user_id=rep-9")
-        assert allowed.status_code == 200
-        assert any("rep-9" in params for params in captured)
-        assert all("someone-else" not in params for params in captured)
-
 
 class TestAdminEquivalentSalesRoleSets:
-    def test_vp_sales_is_a_viewer_and_not_field_sales(self):
-        role = "vp_sales"
+    @pytest.mark.parametrize("role", ["vp_sales"])
+    def test_viewer_and_not_field_sales(self, role):
         assert role in authz.REP_VIEWER_ROLES
         assert role in authz.CROSS_BRANCH_ROLES
         assert role in authz.APPROVER_ROLES
@@ -396,21 +361,6 @@ class TestAdminEquivalentSalesRoleSets:
         assert not authz.requires_aspire_sales_rep(role)
         assert not authz.is_sales_rep(role)
         assert authz.own_lead_filter({"role": role, "id": "lead-1"}) == ("", [])
-
-    def test_regional_sales_is_field_sales_with_a_team_filter(self):
-        role = "regional_sales"
-        assert role not in authz.REP_VIEWER_ROLES
-        assert role not in authz.CROSS_BRANCH_ROLES
-        assert role not in authz.APPROVER_ROLES
-        assert role not in authz.ANALYTICS_DASHBOARD_ROLES
-        assert role in authz.SALES_REP_DB_ROLES
-        assert role in authz.FIELD_SALES_ROLES
-        assert authz.requires_aspire_sales_rep(role)
-        assert authz.is_sales_rep(role)
-        sql, params = authz.own_lead_filter({"role": role, "id": "lead-1"})
-        assert "reports_to_user_id" in sql
-        assert "user_branches" in sql
-        assert params == ["lead-1"] * 5
 
     def test_regional_director_and_vice_president_unchanged(self):
         assert authz.normalize_role("regional_director") == "regional_director"

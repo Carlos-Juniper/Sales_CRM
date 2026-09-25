@@ -171,7 +171,6 @@ describe('canonical auth role → estimating role mapping', () => {
     expect(estimatingRolesForUser('maintenance_estimating')).toContain('estimator')
     expect(estimatingRolesForUser('install_estimating')).toContain('estimator')
     expect(estimatingRolesForUser('admin')).toContain('estimator')
-    expect(estimatingRolesForUser('regional_sales')).not.toContain('estimator')
     expect(estimatingRolesForUser('vp_sales')).toContain('estimator')
     expect(estimatingRolesForUser('regional_director')).not.toContain('estimator')
     expect(estimatingRolesForUser('vice_president')).not.toContain('estimator')

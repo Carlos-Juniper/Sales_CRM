@@ -15,7 +15,6 @@ const MANAGEMENT: UserRole[] = [
 ]
 const DENIED: UserRole[] = [
   'sales',
-  'regional_sales',
   'inside_sales',
   'maintenance_estimating',
   'install_estimating',

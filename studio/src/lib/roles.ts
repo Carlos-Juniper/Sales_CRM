@@ -6,14 +6,13 @@
 import { CANONICAL_ROLES, type UserRole } from '@/types'
 
 /**
- * The five assignable sales roles. Each has its own commission structure
+ * The four assignable sales roles. Each has its own commission structure
  * and workflow. Mirrors api/authz.py SALES_TEAM_ROLES.
  */
 export const SALES_TEAM_ROLES: readonly UserRole[] = [
   'inside_sales',
   'maintenance_sales',
   'install_sales',
-  'regional_sales',
   'vp_sales',
 ]
 
@@ -26,7 +25,7 @@ export const ASSIGNABLE_ROLES: readonly UserRole[] = CANONICAL_ROLES.filter(
 )
 
 /**
- * users.role values matched by GET /api/users?role=sales. The five sales
+ * users.role values matched by GET /api/users?role=sales. The four sales
  * roles, then legacy sales / outside_sales. Mirrors api/authz.py
  * SALES_REP_DB_ROLES.
  */
@@ -37,8 +36,7 @@ export const SALES_REP_ROLES: readonly string[] = [
 ]
 
 /**
- * Admin and VP of Sales share every admin grant. regional_sales is
- * field sales and is not a member. Mirrors api/authz.py
+ * Admin and VP of Sales share every admin grant. Mirrors api/authz.py
  * ADMIN_EQUIVALENT_ROLES. regional_director and vice_president are not
  * members.
  */
@@ -127,7 +125,7 @@ export const FULL_ACCESS_ROLES: readonly UserRole[] = [
 ]
 
 /**
- * Field sales: maintenance_sales, install_sales, regional_sales, plus legacy `sales`.
+ * Field sales: maintenance_sales and install_sales, plus legacy `sales`.
  * Own leads, proposals, self-scoped performance. Not the rep-selector
  * viewer list, and not Public Leads. outside_sales normalizes to sales
  * before this check. Mirrors api/authz.py FIELD_SALES_ROLES.
@@ -135,7 +133,6 @@ export const FULL_ACCESS_ROLES: readonly UserRole[] = [
 export const FIELD_SALES_ROLES: readonly UserRole[] = [
   'maintenance_sales',
   'install_sales',
-  'regional_sales',
   'sales',
 ]
 
@@ -180,14 +177,14 @@ export function defaultRouteForRole(role: UserRole | null): string {
   if (role === 'inside_sales') return '/inside-sales/leads'
   if (role === 'maintenance_estimating' || role === 'install_estimating' || role === 'procurement')
     return '/inside-sales/estimating'
-  // Field sales (maintenance, install, regional, and legacy sales) share
+  // Field sales (maintenance_sales, install_sales, and legacy sales) share
   // the sales workspace but not Analytics. Pipeline is a page they can open,
   // so a denied visit to /inside-sales does not bounce back onto itself.
   if (role !== null && (FIELD_SALES_ROLES as readonly string[]).includes(role)) {
     return '/inside-sales/pipeline'
   }
-  // Management and admin-equivalent roles (admin, vp_sales) land on Analytics.
-  // Any other role (marketing, null, unknown)
+  // Management and admin-equivalent roles (admin, vp_sales) land on
+  // Analytics. Any other role (marketing, null, unknown)
   // has no inside-sales access — redirect to /settings, which is open to
   // every authenticated user, to avoid an infinite redirect loop.
   if (role !== null && ANALYTICS_NAV_ROLES.includes(role)) return '/inside-sales'

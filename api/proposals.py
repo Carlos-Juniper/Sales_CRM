@@ -1237,24 +1237,10 @@ def register(app, require_auth) -> None:
         # older generation cannot leak back in through the grace window.
         excluded = [s.strip() for s in (exclude_status or "").split(",") if s.strip()]
         params: list[Any] = []
-        team_sql = ""
-        if authz.is_regional_sales(_user.get("role")):
-            uid = _user.get("id")
-            team_sql = (
-                " AND (l.assigned_to = %s OR l.created_by = %s"
-                " OR l.assigned_to IN (SELECT id FROM users WHERE reports_to_user_id = %s)"
-                " OR l.created_by IN (SELECT id FROM users WHERE reports_to_user_id = %s))"
-                " AND l.branch_id IN ("
-                "SELECT st.id FROM sales_territories st"
-                " JOIN user_branches ub ON ub.user_id = %s"
-                " AND (ub.aspire_branch_id = st.aspire_branch_id_maintenance"
-                " OR ub.aspire_branch_id = st.aspire_branch_id_install))"
-            )
-            params.extend([uid, uid, uid, uid, uid])
         if excluded:
             placeholders = ", ".join(["%s"] * len(excluded))
             where = (
-                f"WHERE {_LATEST_PACKAGE_PER_LEAD_SQL}{team_sql}"
+                f"WHERE {_LATEST_PACKAGE_PER_LEAD_SQL}"
                 f" AND (l.status NOT IN ({placeholders})"
                 " OR COALESCE((SELECT MAX(la.performed_at)"
                 "               FROM lead_actions la"
@@ -1263,10 +1249,9 @@ def register(app, require_auth) -> None:
                 "                AND la.new_status = l.status), '1970-01-01')"
                 " >= NOW() - INTERVAL %s DAY)"
             )
-            params.extend(excluded)
-            params.append(CLOSED_PACKAGE_GRACE_DAYS)
+            params = excluded + [CLOSED_PACKAGE_GRACE_DAYS]
         else:
-            where = f"WHERE {_LATEST_PACKAGE_PER_LEAD_SQL}{team_sql}"
+            where = f"WHERE {_LATEST_PACKAGE_PER_LEAD_SQL}"
         rows = await query(
             f"""
             SELECT
@@ -1507,31 +1492,7 @@ def register(app, require_auth) -> None:
         lead_id: Optional[str] = Query(default=None, alias="leadId"),
         _user: dict = Depends(require_auth),
     ) -> list:
-        if authz.is_regional_sales(_user.get("role")):
-            uid = _user.get("id")
-            team = (
-                "(l.assigned_to = %s OR l.created_by = %s"
-                " OR l.assigned_to IN (SELECT id FROM users WHERE reports_to_user_id = %s)"
-                " OR l.created_by IN (SELECT id FROM users WHERE reports_to_user_id = %s))"
-                " AND l.branch_id IN ("
-                "SELECT st.id FROM sales_territories st"
-                " JOIN user_branches ub ON ub.user_id = %s"
-                " AND (ub.aspire_branch_id = st.aspire_branch_id_maintenance"
-                " OR ub.aspire_branch_id = st.aspire_branch_id_install))"
-            )
-            params = [uid, uid, uid, uid, uid]
-            lead_clause = ""
-            if lead_id:
-                lead_clause = " AND pr.lead_id = %s"
-                params.append(lead_id)
-            rows = await query(
-                f"""SELECT pr.* FROM proposal_requests pr
-                    JOIN leads l ON l.id = pr.lead_id
-                    WHERE {team}{lead_clause}
-                    ORDER BY pr.created_at DESC""",
-                params,
-            )
-        elif lead_id:
+        if lead_id:
             rows = await query(
                 "SELECT * FROM proposal_requests WHERE lead_id = %s ORDER BY created_at DESC",
                 [lead_id],

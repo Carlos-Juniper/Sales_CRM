@@ -2,10 +2,9 @@
 
 A field-sales rep's pipeline, analytics counts, and lead mutations are limited
 to leads they are assigned to or created. That is `sales` (including legacy
-`outside_sales`), `maintenance_sales`, `install_sales`, and `regional_sales`.
-`regional_sales` also includes direct reports, and only inside assigned
-branches. Admin, vp_sales, manager-type roles, and the existing `inside_sales`
-shared public queue keep company-wide visibility.
+`outside_sales`), `maintenance_sales`, and `install_sales`. Admin and
+manager-type roles, and the existing `inside_sales` shared public queue, keep
+company-wide visibility.
 
 DB is mocked — patch api.server.query / api.server.execute, and
 api.estimating.query / api.estimating.execute for lead attachments.
@@ -161,15 +160,6 @@ def test_estimators_cannot_list_leads(as_user, role):
     assert resp.status_code == 403
 
 
-def test_regional_sales_list_is_own_reports_and_assigned_branches(as_user):
-    sql, params = _list("regional_sales", as_user)
-    assert "reports_to_user_id" in sql
-    assert "user_branches" in sql
-    assert "sales_territories" in sql
-    assert params.count(REP_ID) == 5
-    assert OTHER_ID not in params
-
-
 def test_inside_sales_public_queue_is_not_forced_onto_one_rep(as_user):
     sql, params = _list(
         "inside_sales", as_user, sources="higher_gov,sam_gov", unassigned_only="true"
@@ -195,70 +185,6 @@ def test_split_sales_cannot_read_another_reps_lead(as_user, role):
         resp = client.get("/api/leads/lead-1")
     assert resp.status_code == 403
     assert resp.json()["detail"] == _FORBIDDEN
-
-
-def test_regional_sales_cannot_read_a_non_report(as_user):
-    as_user("regional_sales")
-    with (
-        patch("api.server.query", new_callable=AsyncMock, return_value=[_lead(branch_id="Fort Myers, FL")]),
-        patch("api.authz.query", new_callable=AsyncMock, return_value=[]),
-    ):
-        resp = client.get("/api/leads/lead-1")
-    assert resp.status_code == 403
-    assert resp.json()["detail"] == authz.REGIONAL_LEAD_DENIED
-
-
-def test_regional_sales_can_read_a_direct_report_in_an_assigned_branch(as_user):
-    as_user("regional_sales")
-    lead = _lead(assigned_to="rep-report", created_by="inside-1", branch_id="Fort Myers, FL")
-    with (
-        patch("api.server.query", new_callable=AsyncMock, return_value=[lead]),
-        patch("api.authz.query", new_callable=AsyncMock) as mock_authz,
-    ):
-        mock_authz.side_effect = [
-            [{"id": "rep-report"}],
-            [{"id": "Fort Myers, FL"}],
-        ]
-        resp = client.get("/api/leads/lead-1")
-    assert resp.status_code == 200
-    assert mock_authz.await_count == 2
-
-
-def test_regional_sales_blocks_a_report_outside_assigned_branches(as_user):
-    as_user("regional_sales")
-    lead = _lead(assigned_to="rep-report", branch_id="Fort Myers, FL")
-    with (
-        patch("api.server.query", new_callable=AsyncMock, return_value=[lead]),
-        patch("api.authz.query", new_callable=AsyncMock) as mock_authz,
-    ):
-        mock_authz.side_effect = [
-            [{"id": "rep-report"}],
-            [],
-        ]
-        resp = client.get("/api/leads/lead-1")
-    assert resp.status_code == 403
-    assert resp.json()["detail"] == authz.REGIONAL_LEAD_DENIED
-
-
-def test_regional_sales_own_lead_still_requires_an_assigned_branch(as_user):
-    as_user("regional_sales")
-    lead = _lead(assigned_to=REP_ID, branch_id="Fort Myers, FL")
-    with (
-        patch("api.server.query", new_callable=AsyncMock, return_value=[lead]),
-        patch("api.authz.query", new_callable=AsyncMock) as mock_authz,
-    ):
-        mock_authz.return_value = [{"id": "Fort Myers, FL"}]
-        allowed = client.get("/api/leads/lead-1")
-        mock_authz.return_value = []
-        denied = client.get("/api/leads/lead-1")
-    assert allowed.status_code == 200
-    assert denied.status_code == 403
-    assert denied.json()["detail"] == authz.REGIONAL_LEAD_DENIED
-    # Own book skips the report lookup and only checks the territory join.
-    assert mock_authz.await_count == 2
-    for call in mock_authz.await_args_list:
-        assert "user_branches" in call.args[0]
-        assert "reports_to_user_id" not in call.args[0]
 
 
 @pytest.mark.parametrize("role", ("maintenance_sales", "install_sales"))

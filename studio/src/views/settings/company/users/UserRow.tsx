@@ -5,7 +5,6 @@ import { useLinkAspireRep, useUpdateUser } from '@/hooks/useUserAdmin'
 import { ASSIGNABLE_ROLES, requiresAspireSalesRep } from '@/lib/roles'
 import { roleLabel } from '@/lib/roleLabels'
 import { RoleSelect, type RoleSelectValue } from './RoleSelect'
-import { ReportsToSelect } from './ReportsToSelect'
 import { BranchMultiSelect } from './BranchMultiSelect'
 import { isUserActive } from './userDisplay'
 
@@ -15,15 +14,7 @@ import { isUserActive } from './userDisplay'
  * PATCH as a replace-set). Deactivate/Activate toggles `active` via PATCH — never
  * a DELETE, so a deactivated user stays listed (historical) and visibly marked.
  */
-export function UserRow({
-  user,
-  branches,
-  regionalManagers = [],
-}: {
-  user: AdminUser
-  branches: ManageableBranch[]
-  regionalManagers?: AdminUser[]
-}) {
+export function UserRow({ user, branches }: { user: AdminUser; branches: ManageableBranch[] }) {
   const [editing, setEditing] = useState(false)
   const active = isUserActive(user)
 
@@ -78,7 +69,6 @@ export function UserRow({
         <UserRowEditor
           user={user}
           branches={branches}
-          regionalManagers={regionalManagers.filter((manager) => manager.id !== user.id)}
           onSave={(body) => update.mutate({ userId: user.id, body })}
           pending={update.isPending}
           onLinkAspire={() => link.mutate(user.id)}
@@ -92,7 +82,6 @@ export function UserRow({
 function UserRowEditor({
   user,
   branches,
-  regionalManagers,
   onSave,
   pending,
   onLinkAspire,
@@ -100,8 +89,7 @@ function UserRowEditor({
 }: {
   user: AdminUser
   branches: ManageableBranch[]
-  onSave: (body: { role?: UserRole; branches: number[]; reports_to_user_id?: string | null }) => void
-  regionalManagers: AdminUser[]
+  onSave: (body: { role?: UserRole; branches: number[] }) => void
   pending: boolean
   onLinkAspire: () => void
   linkPending: boolean
@@ -116,9 +104,7 @@ function UserRowEditor({
         ? (user.role as UserRole)
         : 'maintenance_sales'
   const [role, setRole] = useState<RoleSelectValue>(initialRole)
-  const [reportsTo, setReportsTo] = useState(user.reports_to_user_id ?? '')
   const [selected, setSelected] = useState<number[]>(user.branches ?? [])
-  const fieldSales = requiresAspireSalesRep(role)
 
   function toggleBranch(id: number) {
     setSelected((prev) =>
@@ -140,30 +126,9 @@ function UserRowEditor({
           testId={`edit-role-${user.id}`}
           value={role}
           currentRole={user.role}
-          onChange={(next) => {
-            setRole(next)
-            if (!requiresAspireSalesRep(next)) setReportsTo('')
-          }}
+          onChange={setRole}
         />
       </div>
-
-      {fieldSales && (
-        <div>
-          <label
-            htmlFor={`edit-reports-to-${user.id}`}
-            className="block text-xs font-medium opacity-70 mb-1"
-          >
-            Reports to
-          </label>
-          <ReportsToSelect
-            id={`edit-reports-to-${user.id}`}
-            testId={`edit-reports-to-${user.id}`}
-            value={reportsTo}
-            onChange={setReportsTo}
-            managers={regionalManagers}
-          />
-        </div>
-      )}
 
       <div>
         <p className="text-xs font-medium opacity-70 mb-1">Branches</p>
@@ -191,13 +156,8 @@ function UserRowEditor({
           type="button"
           onClick={() => {
             // Resubmitting a stored legacy role is not a new assignment.
-            const body: { role?: UserRole; branches: number[]; reports_to_user_id?: string | null } = {
-              branches: selected,
-            }
+            const body: { role?: UserRole; branches: number[] } = { branches: selected }
             if (role !== user.role && role !== 'outside_sales') body.role = role
-            if (fieldSales || user.reports_to_user_id) {
-              body.reports_to_user_id = fieldSales && reportsTo ? reportsTo : null
-            }
             onSave(body)
           }}
           disabled={pending}

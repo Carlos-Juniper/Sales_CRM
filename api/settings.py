@@ -132,8 +132,8 @@ async def _require_admin(user: dict) -> None:
     """403 unless the LIVE users row is admin-equivalent and active (B.2).
 
     Admin-equivalent roles are authz.ADMIN_EQUIVALENT_ROLES: admin and
-    vp_sales. regional_sales, regional_director, and vice_president are
-    not included. Never trusts the JWT `role` claim on the write path:
+    vp_sales. regional_director and vice_president
+    are not included. Never trusts the JWT `role` claim on the write path:
     a token that claims one of those roles for a user since demoted or
     deactivated must not widen scope. Reuses authz._live_role, which reads
     role+active from users by JWT id and 403s on a missing/inactive row.
@@ -500,7 +500,6 @@ class AuthorizeUserBody(BaseModel):
     email: str
     role: str
     branches: Optional[list[int]] = None
-    reports_to_user_id: Optional[str] = None
 
 
 class UserAdminPatch(BaseModel):
@@ -516,7 +515,6 @@ class UserAdminPatch(BaseModel):
     role: Optional[str] = None
     branches: Optional[list[int]] = None
     active: Optional[bool] = None
-    reports_to_user_id: Optional[str] = None
 
 
 class MyProfilePatch(BaseModel):
@@ -1252,7 +1250,7 @@ def register(app, require_auth) -> None:
 
         Not "create from scratch": name/email come from the M365 pick, so the
         stored email is exact. Email is lowercased (Entra SSO matches lowercased
-        email). Assignable sales roles are the five in authz.SALES_TEAM_ROLES.
+        email). Assignable sales roles are the four in authz.SALES_TEAM_ROLES.
         `sales` and `outside_sales` are rejected (400). maintenance_sales and
         install_sales trigger the aspire_rep_id hard-block; other roles save
         with no Aspire link and no warning. The authorize and any branch
@@ -1261,7 +1259,6 @@ def register(app, require_auth) -> None:
         await _require_admin(user)
 
         role = authz.ensure_assignable_role(body.role)
-        reports_to = await _validated_reports_to(body.reports_to_user_id, role, None)
 
         email = body.email.strip().lower()
 
@@ -1272,10 +1269,9 @@ def register(app, require_auth) -> None:
 
         user_id = str(uuid.uuid4())
         await execute(
-            """INSERT INTO users
-                 (id, email, name, role, active, aspire_rep_id, reports_to_user_id)
-                 VALUES (%s, %s, %s, %s, 1, %s, %s)""",
-            [user_id, email, body.name, role, aspire_rep_id, reports_to],
+            """INSERT INTO users (id, email, name, role, active, aspire_rep_id)
+                 VALUES (%s, %s, %s, %s, 1, %s)""",
+            [user_id, email, body.name, role, aspire_rep_id],
         )
 
         actor = _actor(user)
@@ -1297,7 +1293,6 @@ def register(app, require_auth) -> None:
             "role": role,
             "active": 1,
             "aspire_rep_id": aspire_rep_id,
-            "reports_to_user_id": reports_to,
         }
 
     @app.patch("/api/settings/users/{user_id}")
@@ -1316,8 +1311,7 @@ def register(app, require_auth) -> None:
         await _require_admin(user)
 
         rows = await query(
-            "SELECT id, email, role, active, aspire_rep_id, reports_to_user_id"
-            " FROM users WHERE id = %s",
+            "SELECT id, email, role, active, aspire_rep_id FROM users WHERE id = %s",
             [user_id],
         )
         if not rows:
@@ -1326,7 +1320,6 @@ def register(app, require_auth) -> None:
         actor = _actor(user)
 
         # ── role ─────────────────────────────────────────────────────────────
-        new_role = current.get("role")
         if body.role is not None:
             new_role = authz.ensure_assignable_role(
                 body.role, current=current.get("role")
@@ -1375,37 +1368,8 @@ def register(app, require_auth) -> None:
         if body.branches is not None:
             await _replace_user_branches(user_id, body.branches, actor)
 
-        if "reports_to_user_id" in body.model_fields_set or (
-            body.role is not None and not authz.is_sales_rep(new_role)
-        ):
-            if body.reports_to_user_id and not authz.is_sales_rep(new_role):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Reports to applies only to field sales roles.",
-                )
-            reports_to = (
-                None
-                if not authz.is_sales_rep(new_role)
-                else await _validated_reports_to(
-                    body.reports_to_user_id, new_role, user_id
-                )
-            )
-            await execute(
-                "UPDATE users SET reports_to_user_id = %s WHERE id = %s",
-                [reports_to, user_id],
-            )
-            await _audit(
-                scope_type="company",
-                scope_id=None,
-                setting_key=f"user.{user_id}.reports_to",
-                from_value=current.get("reports_to_user_id"),
-                to_value=reports_to,
-                actor=actor,
-            )
-
         refreshed = await query(
-            "SELECT id, email, name, role, active, aspire_rep_id, reports_to_user_id"
-            " FROM users WHERE id = %s",
+            "SELECT id, email, name, role, active, aspire_rep_id FROM users WHERE id = %s",
             [user_id],
         )
         return dict(refreshed[0]) if refreshed else {"id": user_id}
@@ -2530,48 +2494,6 @@ async def _replace_user_branches(
         to_value=branches,
         actor=actor,
     )
-
-
-async def _validated_reports_to(
-    reports_to_user_id: Optional[str],
-    subject_role: str,
-    subject_user_id: Optional[str],
-) -> Optional[str]:
-    """Return a Regional Sales manager id, or None when the field is cleared.
-
-    The picker is only for field-sales roles. The target must be an active
-    `regional_sales` user, and a person cannot report to themselves.
-    """
-    if reports_to_user_id is None:
-        return None
-    cleaned = reports_to_user_id.strip()
-    if not cleaned:
-        return None
-    if not authz.is_sales_rep(subject_role):
-        raise HTTPException(
-            status_code=400,
-            detail="Reports to applies only to field sales roles.",
-        )
-    if subject_user_id and cleaned == subject_user_id:
-        raise HTTPException(
-            status_code=400,
-            detail="A user cannot report to themselves.",
-        )
-    rows = await query(
-        "SELECT id, role, active FROM users WHERE id = %s",
-        [cleaned],
-    )
-    manager = rows[0] if rows else None
-    if (
-        not manager
-        or not manager.get("active")
-        or authz.normalize_role(manager.get("role")) != "regional_sales"
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Reports to must be an active Regional Sales user.",
-        )
-    return cleaned
 
 
 async def _require_resolved_sales_rep(email: str, current_rep_id: Any) -> int:

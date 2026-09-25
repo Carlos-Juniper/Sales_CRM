@@ -4,12 +4,16 @@ import { Leaf } from 'lucide-react'
 import { consumePkce } from '@/lib/azureAuth'
 import { entraComplete } from '@/api/auth'
 import { useAuthStore } from '@/store/authStore'
+import { normalizeRole } from '@/hooks/useRole'
+import { defaultRouteForRole } from '@/lib/roles'
 
 function roleDefaultRoute(role: string) {
-  if (role === 'outside_sales') return '/outside-sales'
+  const canonical = normalizeRole(role)
   // BranchManagerPage removed in Slice 12; managers land on settings.
-  if (role === 'manager') return '/settings'
-  return '/inside-sales'
+  // They can open Analytics from the nav — this is a page they are allowed to see.
+  // Field sales, including the maintenance/install split, land via defaultRouteForRole.
+  if (canonical === 'manager') return '/settings'
+  return defaultRouteForRole(canonical)
 }
 
 export default function AuthCallbackPage() {

@@ -11,7 +11,7 @@ import AccountsPage from '@/views/inside-sales/AccountsPage'
 import CommissionsPage from '@/views/inside-sales/CommissionsPage'
 import SalesPerformancePage from '@/views/inside-sales/SalesPerformancePage'
 import { SettingsPage } from '@/views/settings/SettingsPage'
-import { SalesWorkspaceGuard, PublicLeadsGuard, EstimatingGuard } from '@/guards'
+import { SalesWorkspaceGuard, PublicLeadsGuard, EstimatingGuard, AnalyticsGuard, HomeRedirect } from '@/guards'
 import ProposalPrintRoute from '@/views/inside-sales/components/estimating/ProposalPrintRoute'
 import ProposalPreviewRoute from '@/views/inside-sales/components/estimating/ProposalPreviewRoute'
 import { LegacyBidsRedirect } from '@/views/inside-sales/LegacyBidsRedirect'
@@ -77,12 +77,12 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <Navigate to="/inside-sales" replace />,
+        element: <HomeRedirect />,
       },
       // Inside Sales
       {
         path: 'inside-sales',
-        element: <SalesWorkspaceGuard><DashboardPage /></SalesWorkspaceGuard>,
+        element: <AnalyticsGuard><DashboardPage /></AnalyticsGuard>,
       },
       {
         path: 'inside-sales/leads',

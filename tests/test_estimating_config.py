@@ -315,7 +315,9 @@ class TestCatalogItems:
         assert res.json() == []
 
     def test_filters_kit_type_and_active(self, authed):
-        """Slice 14 removed the `branch` city-string filter (api/estimating.py:3016)."""
+        """Slice 14 removed the city-string filter. catalog_items.branch was
+        dropped by migration 022, so the list query must not filter on that
+        column (the old `branch=` query param is ignored)."""
         with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = []
             res = client.get(
@@ -323,9 +325,9 @@ class TestCatalogItems:
             )
         assert res.status_code == 200
         sql, params = mock_query.call_args.args[0], mock_query.call_args.args[1]
+        assert "branch = %s" not in sql
         assert "kit_type = %s" in sql
         assert "active = %s" in sql
-        assert "branch = %s" not in sql
         assert params == ["install_quantity", 1]
 
     def test_active_false_filter(self, authed):

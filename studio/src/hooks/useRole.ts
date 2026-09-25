@@ -1,6 +1,15 @@
 import { useAuthStore } from '@/store/authStore'
 import type { LegacyUserRole, UserRole } from '@/types'
-import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES, REP_SELECTOR_ROLES } from '@/lib/roles'
+import {
+  ESTIMATOR_ROLES,
+  ESTIMATING_ONLY_ROLES,
+  APPROVER_ROLES,
+  CROSS_BRANCH_ROLES,
+  FIELD_SALES_ROLES,
+  REP_SELECTOR_ROLES,
+  ANALYTICS_NAV_ROLES,
+  ROSTER_REP_PICKER_ROLES,
+} from '@/lib/roles'
 
 // ── Canonical role model (mirrors api/authz.py) ─────────────────
 
@@ -19,7 +28,7 @@ export function useRole() {
 
   return {
     role,
-    isSales: role === 'sales',
+    isSales: role !== null && FIELD_SALES_ROLES.includes(role),
     // `admin` is the super-role; `manager` narrows to its approval tier.
     isAdmin: role === 'admin',
     isManager: role === 'manager',
@@ -29,9 +38,15 @@ export function useRole() {
     // Mirrors api/authz.py MARKETING_ROLES (marketing + admin super-role).
     canManageMarketingAssets: role === 'marketing' || role === 'admin',
     isEstimator: role !== null && ESTIMATOR_ROLES.includes(role),
+    // The two estimating disciplines. Admin and management are isEstimator
+    // (line-item edits) but can still read leads.
+    isEstimatingOnly: role !== null && ESTIMATING_ONLY_ROLES.includes(role),
     isApprover: role !== null && APPROVER_ROLES.includes(role),
     seesAllBranches: role !== null && CROSS_BRANCH_ROLES.includes(role),
     canViewRepSelector: role !== null && REP_SELECTOR_ROLES.includes(role),
+    canViewAnalytics: role !== null && ANALYTICS_NAV_ROLES.includes(role),
+    // Proposal settings: marketing/admin pick a rep; a sales rep does not.
+    canPickRosterRep: role !== null && ROSTER_REP_PICKER_ROLES.includes(role),
     canAccess: (requiredRole: UserRole | readonly UserRole[]) => {
       if (!role) return false
       if (role === 'admin') return true

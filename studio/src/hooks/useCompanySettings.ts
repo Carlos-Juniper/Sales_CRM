@@ -5,6 +5,7 @@ import {
   type CompanySettingsPatch,
   type MarginBandPatch,
 } from '@/api/settings'
+import { SLA_CONFIG } from '@/lib/estimating/sla'
 import { useUIStore } from '@/store/uiStore'
 
 // Query keys — kept as module constants so the mutations invalidate exactly
@@ -20,6 +21,20 @@ export function useCompanySettings() {
     queryFn: () => settingsApi.company(),
     staleTime: 30_000,
   })
+}
+
+/**
+ * Estimating return window for the intake rush note.
+ *
+ * Reads company_settings.sla_return_window_days (the same column the server
+ * uses for isRush). Falls back to SLA_CONFIG.returnWindowDays until that
+ * row has loaded — never a second hardcoded copy of the day count.
+ */
+export function useSlaReturnWindowDays(): number {
+  const { data } = useCompanySettings()
+  const days = data?.sla_return_window_days
+  if (typeof days === 'number' && Number.isFinite(days) && days > 0) return days
+  return SLA_CONFIG.returnWindowDays
 }
 
 /**

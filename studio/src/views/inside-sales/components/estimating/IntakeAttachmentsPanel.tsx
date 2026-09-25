@@ -3,20 +3,42 @@
 // provides a Download button for stored files.
 //
 // Rendered inside both MaintenanceEditor and InstallEditor so the estimator
-// has one-click access to site plans, RFPs, and other uploaded PDFs.
+// has one-click access to site plans, RFPs (PDF, Word, or Excel), and other files.
 //
 // Rows with downloadable===false (legacy name-only rows, or pending uploads)
 // render disabled — the filename is visible but Download is greyed out.
 // ---------------------------------------------------------------------------
 
 import { useEffect, useState } from 'react'
-import { Download, FileText, Loader2 } from 'lucide-react'
+import { Download, FileSpreadsheet, FileText, FileType, Loader2 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { estimatingApi } from '@/api/estimating'
+import { rfpFamilyForContentType } from '@/lib/estimating/rfpContentTypes'
+import type { RfpDocumentFamily } from '@/lib/estimating/rfpContentTypes'
 import type { IntakeAttachment, AttachmentKind } from '@/types/estimating'
 
 interface IntakeAttachmentsPanelProps {
   estimateId: string
+}
+
+const FILE_ICON: Record<RfpDocumentFamily, { Icon: LucideIcon; label: string }> = {
+  pdf: { Icon: FileText, label: 'PDF document' },
+  word: { Icon: FileType, label: 'Word document' },
+  excel: { Icon: FileSpreadsheet, label: 'Excel workbook' },
+}
+
+function AttachmentTypeIcon({ contentType }: { contentType: string }) {
+  const family = rfpFamilyForContentType(contentType)
+  const { Icon, label } = family ? FILE_ICON[family] : { Icon: FileText, label: 'Document' }
+  return (
+    <Icon
+      className="h-4 w-4 shrink-0 text-muted-foreground"
+      role="img"
+      aria-label={label}
+      data-testid={family ? `attachment-icon-${family}` : 'attachment-icon-file'}
+    />
+  )
 }
 
 const KIND_LABEL: Record<AttachmentKind, string> = {
@@ -86,7 +108,7 @@ export function IntakeAttachmentsPanel({ estimateId }: IntakeAttachmentsPanelPro
           className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
         >
           <div className="flex items-center gap-2 min-w-0">
-            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <AttachmentTypeIcon contentType={att.contentType} />
             <span className="truncate">{att.fileName}</span>
             <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
               {KIND_LABEL[att.kind] ?? att.kind}

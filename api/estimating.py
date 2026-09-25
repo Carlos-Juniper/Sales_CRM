@@ -22,8 +22,9 @@ import logging
 import math
 import os
 import uuid
-from datetime import date, datetime, timezone
-from decimal import Decimal
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Optional
 
 from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request, Response
@@ -258,10 +259,299 @@ def _num(v: Any) -> Any:
     return v
 
 
+def _int_or_none(v: Any) -> Optional[int]:
+    """Nullable integer column → JSON number or null. Missing columns stay null."""
+    if v is None:
+        return None
+    return int(v)
+
+
+# Contract-structure budgets on a maintenance estimate (split: homes vs common
+# area). Dollars, not cents — the intake form collects them as dollar amounts.
+# NULL is unknown. A known zero stays zero. Do not coerce NULL to 0.
+_CONTRACT_BUDGET_FIELDS: tuple[tuple[str, str], ...] = (
+    ("homesBudget", "homes_budget"),
+    ("commonAreaBudget", "common_area_budget"),
+)
+_BUDGET_QUANT = Decimal("0.01")
+_BUDGET_MAX = Decimal("9999999999999.99")
+
+
+def parse_optional_budget(value: Any, field: str) -> Optional[Decimal]:
+    """Parse one contract-structure budget.
+
+    Omitted, null, and blank (including whitespace) are unknown → None.
+    0 / "0" / 0.0 stay zero. Non-numeric values and negatives are rejected.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise HTTPException(status_code=400, detail=f"{field} must be a number, blank, or null")
+    if isinstance(value, str):
+        text = value.strip()
+        if text == "":
+            return None
+        try:
+            amount = Decimal(text)
+        except InvalidOperation:
+            raise HTTPException(
+                status_code=400, detail=f"{field} must be a number, blank, or null"
+            )
+    elif isinstance(value, (int, float, Decimal)):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise HTTPException(
+                status_code=400, detail=f"{field} must be a number, blank, or null"
+            )
+        try:
+            amount = value if isinstance(value, Decimal) else Decimal(str(value))
+        except InvalidOperation:
+            raise HTTPException(
+                status_code=400, detail=f"{field} must be a number, blank, or null"
+            )
+    else:
+        raise HTTPException(status_code=400, detail=f"{field} must be a number, blank, or null")
+    if not amount.is_finite():
+        raise HTTPException(status_code=400, detail=f"{field} must be a number, blank, or null")
+    amount = amount.quantize(_BUDGET_QUANT, rounding=ROUND_HALF_UP)
+    if amount < 0:
+        raise HTTPException(status_code=400, detail=f"{field} cannot be negative")
+    if amount > _BUDGET_MAX:
+        raise HTTPException(status_code=400, detail=f"{field} is too large")
+    return amount
+
+
+def _budget_json_number(amount: Decimal) -> int | float:
+    """Whole dollar amounts stay ints so 0 is 0, not 0.0."""
+    integral = amount.to_integral_value()
+    if amount == integral:
+        return int(integral)
+    return float(amount)
+
+
+def _budget_db_value(amount: Optional[Decimal]) -> Optional[int | float]:
+    if amount is None:
+        return None
+    return _budget_json_number(amount)
+
+
+def _budget_out(value: Any) -> Optional[int | float]:
+    """Serialize a stored budget. None stays None — never an invented zero."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, Decimal):
+        return _budget_json_number(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return _budget_json_number(Decimal(str(value)))
+    return None
+
+
+def combine_contract_budgets(homes: Any, common_area: Any) -> Optional[Decimal]:
+    """Sum the two contract-structure budgets.
+
+    A null budget is unknown, not zero, so the total is unknown unless both
+    amounts are known: None + 0 is None, and 0 + 0 is 0. Priced totals
+    (contract_value_cents, the ITB LS/IR split, commissions, sales performance)
+    must not substitute this figure, and Aspire's opportunity payload does not
+    carry it — sending 0 for an unknown budget would understate the deal.
+    """
+    if homes is None or common_area is None:
+        return None
+    return Decimal(str(homes)) + Decimal(str(common_area))
+
+
+def _intake_payload_dict(body: dict) -> Optional[dict]:
+    """The dict create_estimate will persist as the intake payload, if any."""
+    intake = body.get("intake")
+    if not isinstance(intake, dict):
+        return None
+    nested = intake.get("payload")
+    if isinstance(nested, dict):
+        return nested
+    if "payload" not in intake:
+        return intake
+    return None
+
+
+def _normalize_present_budgets(payload: dict) -> None:
+    """Rewrite budget keys already on a payload: blank → null, numeric string → number."""
+    for camel, _col in _CONTRACT_BUDGET_FIELDS:
+        if camel in payload:
+            payload[camel] = _budget_db_value(parse_optional_budget(payload[camel], camel))
+
+
+def _resolve_contract_budgets(body: dict) -> tuple[Optional[int | float], Optional[int | float]]:
+    """Column values for homes_budget and common_area_budget.
+
+    Top-level body keys win over the same names inside intake.payload (the
+    maintenance form posts them there). Omitted from both → None. When a value
+    is resolved from either place, the payload copy is rewritten so the stored
+    intake JSON matches the columns (blank strings do not survive).
+    """
+    payload = _intake_payload_dict(body)
+    if payload is not None:
+        _normalize_present_budgets(payload)
+    resolved: list[Optional[int | float]] = []
+    for camel, _col in _CONTRACT_BUDGET_FIELDS:
+        if camel in body:
+            number = _budget_db_value(parse_optional_budget(body[camel], camel))
+            if payload is not None:
+                payload[camel] = number
+        elif payload is not None and camel in payload:
+            number = payload[camel]
+        else:
+            number = None
+        resolved.append(number)
+    return resolved[0], resolved[1]
+
+
+def _coerce_budget_patch(body: dict) -> None:
+    """Normalize budget keys on a PATCH body in place. Absent keys are left absent."""
+    for camel, _col in _CONTRACT_BUDGET_FIELDS:
+        if camel in body:
+            body[camel] = _budget_db_value(parse_optional_budget(body[camel], camel))
+
+
 def _iso(v: Any) -> Any:
     if isinstance(v, (datetime, date)):
         return v.isoformat()
     return v
+
+
+# BRD I-6.2 estimating return window, in calendar days. The live value is
+# company_settings.sla_return_window_days (migration 020 seeds 14, the same
+# number as studio SLA_CONFIG.returnWindowDays). This constant is the only
+# backend spelling of that day count, and the fallback when the singleton
+# row is missing. A needed-back date inside the window is a rush job, not
+# a validation error — the window is no longer a minimum lead time.
+SLA_RETURN_WINDOW_DAYS = 14
+
+# company_settings has no timezone column. branches.time_zone is per-branch
+# and often null, so it is not a company calendar. Juniper's business day is
+# US Eastern. Cloud Run evaluates date.today() in UTC, which is already the
+# next calendar day after 8pm Eastern — a same-day needed-back date was
+# rejected as past, and a blank date defaulted to that UTC day.
+BUSINESS_TZ = ZoneInfo("America/New_York")
+
+
+def _business_now() -> datetime:
+    return datetime.now(BUSINESS_TZ)
+
+
+def _business_today(now: Optional[datetime] = None) -> date:
+    """Calendar date in the business timezone.
+
+    ``now`` is for tests. A naive datetime is treated as UTC, the same clock
+    Cloud Run uses when the zone is unset.
+    """
+    moment = now if now is not None else _business_now()
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(BUSINESS_TZ).date()
+
+
+def _default_due_back_date(window_days: int, *, today: Optional[date] = None) -> str:
+    """Blank needed-back: business today plus the SLA return window.
+
+    A date exactly ``window_days`` out meets the SLA, so the default is not
+    a rush and is not already at-risk.
+    """
+    start = today if today is not None else _business_today()
+    try:
+        days = int(window_days)
+    except (TypeError, ValueError):
+        days = SLA_RETURN_WINDOW_DAYS
+    if days < 0:
+        days = SLA_RETURN_WINDOW_DAYS
+    return (start + timedelta(days=days)).isoformat()
+
+
+def _coerce_date(value: Any) -> Optional[date]:
+    """Calendar date from a SQL DATE, datetime, or YYYY-MM-DD string.
+
+    Returns None for blank or unparseable values. Serializers use this so a
+    bad stored date cannot 500 a read; writers validate separately.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if len(text) < 10:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _require_due_back_not_past(value: Any, *, today: Optional[date] = None) -> None:
+    """Reject a needed-back / dueBackDate that is already in the past.
+
+    Applies to maintenance and install intake. Both forms write the same
+    estimates.due_back_date column (maintenance "Needed back", install
+    "Internal deadline") through create and PATCH. Dates inside the SLA
+    window are accepted; they are flagged isRush instead of blocked.
+    Omitted or blank is allowed — create defaults the column to business
+    today plus the SLA return window.
+    """
+    if value is None or value == "":
+        return
+    due = _coerce_date(value)
+    if due is None:
+        raise HTTPException(
+            status_code=400,
+            detail="dueBackDate must be a YYYY-MM-DD date",
+        )
+    if due < (today if today is not None else _business_today()):
+        raise HTTPException(
+            status_code=400,
+            detail="dueBackDate cannot be in the past",
+        )
+
+
+def _is_rush(
+    due_value: Any,
+    window_days: int = SLA_RETURN_WINDOW_DAYS,
+    *,
+    today: Optional[date] = None,
+) -> bool:
+    """True when needed-back falls strictly inside the SLA return window.
+
+    Calendar days from today until due_back_date. Due today through
+    window_days - 1 is a rush so estimators can prioritize a short
+    turnaround. window_days or more meets the SLA and is not a rush.
+    A missing date or a date already in the past is not a rush — past
+    dates are rejected on write, and a stored overdue date is the queue's
+    breached SLA state rather than a new rush flag.
+    """
+    due = _coerce_date(due_value)
+    if due is None:
+        return False
+    days_out = (due - (today if today is not None else _business_today())).days
+    return 0 <= days_out < window_days
+
+
+async def _sla_return_window_days() -> int:
+    """Read the estimating SLA window from company_settings.
+
+    Falls back to SLA_RETURN_WINDOW_DAYS only when the singleton row is
+    absent — never invents a different number.
+    """
+    rows = await query(
+        "SELECT sla_return_window_days FROM company_settings WHERE id = %s", [1]
+    )
+    if not rows or rows[0].get("sla_return_window_days") is None:
+        return SLA_RETURN_WINDOW_DAYS
+    try:
+        return int(rows[0]["sla_return_window_days"])
+    except (TypeError, ValueError):
+        return SLA_RETURN_WINDOW_DAYS
 
 
 def _component_out(r: dict) -> dict:
@@ -327,7 +617,12 @@ def _section_out(r: dict, services: list[dict]) -> dict:
     }
 
 
-def _estimate_out(r: dict, sections: list[dict]) -> dict:
+def _estimate_out(
+    r: dict,
+    sections: list[dict],
+    *,
+    sla_window_days: int = SLA_RETURN_WINDOW_DAYS,
+) -> dict:
     return {
         "id": r["id"],
         "estimateType": r["estimate_type"],
@@ -353,7 +648,21 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         # show "Crew rate changed $X → $Y since this was submitted".
         "priorCrewRateCentsPerHour": r.get("prior_crew_rate_cents_per_hour"),
         "customerType": r["customer_type"],
+        # Split-contract budgets in dollars. Null is unknown (the rep did not
+        # have the number), distinct from a known zero. Single-structure
+        # contracts and pre-migration rows come back null.
+        "homesBudget": _budget_out(r.get("homes_budget")),
+        "commonAreaBudget": _budget_out(r.get("common_area_budget")),
         "acreage": _num(r["acreage"]),
+        # Yearly maintenance visit counts (migration 064). Null when the rep
+        # left the field blank, on install estimates, and on rows created
+        # before the columns existed (.get keeps those rows working).
+        "mowingOccurrences": _int_or_none(r.get("mowing_occurrences")),
+        "pruningOccurrences": _int_or_none(r.get("pruning_occurrences")),
+        "turfFertOccurrences": _int_or_none(r.get("turf_fert_occurrences")),
+        "shrubFertOccurrences": _int_or_none(r.get("shrub_fert_occurrences")),
+        "ipmOccurrences": _int_or_none(r.get("ipm_occurrences")),
+        "irrigationOccurrences": _int_or_none(r.get("irrigation_occurrences")),
         "contractValueCents": int(r["contract_value_cents"]),
         "targetMargin": _num(r["target_margin"]),
         "status": r["status"],
@@ -363,6 +672,10 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
         "winProbability": _num(r["win_probability"]),
         "siteWalkDate": _iso(r["site_walk_date"]),
         "dueBackDate": _iso(r["due_back_date"]),
+        # Computed, not stored. True when dueBackDate (the intake needed-back
+        # date) is inside the SLA window. The queue sorts by that date, so a
+        # rush row already surfaces ahead of a longer lead time.
+        "isRush": _is_rush(r.get("due_back_date"), sla_window_days),
         "anticipatedCloseDate": _iso(r["anticipated_close_date"]),
         "serviceStartDate": _iso(r["service_start_date"]),
         "assignedLsEstimator": r["assigned_ls_estimator"],
@@ -397,7 +710,9 @@ def _estimate_out(r: dict, sections: list[dict]) -> dict:
     }
 
 
-async def _load_estimate(estimate_id: str) -> Optional[dict]:
+async def _load_estimate(
+    estimate_id: str, *, sla_window_days: Optional[int] = None
+) -> Optional[dict]:
     """Assemble the full estimate → sections → services → components tree.
 
     Slice 14: LEFT JOIN to branches on aspire_branch_id so that branchCity is
@@ -462,7 +777,9 @@ async def _load_estimate(estimate_id: str) -> Optional[dict]:
         )
 
     sections = [_section_out(s, services_by_section.get(s["id"], [])) for s in section_rows]
-    return _estimate_out(est, sections)
+    if sla_window_days is None:
+        sla_window_days = await _sla_return_window_days()
+    return _estimate_out(est, sections, sla_window_days=sla_window_days)
 
 
 def _new_id(prefix: str) -> str:
@@ -487,6 +804,16 @@ DEFAULT_SERVICE_LINE = {
 SALES_TYPE_BY_CUSTOMER = {"hoa": "HOA", "commercial": "commercial"}
 
 _SWEEP_INTERVAL_SECONDS = int(os.environ.get("ASPIRE_SWEEP_INTERVAL", "300"))
+
+
+def _territory_city_for_branch(aspire_branch_id: Any) -> str:
+    """City key in ASPIRE_BRANCH_MAP for an Aspire BranchID, or '' if unknown."""
+    if aspire_branch_id is None:
+        return ""
+    for (city, _is_install), bid in ASPIRE_BRANCH_MAP.items():
+        if bid == aspire_branch_id:
+            return city
+    return ""
 
 
 async def _build_opportunity_input(est_row: dict, service_line: Optional[str] = None) -> OpportunityInput:
@@ -521,7 +848,10 @@ async def _build_opportunity_input(est_row: dict, service_line: Optional[str] = 
     return OpportunityInput(
         name=est_row.get("name", ""),
         service_line=service_line or DEFAULT_SERVICE_LINE.get(est_type, "Maintenance: Contract"),
-        branch_city=branch_city or est_row.get("branch") or "",
+        # estimates.branch was dropped by migration 022. The replacement identity
+        # is aspire_branch_id; reverse it through the vendored city map when the
+        # property has no branch_city of its own.
+        branch_city=branch_city or _territory_city_for_branch(est_row.get("aspire_branch_id")),
         is_install=(est_type == "install"),
         aspire_property_id=aspire_property_id,
         aspire_rep_contact_id=rep_contact_id,
@@ -844,8 +1174,9 @@ def _draft_out(r: dict) -> dict:
     }
 
 
-# The Takeoff Insert scan is a scanned map image (or PDF); the
-# intake kinds stay PDF-only at the endpoint layer.
+# The Takeoff Insert scan is a scanned map image (or PDF). RFP documents on
+# the maintenance and install intakes also accept Word and Excel (see
+# attachments.validate_rfp_document). Every other intake kind stays PDF-only.
 _SCAN_CONTENT_TYPES = frozenset(
     {"application/pdf", "image/png", "image/jpeg", "image/webp"}
 )
@@ -1155,8 +1486,10 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
     provides estLsCents / estIrCents explicitly — those always win.
     """
     project_id = _new_id("itb")
-    today = date.today()
-    due = body.get("dueBackDate") or today.isoformat()
+    today = _business_today()
+    # create_estimate fills a blank dueBackDate before this runs. The
+    # fallback matches that default when a caller skips the fill.
+    due = body.get("dueBackDate") or _default_due_back_date(SLA_RETURN_WINDOW_DAYS, today=today)
     total = int(body.get("contractValueCents") or 0)
     est_ls = body.get("estLsCents")
     est_ir = body.get("estIrCents")
@@ -1178,9 +1511,9 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
             estimate_id,
             body.get("name", ""),
             body.get("aspireNumber"),
-            # ITB project carries the display branch city.
-            # TODO(slice14-contract): after migration 022 is applied to live and
-            #   itb_projects.branch is also dropped (or nullable), remove this write.
+            # itb_projects.branch is a different column from estimates.branch.
+            # Migration 022 drops only estimates.branch and catalog_items.branch;
+            # itb_projects.branch is still VARCHAR NOT NULL, so this write stays.
             body.get("branchCity") or body.get("branch", ""),
             body.get("crmRep"),
             body.get("assignedLsEstimator"),
@@ -1340,6 +1673,55 @@ async def _require_resolvable_maintenance_lines(services: list[dict]) -> None:
 # Payloads accept arbitrary camelCase keys (validated against the DB columns in
 # the handlers); modeled loosely to mirror the flexible mock contract.
 
+# Yearly service occurrence counts (visits per year) captured on the
+# maintenance intake. Nullable: null means unanswered, 0 means the service
+# is not in the contract. 366 is every day of a leap year — one visit per
+# day, including Feb 29. More than that would be more than once a day,
+# which these services are not scheduled as.
+MAX_YEARLY_OCCURRENCES = 366
+
+_OCCURRENCE_COUNT_FIELDS = {
+    "mowingOccurrences": "mowing_occurrences",
+    "pruningOccurrences": "pruning_occurrences",
+    "turfFertOccurrences": "turf_fert_occurrences",
+    "shrubFertOccurrences": "shrub_fert_occurrences",
+    "ipmOccurrences": "ipm_occurrences",
+    "irrigationOccurrences": "irrigation_occurrences",
+}
+
+
+def _validate_occurrence_counts(body: dict) -> None:
+    """Reject a non-integer or out-of-range yearly occurrence count with 422.
+
+    Absent keys and JSON null are valid (column stays null / unchanged).
+    Bool is rejected even though it is an int subclass. Floats and numeric
+    strings are rejected so the wire type is a JSON integer.
+    """
+    for camel in _OCCURRENCE_COUNT_FIELDS:
+        if camel not in body:
+            continue
+        value = body[camel]
+        if value is None:
+            continue
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            or value > MAX_YEARLY_OCCURRENCES
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{camel} must be an integer from 0 to {MAX_YEARLY_OCCURRENCES}, or null"
+                ),
+            )
+
+
+def _occurrence_insert_values(body: dict) -> list:
+    """Column order matches _OCCURRENCE_COUNT_FIELDS. Missing keys store NULL."""
+    return [body.get(camel) for camel in _OCCURRENCE_COUNT_FIELDS]
+
+
 # Scalar estimate columns updatable via PATCH (estimate_type intentionally absent).
 _UPDATABLE = {
     "name": "name",
@@ -1349,6 +1731,9 @@ _UPDATABLE = {
     # No caller should send it; if they do it is silently ignored (the key
     # simply won't appear in _UPDATABLE so no SET clause is generated for it).
     "customerType": "customer_type",
+    # Dollars. Null clears the value back to unknown; omitting the key leaves it.
+    "homesBudget": "homes_budget",
+    "commonAreaBudget": "common_area_budget",
     "acreage": "acreage",
     "contractValueCents": "contract_value_cents",
     "targetMargin": "target_margin",
@@ -1372,6 +1757,9 @@ _UPDATABLE = {
     # lands it writes these same fields). Acreage/sqft stay derived, never stored.
     "turfAreaAcres": "turf_area_acres",
     "curbMiles": "curb_miles",
+    # Yearly maintenance visit counts. Same PATCH path as the other header
+    # scalars (estimator-owned). Omitted keys are left unchanged.
+    **_OCCURRENCE_COUNT_FIELDS,
     "notifyBmRdOnReturn": "notify_bm_rd_on_return",
     # Captured at the lost transition so the durability sweep can re-send the same
     # reason on a retry (otherwise a re-push would drop it).
@@ -1451,6 +1839,25 @@ def _adjustment_out(r: dict) -> dict:
 
 # ── Routes ──────────────────────────────────────────────────────────────────
 
+async def _assert_lead_visible(user: dict, lead_id: str) -> None:
+    """404 when the lead is missing; 403 when the role may not see it.
+
+    Estimators are refused. Unassigned government leads stay on the public
+    queue (inside_sales, admin, management). Field sales (sales,
+    maintenance_sales, install_sales) may only touch a lead they are
+    assigned to or created. inside_sales is not own-lead scoped.
+    """
+    authz.require_not_estimating_only(user, "leads")
+    rows = await query(
+        "SELECT id, source, assigned_to, created_by FROM leads WHERE id = %s",
+        [lead_id],
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    authz.require_lead_access(user, rows[0].get("source"), rows[0].get("assigned_to"))
+    authz.require_own_lead(user, rows[0])
+
+
 def register(app, require_auth) -> None:
     """Attach all estimating routes to the FastAPI app with the shared auth dep."""
 
@@ -1491,10 +1898,18 @@ def register(app, require_auth) -> None:
             conditions.append("lead_id = %s")
             params.append(lead_id)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        # created_at order is the API default. The estimating queue re-sorts
+        # by priority or by dueBackDate. Rush is derived from that due date
+        # (sooner than the SLA window), so a deadline sort already places
+        # rush estimates ahead of longer lead times. Nothing is stored.
         rows = await query(
             f"SELECT id FROM estimates {where} ORDER BY created_at DESC", params
         )
-        return [await _load_estimate(r["id"]) for r in rows]
+        if not rows:
+            return []
+        window = await _sla_return_window_days()
+        loaded = [await _load_estimate(r["id"], sla_window_days=window) for r in rows]
+        return [est for est in loaded if est is not None]
 
     @app.post("/api/estimating/estimates", status_code=201)
     async def create_estimate(
@@ -1503,30 +1918,26 @@ def register(app, require_auth) -> None:
         est_type = body.get("estimateType")
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
+        # Split field-sales roles may submit only their intake. Legacy sales,
+        # admin, and manager-tier roles are not locked. Runs before any write.
+        authz.require_intake_type(user, est_type)
         # Branch identity rides on the Aspire BranchID (int), captured at intake.
-        # TODO(slice14-contract): once Carlos applies migration 022 to live, the
-        #   estimates.branch NOT NULL constraint is gone. Remove the branch_city
-        #   write from the INSERT below and drop this city-resolution block.
+        # Migration 022 dropped estimates.branch; do not write that column.
         aspire_branch_id = body.get("aspireBranchId")
         if not isinstance(aspire_branch_id, int) or isinstance(aspire_branch_id, bool):
             raise HTTPException(
                 status_code=400,
                 detail="aspireBranchId is required — select a branch from the intake form",
             )
-        # Resolve a display city from the id so the still-NOT-NULL estimates.branch
-        # column is never left empty (live DB has NOT NULL until 022 is applied).
-        branch_city = (body.get("branchCity") or "").strip()
-        if not branch_city:
-            branch_city = next(
-                (city for (city, _install), bid in ASPIRE_BRANCH_MAP.items()
-                 if bid == aspire_branch_id),
-                "",
-            )
-        if not branch_city:
-            raise HTTPException(
-                status_code=400,
-                detail="aspireBranchId does not resolve to a known branch",
-            )
+        # Yearly occurrence counts are optional on maintenance create. Validate
+        # before any INSERT so a 422 persists nothing. Install may omit them
+        # (they store NULL); a value that is sent is held to the same range.
+        _validate_occurrence_counts(body)
+        # Needed-back may be inside the SLA window (a rush). Only a past
+        # date is rejected, and the check runs before any INSERT or settings
+        # read. Maintenance and install share this column. "Today" is
+        # America/New_York, not UTC.
+        _require_due_back_not_past(body.get("dueBackDate"))
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
             await _require_resolvable_maintenance_lines([
@@ -1534,19 +1945,34 @@ def register(app, require_auth) -> None:
                 for section in (body.get("sections") or [])
                 for svc in (section.get("services") or [])
             ])
+        # Budgets are optional. Resolve before the INSERT so a 400 persists
+        # nothing, and so a blank string is NULL rather than 0. These dollars
+        # are not the priced contract value — contract_value_cents, the ITB
+        # split, commissions, and Aspire stay on their own numbers.
+        homes_budget, common_area_budget = _resolve_contract_budgets(body)
+        # Blank needed-back defaults to business today plus the company SLA
+        # window (fallback 14). That date sits on the window boundary, so it
+        # is not rush. The settings read happens only after validation, so a
+        # 400/422 persists nothing and issues no query.
+        raw_due = body.get("dueBackDate")
+        if raw_due is None or raw_due == "":
+            body["dueBackDate"] = _default_due_back_date(await _sla_return_window_days())
         estimate_id = _new_id("est")
         # Auto-assign the next sequential estimate number (contract generator).
         next_num_row = await query("SELECT COALESCE(MAX(estimate_number), 0) + 1 AS next_num FROM estimates")
         estimate_number = int(next_num_row[0]["next_num"]) if next_num_row else 1
         await execute(
             """INSERT INTO estimates
-                 (id, estimate_type, name, aspire_number, estimate_number, client_name, branch, aspire_branch_id,
+                 (id, estimate_type, name, aspire_number, estimate_number, client_name, aspire_branch_id,
                   customer_type,
                   acreage, contract_value_cents, target_margin, status, lifecycle, aspire_owner,
                   priority, win_probability, site_walk_date, due_back_date, anticipated_close_date,
                   service_start_date, assigned_ls_estimator, assigned_irr_estimator, crm_rep,
-                  notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                  notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status,
+                  mowing_occurrences, pruning_occurrences, turf_fert_occurrences,
+                  shrub_fert_occurrences, ipm_occurrences, irrigation_occurrences,
+                  homes_budget, common_area_budget)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 estimate_id,
                 est_type,
@@ -1554,7 +1980,6 @@ def register(app, require_auth) -> None:
                 body.get("aspireNumber"),
                 estimate_number,
                 body.get("clientName", ""),
-                branch_city,
                 aspire_branch_id,
                 body.get("customerType", ""),
                 body.get("acreage"),
@@ -1566,7 +1991,7 @@ def register(app, require_auth) -> None:
                 body.get("priority", "medium"),
                 body.get("winProbability", 0.20),
                 body.get("siteWalkDate"),
-                body.get("dueBackDate") or date.today().isoformat(),
+                body.get("dueBackDate"),
                 body.get("anticipatedCloseDate"),
                 body.get("serviceStartDate"),
                 body.get("assignedLsEstimator"),
@@ -1578,11 +2003,19 @@ def register(app, require_auth) -> None:
                 body.get("leadId"),
                 # RFI status tracked first-class (install).
                 body.get("rfiStatus"),
+                *_occurrence_insert_values(body),
+                # NULL when the rep left the budget blank. 0 only when they sent 0.
+                homes_budget,
+                common_area_budget,
             ],
         )
         for si, section in enumerate(body.get("sections") or []):
             await _insert_section(estimate_id, section, si)
         # Structured intake payload lands in its own table (never estimate.notes).
+        # Maintenance scopeOfWork inside intake.payload is optional free text.
+        # When a rep still sends it, it is stored verbatim with the rest of the
+        # payload so older estimates keep their scope text. It is not required,
+        # and this path does not drop or rewrite that JSON.
         intake = body.get("intake")
         if isinstance(intake, dict) and intake.get("payload") is not None:
             await _insert_intake_submission(
@@ -1647,9 +2080,15 @@ def register(app, require_auth) -> None:
         est_type = body.get("estimateType")
         if est_type not in ("maintenance", "install"):
             raise HTTPException(status_code=400, detail="estimateType must be maintenance or install")
+        # Same intake lock as estimate create. A resume of an existing draft
+        # is also refused when the stored type is one this role cannot submit.
+        authz.require_intake_type(user, est_type)
         payload = body.get("payload")
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="payload must be an object")
+        # Same blank-vs-zero rule as create: a draft that leaves the budget
+        # empty stores null, not 0 and not "".
+        _normalize_present_budgets(payload)
         user_id = user.get("id") or "unknown"
 
         draft_id = body.get("draftId")
@@ -1660,6 +2099,9 @@ def register(app, require_auth) -> None:
             )
             if not rows:
                 raise HTTPException(status_code=404, detail="Draft not found")
+            stored_type = rows[0].get("estimate_type")
+            if stored_type:
+                authz.require_intake_type(user, stored_type)
             await execute(
                 "UPDATE intake_submissions SET payload = %s WHERE id = %s",
                 [json.dumps(payload), draft_id],
@@ -1739,7 +2181,18 @@ def register(app, require_auth) -> None:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
+        # Same 0..366 integer rule as create. Runs before the UPDATE so a 422
+        # leaves the row untouched. Applies to every estimate type — the
+        # columns live on estimates, and install clients simply omit them.
+        _validate_occurrence_counts(body)
+        # Blank budget strings become NULL before the UPDATE so MySQL cannot
+        # coerce "" to 0 on the DECIMAL columns.
+        _coerce_budget_patch(body)
         current = rows[0]
+        # Same needed-back rule as create: past dates rejected, short
+        # turnarounds kept and flagged isRush on the reloaded estimate.
+        if "dueBackDate" in body:
+            _require_due_back_not_past(body.get("dueBackDate"))
         if "estimateType" in body and body["estimateType"] != current["estimate_type"]:
             raise HTTPException(
                 status_code=400,
@@ -2395,9 +2848,11 @@ def register(app, require_auth) -> None:
         if not est_rows:
             raise HTTPException(status_code=404, detail="Estimate not found")
 
-        # 2. Validate content type per kind. Intake docs and the contract stay
-        # PDF-only; the Takeoff Insert scan and the measurements/other proposal
-        # kinds are scanned images, so they also accept common image types.
+        # 2. Validate content type per kind. RFP documents (maintenance and
+        # install intake) accept PDF, Word, and Excel when the extension and
+        # MIME agree. The contract and the other intake docs stay PDF-only.
+        # The Takeoff Insert scan and the measurements/other proposal kinds
+        # are scanned images, so they also accept common image types.
         #
         # Unknown kinds coerce to 'other' (legacy behaviour). The three proposal
         # kinds are in the allowlist, so they never coerce — a proposal document
@@ -2407,7 +2862,14 @@ def register(app, require_auth) -> None:
         if kind not in _VALID_ATTACHMENT_KINDS:
             kind = "other"
         content_type = body.get("contentType", "")
-        if kind in _IMAGE_OR_PDF_KINDS:
+        if kind == "rfp":
+            try:
+                content_type = _att_mod.validate_rfp_document(
+                    body.get("fileName", ""), content_type
+                )
+            except _att_mod.RfpDocumentRejected as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+        elif kind in _IMAGE_OR_PDF_KINDS:
             if content_type not in _SCAN_CONTENT_TYPES:
                 raise HTTPException(
                     status_code=400,
@@ -2462,7 +2924,15 @@ def register(app, require_auth) -> None:
         raw_origin = request.headers.get("origin", "")
         origin = raw_origin if raw_origin in _att_mod.ALLOWED_ORIGINS else ""
         upload_url = _att_mod.begin_resumable_session(object_key, content_type, origin)
-        return {"attachmentId": attachment_id, "objectKey": object_key, "uploadUrl": upload_url}
+        # contentType is the value the resumable session was opened with. The
+        # browser PUT must send this exact Content-Type (RFP uploads are
+        # canonicalized, so it can differ in case from the request).
+        return {
+            "attachmentId": attachment_id,
+            "objectKey": object_key,
+            "uploadUrl": upload_url,
+            "contentType": content_type,
+        }
 
     @app.post(
         "/api/estimating/estimates/{estimate_id}/attachments/{attachment_id}/confirm",
@@ -2578,7 +3048,15 @@ def register(app, require_auth) -> None:
         if row.get("status") != "stored":
             raise HTTPException(status_code=409, detail="Attachment is not yet stored")
 
-        url = _att_mod.signed_get_url(row["object_key"], row["file_name"])
+        # RFP downloads pin the response Content-Type to the type presign
+        # stored (PDF, Word, or Excel). Other kinds keep the previous signed
+        # URL, which serves the object's own content type.
+        sign_kwargs: dict = {}
+        if row.get("kind") == "rfp" and row.get("content_type"):
+            sign_kwargs["content_type"] = row["content_type"]
+        url = _att_mod.signed_get_url(
+            row["object_key"], row["file_name"], **sign_kwargs
+        )
         return {"url": url, "expiresIn": _att_mod.GCS_SIGNED_URL_TTL_MIN * 60}
 
     @app.patch(
@@ -2683,10 +3161,9 @@ def register(app, require_auth) -> None:
         Only the three proposal document kinds are accepted; intake/takeoff kinds
         must be uploaded against an estimate (estimate-scoped presign endpoint).
         """
-        # 1. Lead must exist.
-        lead_rows = await query("SELECT id FROM leads WHERE id = %s", [lead_id])
-        if not lead_rows:
-            raise HTTPException(status_code=404, detail="Lead not found")
+        # Estimator deny, public-queue allowlist, and own-lead scope. A missing
+        # lead is 404. Field sales may only attach to a lead they own.
+        await _assert_lead_visible(user, lead_id)
 
         # 2. Only proposal kinds are accepted at the lead level.
         kind = body.get("kind", "")
@@ -2756,6 +3233,7 @@ def register(app, require_auth) -> None:
         Looks up the attachment by both id AND lead_id so a rep cannot confirm
         an attachment belonging to a different lead.
         """
+        await _assert_lead_visible(_user, lead_id)
         rows = await query(
             "SELECT ia.* FROM intake_attachments ia WHERE ia.id = %s AND ia.lead_id = %s",
             [attachment_id, lead_id],
@@ -2824,9 +3302,7 @@ def register(app, require_auth) -> None:
         Returns only the three proposal kinds; intake/takeoff attachments are
         always estimate-scoped and will not appear here.
         """
-        lead_rows = await query("SELECT id FROM leads WHERE id = %s", [lead_id])
-        if not lead_rows:
-            raise HTTPException(status_code=404, detail="Lead not found")
+        await _assert_lead_visible(_user, lead_id)
 
         rows = await query(
             """SELECT ia.* FROM intake_attachments ia
@@ -2850,7 +3326,9 @@ def register(app, require_auth) -> None:
         Scopes the lookup to both id AND lead_id so a rep cannot delete an
         attachment belonging to a different lead. GCS delete is best-effort —
         an already-absent object must not block the soft-delete of the row.
+        A sales rep cannot delete an attachment on a lead they do not own.
         """
+        await _assert_lead_visible(_user, lead_id)
         rows = await query(
             "SELECT * FROM intake_attachments WHERE id = %s AND lead_id = %s",
             [attachment_id, lead_id],

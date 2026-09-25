@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { render, makeUser } from '@/test/utils'
@@ -21,8 +21,16 @@ import {
 } from '@/views/inside-sales/components/estimating/useEstimatingShell'
 import { EstimatingToastProvider } from '@/views/inside-sales/components/estimating/EstimatingToast'
 import { MaintenanceIntakeModal } from '@/views/inside-sales/components/estimating/MaintenanceIntakeModal'
+import { InstallIntakeModal } from '@/views/inside-sales/components/estimating/InstallIntakeModal'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 import type { CreateEstimatePayload } from '@/api/estimating'
+import { DUE_BACK_PAST_MESSAGE, SLA_CONFIG, defaultDueBackDate, isRushWindowDate, businessDateOnly, localDateOnly } from '@/lib/estimating/sla'
+
+/** Local calendar date offset. Avoids `toISOString()` shifting the day off UTC. */
+function calendarShift(days: number): string {
+  const [y, m, d] = localDateOnly().split('-').map(Number)
+  return localDateOnly(new Date(y, m - 1, d + days))
+}
 
 // jsdom stubs for Radix Dialog
 window.HTMLElement.prototype.hasPointerCapture = vi.fn()
@@ -78,7 +86,7 @@ function renderModal({
 }
 
 /** Fill the minimum required fields for a valid submission.
- *  Note: "Needed back" is not required — defaults to +14 days (SLA clock fallback).
+ *  "Needed back" is not required — a blank field submits as today.
  */
 async function fillMinimumFields(
   user: ReturnType<typeof userEvent.setup>,
@@ -90,7 +98,6 @@ async function fillMinimumFields(
   await user.type(q(/company/i), 'Dobson Ranch HOA')
   await user.type(q(/phone/i), '602-555-1234')
   await user.type(q(/email/i), 'jane@example.com')
-  await user.type(q(/scope of work/i), 'Full grounds maintenance')
   // Branch is now required; wait for async options then select one.
   await scope.findByRole('option', { name: 'Bradenton, FL' })
   await user.selectOptions(q(/^branch/i) as HTMLSelectElement, 'Bradenton, FL')
@@ -145,12 +152,14 @@ describe('MaintenanceIntakeModal — field rendering (AC §3 bullet 1)', () => {
 
   it('renders all scope & date fields', () => {
     renderModal()
-    expect(screen.getByLabelText(/scope of work/i)).toBeInTheDocument()
+    const notes = screen.getByLabelText(/additional scope notes/i)
+    expect(notes).toBeInTheDocument()
+    expect(notes).not.toBeRequired()
     expect(screen.getByLabelText(/needed back/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/anticipated close/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/service start/i)).toBeInTheDocument()
-    // Needed back defaults to +14 days when blank (SLA minimum fallback)
-    expect(screen.getByText(/defaults to \+14 days/i)).toBeInTheDocument()
+    expect(screen.queryByText(/defaults to \+14 days/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/14-calendar-day minimum/i)).not.toBeInTheDocument()
   })
 
   it('renders win probability field constrained to 20–100%', () => {
@@ -168,9 +177,10 @@ describe('MaintenanceIntakeModal — field rendering (AC §3 bullet 1)', () => {
     expect(screen.getByText(/attach other files/i)).toBeInTheDocument()
   })
 
-  it('renders the 14-day SLA note', () => {
+  it('does not render the 14-day minimum return window', () => {
     renderModal()
-    expect(screen.getByText(/14-calendar-day minimum return window/i)).toBeInTheDocument()
+    expect(screen.queryByText(/14-calendar-day/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/at least 14/i)).not.toBeInTheDocument()
   })
 
   it('renders Cancel and Submit buttons', () => {
@@ -229,6 +239,158 @@ describe('MaintenanceIntakeModal — contract structure (AC §3 bullet 5)', () =
     // Default is 'single' — no split-budget inputs visible
     expect(screen.queryByLabelText(/homes.*budget|budget.*homes/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/common.*area.*budget|budget.*common/i)).not.toBeInTheDocument()
+  })
+
+  it('styles split-budget inputs with the shared Input tokens, not a light-only fill', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+
+    const contact = screen.getByLabelText(/contact name/i)
+    const homes = screen.getByLabelText(/homes budget/i)
+    const common = screen.getByLabelText(/common area budget/i)
+
+    for (const input of [homes, common]) {
+      expect(input.className).toContain('bg-[hsl(var(--card))]')
+      expect(input.className).toContain('text-[hsl(var(--fg))]')
+      expect(input.className).not.toContain('bg-[#eff6ff]')
+      expect(input.className).not.toContain('border-[#bfdbfe]')
+    }
+    expect(contact.className).toContain('bg-[hsl(var(--card))]')
+  })
+
+  it('does not mark split budgets required', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+
+    expect(screen.getByText('Homes budget ($)')).toBeInTheDocument()
+    expect(screen.getByText('Common area budget ($)')).toBeInTheDocument()
+    expect(screen.queryByText(/Homes budget \(\$\) \*/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Common area budget \(\$\) \*/)).not.toBeInTheDocument()
+
+    const homes = screen.getByLabelText(/homes budget/i)
+    const common = screen.getByLabelText(/common area budget/i)
+    expect(homes).not.toBeRequired()
+    expect(common).not.toBeRequired()
+  })
+
+  it('sends null (not 0) when both split budgets are left blank', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'budget-blank', status: 'new_from_sales' })
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].homesBudget).toBeNull()
+    expect(created[0].commonAreaBudget).toBeNull()
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.homesBudget).toBeNull()
+    expect(payload.commonAreaBudget).toBeNull()
+    expect(payload.homesBudget).not.toBe(0)
+    expect(payload.commonAreaBudget).not.toBe('')
+  })
+
+  it('sends 0 only when the rep typed 0', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'budget-zero', status: 'new_from_sales' })
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    await user.type(screen.getByLabelText(/homes budget/i), '0')
+    await user.type(screen.getByLabelText(/common area budget/i), '0')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].homesBudget).toBe(0)
+    expect(created[0].commonAreaBudget).toBe(0)
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.homesBudget).toBe(0)
+    expect(payload.commonAreaBudget).toBe(0)
+  })
+
+  it('sends typed budget amounts in dollars', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'budget-dollars', status: 'new_from_sales' })
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    await user.type(screen.getByLabelText(/homes budget/i), '120000')
+    await user.type(screen.getByLabelText(/common area budget/i), '80000')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].homesBudget).toBe(120000)
+    expect(created[0].commonAreaBudget).toBe(80000)
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.homesBudget).toBe(120000)
+    expect(payload.commonAreaBudget).toBe(80000)
+  })
+
+  it('rejects a negative budget without posting and shows the form error', async () => {
+    const user = userEvent.setup()
+    const postCalls: unknown[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        postCalls.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    await user.type(screen.getByLabelText(/homes budget/i), '-5')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    expect(postCalls).toHaveLength(0)
+    await waitFor(() =>
+      expect(document.body).toHaveTextContent(/homes budget must be blank or a non-negative number/i),
+    )
+  })
+
+  it('surfaces a 400 from create in the form error toast', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/api/estimating/estimates', () =>
+        HttpResponse.json({ detail: 'homesBudget cannot be negative' }, { status: 400 }),
+      ),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    await user.selectOptions(screen.getByLabelText(/contract structure/i), 'split')
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() =>
+      expect(document.body).toHaveTextContent(/homesBudget cannot be negative/i),
+    )
   })
 })
 
@@ -330,6 +492,152 @@ describe('MaintenanceIntakeModal — home count', () => {
   })
 })
 
+const OCCURRENCE_LABELS = [
+  'Mowing occurrences per year',
+  'Pruning occurrences per year',
+  'Turf Fert occurrences per year',
+  'Shrub Fert occurrences per year',
+  'IPM occurrences per year',
+  'Irrigation occurrences per year',
+] as const
+
+describe('MaintenanceIntakeModal — yearly occurrence counts', () => {
+  it('renders the six occurrence inputs for maintenance, above the optional notes', () => {
+    renderModal()
+    const group = screen.getByRole('group', { name: /occurrences per year/i })
+    for (const label of OCCURRENCE_LABELS) {
+      const input = within(group).getByLabelText(label)
+      expect(input).toHaveAttribute('type', 'number')
+      expect(input).toHaveAttribute('min', '0')
+      expect(input).toHaveAttribute('max', '366')
+      expect(input).toHaveAttribute('step', '1')
+      expect(input).not.toBeRequired()
+    }
+    const notes = screen.getByLabelText(/additional scope notes/i)
+    expect(group.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('does not render the occurrence inputs on install intake', () => {
+    render(
+      <EstimatingToastProvider>
+        <EstimatingShellContext.Provider value={makeShell()}>
+          <InstallIntakeModal open onClose={vi.fn()} onCreated={vi.fn()} />
+        </EstimatingShellContext.Provider>
+      </EstimatingToastProvider>,
+    )
+    expect(screen.queryByRole('group', { name: /occurrences per year/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/mowing occurrences per year/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/additional scope notes/i)).not.toBeInTheDocument()
+  })
+
+  it('sends null for a blank count, 0 for zero, and JSON integers otherwise', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'occ-1', status: 'new_from_sales' })
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    fireEvent.input(screen.getByLabelText('Mowing occurrences per year'), { target: { value: '0' } })
+    fireEvent.input(screen.getByLabelText('Turf Fert occurrences per year'), { target: { value: '6' } })
+    fireEvent.input(screen.getByLabelText('Shrub Fert occurrences per year'), { target: { value: '366' } })
+    fireEvent.input(screen.getByLabelText('Irrigation occurrences per year'), { target: { value: '52' } })
+    fireEvent.input(screen.getByLabelText(/additional scope notes/i), {
+      target: { value: 'Seasonal color at the entry' },
+    })
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].mowingOccurrences).toBe(0)
+    expect(created[0].pruningOccurrences).toBeNull()
+    expect(created[0].turfFertOccurrences).toBe(6)
+    expect(created[0].shrubFertOccurrences).toBe(366)
+    expect(created[0].ipmOccurrences).toBeNull()
+    expect(created[0].irrigationOccurrences).toBe(52)
+    expect((created[0].intake!.payload as Record<string, unknown>).scopeOfWork).toBe(
+      'Seasonal color at the entry',
+    )
+    for (const value of [
+      created[0].mowingOccurrences,
+      created[0].pruningOccurrences,
+      created[0].turfFertOccurrences,
+      created[0].shrubFertOccurrences,
+      created[0].ipmOccurrences,
+      created[0].irrigationOccurrences,
+    ]) {
+      expect(value === null || typeof value === 'number').toBe(true)
+    }
+  })
+
+  it.each(['1.5', '367', '-1'])('blocks %s and does not POST', async (value) => {
+    const user = userEvent.setup()
+    const postCalls: unknown[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        postCalls.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    const input = screen.getByLabelText('Mowing occurrences per year') as HTMLInputElement
+    fireEvent.input(input, { target: { value } })
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    expect(postCalls).toHaveLength(0)
+    expect(input.validity.valid).toBe(false)
+    expect(
+      await screen.findAllByText('mowingOccurrences must be an integer from 0 to 366, or null'),
+    ).not.toHaveLength(0)
+  })
+
+  it('submits without scope notes and keeps the notes field optional', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'occ-notes', status: 'new_from_sales' })
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    const notes = screen.getByLabelText(/additional scope notes/i)
+    expect(notes).not.toBeRequired()
+    expect(notes).toHaveValue('')
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.scopeOfWork).toBe('')
+  })
+
+  it('shows a 422 detail in the toast and on the named field', async () => {
+    const user = userEvent.setup()
+    const detail = 'ipmOccurrences must be an integer from 0 to 366, or null'
+    server.use(
+      http.post('/api/estimating/estimates', () => HttpResponse.json({ detail }, { status: 422 })),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    fireEvent.input(screen.getByLabelText('IPM occurrences per year'), { target: { value: '4' } })
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    // The toast sits outside the dialog, which Radix marks aria-hidden.
+    await waitFor(() => expect(document.body).toHaveTextContent(detail))
+    expect(screen.getByRole('alert')).toHaveTextContent(detail)
+  })
+})
+
 describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
   it('POSTs an estimate with estimateType="maintenance" on submit', async () => {
     const user = userEvent.setup()
@@ -408,7 +716,6 @@ describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
     await user.type(screen.getByLabelText(/company/i), 'Dobson Ranch HOA')
     await user.type(screen.getByLabelText(/phone/i), '602-555-1234')
     await user.type(screen.getByLabelText(/email/i), 'jane@example.com')
-    await user.type(screen.getByLabelText(/scope of work/i), 'Full grounds maintenance')
     await screen.findByRole('option', { name: 'Bradenton, FL' })
     await user.selectOptions(screen.getByLabelText(/^branch/i), 'Bradenton, FL')
     await user.click(screen.getByRole('button', { name: /submit/i }))
@@ -434,7 +741,36 @@ describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
     await user.click(screen.getByRole('button', { name: /submit/i }))
 
     await waitFor(() => expect(created).toHaveLength(1))
-    expect(created[0].dueBackDate).toBeTruthy()
+    expect(created[0].dueBackDate).toBe(defaultDueBackDate())
+    expect(
+      isRushWindowDate(created[0].dueBackDate, SLA_CONFIG.returnWindowDays, businessDateOnly()),
+    ).toBe(false)
+    expect(created[0]).not.toHaveProperty('isRush')
+  })
+
+  it('uses the company SLA window when needed-back is left blank', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    server.use(
+      http.get('/api/settings/company', () =>
+        HttpResponse.json({ id: 1, sla_return_window_days: 7 }),
+      ),
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json(buildMaintenanceEstimate({ id: 'sla-blank' }), { status: 201 })
+      }),
+    )
+    renderModal()
+    const input = screen.getByLabelText(/needed back/i)
+    // Window 14 would still show the rush note at +10. Window 7 hides it.
+    fireEvent.change(input, { target: { value: calendarShift(10) } })
+    await waitFor(() => expect(screen.queryByTestId('rush-window-note')).not.toBeInTheDocument())
+    fireEvent.change(input, { target: { value: '' } })
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].dueBackDate).toBe(defaultDueBackDate(7))
   })
 
   it('routes to the editor tab with the new estimate after successful submit', async () => {
@@ -546,6 +882,35 @@ describe('MaintenanceIntakeModal — file attachments (AC §3 bullet 2)', () => 
 
     await user.upload(input, file)
     expect(screen.getByText(/property-map\.pdf/i)).toBeInTheDocument()
+  })
+
+  it('accepts Word and Excel on the RFP input and keeps the property map PDF-only', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    const rfpArea = document.querySelector('[data-testid="rfp-file-area"]')!
+    const rfpInput = rfpArea.querySelector('input[type="file"]') as HTMLInputElement
+    expect(rfpInput.accept).toContain('.docx')
+    expect(rfpInput.accept).toContain('.xlsx')
+    expect(rfpInput.accept).toContain('.doc')
+    expect(rfpInput.accept).toContain('.xls')
+    expect(rfpInput.accept).toContain('application/pdf')
+
+    const mapArea = document.querySelector('[data-testid="property-map-file-area"]')!
+    const mapInput = mapArea.querySelector('input[type="file"]') as HTMLInputElement
+    expect(mapInput.accept).toBe('application/pdf')
+
+    const docx = new File(['PK'], 'scope.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
+    await user.upload(rfpInput, docx)
+    expect(screen.getByText(/scope\.docx/i)).toBeInTheDocument()
+
+    const xlsx = new File(['PK'], 'pricing.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    await user.upload(rfpInput, xlsx)
+    expect(screen.getByText(/pricing\.xlsx/i)).toBeInTheDocument()
   })
 
   it('accepts a PDF file for the RFP document', async () => {
@@ -764,6 +1129,68 @@ describe('MaintenanceIntakeModal — leadId (Pipeline kanban redesign)', () => {
     expect(created[0].leadId).toBe('L-1042')
   })
 
+  it('skips the linked-lead lookup for estimating disciplines and keeps intake usable', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'est-skip-lead', status: 'new_from_sales' })
+    let leadsCalls = 0
+
+    useAuthStore.setState({
+      user: makeUser({ role: 'maintenance_estimating', branch_id: 'b1' }),
+    })
+    server.use(
+      http.get('/api/leads', () => {
+        leadsCalls += 1
+        return HttpResponse.json(
+          { detail: 'Estimators cannot access leads.' },
+          { status: 403 },
+        )
+      }),
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModalRaw({ crmLead: null, initialProperty: h23Property })
+
+    expect(screen.getByText(/no linked crm lead — this intake continues without one/i)).toBeInTheDocument()
+    expect(screen.queryByText(/cannot access leads/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/failed/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(leadsCalls).toBe(0)
+    expect(created[0].leadId).toBeNull()
+    expect(created[0].propertyId).toBe('prop-1')
+    expect(screen.queryByText(/cannot access leads/i)).not.toBeInTheDocument()
+  })
+
+  it('skips the linked-lead lookup for install estimating as well', async () => {
+    let leadsCalls = 0
+    useAuthStore.setState({
+      user: makeUser({ role: 'install_estimating', branch_id: 'b1' }),
+    })
+    server.use(
+      http.get('/api/leads', () => {
+        leadsCalls += 1
+        return HttpResponse.json({ detail: 'Estimators cannot access leads.' }, { status: 403 })
+      }),
+    )
+
+    renderModalRaw({ crmLead: null, initialProperty: h23Property })
+
+    expect(screen.getByText(/no linked crm lead/i)).toBeInTheDocument()
+    // Branch options load in an effect. By the time they arrive, the lead
+    // lookup effect has also had its chance to fire.
+    await screen.findByRole('option', { name: 'Bradenton, FL' })
+    expect(leadsCalls).toBe(0)
+    expect(screen.queryByText(/cannot access leads/i)).not.toBeInTheDocument()
+  })
+
   it('sends leadId null when no lead context is available (no crmLead, no property)', async () => {
     const user = userEvent.setup()
     const created: CreateEstimatePayload[] = []
@@ -808,5 +1235,91 @@ describe('MaintenanceIntakeModal — Aspire-derived maintenance branch', () => {
     await screen.findByRole('option', { name: 'Bradenton, FL' })
     expect(screen.getByRole('option', { name: 'Fort Myers, FL' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Raleigh, NC' })).toBeInTheDocument()
+  })
+})
+
+describe('MaintenanceIntakeModal — needed-back date', () => {
+  it('lets today be selected and blocks yesterday in the picker and on submit', async () => {
+    const user = userEvent.setup()
+    const postCalls: unknown[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        postCalls.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+    renderModal()
+    const input = screen.getByLabelText(/needed back/i) as HTMLInputElement
+    expect(input).toHaveAttribute('min', localDateOnly())
+    expect(calendarShift(-1) < input.min).toBe(true)
+
+    await fillMinimumFields(user)
+
+    fireEvent.change(input, { target: { value: localDateOnly() } })
+    expect(input).toHaveValue(localDateOnly())
+
+    // A value below min is not a picker choice. Submit the form directly so the
+    // handler's past-date check runs even when the browser blocks the button.
+    fireEvent.change(input, { target: { value: calendarShift(-1) } })
+    expect(input).toHaveValue(calendarShift(-1))
+    fireEvent.submit(input.form!)
+    expect(await screen.findByText(DUE_BACK_PAST_MESSAGE)).toBeInTheDocument()
+    expect(postCalls).toHaveLength(0)
+  })
+
+  it('accepts a date inside the old 14-day floor with no 14-day error', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        const body = (await request.json()) as CreateEstimatePayload
+        created.push(body)
+        return HttpResponse.json(buildMaintenanceEstimate({ id: 'short-turn' }), { status: 201 })
+      }),
+    )
+    renderModal()
+    fireEvent.change(screen.getByLabelText(/needed back/i), { target: { value: calendarShift(3) } })
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].dueBackDate).toBe(calendarShift(3))
+    expect(screen.queryByText(/14-calendar-day|at least 14/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the rush note inside the SLA window and hides it outside', async () => {
+    server.use(
+      http.get('/api/settings/company', () =>
+        HttpResponse.json({ id: 1, sla_return_window_days: 7 }),
+      ),
+    )
+    renderModal()
+    const input = screen.getByLabelText(/needed back/i)
+
+    fireEvent.change(input, { target: { value: calendarShift(6) } })
+    expect(await screen.findByTestId('rush-window-note')).toHaveTextContent(/flagged as a rush job/i)
+
+    fireEvent.change(input, { target: { value: localDateOnly() } })
+    expect(screen.getByTestId('rush-window-note')).toBeInTheDocument()
+
+    fireEvent.change(input, { target: { value: calendarShift(7) } })
+    await waitFor(() => expect(screen.queryByTestId('rush-window-note')).not.toBeInTheDocument())
+
+    fireEvent.change(input, { target: { value: '' } })
+    expect(screen.queryByTestId('rush-window-note')).not.toBeInTheDocument()
+  })
+
+  it('surfaces the server detail when a past date is rejected', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/api/estimating/estimates', () =>
+        HttpResponse.json({ detail: DUE_BACK_PAST_MESSAGE }, { status: 400 }),
+      ),
+    )
+    renderModal()
+    fireEvent.change(screen.getByLabelText(/needed back/i), { target: { value: localDateOnly() } })
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+    expect(await screen.findByText(DUE_BACK_PAST_MESSAGE)).toBeInTheDocument()
+    expect(screen.queryByText(/please try again/i)).not.toBeInTheDocument()
   })
 })

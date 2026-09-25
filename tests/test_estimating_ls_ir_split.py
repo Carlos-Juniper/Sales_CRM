@@ -73,16 +73,19 @@ def _query_rows(rows):
 
     A bare positional ``side_effect`` list breaks whenever production adds a
     query — which is exactly what happened when create() began assigning
-    ``estimate_number`` (api/estimating.py:1539). Every list in this module then
-    fell one short and surfaced as ``KeyError: 'next_num'`` or a bare
-    ``StopIteration``. Matching that one statement out of band keeps the rest
-    positional without re-counting every list here on the next schema change.
+    ``estimate_number`` and filling a blank due-back date from
+    ``sla_return_window_days``. Every list in this module then fell one short
+    and surfaced as ``KeyError`` or a bare ``StopIteration``. Matching those
+    statements out of band keeps the rest positional without re-counting every
+    list here on the next schema change.
     """
     it = iter(rows)
 
     def _side_effect(sql, params=None):
         if "AS next_num" in sql:
             return [{"next_num": 1}]
+        if "sla_return_window_days" in sql:
+            return [{"sla_return_window_days": 14}]
         return next(it)
 
     return _side_effect
@@ -94,12 +97,14 @@ def _split_query_count(mock_query):
 
     These assertions exist to pin down that the split does not issue a query
     per line. Counting raw calls conflates that with unrelated statements
-    create() happens to make, so the estimate-number lookup is filtered out
-    rather than absorbed into a bumped expected count.
+    create() happens to make, so the estimate-number lookup and the blank
+    due-back SLA read are filtered out rather than absorbed into a bumped
+    expected count.
     """
     return sum(
         1 for call in mock_query.call_args_list
         if "AS next_num" not in (call.args[0] if call.args else "")
+        and "sla_return_window_days" not in (call.args[0] if call.args else "")
     )
 
 

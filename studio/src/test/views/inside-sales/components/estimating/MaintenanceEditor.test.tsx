@@ -20,7 +20,7 @@ import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
 import { render } from '@/test/utils'
 import type { CatalogItem, Estimate, MaintenanceEstimate } from '@/types/estimating'
-import { buildMaintenanceEstimate, mockEstimatesV2, toCreatePayload } from '@/mocks/estimatingData'
+import { buildInstallEstimate, buildMaintenanceEstimate, mockEstimatesV2, toCreatePayload } from '@/mocks/estimatingData'
 import { estimatingApi } from '@/api/estimating'
 import { LineItemEditor } from '@/views/inside-sales/components/estimating/LineItemEditor'
 import { EstimatingToastProvider } from '@/views/inside-sales/components/estimating/EstimatingToast'
@@ -72,6 +72,16 @@ const RATED_KIT: CatalogItem = {
 }
 
 describe('MaintenanceEditor — structure', () => {
+  it('renders a null budget as an em dash and a real zero as $0', () => {
+    renderMaint(
+      buildMaintenanceEstimate({ homesBudget: null, commonAreaBudget: 0 }),
+    )
+    const budgets = screen.getByTestId('contract-budgets')
+    expect(budgets).toHaveTextContent(/Homes budget —/)
+    expect(budgets).toHaveTextContent(/Common area budget \$0/)
+    expect(budgets).not.toHaveTextContent(/Homes budget \$0/)
+  })
+
   it('renders header with name, draft badge, and lifecycle control', () => {
     renderMaint()
     expect(screen.getByText('Dobson Ranch HOA — Grounds Maintenance')).toBeInTheDocument()
@@ -110,6 +120,82 @@ describe('MaintenanceEditor — structure', () => {
     renderMaint()
     expect(screen.getByText(/ancillary/i)).toBeInTheDocument()
     expect(screen.getByText(/branch/i, { selector: '[data-testid="ancillary-banner"] *' })).toBeInTheDocument()
+  })
+
+  it('shows yearly occurrence counts, with Not set for null and 0 kept as 0', () => {
+    renderMaint(
+      buildMaintenanceEstimate({
+        mowingOccurrences: 42,
+        pruningOccurrences: 0,
+        turfFertOccurrences: null,
+        shrubFertOccurrences: null,
+        ipmOccurrences: 8,
+        irrigationOccurrences: null,
+      }),
+    )
+    expect(screen.getByTestId('occurrence-count-mowingOccurrences')).toHaveTextContent('42')
+    expect(screen.getByTestId('occurrence-count-pruningOccurrences')).toHaveTextContent('0')
+    expect(screen.getByTestId('occurrence-count-turfFertOccurrences')).toHaveTextContent('Not set')
+    expect(screen.getByTestId('occurrence-count-shrubFertOccurrences')).toHaveTextContent('Not set')
+    expect(screen.getByTestId('occurrence-count-ipmOccurrences')).toHaveTextContent('8')
+    expect(screen.getByTestId('occurrence-count-irrigationOccurrences')).toHaveTextContent('Not set')
+  })
+
+  it('shows legacy scope text from the intake endpoint when it is present', async () => {
+    const estimate = buildMaintenanceEstimate({
+      mowingOccurrences: 12,
+      pruningOccurrences: null,
+      turfFertOccurrences: null,
+      shrubFertOccurrences: null,
+      ipmOccurrences: null,
+      irrigationOccurrences: null,
+    })
+    server.use(
+      http.get('/api/estimating/estimates/:id/intake', () =>
+        HttpResponse.json([
+          {
+            id: 'ins-legacy',
+            estimateId: estimate.id,
+            estimateType: 'maintenance',
+            payload: { scopeOfWork: 'Weekly mow, monthly IPM' },
+            submittedBy: 'mock-user',
+            createdAt: new Date().toISOString(),
+          },
+        ]),
+      ),
+    )
+    renderMaint(estimate)
+    expect(await screen.findByTestId('legacy-scope-notes')).toHaveTextContent('Weekly mow, monthly IPM')
+  })
+
+  it('hides legacy scope notes when the intake has none', async () => {
+    const estimate = buildMaintenanceEstimate()
+    let sawIntake = false
+    server.use(
+      http.get('/api/estimating/estimates/:id/intake', () => {
+        sawIntake = true
+        return HttpResponse.json([
+          {
+            id: 'ins-empty',
+            estimateId: estimate.id,
+            estimateType: 'maintenance',
+            payload: { scopeOfWork: '   ' },
+            submittedBy: 'mock-user',
+            createdAt: new Date().toISOString(),
+          },
+        ])
+      }),
+    )
+    renderMaint(estimate)
+    expect(screen.getByTestId('maintenance-occurrence-summary')).toBeInTheDocument()
+    await waitFor(() => expect(sawIntake).toBe(true))
+    expect(screen.queryByTestId('legacy-scope-notes')).not.toBeInTheDocument()
+  })
+
+  it('does not show occurrence counts on an install estimate', () => {
+    renderMaint(buildInstallEstimate())
+    expect(screen.getByTestId('install-editor')).toBeInTheDocument()
+    expect(screen.queryByTestId('maintenance-occurrence-summary')).not.toBeInTheDocument()
   })
 })
 
@@ -516,5 +602,24 @@ describe('MaintenanceEditor — kit catalog + production-rate save guard', () =>
     await user.click(screen.getByRole('button', { name: /^save$/i }))
     const err = await screen.findByTestId('save-error')
     expect(err).toHaveTextContent(/production rate/i)
+  })
+})
+
+describe('MaintenanceEditor — rush badge', () => {
+  it('shows Rush on the estimate detail only when isRush is true', () => {
+    renderMaint(buildMaintenanceEstimate({ name: 'Rush Detail', isRush: true }))
+    expect(screen.getByTestId('maintenance-editor')).toBeInTheDocument()
+    expect(screen.getByTestId('rush-badge')).toHaveTextContent('Rush')
+  })
+
+  it('hides Rush when isRush is false, including a past-due estimate', () => {
+    renderMaint(
+      buildMaintenanceEstimate({
+        name: 'Plain Detail',
+        dueBackDate: '2020-01-01',
+        isRush: false,
+      }),
+    )
+    expect(screen.queryByTestId('rush-badge')).not.toBeInTheDocument()
   })
 })

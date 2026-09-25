@@ -393,3 +393,22 @@ describe('InstallEditor — RFI status surfaced (§3.2)', () => {
     expect(screen.queryByTestId('install-rfi-status')).not.toBeInTheDocument()
   })
 })
+
+describe('InstallEditor — rush badge', () => {
+  it('shows Rush on the estimate detail only when isRush is true', () => {
+    renderInstall(buildInstallEstimate({ name: 'Rush Install', isRush: true }))
+    expect(screen.getByTestId('install-editor')).toBeInTheDocument()
+    expect(screen.getByTestId('rush-badge')).toHaveTextContent('Rush')
+  })
+
+  it('hides Rush when isRush is false, including a past-due estimate', () => {
+    renderInstall(
+      buildInstallEstimate({
+        name: 'Plain Install',
+        dueBackDate: '2020-01-01',
+        isRush: false,
+      }),
+    )
+    expect(screen.queryByTestId('rush-badge')).not.toBeInTheDocument()
+  })
+})

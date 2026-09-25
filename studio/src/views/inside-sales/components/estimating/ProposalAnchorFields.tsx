@@ -150,7 +150,7 @@ export function ProposalAnchorFields({ lead, pickLead, onLeadChange }: ProposalA
               </p>
             ) : (
               <>
-                <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="property-required">
+                <p className="text-xs text-amber-700" data-testid="property-required">
                   Attach a property before generating this proposal.
                 </p>
                 <PropertySelector value={null} onSelect={(property) => { void attachProperty(property) }} />

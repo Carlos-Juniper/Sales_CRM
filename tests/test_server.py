@@ -27,7 +27,7 @@ os.environ.setdefault("ENTRA_CLIENT_ID", "test-client-id")
 os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 
-from api.server import app  # noqa: E402 — env must be set first
+from api.server import LEAD_NOTES_MAX_LENGTH, app  # noqa: E402 — env must be set first
 
 client = TestClient(app)
 
@@ -325,6 +325,80 @@ def test_create_lead_persists_branch_id(authed):
     sql, params = mock_execute.await_args[0]
     assert "branch_id" in sql
     assert "branch-tampa" in params
+
+
+def _post_lead(extra: dict | None = None):
+    body = {
+        "property_name": "Test HOA",
+        "city": "Tempe",
+        "state": "AZ",
+        "lead_type": "HOA",
+        "property_id": "existing-prop-1",
+    }
+    if extra:
+        body.update(extra)
+    return client.post("/api/leads", json=body)
+
+
+def test_create_lead_persists_notes_on_the_lead_row(authed):
+    """Create-time notes land in leads.notes, the column the detail Notes section reads."""
+    note = "met at the CAI trade show, looking for X"
+    saved = {**_LEAD_ROW, "notes": note, "created_by": _AUTHED_USER["id"]}
+    with patch("api.server.execute", new_callable=AsyncMock, return_value=1) as mock_execute, \
+         patch("api.server.query", new_callable=AsyncMock, return_value=[saved]):
+        resp = _post_lead({"notes": f"  {note}  "})
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["notes"] == note
+    assert body["created_by"] == _AUTHED_USER["id"]
+    assert mock_execute.await_count == 1
+    sql, params = mock_execute.await_args[0]
+    assert "INSERT INTO leads" in sql
+    assert "notes" in sql
+    assert "lead_actions" not in sql
+    # Trimmed notes sit immediately before created_by (the session id).
+    assert params[-2] == note
+    assert params[-1] == _AUTHED_USER["id"]
+
+
+@pytest.mark.parametrize("notes", ["__omit__", None, "", "   ", "\n\t"])
+def test_create_lead_blank_notes_store_null(authed, notes):
+    """Missing, null, and whitespace-only notes still create the lead with notes NULL."""
+    with patch("api.server.execute", new_callable=AsyncMock, return_value=1) as mock_execute, \
+         patch("api.server.query", new_callable=AsyncMock, return_value=[_LEAD_ROW]):
+        extra = None if notes == "__omit__" else {"notes": notes}
+        resp = _post_lead(extra)
+
+    assert resp.status_code == 201
+    assert resp.json()["notes"] is None
+    sql, params = mock_execute.await_args[0]
+    assert "INSERT INTO leads" in sql
+    assert params[-2] is None
+    assert params[-1] == _AUTHED_USER["id"]
+
+
+def test_create_lead_rejects_notes_over_max_length(authed):
+    with patch("api.server.execute", new_callable=AsyncMock, return_value=1) as mock_execute:
+        resp = _post_lead({"notes": "x" * (LEAD_NOTES_MAX_LENGTH + 1)})
+
+    assert resp.status_code == 422
+    mock_execute.assert_not_awaited()
+    locs = [err.get("loc") for err in resp.json()["detail"]]
+    assert ["body", "notes"] in locs
+
+
+def test_create_lead_accepts_notes_at_max_length(authed):
+    note = "y" * LEAD_NOTES_MAX_LENGTH
+    saved = {**_LEAD_ROW, "notes": note}
+    with patch("api.server.execute", new_callable=AsyncMock, return_value=1) as mock_execute, \
+         patch("api.server.query", new_callable=AsyncMock, return_value=[saved]):
+        resp = _post_lead({"notes": note})
+
+    assert resp.status_code == 201
+    assert resp.json()["notes"] == note
+    _sql, params = mock_execute.await_args[0]
+    assert params[-2] == note
 
 
 def test_create_lead_auto_property(authed):
@@ -659,6 +733,7 @@ def test_list_users_filters_by_branch_id(authed):
 
 
 def test_dashboard_inside_sales_returns_expected_shape(authed):
+    app.dependency_overrides[require_auth] = lambda: {**_AUTHED_USER, "role": "manager"}
     with patch("api.server.query", new_callable=AsyncMock) as mock_query:
         mock_query.side_effect = [
             [{"cnt": 42}],
@@ -679,6 +754,7 @@ def test_dashboard_inside_sales_returns_expected_shape(authed):
 
 
 def test_dashboard_avg_score_zero_when_no_scored_leads(authed):
+    app.dependency_overrides[require_auth] = lambda: {**_AUTHED_USER, "role": "manager"}
     with patch("api.server.query", new_callable=AsyncMock) as mock_query:
         mock_query.side_effect = [
             [{"cnt": 0}],
@@ -998,6 +1074,7 @@ def test_get_lead_sql_excludes_deleted(authed):
 
 
 def test_dashboard_sql_excludes_deleted(authed):
+    app.dependency_overrides[require_auth] = lambda: {**_AUTHED_USER, "role": "manager"}
     with patch("api.server.query", new_callable=AsyncMock) as mock_query:
         mock_query.side_effect = [
             [{"cnt": 5}],

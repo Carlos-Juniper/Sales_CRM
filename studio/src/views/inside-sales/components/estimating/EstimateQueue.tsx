@@ -26,7 +26,6 @@ import {
   Clock,
   Hammer,
   Inbox,
-  Lock,
   Repeat,
   RotateCcw,
   Send,
@@ -49,25 +48,14 @@ import { SyncStatusBadge } from './SyncStatusBadge'
 import { acresFromSqft } from '@/lib/estimating/calc'
 import { SLA_CONFIG, slaCountdownLabel, slaDaysLeft, slaStateFor, type SlaState } from '@/lib/estimating/sla'
 import { useAuthStore } from '@/store/authStore'
-import { useRole } from '@/hooks/useRole'
+import { canStartIntake } from '@/lib/intakeAccess'
 import { useUsers } from '@/hooks/useUsers'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
+import { formatOptionalBudget } from '@/lib/estimating/contractBudgets'
 import type { Estimate, EstimatePriority, EstimateStatus } from '@/types/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
-
-// ----- Branch scope ----------------------------------------------------------
-// The scope is enforced SERVER-side from the JWT (BRD I-9.5): the
-// API derives the branch from the authenticated user and ignores any client
-// `branch` param for non-exec roles, so the client sends nothing. The
-// lock-chip only *displays* the applied scope.
-function branchScopeLabel(
-  seesAllBranches: boolean,
-  branchId: string | null | undefined,
-): string {
-  if (seesAllBranches) return 'All branches'
-  return branchId || 'your branch'
-}
+import { RushBadge } from './RushIndicators'
 
 // ----- Badge configs (§3.2 status enum + priority) ----------------------------
 
@@ -156,10 +144,8 @@ export function EstimateQueue({
 }: EstimateQueueProps) {
   const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
-  const user = useAuthStore((s) => s.user)
-  const { seesAllBranches } = useRole()
-  const branchScope = branchScopeLabel(seesAllBranches, user?.branch_id)
   const { findUser } = useUsers()
+  const user = useAuthStore((s) => s.user)
 
   // Branch scope is applied server-side from the session — no branch param.
   const { data: estimatesData, isError, refetch } = useEstimates()
@@ -255,12 +241,6 @@ export function EstimateQueue({
           </SelectContent>
         </Select>
 
-        {/* Lock-chip — reflects the server-enforced row scope (BRD I-9.5). */}
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-[#bfdcc9] bg-[#e8f3ed] px-2.5 py-1 text-[11px] font-medium text-[#2E7D52]">
-          <Lock className="h-3 w-3" />
-          Role &amp; branch scoped — {branchScope}
-        </span>
-
         <div className="flex items-center gap-1 ml-auto text-xs text-[hsl(var(--muted-fg))]">
           Sort by:
           {(['priority', 'deadline', 'value', 'acreage'] as SortKey[]).map((k) => (
@@ -278,21 +258,25 @@ export function EstimateQueue({
           ))}
         </div>
 
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 text-xs gap-1.5"
-          onClick={handleMaintenanceIntake}
-        >
-          <Repeat className="h-3.5 w-3.5" /> Maintenance intake
-        </Button>
-        <Button
-          size="sm"
-          className="h-8 text-xs gap-1.5 bg-[#2E7D52] hover:bg-[#256844] text-white"
-          onClick={handleInstallIntake}
-        >
-          <Hammer className="h-3.5 w-3.5" /> {installCtaLabel}
-        </Button>
+        {canStartIntake(user, 'maintenance') && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs gap-1.5"
+            onClick={handleMaintenanceIntake}
+          >
+            <Repeat className="h-3.5 w-3.5" /> Maintenance intake
+          </Button>
+        )}
+        {canStartIntake(user, 'install') && (
+          <Button
+            size="sm"
+            className="h-8 text-xs gap-1.5 bg-[#2E7D52] hover:bg-[#256844] text-white"
+            onClick={handleInstallIntake}
+          >
+            <Hammer className="h-3.5 w-3.5" /> {installCtaLabel}
+          </Button>
+        )}
       </div>
 
       {/* Queue cards */}
@@ -384,6 +368,8 @@ function QueueCard({
                 <StatusIcon className="h-2.5 w-2.5" />
                 {statusCfg.label}
               </span>
+              {/* Server flag only. Past-due rows stay on the overdue countdown below; isRush is false for those. */}
+              {estimate.isRush && <RushBadge />}
               <span className="text-[10px] text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))] px-1.5 py-0.5 rounded">
                 {typeTag(estimate)}
               </span>
@@ -412,6 +398,26 @@ function QueueCard({
                 </span>
               )}
             </div>
+
+            {estimate.estimateType === 'maintenance' && (
+              <div
+                data-testid="queue-contract-budgets"
+                className="flex flex-wrap items-center gap-3 mt-1"
+              >
+                <span className="text-xs text-[hsl(var(--muted-fg))]">
+                  Homes budget{' '}
+                  <span className="font-medium text-[hsl(var(--fg))]">
+                    {formatOptionalBudget(estimate.homesBudget)}
+                  </span>
+                </span>
+                <span className="text-xs text-[hsl(var(--muted-fg))]">
+                  Common area budget{' '}
+                  <span className="font-medium text-[hsl(var(--fg))]">
+                    {formatOptionalBudget(estimate.commonAreaBudget)}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Right column: SLA countdown + assigned rep */}

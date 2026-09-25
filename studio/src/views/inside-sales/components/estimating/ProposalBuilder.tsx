@@ -21,23 +21,30 @@
 //
 // Branch-scoping: the Estimate carries aspireBranchId (Slice 8), captured at
 // intake from the selected branch. The team/client-reference pickers scope by
-// that id; legacy rows with a null id fall back to all active branch members.
+// that id and by a region switcher (default: the caller's region). Legacy rows
+// with a null id fall back to all active branch members.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronRight, Loader2, X } from 'lucide-react'
+import './proposal-generator.css'
 import { useAuthStore } from '@/store/authStore'
 import { teamMemberTitleLabel } from '@/lib/proposal/titleLabels'
+import { regionsFromCoverage } from '@/lib/proposal/regionFilter'
+import { AllRegionsBadge, RegionSwitcher } from '@/components/proposal/RegionSwitcher'
 import { ProposalDocumentsSection } from './ProposalDocumentsSection'
 import { ProposalAnchorFields } from './ProposalAnchorFields'
 import {
-  useTeamMembers,
-  useClientReferences,
+  useRegionScopedClientReferences,
+  useRegionScopedTeamMembers,
+} from '@/hooks/useRegionScopedRoster'
+import {
   usePortfolio,
   useProposal,
   useCreateProposal,
   useUpdateProposal,
+  useProposalConfig,
 } from '@/hooks/useProposals'
 import { useApprovedEstimate } from '@/hooks/useApprovedEstimate'
 import type { Lead } from '@/types'
@@ -181,7 +188,7 @@ function MultiSelect<T extends { id: string }>({
 }: {
   items: T[]
   selected: string[]
-  renderLabel: (item: T) => string
+  renderLabel: (item: T) => ReactNode
   onChange: (ids: string[]) => void
   'data-testid'?: string
 }) {
@@ -401,14 +408,18 @@ function ProposalFormStep({
   // that branch; when no estimate is present fall back to all active members.
   // ---------------------------------------------------------------------------
   const aspireBranchId: number | undefined = estimate?.aspireBranchId ?? undefined
+  const branchParams = aspireBranchId !== undefined ? { aspireBranchId } : undefined
+  const { branchCoverage } = useProposalConfig()
+  const regions = useMemo(() => regionsFromCoverage(branchCoverage), [branchCoverage])
 
-  const { data: branchTeamMembers = [] } = useTeamMembers(
-    aspireBranchId !== undefined ? { aspireBranchId } : undefined,
-  )
-  const { data: executiveMembers = [] } = useTeamMembers({ teamType: 'executive' })
-  const { data: clientRefs = [] } = useClientReferences(
-    aspireBranchId !== undefined ? { aspireBranchId } : undefined,
-  )
+  // Account-manager checkboxes and Meet Our Team share this roster, so they
+  // follow one region switcher.
+  const teamRoster = useRegionScopedTeamMembers(branchParams, regions)
+  const executiveRoster = useRegionScopedTeamMembers({ teamType: 'executive' }, regions)
+  const referenceRoster = useRegionScopedClientReferences(branchParams, regions)
+  const branchTeamMembers = teamRoster.data ?? []
+  const executiveMembers = executiveRoster.data ?? []
+  const clientRefs = referenceRoster.data ?? []
   const { data: portfolio = [] } = usePortfolio()
 
   // Derived filtered view for the Account Manager picker (branch-type members only).
@@ -622,7 +633,13 @@ function ProposalFormStep({
                         className="h-3.5 w-3.5 accent-[#2E7D52]"
                         data-testid={`am-checkbox-${m.id}`}
                       />
-                      <span className="text-xs text-[hsl(var(--fg))]">{m.name}</span>
+                      <span className="text-xs text-[hsl(var(--fg))]">
+                        {m.name}
+                        <AllRegionsBadge
+                          regionId={m.regionId}
+                          testId={`account-manager-${m.id}-all-regions`}
+                        />
+                      </span>
                     </label>
                   ))}
                 </div>
@@ -712,16 +729,30 @@ function ProposalFormStep({
         aria-labelledby="team-heading"
         className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4"
       >
-        <h3
-          id="team-heading"
-          className="mb-2.5 text-[13px] font-semibold text-[hsl(var(--fg))]"
-        >
-          Meet Our Team (page 8)
-        </h3>
+        <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+          <h3
+            id="team-heading"
+            className="text-[13px] font-semibold text-[hsl(var(--fg))]"
+          >
+            Meet Our Team (page 8)
+          </h3>
+          <RegionSwitcher
+            id="team-region"
+            regions={regions}
+            value={teamRoster.choice}
+            onChange={teamRoster.selectRegion}
+            testId="team-region-switcher"
+          />
+        </div>
         <MultiSelect<TeamMember>
           items={branchTeamMembers.filter((m) => m.teamType === 'branch')}
           selected={formState.teamMemberIds}
-          renderLabel={(m) => `${m.name} — ${teamMemberTitleLabel(m.title)}`}
+          renderLabel={(m) => (
+            <>
+              {m.name} — {teamMemberTitleLabel(m.title)}
+              <AllRegionsBadge regionId={m.regionId} testId={`team-member-${m.id}-all-regions`} />
+            </>
+          )}
           onChange={(teamMemberIds) => onFormChange({ teamMemberIds })}
           data-testid="team-member-picker"
         />
@@ -734,16 +765,30 @@ function ProposalFormStep({
           data-testid="executive-team-section"
           className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4"
         >
-          <h3
-            id="executive-team-heading"
-            className="mb-2.5 text-[13px] font-semibold text-[hsl(var(--fg))]"
-          >
-            Meet Our Team — Executive
-          </h3>
+          <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+            <h3
+              id="executive-team-heading"
+              className="text-[13px] font-semibold text-[hsl(var(--fg))]"
+            >
+              Meet Our Team — Executive
+            </h3>
+            <RegionSwitcher
+              id="executive-region"
+              regions={regions}
+              value={executiveRoster.choice}
+              onChange={executiveRoster.selectRegion}
+              testId="executive-region-switcher"
+            />
+          </div>
           <MultiSelect<TeamMember>
             items={executiveMembers}
             selected={formState.executiveTeamMemberIds}
-            renderLabel={(m) => `${m.name} — ${teamMemberTitleLabel(m.title)}`}
+            renderLabel={(m) => (
+              <>
+                {m.name} — {teamMemberTitleLabel(m.title)}
+                <AllRegionsBadge regionId={m.regionId} testId={`executive-member-${m.id}-all-regions`} />
+              </>
+            )}
             onChange={(executiveTeamMemberIds) => onFormChange({ executiveTeamMemberIds })}
             data-testid="executive-team-picker"
           />
@@ -755,16 +800,30 @@ function ProposalFormStep({
         aria-labelledby="refs-heading"
         className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4"
       >
-        <h3
-          id="refs-heading"
-          className="mb-2.5 text-[13px] font-semibold text-[hsl(var(--fg))]"
-        >
-          Client references (page 9)
-        </h3>
+        <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+          <h3
+            id="refs-heading"
+            className="text-[13px] font-semibold text-[hsl(var(--fg))]"
+          >
+            Client references (page 9)
+          </h3>
+          <RegionSwitcher
+            id="client-reference-region"
+            regions={regions}
+            value={referenceRoster.choice}
+            onChange={referenceRoster.selectRegion}
+            testId="client-reference-region-switcher"
+          />
+        </div>
         <MultiSelect<ClientReference>
           items={clientRefs}
           selected={formState.clientReferenceIds}
-          renderLabel={(r) => `${r.propertyName} (${r.clientSinceYear})`}
+          renderLabel={(r) => (
+            <>
+              {r.propertyName} ({r.clientSinceYear})
+              <AllRegionsBadge regionId={r.regionId} testId={`client-ref-${r.id}-all-regions`} />
+            </>
+          )}
           onChange={(clientReferenceIds) => onFormChange({ clientReferenceIds })}
           data-testid="client-reference-picker"
         />
@@ -979,7 +1038,7 @@ export function ProposalBuilder({
 
   if (loadingProposal) {
     return (
-      <div className="flex items-center justify-center py-16">
+      <div className="proposal-generator flex items-center justify-center py-16" data-testid="proposal-generator">
         <Loader2 className="h-5 w-5 animate-spin text-[hsl(var(--muted-fg))]" />
       </div>
     )
@@ -988,7 +1047,7 @@ export function ProposalBuilder({
   const anchorReady = !!attachedLead?.id && !!attachedLead.property_id
 
   return (
-    <div className="flex flex-col gap-4 overflow-y-auto pb-6">
+    <div className="proposal-generator flex flex-col gap-4 overflow-y-auto pb-6" data-testid="proposal-generator">
       {showHeader && (
         <div className="flex items-center justify-between">
           <div>

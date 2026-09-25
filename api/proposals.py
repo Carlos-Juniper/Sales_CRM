@@ -9,8 +9,8 @@ Mirrors the api/estimating.py facade pattern exactly:
 Slice 3 scope (this file, Amendment A):
   Config read endpoints — project from crm.branches / new proposal config tables:
     GET /api/proposals/config/branches       → BranchProfile[]
-    GET /api/proposals/config/team-members   → TeamMember[]  (+ optional filters)
-    GET /api/proposals/config/client-references → ClientReference[]
+    GET /api/proposals/config/team-members   → TeamMember[]  (+ optional filters, rep_id)
+    GET /api/proposals/config/client-references → ClientReference[]  (+ optional rep_id)
     GET /api/proposals/config/portfolio      → PortfolioProperty[]
     GET /api/proposals/config/insurance      → InsuranceCert (current cert)
     GET /api/proposals/config/licenses       → { licenses[], certifications[] }
@@ -26,6 +26,21 @@ Amendment A notes baked into this file:
   A.4  TeamMember.title aligns to CANONICAL_ROLES ('manager' not 'branch_manager')
   A.6  null-branch rows (aspire_branch_id IS NULL) are returned IN ADDITION to
        branch matches, never instead — both for team_members and client_references
+
+Region on the team-roster and client-reference pickers:
+  Users have no region column. Region is crm.regions, stored on
+  branches.region_id. A caller's region is the distinct region_id of the
+  branches in their user_branches rows. GET team-members and
+  client-references take region_id: omit it to default to that set, pass a
+  regions.id to pick another, or pass 'all' to turn the filter off. Rows
+  whose region cannot be resolved stay in the list (see _region_match_sql).
+
+Per-rep roster reads (client references and team members):
+  Field sales (FIELD_SALES_ROLES) who omit rep_id are limited to their own
+  rows plus legacy rows whose owner_user_id is NULL. Naming another rep is
+  403. Marketing, admin, and management who omit rep_id see every row. A
+  rep_id filter is (owner = that rep OR owner IS NULL) and is AND-ed with
+  the region filter.
 """
 from __future__ import annotations
 
@@ -37,9 +52,10 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query, Response
 
 from db import execute, query
+from api import authz
 from api._serialize import coerce_row
 
 logger = logging.getLogger(__name__)
@@ -63,8 +79,13 @@ _NON_OFFICE_BRANCHES = (
 # Sorts the no-region bucket last, after every real region's sort_order.
 _UNGROUPED_REGION_SORT = 10_000
 
+# Bound, not inlined. db.query()/aiomysql %-formats the SQL whenever params is
+# non-empty, so a literal '%DO NOT USE%' raises ValueError ('%D') on the
+# signer-scoped branches query (which also binds aspire_branch_id placeholders).
+_DO_NOT_USE_LIKE = "%DO NOT USE%"
+
 _BRANCH_ROSTER_FILTER = (
-    "active = 1 AND branch_name NOT LIKE '%DO NOT USE%' AND branch_name NOT IN ("
+    "active = 1 AND branch_name NOT LIKE %s AND branch_name NOT IN ("
     + ", ".join("'" + n.replace("'", "''") + "'" for n in _NON_OFFICE_BRANCHES)
     + ")"
 )
@@ -105,6 +126,45 @@ def _iso(v: Any) -> Any:
 # Won/lost proposals stay visible in the packages list for this many days after
 # the status-change action is recorded in lead_actions, then drop automatically.
 CLOSED_PACKAGE_GRACE_DAYS = 7
+
+# Newest proposal_requests row for the joined lead. created_at is the source of
+# truth: ids are `prop-` plus a random uuid4 fragment, so they only break a
+# timestamp tie. Historical rows stay in the table.
+_LATEST_PACKAGE_PER_LEAD_SQL = (
+    "pr.id = ("
+    "SELECT pr_latest.id FROM proposal_requests pr_latest "
+    "WHERE pr_latest.lead_id = pr.lead_id "
+    "ORDER BY pr_latest.created_at DESC, pr_latest.id DESC "
+    "LIMIT 1)"
+)
+
+
+def _proposal_recency_key(row: dict) -> tuple:
+    """Sort key for 'latest generated proposal': created_at, then id."""
+    created = row.get("created_at")
+    if not isinstance(created, datetime):
+        created = datetime.min
+    return (created, str(row.get("id") or ""))
+
+
+def _latest_package_per_lead(rows: list[dict]) -> list[dict]:
+    """Keep one package row per lead: the newest proposal by created_at.
+
+    The list query applies the same rule in SQL. This pass covers a result
+    that still contains older generations (the unit tests stub the driver).
+    Nothing is deleted. Survivors stay in updated_at order, newest first.
+    """
+    best: dict[Any, dict] = {}
+    for row in rows:
+        lead_id = row.get("lead_id")
+        current = best.get(lead_id)
+        if current is None or _proposal_recency_key(row) > _proposal_recency_key(current):
+            best[lead_id] = row
+    return sorted(
+        best.values(),
+        key=lambda r: r.get("updated_at") if isinstance(r.get("updated_at"), datetime) else datetime.min,
+        reverse=True,
+    )
 
 
 def _package_code(proposal_id: str, created_at: Any) -> str:
@@ -215,6 +275,179 @@ def _build_address(r: dict) -> str:
     return ", ".join(filter(None, [street, city_state_zip]))
 
 
+# Sentinel for "do not restrict by region". Not a crm.regions.id.
+_REGION_FILTER_ALL = "all"
+
+# Applied filter, for a client that wants to label the default selection.
+# "all" means no region restriction; otherwise comma-separated regions.id
+# values. The JSON body stays an array so existing callers keep working.
+_REGION_FILTER_HEADER = "X-Region-Filter"
+
+
+def _region_id_out(row: dict) -> Optional[str]:
+    """branches.region_id as a slug, or None when the region is unknown."""
+    raw = row.get("region_id")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
+def _set_region_filter_header(response: Response, region_ids: Optional[list[str]]) -> None:
+    response.headers[_REGION_FILTER_HEADER] = (
+        _REGION_FILTER_ALL if not region_ids else ",".join(region_ids)
+    )
+
+
+async def _caller_region_ids(user_id: Optional[str]) -> list[str]:
+    """Distinct regions of the branches assigned to this user.
+
+    Region is not stored on users. It lives on branches.region_id
+    (crm.regions.id). The caller's region is that set for the branches in
+    their user_branches rows — the same assignment table that scopes
+    estimates. A branch with a null or blank region_id does not invent a
+    region for the caller.
+    """
+    if not user_id:
+        return []
+    rows = await query(
+        """
+        SELECT DISTINCT b.region_id AS region_id
+        FROM user_branches ub
+        INNER JOIN branches b ON b.aspire_branch_id = ub.aspire_branch_id
+        WHERE ub.user_id = %s
+          AND b.region_id IS NOT NULL
+          AND b.region_id <> ''
+        ORDER BY b.region_id
+        """,
+        [user_id],
+    )
+    seen: list[str] = []
+    for row in rows:
+        rid = _region_id_out(row)
+        if rid and rid not in seen:
+            seen.append(rid)
+    return seen
+
+
+async def _resolve_region_filter(
+    region_id: Optional[str], user: dict
+) -> Optional[list[str]]:
+    """Region ids to keep, or None when the picker must not restrict by region.
+
+    An omitted region_id defaults to the caller's region(s). When that set
+    is empty — no user_branches rows, or every assigned branch has no
+    region — the default is unrestricted, the same as region_id=all.
+    Restricting those callers to "unknown region only" would hide the
+    people they need to put on a proposal.
+
+    An explicit id is checked against crm.regions. 'all' (any case) turns
+    the filter off so a rep can leave their region.
+    """
+    if region_id is not None:
+        token = region_id.strip()
+        if token.lower() == _REGION_FILTER_ALL:
+            return None
+        if not token or len(token) > 36:
+            raise HTTPException(
+                status_code=400,
+                detail="region_id must be a crm.regions.id or 'all'.",
+            )
+        found = await query("SELECT id FROM regions WHERE id = %s", [token])
+        if not found:
+            raise HTTPException(
+                status_code=400,
+                detail="Unknown region_id. Pass a crm.regions.id or 'all'.",
+            )
+        return [token]
+    caller_regions = await _caller_region_ids(user.get("id"))
+    return caller_regions or None
+
+
+def _region_match_sql(region_ids: Optional[list[str]]) -> tuple[str, list[Any]]:
+    """Predicate for a roster row's region, plus its bound params.
+
+    A row matches when its branch's region is one of region_ids, OR the
+    region cannot be determined. Unknown means the row has no
+    aspire_branch_id (company-wide roster), the branch row is missing, or
+    branches.region_id is null or blank. Those rows stay in the list so
+    missing region data is visible instead of silently dropped. The joined
+    region_id is null in every one of those cases except a blank string,
+    which is matched on its own.
+
+    Returns ("", []) when there is nothing to restrict.
+    """
+    if not region_ids:
+        return "", []
+    placeholders = ", ".join(["%s"] * len(region_ids))
+    clause = (
+        f"(b.region_id IN ({placeholders})"
+        " OR b.region_id IS NULL OR b.region_id = ''"
+        " OR t.aspire_branch_id IS NULL)"
+    )
+    return clause, list(region_ids)
+
+
+async def _fetch_roster(
+    *,
+    table: str,
+    order_by: str,
+    region_ids: Optional[list[str]],
+    aspire_branch_id: Optional[int],
+    team_type: Optional[str] = None,
+    include_user_branch_twins: bool = False,
+    owner_user_id: Optional[str] = None,
+) -> list[dict]:
+    """Active roster rows for one picker, with the branch's region joined on.
+
+    table and order_by are fixed literals from the call sites, never request
+    input. include_user_branch_twins is the team-member branch filter's
+    third arm (migration 058): a manager pinned to one city-twin is also
+    returned for the other via user_branches.
+    """
+    conditions = ["t.active = 1"]
+    params: list[Any] = []
+
+    if aspire_branch_id is not None:
+        if include_user_branch_twins:
+            conditions.append(
+                "(t.aspire_branch_id = %s OR t.aspire_branch_id IS NULL"
+                " OR t.user_id IN (SELECT user_id FROM user_branches"
+                " WHERE aspire_branch_id = %s))"
+            )
+            params.extend([aspire_branch_id, aspire_branch_id])
+        else:
+            conditions.append(
+                "(t.aspire_branch_id = %s OR t.aspire_branch_id IS NULL)"
+            )
+            params.append(aspire_branch_id)
+
+    if team_type:
+        conditions.append("t.team_type = %s")
+        params.append(team_type)
+
+    if owner_user_id is not None:
+        # Own rows plus legacy company-wide rows (owner_user_id NULL) that
+        # predate per-rep ownership. Hiding the NULL rows dropped them from
+        # marketing's Settings view whenever a rep was selected.
+        conditions.append("(t.owner_user_id = %s OR t.owner_user_id IS NULL)")
+        params.append(owner_user_id)
+
+    region_sql, region_params = _region_match_sql(region_ids)
+    if region_sql:
+        conditions.append(region_sql)
+        params.extend(region_params)
+
+    where = "WHERE " + " AND ".join(conditions)
+    return await query(
+        f"SELECT t.*, b.region_id "
+        f"FROM {table} t "
+        f"LEFT JOIN branches b ON b.aspire_branch_id = t.aspire_branch_id "
+        f"{where} ORDER BY {order_by}",
+        params or None,
+    )
+
+
 def _team_member_out(r: dict) -> dict:
     """Map a team_members row to TeamMember API shape."""
     return {
@@ -231,6 +464,11 @@ def _team_member_out(r: dict) -> dict:
         "headshotObjectKey": r.get("headshot_object_key"),
         "active": bool(r["active"]),
         "sortOrder": r["sort_order"],
+        # branches.region_id via the roster join. null = company-wide row,
+        # missing branch, or a branch whose region was never set.
+        "regionId": _region_id_out(r),
+        # Sales rep this roster row belongs to. Null = legacy company/branch row.
+        "ownerUserId": r.get("owner_user_id"),
     }
 
 
@@ -249,7 +487,48 @@ def _client_reference_out(r: dict) -> dict:
         "address": r["address"],
         "clientSinceYear": r["client_since_year"],
         "active": bool(r["active"]),
+        # branches.region_id via the roster join. null when the reference is
+        # company-wide or its branch has no region.
+        "regionId": _region_id_out(r),
+        # Sales rep this reference belongs to. Null = legacy company/branch row.
+        "ownerUserId": r.get("owner_user_id"),
     }
+
+
+_ROSTER_VIEW_DENIED = (
+    "You can view only your own client references and team roster."
+)
+
+
+async def _authorize_rep_roster_read(user: dict, rep_id: str) -> None:
+    """403 unless the caller may read this rep's roster.
+
+    The rep themselves, plus marketing and admin. A live role re-read gates
+    the cross-rep grant so a demoted token cannot keep it.
+    """
+    if rep_id == user.get("id"):
+        return
+    if authz.is_marketing_manager(await authz._live_role(user)):
+        return
+    raise HTTPException(status_code=403, detail=_ROSTER_VIEW_DENIED)
+
+
+def _scope_roster_read(user: dict, rep_id: Optional[str]) -> Optional[str]:
+    """Owner id to filter a roster read by, or None for the full list.
+
+    Field sales who omit rep_id are scoped to themselves so ProposalBuilder
+    cannot read every other rep's references and roster by leaving the
+    parameter off. Naming another rep is 403. Marketing, admin, and
+    management (and every non-field role, including inside_sales) who omit
+    rep_id stay unscoped. A non-field caller who does pass rep_id is still
+    checked by ``_authorize_rep_roster_read``.
+    """
+    if not authz.is_sales_rep(user.get("role")):
+        return rep_id
+    caller_id = user.get("id")
+    if not caller_id or (rep_id is not None and rep_id != caller_id):
+        raise HTTPException(status_code=403, detail=_ROSTER_VIEW_DENIED)
+    return caller_id
 
 
 def _portfolio_property_out(r: dict) -> dict:
@@ -469,6 +748,12 @@ def register(app, require_auth) -> None:
     Mount point: every route here is under /api/proposals.
     """
 
+    async def _proposal_auth(user: dict = Depends(require_auth)) -> dict:
+        authz.require_proposals_access(user)
+        return user
+
+    require_auth = _proposal_auth
+
     # ── GET /api/proposals/config/branches ─────────────────────────────────
     # Returns BranchProfile[] projected from crm.branches JOIN crm.regions.
     # Operating-roster filter applied (active = 1 AND name NOT LIKE '%DO NOT USE%').
@@ -524,7 +809,7 @@ def register(app, require_auth) -> None:
                   AND b.aspire_branch_id IN ({placeholders})
                 ORDER BY b.branch_name
                 """,
-                held_branch_ids,
+                [_DO_NOT_USE_LIKE, *held_branch_ids],
             )
         else:
             rows = await query(
@@ -545,6 +830,7 @@ def register(app, require_auth) -> None:
                   AND b.lng IS NOT NULL
                 ORDER BY b.branch_name
                 """,
+                [_DO_NOT_USE_LIKE],
             )
         return [_branch_profile_out(r) for r in rows]
 
@@ -570,6 +856,7 @@ def register(app, require_auth) -> None:
               AND b.state IS NOT NULL AND b.state <> ''
             ORDER BY b.state, b.branch_name
             """,
+            [_DO_NOT_USE_LIKE],
         )
 
         # Region key for an office. Branches with no region_id fall into the
@@ -625,7 +912,8 @@ def register(app, require_auth) -> None:
         ]
 
     # ── GET /api/proposals/config/team-members ─────────────────────────────
-    # Returns TeamMember[] with optional aspire_branch_id and team_type filters.
+    # Returns TeamMember[] with optional aspire_branch_id, team_type, and
+    # region_id filters.
     #
     # Amendment A.6 null-branch-inclusion rule:
     #   When aspire_branch_id is supplied, null-aspire_branch_id rows are returned
@@ -638,62 +926,83 @@ def register(app, require_auth) -> None:
     #   table, migration 019). Migration 057 pins each manager's team_members row
     #   to one twin, so the user_branches subquery surfaces them for the other.
     #   The subquery hits idx_user_branches_branch; the table is small.
+    #
+    # region_id defaults to the caller's region(s). Pass a regions.id to pick
+    # another region, or 'all' to show every region. Rows with no resolvable
+    # region are included either way. X-Region-Filter reports what was applied.
 
     @app.get("/api/proposals/config/team-members")
     async def get_proposal_team_members(
+        response: Response,
         aspire_branch_id: Optional[int] = Query(default=None),
         team_type: Optional[str] = Query(default=None),
-        _user: dict = Depends(require_auth),
+        region_id: Optional[str] = Query(
+            default=None,
+            description=(
+                "crm.regions.id to filter to, or 'all' for every region. "
+                "Omit to default to the caller's region(s), from "
+                "user_branches joined to branches.region_id. Rows with no "
+                "resolvable region are included."
+            ),
+        ),
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
+        user: dict = Depends(require_auth),
     ) -> list:
-        conditions: list[str] = ["active = 1"]
-        params: list[Any] = []
-
-        if aspire_branch_id is not None:
-            # Include branch-specific, null-branch (company-wide) rows, AND any
-            # row whose linked user holds this branch in user_branches (e.g. a
-            # manager whose team_members row is pinned to the twin branch id).
-            conditions.append(
-                "(aspire_branch_id = %s OR aspire_branch_id IS NULL"
-                " OR user_id IN (SELECT user_id FROM user_branches WHERE aspire_branch_id = %s))"
-            )
-            params.extend([aspire_branch_id, aspire_branch_id])
-
-        if team_type:
-            conditions.append("team_type = %s")
-            params.append(team_type)
-
-        where = "WHERE " + " AND ".join(conditions)
-        rows = await query(
-            f"SELECT * FROM team_members {where} ORDER BY sort_order, name",
-            params or None,
+        owner_id = _scope_roster_read(user, rep_id)
+        if owner_id is not None and not authz.is_sales_rep(user.get("role")):
+            await _authorize_rep_roster_read(user, owner_id)
+        region_ids = await _resolve_region_filter(region_id, user)
+        _set_region_filter_header(response, region_ids)
+        rows = await _fetch_roster(
+            table="team_members",
+            order_by="t.sort_order, t.name",
+            region_ids=region_ids,
+            aspire_branch_id=aspire_branch_id,
+            team_type=team_type,
+            include_user_branch_twins=True,
+            owner_user_id=owner_id,
         )
         return [_team_member_out(r) for r in rows]
 
     # ── GET /api/proposals/config/client-references ─────────────────────────
-    # Returns ClientReference[] with optional aspire_branch_id filter.
+    # Returns ClientReference[] with optional aspire_branch_id and region_id
+    # filters.
     #
     # Amendment A.6 null-branch-inclusion rule:
     #   When aspire_branch_id is supplied, null-aspire_branch_id (company-wide)
     #   rows are returned IN ADDITION to branch-specific matches.
-    #   Omitting the filter returns all active rows.
+    #
+    # region_id behaves the same as on team-members: default is the caller's
+    # region, 'all' disables it, and references with no resolvable region
+    # stay in the list. X-Region-Filter reports what was applied.
 
     @app.get("/api/proposals/config/client-references")
     async def get_proposal_client_references(
+        response: Response,
         aspire_branch_id: Optional[int] = Query(default=None),
-        _user: dict = Depends(require_auth),
+        region_id: Optional[str] = Query(
+            default=None,
+            description=(
+                "crm.regions.id to filter to, or 'all' for every region. "
+                "Omit to default to the caller's region(s), from "
+                "user_branches joined to branches.region_id. Rows with no "
+                "resolvable region are included."
+            ),
+        ),
+        rep_id: Optional[str] = Depends(authz.roster_rep_query),
+        user: dict = Depends(require_auth),
     ) -> list:
-        conditions: list[str] = ["active = 1"]
-        params: list[Any] = []
-
-        if aspire_branch_id is not None:
-            # Include branch-specific AND company-wide (null) rows.
-            conditions.append("(aspire_branch_id = %s OR aspire_branch_id IS NULL)")
-            params.append(aspire_branch_id)
-
-        where = "WHERE " + " AND ".join(conditions)
-        rows = await query(
-            f"SELECT * FROM client_references {where} ORDER BY client_since_year DESC",
-            params or None,
+        owner_id = _scope_roster_read(user, rep_id)
+        if owner_id is not None and not authz.is_sales_rep(user.get("role")):
+            await _authorize_rep_roster_read(user, owner_id)
+        region_ids = await _resolve_region_filter(region_id, user)
+        _set_region_filter_header(response, region_ids)
+        rows = await _fetch_roster(
+            table="client_references",
+            order_by="t.client_since_year DESC",
+            region_ids=region_ids,
+            aspire_branch_id=aspire_branch_id,
+            owner_user_id=owner_id,
         )
         return [_client_reference_out(r) for r in rows]
 
@@ -909,8 +1218,10 @@ def register(app, require_auth) -> None:
 
     # ── GET /api/proposals/packages ────────────────────────────────────────
     # Registered before /api/proposals/{proposal_id} so "packages" is not
-    # captured as a proposal id. One row per saved proposal, joined to the
-    # lead (title, value, status, property) and the latest complete render.
+    # captured as a proposal id. One row per lead — the latest generated
+    # proposal — joined to the lead (title, value, status, property) and the
+    # latest complete render. Older proposal_requests rows are kept; reopen
+    # them through GET /api/proposals?leadId=.
 
     @app.get("/api/proposals/packages")
     async def list_proposal_packages(
@@ -922,21 +1233,25 @@ def register(app, require_auth) -> None:
         # Grace window: an excluded-status row is still returned if its terminal
         # status_change was recorded within CLOSED_PACKAGE_GRACE_DAYS days, so
         # reps see recently-won/lost proposals for a week before they disappear.
+        # The latest-per-lead predicate is AND-ed outside that OR group so an
+        # older generation cannot leak back in through the grace window.
         excluded = [s.strip() for s in (exclude_status or "").split(",") if s.strip()]
-        where = ""
         params: list[Any] = []
         if excluded:
             placeholders = ", ".join(["%s"] * len(excluded))
             where = (
-                f"WHERE l.status NOT IN ({placeholders})"
+                f"WHERE {_LATEST_PACKAGE_PER_LEAD_SQL}"
+                f" AND (l.status NOT IN ({placeholders})"
                 " OR COALESCE((SELECT MAX(la.performed_at)"
                 "               FROM lead_actions la"
                 "              WHERE la.lead_id = l.id"
                 "                AND la.action_type = 'status_change'"
                 "                AND la.new_status = l.status), '1970-01-01')"
-                " >= NOW() - INTERVAL %s DAY"
+                " >= NOW() - INTERVAL %s DAY)"
             )
             params = excluded + [CLOSED_PACKAGE_GRACE_DAYS]
+        else:
+            where = f"WHERE {_LATEST_PACKAGE_PER_LEAD_SQL}"
         rows = await query(
             f"""
             SELECT
@@ -983,7 +1298,7 @@ def register(app, require_auth) -> None:
             """,
             params,
         )
-        return [_proposal_package_out(r) for r in rows]
+        return [_proposal_package_out(r) for r in _latest_package_per_lead(rows)]
 
     # ── GET /api/proposals/:id ─────────────────────────────────────────────
     # Reopen / re-edit a persisted proposal.

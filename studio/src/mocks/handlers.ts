@@ -1,5 +1,10 @@
 import { http, HttpResponse, delay } from 'msw'
+import { useAuthStore } from '@/store/authStore'
+import { normalizeRole } from '@/hooks/useRole'
+import { ANALYTICS_NAV_ROLES } from '@/lib/roles'
 import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockConnections, mockProposalPackages } from './data'
+import { MOCK_BRANCH_COVERAGE } from './proposalRoster'
+import { rosterHandlers } from './rosterHandlers'
 import { CATALOG_ITEM_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid, UserRole } from '@/types'
@@ -19,6 +24,7 @@ import type {
   SectionServiceComponent,
   TakeoffLine,
 } from '@/types/estimating'
+import { LEAD_NOTES_MAX_LENGTH } from '@/api/leads'
 import type {
   ApproveHandBackPayload,
   CreateAdjustmentPayload,
@@ -35,18 +41,78 @@ import type {
 } from '@/api/estimating'
 import { deriveTakeoffLine } from '@/lib/estimating/discrepancy'
 import {
+  OCCURRENCE_COUNT_FIELDS,
+  emptyOccurrenceCounts,
+  occurrenceCountError,
+} from '@/lib/estimating/occurrences'
+import {
   approveAndHandBack,
   canTransition,
   IllegalTransitionError,
   type StatusTransitionRecord,
 } from '@/lib/estimating/transitions'
+import { coerceBudgetPatch, resolveContractBudgets } from '@/lib/estimating/contractBudgets'
 import {
   APPROVAL_TIER_SEED,
   ITB_SCOPE_SEED,
   MATERIAL_FORMULA_ROWS,
 } from '@/lib/estimating/config'
+import {
+  extensionForStoredContentType,
+  normalizeContentType,
+  validateAttachmentSize,
+  validateRfpDocument,
+} from '@/lib/estimating/rfpContentTypes'
+import {
+  DUE_BACK_PAST_MESSAGE,
+  SLA_CONFIG,
+  businessDateOnly,
+  defaultDueBackDate,
+  isPastCalendarDate,
+  isRushWindowDate,
+} from '@/lib/estimating/sla'
 
 const API = '/api'
+
+type IntakeTypeName = 'maintenance' | 'install'
+
+const DEFAULT_ALLOWED_INTAKE: IntakeTypeName[] = ['maintenance', 'install']
+
+/**
+ * Mock session read by GET /api/auth/me and the intake lock.
+ * Tests that need a locked role mutate `allowed_intake_types` and reset it.
+ */
+export const mockAuthSession: {
+  role: UserRole
+  allowed_intake_types: IntakeTypeName[]
+} = {
+  role: 'sales',
+  allowed_intake_types: [...DEFAULT_ALLOWED_INTAKE],
+}
+
+export function resetMockAuthSession() {
+  mockAuthSession.role = 'sales'
+  mockAuthSession.allowed_intake_types = [...DEFAULT_ALLOWED_INTAKE]
+}
+
+/** 403 when the mock session may not submit this intake type. Null when allowed. */
+function denyDisallowedIntake(estimateType: string) {
+  if (mockAuthSession.allowed_intake_types.includes(estimateType as IntakeTypeName)) return null
+  const only = mockAuthSession.allowed_intake_types
+  const detail = only.length === 1
+    ? `Role may only submit ${only[0]} intakes.`
+    : 'Role may not submit this intake type.'
+  return HttpResponse.json({ detail }, { status: 403 })
+}
+
+/** `?role=sales` (and legacy `outside_sales`) is the whole sales-rep group. */
+const SALES_GROUP_ROLES = new Set([
+  'sales',
+  'outside_sales',
+  'inside_sales',
+  'maintenance_sales',
+  'install_sales',
+])
 const leads = [...mockLeads]
 const bids = [...mockBids]
 const proposalPackages: ProposalPackageSummary[] = [...mockProposalPackages]
@@ -99,6 +165,10 @@ const attachments: IntakeAttachment[] = []
 // In-memory resumable sessions: sessionId → { attachmentId, estimateId }.
 const resumableSessions: Map<string, { attachmentId: string; estimateId: string }> = new Map()
 
+// Content-Type the browser actually PUT, keyed by attachment id. Confirm
+// compares it to the presigned type and returns 400 when they disagree.
+const uploadedContentTypeByAttachment = new Map<string, string>()
+
 /** Attachment authz: linked directly (takeoff scans) or via the intake submission. */
 function attachmentBelongsTo(a: IntakeAttachment, estimateId: string): boolean {
   if (a.estimateId === estimateId) return true
@@ -127,6 +197,50 @@ function eid(prefix: string): string {
 
 function notFound() {
   return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+}
+
+/** 422 detail when a present occurrence count is not an integer 0–366 or null. */
+function occurrenceDetail(body: object): string | null {
+  const record = body as Record<string, unknown>
+  for (const { key } of OCCURRENCE_COUNT_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+    const message = occurrenceCountError(key, record[key])
+    if (message) return message
+  }
+  return null
+}
+
+/** Mirror the server: isRush is computed, never trusted from the client. */
+function withRush(estimate: Estimate): Estimate {
+  const copy = { ...estimate }
+  delete (copy as { isRush?: boolean }).isRush
+  return {
+    ...copy,
+    isRush: isRushWindowDate(
+      estimate.dueBackDate ?? '',
+      SLA_CONFIG.returnWindowDays,
+      businessDateOnly(),
+    ),
+  }
+}
+
+/** 400 when a written dueBackDate is before business today. Blank is allowed. */
+function pastDueResponse(dueBackDate: string | null | undefined) {
+  if (!dueBackDate) return null
+  if (isPastCalendarDate(dueBackDate, businessDateOnly())) {
+    return HttpResponse.json({ detail: DUE_BACK_PAST_MESSAGE }, { status: 400 })
+  }
+  return null
+}
+
+/** Create stores NULL for omitted keys. 0 is preserved; null stays null. */
+function occurrenceColumns(body: object): ReturnType<typeof emptyOccurrenceCounts> {
+  const record = body as Record<string, unknown>
+  const counts = emptyOccurrenceCounts()
+  for (const { key } of OCCURRENCE_COUNT_FIELDS) {
+    if (record[key] !== undefined) counts[key] = record[key] as number | null
+  }
+  return counts
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +299,14 @@ function itbProjectForEstimate(e: Estimate): MockItbProject {
 // Seeded estimates get their auto-generated projects too.
 const itbProjects: MockItbProject[] = estimates.map(itbProjectForEstimate)
 
+/** Match POST /api/leads: blank notes become null; over-max is a 422. */
+function notesForCreate(raw: unknown): { ok: true; notes: string | null } | { ok: false } {
+  if (typeof raw !== 'string') return { ok: true, notes: null }
+  if (raw.length > LEAD_NOTES_MAX_LENGTH) return { ok: false }
+  const trimmed = raw.trim()
+  return { ok: true, notes: trimmed.length > 0 ? trimmed : null }
+}
+
 const allHandlers = [
   // GET /api/auth/me — mock session so the app shell can boot under VITE_MOCK
   http.get(`${API}/auth/me`, async () => {
@@ -192,9 +314,10 @@ const allHandlers = [
       id: 'u2',
       email: 'morgan.lee@example.com',
       name: 'Morgan Lee',
-      role: 'sales' as UserRole,
+      role: mockAuthSession.role,
       branch_id: 'c1',
       avatar_initials: 'ML',
+      allowed_intake_types: mockAuthSession.allowed_intake_types,
     })
   }),
 
@@ -257,6 +380,20 @@ const allHandlers = [
   http.post(`${API}/leads`, async ({ request }) => {
     await delay(300)
     const body = await request.json() as Partial<Lead>
+    const notesResult = notesForCreate(body.notes)
+    if (!notesResult.ok) {
+      return HttpResponse.json(
+        {
+          detail: [{
+            type: 'string_too_long',
+            loc: ['body', 'notes'],
+            msg: `String should have at most ${LEAD_NOTES_MAX_LENGTH} characters`,
+            ctx: { max_length: LEAD_NOTES_MAX_LENGTH },
+          }],
+        },
+        { status: 422 },
+      )
+    }
     const newLead: Lead = {
       id: `l${Date.now()}`,
       property_name: body.property_name ?? 'Unnamed Lead',
@@ -279,7 +416,7 @@ const allHandlers = [
       bid_deadline: null,
       status: body.status ?? 'new',
       assigned_to: null,
-      notes: null,
+      notes: notesResult.notes,
       handoff_notes: null,
       ai_linkedin_draft: null,
       branch_id: 'b1',
@@ -443,8 +580,10 @@ const allHandlers = [
     return HttpResponse.json(created, { status: 201 })
   }),
 
-  http.get(`${API}/proposals/config/team-members`, async () => HttpResponse.json([])),
-  http.get(`${API}/proposals/config/client-references`, async () => HttpResponse.json([])),
+  http.get(`${API}/proposals/config/branch-coverage`, () => HttpResponse.json(MOCK_BRANCH_COVERAGE)),
+  // Rep-scoped team roster and client references (reads, writes, 403/400/404).
+  // Reads without rep_id keep the region-filtered shared roster. Portfolio stays unscoped.
+  ...rosterHandlers,
   http.get(`${API}/proposals/config/portfolio`, async () => HttpResponse.json([])),
 
   // GET /api/users
@@ -454,7 +593,11 @@ const allHandlers = [
     const role = url.searchParams.get('role')
     const branchId = url.searchParams.get('branch_id')
     let users = [...mockUsers]
-    if (role) users = users.filter(u => u.role === role)
+    if (role === 'sales' || role === 'outside_sales') {
+      users = users.filter((u) => SALES_GROUP_ROLES.has(u.role))
+    } else if (role) {
+      users = users.filter((u) => u.role === role)
+    }
     if (branchId) users = users.filter(u => u.branch_id === branchId)
     return HttpResponse.json(users)
   }),
@@ -465,9 +608,19 @@ const allHandlers = [
     return HttpResponse.json(mockMonthlyRevenue)
   }),
 
-  // GET /api/dashboard/inside-sales
+  // GET /api/dashboard/inside-sales — management only, matching
+  // require_analytics_dashboard. The route guard hides the page; this 403
+  // is what a direct call gets for every other role.
   http.get(`${API}/dashboard/inside-sales`, async () => {
     await delay(200)
+    const user = useAuthStore.getState().user
+    const role = user ? normalizeRole(user.role) : null
+    if (!role || !ANALYTICS_NAV_ROLES.includes(role)) {
+      return HttpResponse.json(
+        { detail: 'The analytics dashboard is limited to admin and management.' },
+        { status: 403 },
+      )
+    }
     return HttpResponse.json(mockSummary)
   }),
 
@@ -475,6 +628,22 @@ const allHandlers = [
   http.get(`${API}/settings/connections`, async () => {
     await delay(150)
     return HttpResponse.json(mockConnections)
+  }),
+
+  // GET /api/settings/company — company_settings singleton (migration 020).
+  // Intake rush notes read sla_return_window_days from here. Tests override
+  // with server.use() when they need a different window.
+  http.get(`${API}/settings/company`, async () => {
+    return HttpResponse.json({
+      id: 1,
+      sla_return_window_days: SLA_CONFIG.returnWindowDays,
+      sla_at_risk_threshold_days: SLA_CONFIG.atRiskThresholdDays,
+      discrepancy_threshold_pct: 0.1,
+      default_target_margin: 0.22,
+      default_win_probability: 0.2,
+      default_priority: 'medium',
+      default_notify_bm_rd_on_return: 1,
+    })
   }),
 
   // GET /api/settings/branches — the Settings branch-picker source (Slice 9).
@@ -615,7 +784,7 @@ const allHandlers = [
     if (status) filtered = filtered.filter((e) => e.status === status)
     if (branch) filtered = filtered.filter((e) => e.branchCity === branch)
     if (leadId) filtered = filtered.filter((e) => e.leadId === leadId)
-    return HttpResponse.json(filtered)
+    return HttpResponse.json(filtered.map(withRush))
   }),
 
   // POST /api/estimating/estimates
@@ -627,6 +796,21 @@ const allHandlers = [
         { error: 'estimateType must be maintenance or install' },
         { status: 400 },
       )
+    }
+    const denied = denyDisallowedIntake(body.estimateType)
+    if (denied) return denied
+    const past = pastDueResponse(body.dueBackDate)
+    if (past) return past
+    // Dollars, not cents. Blank / omitted / null → null. 0 stays 0.
+    // Top-level homesBudget / commonAreaBudget win over intake.payload.
+    // Reject before insert so a 400 persists nothing.
+    const budgets = resolveContractBudgets(body)
+    if (!budgets.ok) {
+      return HttpResponse.json({ detail: budgets.error }, { status: 400 })
+    }
+    const occurrenceError = occurrenceDetail(body)
+    if (occurrenceError) {
+      return HttpResponse.json({ detail: occurrenceError }, { status: 422 })
     }
     const id = eid('est')
     const now = new Date().toISOString()
@@ -657,18 +841,28 @@ const allHandlers = [
     // Structured intake payload is persisted to its own store — it must NOT ride
     // along on the estimate row (mirrors the server splitting it into
     // intake_submissions). Strip it before building the estimate.
-    const { intake, serviceLine: _serviceLine, ...estimateBody } = body
+    const raw = body as CreateEstimatePayload & { isRush?: boolean }
+    const intake = raw.intake
+    const estimateBody = { ...raw }
+    delete estimateBody.intake
+    delete estimateBody.serviceLine
+    delete estimateBody.isRush
     // Server-managed Aspire fields: create returns pending (the push is async),
     // then flips to synced. Simulate the flip so the UI can exercise both states.
-    const created = {
+    const created = withRush({
       ...estimateBody,
+      ...occurrenceColumns(estimateBody),
+      // Omitted on create defaults to business today + the SLA window, not a rush.
+      dueBackDate: estimateBody.dueBackDate || defaultDueBackDate(),
       id,
       sections,
+      homesBudget: budgets.homesBudget,
+      commonAreaBudget: budgets.commonAreaBudget,
       aspireOpportunityId: null,
       aspireSyncStatus: 'pending',
       createdAt: now,
       updatedAt: now,
-    } as Estimate
+    } as Estimate)
     estimates.push(created)
     // Auto-generate the 1:1 ITB project for EITHER intake type.
     itbProjects.push(itbProjectForEstimate(created))
@@ -699,7 +893,7 @@ const allHandlers = [
     await delay(100)
     const estimate = estimates.find((e) => e.id === params.id)
     if (!estimate) return notFound()
-    return HttpResponse.json(estimate)
+    return HttpResponse.json(withRush(estimate))
   }),
 
   // PATCH /api/estimating/estimates/:id
@@ -711,6 +905,16 @@ const allHandlers = [
     const idx = estimates.findIndex((e) => e.id === params.id)
     if (idx === -1) return notFound()
     const body = (await request.json()) as UpdateEstimatePayload & { estimateType?: string }
+    // Same budget rules as create. Absent keys are left absent (keep).
+    // Null or blank clears. A bad value 400s without mutating the row.
+    const budgetPatch = coerceBudgetPatch(body as Record<string, unknown>)
+    if (!budgetPatch.ok) {
+      return HttpResponse.json({ detail: budgetPatch.error }, { status: 400 })
+    }
+    const occurrenceError = occurrenceDetail(body)
+    if (occurrenceError) {
+      return HttpResponse.json({ detail: occurrenceError }, { status: 422 })
+    }
     if (body.estimateType !== undefined && body.estimateType !== estimates[idx].estimateType) {
       return HttpResponse.json(
         { error: 'estimate_type is immutable and cannot be changed after creation' },
@@ -718,6 +922,9 @@ const allHandlers = [
       )
     }
     delete body.estimateType
+    delete (body as { isRush?: boolean }).isRush
+    const past = pastDueResponse(body.dueBackDate)
+    if (past) return past
     // The mock mirrors the server: every status write walks the
     // ONE transition module. Illegal edges 409 (same shape as approve-handback);
     // re-sending the current status is an idempotent no-op.
@@ -732,11 +939,11 @@ const allHandlers = [
         { status: 409 },
       )
     }
-    estimates[idx] = {
+    estimates[idx] = withRush({
       ...estimates[idx],
       ...body,
       updatedAt: new Date().toISOString(),
-    } as Estimate
+    } as Estimate)
     return HttpResponse.json(estimates[idx])
   }),
 
@@ -754,14 +961,14 @@ const allHandlers = [
       const { patch, records } = approveAndHandBack(estimates[idx], {
         actor: body.actor ?? 'Session Approver',
       })
-      estimates[idx] = {
+      estimates[idx] = withRush({
         ...estimates[idx],
         ...patch,
         ...(body.notifyBmRdOnReturn !== undefined
           ? { approvalSettings: { notifyBmRdOnReturn: body.notifyBmRdOnReturn } }
           : {}),
         updatedAt: new Date().toISOString(),
-      } as Estimate
+      } as Estimate)
       statusTransitions.push(...records)
       return HttpResponse.json({ estimate: estimates[idx], transitions: records })
     } catch (err) {
@@ -840,9 +1047,18 @@ const allHandlers = [
         { status: 400 },
       )
     }
+    const denied = denyDisallowedIntake(body.estimateType)
+    if (denied) return denied
+    const draftBudgets = coerceBudgetPatch(body.payload)
+    if (!draftBudgets.ok) {
+      return HttpResponse.json({ detail: draftBudgets.error }, { status: 400 })
+    }
     if (body.draftId) {
       const existing = intakeDrafts.find((d) => d.id === body.draftId)
       if (!existing) return notFound()
+      // Resuming a draft of the other type is the same lock as creating one.
+      const deniedStored = denyDisallowedIntake(existing.estimateType)
+      if (deniedStored) return deniedStored
       existing.payload = body.payload
       return HttpResponse.json(existing)
     }
@@ -1070,7 +1286,7 @@ const allHandlers = [
       return HttpResponse.json({ error: 'to must be bidding or won' }, { status: 400 })
     }
     if (estimate.lifecycle === body.to) {
-      return HttpResponse.json({ estimate, transition: null })
+      return HttpResponse.json({ estimate: withRush(estimate), transition: null })
     }
     const from = estimate.lifecycle
     estimate.lifecycle = body.to
@@ -1084,7 +1300,7 @@ const allHandlers = [
       at: new Date().toISOString(),
     }
     statusTransitions.push(transition)
-    return HttpResponse.json({ estimate, transition })
+    return HttpResponse.json({ estimate: withRush(estimate), transition })
   }),
 
   // ── Takeoff-line CRUD (Discrepancy Review persistence) ────────────────────
@@ -1247,7 +1463,7 @@ allHandlers.push(
   http.post(`${API}/estimating/estimates/:estimateId/attachments/presign`, async ({ params, request }) => {
     const { estimateId } = params as { estimateId: string }
     const est = estimates.find((e) => e.id === estimateId)
-    if (!est) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+    if (!est) return HttpResponse.json({ detail: 'Estimate not found' }, { status: 404 })
 
     const body = (await request.json()) as {
       kind?: AttachmentKind
@@ -1258,35 +1474,44 @@ allHandlers.push(
     const kind = body.kind ?? 'other'
 
     // Estimate-scoped kinds (takeoff scans + the three proposal kinds) need no
-    // intake submission; measurements/other/takeoff_scan may be images, while
-    // the contract and intake kinds stay PDF-only (Handoff 47 §3.2).
+    // intake submission. RFP accepts PDF, Word, and Excel when the extension
+    // and MIME agree. measurements/other/takeoff_scan may be images. The
+    // contract and every other intake kind stay PDF-only.
     const scanTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp']
     const estimateScoped = ['takeoff_scan', 'proposal_contract', 'proposal_measurements', 'proposal_other']
     const imageOrPdf = ['takeoff_scan', 'proposal_measurements', 'proposal_other']
-    if (imageOrPdf.includes(kind)) {
+    let contentType = body.contentType
+    if (kind === 'rfp') {
+      const checked = validateRfpDocument(body.fileName, body.contentType)
+      if (!checked.ok) {
+        return HttpResponse.json({ detail: checked.detail }, { status: 400 })
+      }
+      contentType = checked.contentType
+    } else if (imageOrPdf.includes(kind)) {
       if (!scanTypes.includes(body.contentType)) {
         return HttpResponse.json(
-          { error: 'This attachment must be PNG, JPEG, WebP, or PDF' },
+          { detail: 'This attachment must be PNG, JPEG, WebP, or PDF' },
           { status: 400 },
         )
       }
     } else if (body.contentType !== 'application/pdf') {
-      return HttpResponse.json({ error: 'Only PDF attachments are supported' }, { status: 400 })
+      return HttpResponse.json({ detail: 'Only PDF attachments are supported' }, { status: 400 })
     }
-    if (body.sizeBytes > 2 * 1024 * 1024 * 1024) {
-      return HttpResponse.json({ error: 'File exceeds the 2 GiB limit' }, { status: 400 })
+    const sizeError = validateAttachmentSize(body.sizeBytes)
+    if (sizeError) {
+      return HttpResponse.json({ detail: sizeError }, { status: 400 })
     }
 
     const sub = intakeSubmissions.find((s) => s.estimateId === estimateId)
     if (!estimateScoped.includes(kind) && !sub) {
-      return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+      return HttpResponse.json(
+        { detail: 'No intake submission found for this estimate' },
+        { status: 404 },
+      )
     }
 
     const attachmentId = eid('att')
-    const ext =
-      { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[
-        body.contentType
-      ] ?? 'bin'
+    const ext = extensionForStoredContentType(contentType)
     const objectKey = `estimating/${estimateId}/${attachmentId}.${ext}`
     const sessionId = eid('sess')
 
@@ -1295,7 +1520,7 @@ allHandlers.push(
       intakeSubmissionId: estimateScoped.includes(kind) ? null : (sub?.id ?? null),
       estimateId,
       fileName: body.fileName,
-      contentType: body.contentType,
+      contentType,
       sizeBytes: body.sizeBytes,
       kind,
       uploadedBy: null,
@@ -1311,16 +1536,20 @@ allHandlers.push(
 
     // Fake resumable upload endpoint URL — MSW intercepts it below.
     const uploadUrl = `http://localhost/__mock_gcs_upload/${sessionId}`
-    return HttpResponse.json({ attachmentId, objectKey, uploadUrl }, { status: 201 })
+    return HttpResponse.json({ attachmentId, objectKey, uploadUrl, contentType }, { status: 201 })
   }),
 )
 
 // PUT /__mock_gcs_upload/:sessionId — fake GCS resumable upload endpoint
 allHandlers.push(
-  http.put('http://localhost/__mock_gcs_upload/:sessionId', ({ params }) => {
+  http.put('http://localhost/__mock_gcs_upload/:sessionId', ({ params, request }) => {
     const { sessionId } = params as { sessionId: string }
     const session = resumableSessions.get(sessionId)
     if (!session) return new HttpResponse(null, { status: 404 })
+    uploadedContentTypeByAttachment.set(
+      session.attachmentId,
+      request.headers.get('content-type') ?? '',
+    )
     // Mark the object as uploaded so confirm can succeed.
     const att = attachments.find((a) => a.id === session.attachmentId)
     if (att) att.status = 'pending'  // still pending until confirm fires
@@ -1337,7 +1566,15 @@ allHandlers.push(
       const att = attachments.find(
         (a) => a.id === attachmentId && attachmentBelongsTo(a, estimateId),
       )
-      if (!att) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+      if (!att) return HttpResponse.json({ detail: 'Not found' }, { status: 404 })
+      const uploadedType = uploadedContentTypeByAttachment.get(attachmentId)
+      if (
+        uploadedType != null &&
+        (normalizeContentType(uploadedType) !== normalizeContentType(att.contentType) || !att.sizeBytes)
+      ) {
+        att.status = 'failed'
+        return HttpResponse.json({ detail: 'Upload validation failed' }, { status: 400 })
+      }
       att.status = 'stored'
       att.downloadable = true
       return HttpResponse.json(att)
@@ -1411,6 +1648,44 @@ allHandlers.push(
       return new HttpResponse(null, { status: 204 })
     },
   ),
+)
+
+// Commissions + sales performance. Rep lists are only fetched by roles in
+// REP_SELECTOR_ROLES (api/authz.py REP_VIEWER_ROLES); summary and list
+// endpoints auto-scope when no user_id is supplied.
+const mockReps = [
+  {
+    id: 'rep-1',
+    name: 'Alex Rivera',
+    email: 'alex.rivera@example.com',
+    commission_rate: 0.05,
+    effective_date: '2026-01-01',
+  },
+]
+
+allHandlers.push(
+  http.get(`${API}/commissions/reps`, () => HttpResponse.json(mockReps)),
+  http.get(`${API}/commissions/summary`, () =>
+    HttpResponse.json({ scheduled_ytd_cents: 125_000, paid_ytd_cents: 80_000 }),
+  ),
+  http.get(`${API}/commissions/list`, () => HttpResponse.json([])),
+  http.get(`${API}/sales-performance/reps`, () =>
+    HttpResponse.json(mockReps.map(({ id, name, email }) => ({ id, name, email }))),
+  ),
+  http.get(`${API}/sales-performance/summary`, () =>
+    HttpResponse.json({
+      won_count: 2,
+      won_total_cents: 500_000,
+      won_avg_cents: 250_000,
+      lost_count: 1,
+      lost_total_cents: 100_000,
+      lost_avg_cents: 100_000,
+      win_rate: 0.67,
+      loss_categories: [],
+    }),
+  ),
+  http.get(`${API}/sales-performance/won-deals`, () => HttpResponse.json([])),
+  http.get(`${API}/sales-performance/lost-deals`, () => HttpResponse.json([])),
 )
 
 export const handlers = import.meta.env.DEV ? allHandlers : []

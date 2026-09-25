@@ -9,10 +9,12 @@ Endpoints under test (all authenticated, all read-only):
         only rows with lat/lng; ordered by branch_name
   GET /api/proposals/config/branch-coverage
       → office names grouped by state; address-deduped; no lat/lng requirement
-  GET /api/proposals/config/team-members?aspire_branch_id=&team_type=
-      → TeamMember[]; null-branch rows included alongside branch matches (A.6)
-  GET /api/proposals/config/client-references?aspire_branch_id=
-      → ClientReference[]; company-wide (null) rows included (A.6)
+  GET /api/proposals/config/team-members?aspire_branch_id=&team_type=&region_id=
+      → TeamMember[]; null-branch rows included alongside branch matches (A.6).
+        region_id defaults to the caller's region; 'all' disables it.
+  GET /api/proposals/config/client-references?aspire_branch_id=&region_id=
+      → ClientReference[]; company-wide (null) rows included (A.6).
+        Same region_id default as team-members.
   GET /api/proposals/config/portfolio?region_id=
       → PortfolioProperty[]; optional region_id filter
   GET /api/proposals/config/insurance
@@ -177,13 +179,42 @@ class TestBranches:
         assert b["lng"] == pytest.approx(-81.7718)
 
     def test_operating_roster_filter_in_sql(self, authed):
-        """SQL must exclude inactive and 'DO NOT USE' branches."""
+        """SQL must exclude inactive and 'DO NOT USE' branches.
+
+        The pattern is bound. db.query %-formats whenever params is non-empty,
+        so an inlined '%DO NOT USE%' raises ValueError on the signer-scoped path.
+        """
         with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
             mock_q.return_value = []
             client.get("/api/proposals/config/branches")
-        sql = mock_q.call_args.args[0]
+        sql, params = mock_q.call_args.args
         assert "active = 1" in sql
-        assert "DO NOT USE" in sql
+        assert "NOT LIKE %s" in sql
+        assert "%DO NOT USE%" not in sql
+        assert params == ["%DO NOT USE%"]
+        formatted = sql % tuple(params)
+        assert "DO NOT USE" in formatted
+
+    def test_signer_scoped_roster_binds_like_pattern(self, authed):
+        """The proposalId path also binds branch ids, so the LIKE pattern must
+        be a parameter or aiomysql raises unsupported format character 'D'."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = [
+                [{"signer_user_id": "user-1"}],
+                [{"aspire_branch_id": 1403}],
+                [],
+            ]
+            res = client.get("/api/proposals/config/branches?proposal_id=pr-1")
+        assert res.status_code == 200
+        sql, params = mock_q.call_args_list[-1].args
+        assert "NOT LIKE %s" in sql
+        assert "aspire_branch_id IN (%s)" in sql
+        assert "%DO NOT USE%" not in sql
+        assert params[0] == "%DO NOT USE%"
+        assert 1403 in params
+        formatted = sql % tuple(params)
+        assert "DO NOT USE" in formatted
+        assert "1403" in formatted
 
     def test_only_rows_with_lat_lng_are_returned(self, authed):
         """Rows without lat/lng are excluded (proximity footer requires coords)."""
@@ -358,6 +389,8 @@ class TestTeamMembers:
             "headshotObjectKey": None,
             "active": True,
             "sortOrder": 0,
+            "regionId": None,
+            "ownerUserId": None,
         }
 
     def test_branch_filter_includes_null_branch_rows(self, authed):
@@ -394,7 +427,7 @@ class TestTeamMembers:
             mock_q.return_value = []
             client.get("/api/proposals/config/team-members?aspire_branch_id=3696&team_type=branch")
         sql, params = mock_q.call_args.args[0], mock_q.call_args.args[1]
-        assert "aspire_branch_id = %s OR aspire_branch_id IS NULL" in sql
+        assert "t.aspire_branch_id = %s OR t.aspire_branch_id IS NULL" in sql
         assert 3696 in params
         assert "team_type = %s" in sql
         assert "branch" in params
@@ -464,6 +497,8 @@ class TestClientReferences:
             "address": "100 Coral Bay Dr, Jupiter, FL 33458",
             "clientSinceYear": 2021,
             "active": True,
+            "regionId": None,
+            "ownerUserId": None,
         }
 
     def test_branch_filter_includes_company_wide_rows(self, authed):
@@ -498,6 +533,196 @@ class TestClientReferences:
         branch_ids = {b["aspireBranchId"] for b in body}
         assert None in branch_ids
         assert 3696 in branch_ids
+
+
+# ── region_id on the team-roster and client-reference pickers ────────────────
+
+_PICKERS = (
+    "/api/proposals/config/team-members",
+    "/api/proposals/config/client-references",
+)
+
+
+def _route_roster_query(*, caller_regions=(), roster_rows=(), known_regions=()):
+    """Dispatch the patched query() by which statement the handler issued.
+
+    Caller-region lookup, the regions-table existence check, and the roster
+    SELECT are separate round-trips. Routing on the SQL keeps a test from
+    depending on call order.
+    """
+    known = set(known_regions)
+
+    def fake(sql, params=None):
+        folded = sql.lower()
+        if "user_branches" in folded and "from team_members" not in folded and "from client_references" not in folded:
+            return [{"region_id": rid} for rid in caller_regions]
+        if "from regions" in folded:
+            rid = (params or [None])[0]
+            return [{"id": rid}] if rid in known else []
+        return list(roster_rows)
+
+    return fake
+
+
+class TestPickerRegionFilter:
+    """region_id on both picker endpoints.
+
+    Region is branches.region_id (crm.regions). The caller has no region
+    column; theirs is the distinct region of their user_branches. Rows with
+    no resolvable region stay in a filtered list.
+    """
+
+    @pytest.mark.parametrize("path", _PICKERS)
+    def test_defaults_to_caller_region_and_keeps_unknown(self, authed, path):
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = _route_roster_query(caller_regions=("west-coast",))
+            res = client.get(path)
+        assert res.status_code == 200
+        assert res.headers["x-region-filter"] == "west-coast"
+        roster = _roster_call(mock_q)
+        sql, params = roster.args[0], roster.args[1]
+        assert "b.region_id IN (%s)" in sql
+        assert "b.region_id IS NULL" in sql
+        assert "b.region_id = ''" in sql
+        assert "t.aspire_branch_id IS NULL" in sql
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
+        assert params == ["u1", "west-coast"]
+
+    @pytest.mark.parametrize("path", _PICKERS)
+    def test_caller_spanning_regions_defaults_to_the_union(self, authed, path):
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = _route_roster_query(
+                caller_regions=("central", "west-coast"),
+            )
+            res = client.get(path)
+        assert res.headers["x-region-filter"] == "central,west-coast"
+        sql, params = _roster_call(mock_q).args[0], _roster_call(mock_q).args[1]
+        assert "b.region_id IN (%s, %s)" in sql
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
+        assert params == ["u1", "central", "west-coast"]
+
+    @pytest.mark.parametrize("path", _PICKERS)
+    def test_unknown_caller_region_shows_everyone(self, authed, path):
+        """No user_branches, or every assigned branch has a blank region.
+
+        The default then matches region_id=all. An empty picker would lock
+        the rep out, which is the opposite of keeping unknown-region people
+        visible.
+        """
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = _route_roster_query(caller_regions=())
+            res = client.get(path)
+        assert res.status_code == 200
+        assert res.headers["x-region-filter"] == "all"
+        sql = _roster_call(mock_q).args[0]
+        assert "b.region_id IN" not in sql
+        # The lookup itself must ignore branches that have no region.
+        lookup = next(
+            call.args[0] for call in mock_q.call_args_list if "user_branches" in call.args[0].lower()
+            and "from team_members" not in call.args[0].lower()
+            and "from client_references" not in call.args[0].lower()
+        )
+        assert "b.region_id IS NOT NULL" in lookup
+        assert "b.region_id <> ''" in lookup
+
+    @pytest.mark.parametrize("path", _PICKERS)
+    def test_explicit_region_overrides_the_caller(self, authed, path):
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = _route_roster_query(
+                caller_regions=("west-coast",),
+                known_regions={"east-coast"},
+            )
+            res = client.get(f"{path}?region_id=east-coast")
+        assert res.status_code == 200
+        assert res.headers["x-region-filter"] == "east-coast"
+        sqls = [call.args[0].lower() for call in mock_q.call_args_list]
+        assert not any("user_branches" in sql and "from team_members" not in sql and "from client_references" not in sql for sql in sqls)
+        sql, params = _roster_call(mock_q).args[0], _roster_call(mock_q).args[1]
+        assert "b.region_id IS NULL" in sql
+        assert "(t.owner_user_id = %s OR t.owner_user_id IS NULL)" in sql
+        assert params == ["u1", "east-coast"]
+        assert "west-coast" not in params
+
+    @pytest.mark.parametrize("path", _PICKERS)
+    def test_all_disables_the_region_filter(self, authed, path):
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = _route_roster_query(caller_regions=("west-coast",))
+            res = client.get(f"{path}?region_id=ALL")
+        assert res.status_code == 200
+        assert res.headers["x-region-filter"] == "all"
+        sqls = [call.args[0].lower() for call in mock_q.call_args_list]
+        assert not any("user_branches" in sql for sql in sqls)
+        assert "b.region_id IN" not in _roster_call(mock_q).args[0]
+
+    @pytest.mark.parametrize("path", _PICKERS)
+    def test_unknown_region_id_is_400(self, authed, path):
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = _route_roster_query(known_regions={"west-coast"})
+            res = client.get(f"{path}?region_id=not-a-region")
+        assert res.status_code == 400
+        assert "all" in res.json()["detail"]
+        assert not any("team_members" in call.args[0] or "client_references" in call.args[0] for call in mock_q.call_args_list)
+
+    @pytest.mark.parametrize("path", _PICKERS)
+    def test_blank_region_id_is_400(self, authed, path):
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = _route_roster_query()
+            res = client.get(f"{path}?region_id=%20")
+        assert res.status_code == 400
+        assert mock_q.await_count == 0
+
+    def test_team_member_region_id_is_returned_including_unknown(self, authed):
+        rows = [
+            _team_member_row(id="tm-known", region_id="west-coast"),
+            _team_member_row(id="tm-blank", region_id=""),
+            _team_member_row(id="tm-missing", aspire_branch_id=None),
+        ]
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = _route_roster_query(
+                caller_regions=("west-coast",), roster_rows=rows,
+            )
+            res = client.get("/api/proposals/config/team-members")
+        by_id = {row["id"]: row["regionId"] for row in res.json()}
+        assert by_id == {"tm-known": "west-coast", "tm-blank": None, "tm-missing": None}
+
+    def test_client_reference_region_id_is_returned_including_unknown(self, authed):
+        rows = [
+            _client_reference_row(id="cr-known", aspire_branch_id=1403, region_id="east-coast"),
+            _client_reference_row(id="cr-company", aspire_branch_id=None),
+        ]
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = _route_roster_query(
+                caller_regions=("east-coast",), roster_rows=rows,
+            )
+            res = client.get("/api/proposals/config/client-references")
+        by_id = {row["id"]: row["regionId"] for row in res.json()}
+        assert by_id == {"cr-known": "east-coast", "cr-company": None}
+
+    def test_region_filter_ands_with_branch_and_team_type(self, authed):
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = _route_roster_query(caller_regions=("west-coast",))
+            res = client.get(
+                "/api/proposals/config/team-members"
+                "?aspire_branch_id=3696&team_type=branch"
+            )
+        assert res.status_code == 200
+        sql, params = _roster_call(mock_q).args[0], _roster_call(mock_q).args[1]
+        assert "t.aspire_branch_id = %s OR t.aspire_branch_id IS NULL" in sql
+        assert "user_branches" in sql
+        assert "t.team_type = %s" in sql
+        assert "b.region_id IN (%s)" in sql
+        assert params.count(3696) == 2
+        assert "branch" in params
+        assert "west-coast" in params
+
+
+def _roster_call(mock_q):
+    """The picker SELECT, not the caller-region or regions-table lookup."""
+    for call in mock_q.call_args_list:
+        folded = call.args[0].lower()
+        if "from team_members" in folded or "from client_references" in folded:
+            return call
+    raise AssertionError("roster query was not issued")
 
 
 # ── GET /api/proposals/config/portfolio ──────────────────────────────────────

@@ -191,8 +191,30 @@ export interface EstimateBase {
    */
   priorCrewRateCentsPerHour?: number | null
   acreage: number | null
+  /**
+   * Yearly maintenance visit counts. Null when unanswered, on install
+   * estimates, and on rows created before the columns existed. `0` means the
+   * service is not in the contract. Integers from 0 through 366 inclusive.
+   */
+  mowingOccurrences: number | null
+  pruningOccurrences: number | null
+  turfFertOccurrences: number | null
+  shrubFertOccurrences: number | null
+  ipmOccurrences: number | null
+  irrigationOccurrences: number | null
   /** Derived roll-up, persisted for queue/reporting. Integer cents. */
   contractValueCents: number
+  /**
+   * Split-contract homes budget, in dollars (not cents). Null is unknown —
+   * a blank intake field — and must never be rendered or summed as $0.
+   * A real 0 is a known zero. Always present on list and GET.
+   */
+  homesBudget: number | null
+  /**
+   * Split-contract common-area budget, in dollars (not cents). Same null
+   * contract as {@link homesBudget}.
+   */
+  commonAreaBudget: number | null
   /** Decimal, default 0.22 (branch standard). */
   targetMargin: number
   status: EstimateStatus
@@ -204,6 +226,14 @@ export interface EstimateBase {
   siteWalkDate: string | null
   /** SLA clock. */
   dueBackDate: string
+  /**
+   * Server-computed on read (create, list, queue, detail, and PATCH).
+   * True when dueBackDate is today through sla_return_window_days − 1.
+   * False when the date is further out, missing, or already past — a past
+   * date keeps the existing overdue state and is not a rush. Read-only:
+   * never include this on a request payload.
+   */
+  isRush: boolean
   anticipatedCloseDate: string | null
   serviceStartDate: string | null
   /** Landscape estimator user id. */

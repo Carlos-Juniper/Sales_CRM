@@ -167,11 +167,15 @@ export function useProposalDocument(id: string | null): ProposalDocumentResult {
     proposal?.estimateId ?? null,
   )
 
-  const { data: allTeamMembers = [], isLoading: loadingTeam } = useTeamMembers()
+  // Preview and print resolve ids the rep already picked. Omitting region_id
+  // would drop anyone chosen from outside the viewer's region once that
+  // default lands, so these loads ask for the full list.
+  const { data: allTeamMembers = [], isLoading: loadingTeam } = useTeamMembers({ regionId: 'all' })
   const { data: executiveRoster = [], isLoading: loadingExec } = useTeamMembers({
     teamType: 'executive',
+    regionId: 'all',
   })
-  const { data: allClientRefs = [], isLoading: loadingRefs } = useClientReferences()
+  const { data: allClientRefs = [], isLoading: loadingRefs } = useClientReferences({ regionId: 'all' })
   const { data: allPortfolio = [], isLoading: loadingPortfolio } = usePortfolio()
 
   // Part of the readiness gate on purpose. The signer's name is printed on the

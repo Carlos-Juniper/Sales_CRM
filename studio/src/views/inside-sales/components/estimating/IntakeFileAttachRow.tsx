@@ -21,6 +21,8 @@ export interface FileAttachRowProps {
   testId: string
   inputRef: React.RefObject<HTMLInputElement | null>
   accept?: string
+  /** Label on the empty-state button. Defaults to the PDF-only intake wording. */
+  actionLabel?: string
   onChange: (e: ChangeEvent<HTMLInputElement>) => void
   onClear: () => void
 }
@@ -32,6 +34,7 @@ export function FileAttachRow({
   testId,
   inputRef,
   accept,
+  actionLabel = 'Attach PDF',
   onChange,
   onClear,
 }: FileAttachRowProps) {
@@ -71,7 +74,7 @@ export function FileAttachRow({
           )}
         >
           <Upload className="h-3.5 w-3.5" />
-          Attach PDF
+          {actionLabel}
         </button>
       )}
     </div>

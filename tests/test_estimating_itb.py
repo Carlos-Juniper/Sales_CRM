@@ -100,16 +100,19 @@ def _project_row(**over) -> dict:
 def _query_rows(rows):
     """Serve `rows` positionally, but answer the estimate-number query by SQL.
 
-    create() gained a ``SELECT ... AS next_num`` lookup (api/estimating.py:1539)
-    that these positional lists predate, so every one of them fell a row short
-    and surfaced as StopIteration. Matching that statement out of band keeps the
-    lists positional for everything else.
+    create() gained a ``SELECT ... AS next_num`` lookup (api/estimating.py)
+    and a blank-due-date ``sla_return_window_days`` read that these positional
+    lists predate, so every one of them fell a row short and surfaced as
+    StopIteration. Matching those statements out of band keeps the lists
+    positional for everything else.
     """
     it = iter(rows)
 
     def _side_effect(sql, params=None):
         if "AS next_num" in sql:
             return [{"next_num": 1}]
+        if "sla_return_window_days" in sql:
+            return [{"sla_return_window_days": 14}]
         return next(it)
 
     return _side_effect

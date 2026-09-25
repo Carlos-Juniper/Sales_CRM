@@ -43,11 +43,14 @@ export function OrgChartPage({
           teamType: 'branch',
           aspireBranchId: null,
           userId: null,
+          ownerUserId: null,
           location: null,
           bio: '',
           headshotObjectKey: null,
           active: true,
           sortOrder: 0,
+          // Synthesised from the signer, not a roster row, so it has no branch region.
+          regionId: null,
         }
       }
       return undefined

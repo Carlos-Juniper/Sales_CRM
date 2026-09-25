@@ -8,15 +8,18 @@
 // ---------------------------------------------------------------------------
 
 import type { ChangeEvent, RefObject } from 'react'
-import { FileText, Info, Paperclip, X } from 'lucide-react'
+import { FileText, Paperclip, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { PropertySelector } from './PropertySelector'
 import { ServiceLineSelect } from './AspirePickers'
-import { SLA_CONFIG } from '@/lib/estimating/sla'
+import { localDateOnly } from '@/lib/estimating/sla'
+import { useSlaReturnWindowDays } from '@/hooks/useCompanySettings'
 import { FileAttachRow } from './IntakeFileAttachRow'
+import { RFP_FILE_ACCEPT } from '@/lib/estimating/rfpContentTypes'
+import { RushWindowNote } from './RushIndicators'
 import type { AttachedFile } from './IntakeFileAttachRow'
 import type { BranchOption, InstallCustomerType, Property } from '@/types/estimating'
 
@@ -155,7 +158,9 @@ export function AspireSection({
 }
 
 // ---------------------------------------------------------------------------
-// RequestorSection
+// RequestorSection — lead, branch, request date, and flags.
+// Sales-author identity (requested by / phone / email) is not shown here;
+// the modal still submits those fields, defaulted from the signed-in user.
 // ---------------------------------------------------------------------------
 
 interface RequestorSectionProps {
@@ -170,7 +175,7 @@ export function RequestorSection({ form, setStr, setBool, branchOptions }: Reque
   return (
     <section>
       <p className="text-xs font-semibold text-[hsl(var(--muted-fg))] uppercase tracking-wide mb-2">
-        Requestor
+        Request details
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">
@@ -180,17 +185,6 @@ export function RequestorSection({ form, setStr, setBool, branchOptions }: Reque
             value={form.leadId}
             onChange={(e) => setStr('leadId', e.target.value)}
             placeholder="L-1234"
-            className="h-8 text-xs"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-requested-by" className="text-xs">Requested by *</Label>
-          <Input
-            id="ii-requested-by"
-            value={form.requestedBy}
-            onChange={(e) => setStr('requestedBy', e.target.value)}
-            placeholder="Sales rep name"
-            required
             className="h-8 text-xs"
           />
         </div>
@@ -208,30 +202,6 @@ export function RequestorSection({ form, setStr, setBool, branchOptions }: Reque
               <option key={b.aspire_branch_id} value={String(b.aspire_branch_id)}>{b.city}</option>
             ))}
           </select>
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-phone" className="text-xs">Phone *</Label>
-          <Input
-            id="ii-phone"
-            type="tel"
-            value={form.phone}
-            onChange={(e) => setStr('phone', e.target.value)}
-            placeholder="602-555-1234"
-            required
-            className="h-8 text-xs"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ii-email" className="text-xs">Email *</Label>
-          <Input
-            id="ii-email"
-            type="email"
-            value={form.email}
-            onChange={(e) => setStr('email', e.target.value)}
-            placeholder="rep@juniper.com"
-            required
-            className="h-8 text-xs"
-          />
         </div>
         <div className="space-y-1">
           <Label htmlFor="ii-request-date" className="text-xs">Request date</Label>
@@ -295,6 +265,7 @@ interface DatesProbabilitySectionProps {
 }
 
 export function DatesProbabilitySection({ form, setStr }: DatesProbabilitySectionProps) {
+  const slaWindowDays = useSlaReturnWindowDays()
   return (
     <section>
       <p className="text-xs font-semibold text-[hsl(var(--muted-fg))] uppercase tracking-wide mb-2">
@@ -306,10 +277,12 @@ export function DatesProbabilitySection({ form, setStr }: DatesProbabilitySectio
           <Input
             id="ii-internal-deadline"
             type="date"
+            min={localDateOnly()}
             value={form.internalDeadline}
             onChange={(e) => setStr('internalDeadline', e.target.value)}
             className="h-8 text-xs"
           />
+          <RushWindowNote date={form.internalDeadline} windowDays={slaWindowDays} />
         </div>
         <div className="space-y-1">
           <Label htmlFor="ii-client-deadline" className="text-xs">Client deadline</Label>
@@ -356,14 +329,6 @@ export function DatesProbabilitySection({ form, setStr }: DatesProbabilitySectio
           />
           <p className="text-[10px] text-[hsl(var(--muted-fg))]">20–100%</p>
         </div>
-      </div>
-      {/* SLA note */}
-      <div className="mt-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700 flex items-start gap-2">
-        <Info className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-        <span>
-          <strong>14-calendar-day SLA</strong> — clock starts when sent to Estimating.
-          Internal deadline defaults to +{SLA_CONFIG.returnWindowDays} calendar days if blank.
-        </span>
       </div>
     </section>
   )
@@ -881,11 +846,12 @@ export function TakeoffFilesSection({
         />
         <FileAttachRow
           label="RFP document"
-          hint="PDF — Request for Proposal or bid package"
+          hint="PDF, Word (.doc, .docx), or Excel (.xls, .xlsx) — Request for Proposal or bid package"
           file={rfpFile}
           testId="install-rfp-file-area"
           inputRef={rfpRef}
-          accept="application/pdf"
+          accept={RFP_FILE_ACCEPT}
+          actionLabel="Attach file"
           onChange={onRfpChange}
           onClear={onClearRfp}
         />

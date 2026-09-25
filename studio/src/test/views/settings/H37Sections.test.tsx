@@ -44,6 +44,7 @@ const BRANCH_MEMBER: TeamMember = {
   headshotObjectKey: null,
   active: true,
   sortOrder: 0,
+  regionId: 'west-coast',
 }
 
 const COMPANY_WIDE_MEMBER: TeamMember = {
@@ -58,6 +59,7 @@ const COMPANY_WIDE_MEMBER: TeamMember = {
   headshotObjectKey: null,
   active: true,
   sortOrder: 0,
+  regionId: null,
 }
 
 const BRANCH_REF: ClientReference = {
@@ -72,6 +74,7 @@ const BRANCH_REF: ClientReference = {
   address: '100 Lake Dr, Naples FL 34102',
   clientSinceYear: 2020,
   active: true,
+  regionId: 'west-coast',
 }
 
 const COMPANY_WIDE_REF: ClientReference = {
@@ -86,6 +89,7 @@ const COMPANY_WIDE_REF: ClientReference = {
   address: '200 Corp Ave, Miami FL 33101',
   clientSinceYear: 2018,
   active: true,
+  regionId: null,
 }
 
 const PORTFOLIO_PROPERTY = {
@@ -231,6 +235,33 @@ describe('TeamRosterSection', () => {
     // We verify the read-only badge/label is present
     expect(screen.getByTestId('team-member-tm-2-readonly')).toBeInTheDocument()
   })
+
+  it('requests region_id=all and labels null-region rows All regions', async () => {
+    let regionId: string | null = null
+    server.use(
+      http.get('*/api/proposals/config/team-members', ({ request }) => {
+        regionId = new URL(request.url).searchParams.get('region_id')
+        return HttpResponse.json([BRANCH_MEMBER, COMPANY_WIDE_MEMBER])
+      }),
+    )
+    renderComp(<TeamRosterSection aspireBranchId={BRANCH_ID} />)
+    expect(await screen.findByTestId('team-member-tm-2-all-regions')).toHaveTextContent('All regions')
+    expect(screen.queryByTestId('team-member-tm-1-all-regions')).not.toBeInTheDocument()
+    expect(regionId).toBe('all')
+  })
+
+  it('requests region_id=all for the company-wide sales roster', async () => {
+    let regionId: string | null = null
+    server.use(
+      http.get('*/api/proposals/config/team-members', ({ request }) => {
+        regionId = new URL(request.url).searchParams.get('region_id')
+        return HttpResponse.json([COMPANY_WIDE_MEMBER])
+      }),
+    )
+    renderComp(<TeamRosterSection aspireBranchId={null} canEditCompanyWide />)
+    await screen.findByText('Bob CEO')
+    expect(regionId).toBe('all')
+  })
 })
 
 // ── Client References ────────────────────────────────────────────────────────
@@ -309,6 +340,33 @@ describe('ClientReferencesSection', () => {
 
     expect(screen.getByTestId('client-ref-cr-2-readonly')).toBeInTheDocument()
   })
+
+  it('requests region_id=all and labels null-region rows All regions', async () => {
+    let regionId: string | null = null
+    server.use(
+      http.get('*/api/proposals/config/client-references', ({ request }) => {
+        regionId = new URL(request.url).searchParams.get('region_id')
+        return HttpResponse.json([BRANCH_REF, COMPANY_WIDE_REF])
+      }),
+    )
+    renderComp(<ClientReferencesSection aspireBranchId={BRANCH_ID} />)
+    expect(await screen.findByTestId('client-ref-cr-2-all-regions')).toHaveTextContent('All regions')
+    expect(screen.queryByTestId('client-ref-cr-1-all-regions')).not.toBeInTheDocument()
+    expect(regionId).toBe('all')
+  })
+
+  it('requests region_id=all for the company-wide sales references', async () => {
+    let regionId: string | null = null
+    server.use(
+      http.get('*/api/proposals/config/client-references', ({ request }) => {
+        regionId = new URL(request.url).searchParams.get('region_id')
+        return HttpResponse.json([COMPANY_WIDE_REF])
+      }),
+    )
+    renderComp(<ClientReferencesSection aspireBranchId={null} canEditCompanyWide />)
+    await screen.findByText('Global Corp')
+    expect(regionId).toBe('all')
+  })
 })
 
 // ── Portfolio ────────────────────────────────────────────────────────────────
@@ -333,7 +391,7 @@ describe('PortfolioSection', () => {
       ),
     )
     renderComp(<PortfolioSection />, 'admin')
-    expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i)
+    expect(await screen.findByRole('alert')).toHaveTextContent('fail')
   })
 
   it('admin sees the portfolio section with listed properties', async () => {

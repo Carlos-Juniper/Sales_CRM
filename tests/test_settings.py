@@ -290,8 +290,9 @@ class TestManageableBranchesList:
       * BM/RD (scope kind='branch') → only their user_branches operating
         branches,
       * a user with zero branches (kind='none') → [].
-    The operating-roster filter (active=1 AND branch_name NOT LIKE '%DO NOT
-    USE%') lives in the SQL so the 21-of-56 non-office rows never reach the UI.
+    The operating-roster filter (active=1 AND branch_name NOT LIKE a bound
+    '%DO NOT USE%' parameter) lives in the SQL so the 21-of-56 non-office
+    rows never reach the UI.
     """
 
     @patch("api.authz.query", new_callable=AsyncMock)
@@ -312,9 +313,14 @@ class TestManageableBranchesList:
         assert body[0]["branchName"] == "Bonita Springs"
 
         # The operating-roster filter is in the WHERE clause (server-side).
-        sql = mock_query.await_args_list[0].args[0]
+        # The LIKE pattern is a bound parameter: an inlined '%DO NOT USE%' is a
+        # Python format specifier once any other param is present.
+        sql, params = mock_query.await_args_list[0].args
         assert "active = 1" in sql
-        assert "NOT LIKE" in sql and "DO NOT USE" in sql
+        assert "NOT LIKE %s" in sql
+        assert "%DO NOT USE%" not in sql
+        assert params == ["%DO NOT USE%"]
+        sql % tuple(params)
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
@@ -332,10 +338,18 @@ class TestManageableBranchesList:
         assert [b["aspireBranchId"] for b in r.json()] == [1403]
 
         # The scoped branch id is a parameterized filter, not interpolated.
+        # This is the path that 500'd: non-empty params make aiomysql %-format
+        # the SQL, and an inlined '%DO NOT USE%' raises
+        # ValueError: unsupported format character 'D'.
         call = mock_query.await_args_list[0]
         sql, params = call.args[0], call.args[1]
         assert "aspire_branch_id IN" in sql
+        assert "%DO NOT USE%" not in sql
+        assert params[0] == "%DO NOT USE%"
         assert 1403 in params
+        formatted = sql % tuple(params)
+        assert "DO NOT USE" in formatted
+        assert "1403" in formatted
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
@@ -825,7 +839,7 @@ class TestBranchSettingsEnriched:
 
 
 class TestMarketingPortfolioManagement:
-    """portfolio_properties is company-wide, gated on marketing + admin."""
+    """portfolio_properties is shared. Sales, marketing, and admin may edit it."""
 
     _ROW = {
         "id": "pp-001",
@@ -878,17 +892,17 @@ class TestMarketingPortfolioManagement:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_sales_cannot_manage_portfolio(
+    async def test_sales_can_manage_shared_portfolio(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
+        # The portfolio is shared: a sales rep may add to it.
         as_role("sales")
         mock_authz_query.return_value = _live("sales")
         r = client.post(
             "/api/settings/portfolio",
             json={"name": "X", "cityState": "Y", "regionId": "z"},
         )
-        assert r.status_code == 403
-        mock_exec.assert_not_awaited()
+        assert r.status_code == 201
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
@@ -911,7 +925,7 @@ class TestMarketingPortfolioManagement:
 # Literal["branch", "leadership"], a value that exists nowhere else in the
 # system; because they mock the DB they passed while the real INSERT could not.
 class TestMarketingTeamMembers:
-    """team_members: marketing edits any branch; managers keep their own branch."""
+    """team_members: marketing edits any branch; a sales rep owns their new rows."""
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
@@ -947,16 +961,18 @@ class TestMarketingTeamMembers:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_sales_cannot_create_team_member(
+    async def test_sales_creates_their_own_team_member(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
+        # A sales rep's new roster row belongs to them. No rep_id required.
         as_role("sales")
         mock_authz_query.return_value = _live("sales")
         r = client.post(
             "/api/settings/team-members",
             json={"name": "X", "title": "Y", "teamType": "executive"},
         )
-        assert r.status_code == 403
+        assert r.status_code == 201
+        assert r.json()["ownerUserId"] == "u1"
 
 
 def _ref_body(**over) -> dict:
@@ -975,7 +991,7 @@ def _ref_body(**over) -> dict:
 
 
 class TestMarketingClientReferences:
-    """client_references: marketing edits any branch; company-wide gated on role."""
+    """client_references: marketing edits any branch; a sales rep owns their new rows."""
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
@@ -1006,13 +1022,15 @@ class TestMarketingClientReferences:
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_sales_cannot_create_client_reference(
+    async def test_sales_creates_their_own_client_reference(
         self, mock_query, mock_exec, mock_authz_query, as_role
     ):
+        # A sales rep's new client reference belongs to them.
         as_role("sales")
         mock_authz_query.return_value = _live("sales")
         r = client.post("/api/settings/client-references", json=_ref_body())
-        assert r.status_code == 403
+        assert r.status_code == 201
+        assert r.json()["ownerUserId"] == "u1"
 
 
 class TestManagerBranchScopeUnchanged:

@@ -7,11 +7,13 @@ import {
   useDeactivateClientReference,
 } from '@/hooks/useProposals'
 import type { ClientReference } from '@/types/proposal'
+import { AllRegionsBadge } from '@/components/proposal/RegionSwitcher'
 import type {
   ClientReferenceCreateBody,
   ClientReferencePatchBody,
 } from '@/api/settings'
-import { SettingsFormShell, FormStatus } from '../company/formStatus'
+import { SettingsFormShell, FormStatus, LegacyOwnerBadge } from '../company/formStatus'
+import { errorDetail } from '../errorDetail'
 
 /**
  * Branch client references management section (Slice 13b).
@@ -32,16 +34,26 @@ import { SettingsFormShell, FormStatus } from '../company/formStatus'
 export function ClientReferencesSection({
   aspireBranchId,
   canEditCompanyWide = false,
+  repId,
 }: {
   aspireBranchId: number | null
   canEditCompanyWide?: boolean
+  /** When set, list and writes are scoped to this sales rep (Settings). */
+  repId?: string
 }) {
   const companyWide = aspireBranchId === null
-  const { data, isLoading, isError } = useClientReferences(
-    companyWide ? undefined : { aspireBranchId },
+  const repScoped = repId !== undefined
+  // Reference management must keep seeing every region. repId scopes Settings
+  // to one sales rep without dropping the other regions.
+  const { data, isLoading, isError, error } = useClientReferences(
+    repScoped
+      ? { repId, regionId: 'all' }
+      : companyWide
+        ? { regionId: 'all' }
+        : { aspireBranchId, regionId: 'all' },
   )
   const { isAdmin } = useRole()
-  const canEditCompany = isAdmin || canEditCompanyWide
+  const canEditCompany = repScoped || isAdmin || canEditCompanyWide
   const [showCreate, setShowCreate] = useState(false)
 
   if (isLoading) {
@@ -55,14 +67,14 @@ export function ClientReferencesSection({
     return (
       <SettingsFormShell slug="client-references" title="Client references">
         <p role="alert" className="text-xs text-red-600">
-          Could not load client references. The branch may be out of your scope.
+          {errorDetail(error, 'Could not load client references. The branch may be out of your scope.')}
         </p>
       </SettingsFormShell>
     )
   }
 
   const refs = (data ?? []).filter((r) =>
-    companyWide ? r.aspireBranchId === null : true,
+    repScoped ? true : companyWide ? r.aspireBranchId === null : true,
   )
 
   return (
@@ -70,24 +82,32 @@ export function ClientReferencesSection({
       slug="client-references"
       title="Client references"
       description={
-        companyWide
-          ? 'Company-wide client references included in every proposal package.'
-          : 'Client references for proposal packages. Company-wide rows are read-only here — edit them as admin.'
+        repScoped
+          ? 'This rep’s client references included in their proposal packages.'
+          : companyWide
+            ? 'Company-wide client references included in every proposal package.'
+            : 'Client references for proposal packages. Company-wide rows are read-only here — edit them as admin.'
       }
     >
       {refs.length === 0 && !showCreate && (
         <p className="text-xs text-[var(--fg)] opacity-60 mb-3">
-          {companyWide ? 'No company-wide client references yet.' : 'No client references yet for this branch.'}
+          {repScoped
+            ? 'No client references yet for this rep.'
+            : companyWide
+              ? 'No company-wide client references yet.'
+              : 'No client references yet for this branch.'}
         </p>
       )}
 
       <ul className="space-y-2 mb-4">
-        {refs.map((ref) => (
+        {refs.map((reference) => (
           <ClientReferenceRow
-            key={ref.id}
-            ref={ref}
+            key={reference.id}
+            reference={reference}
             branchId={aspireBranchId}
             isAdmin={canEditCompany}
+            repId={repId}
+            repScoped={repScoped}
           />
         ))}
       </ul>
@@ -95,6 +115,7 @@ export function ClientReferencesSection({
       {showCreate ? (
         <ClientReferenceForm
           aspireBranchId={aspireBranchId}
+          repId={repId}
           onDone={() => setShowCreate(false)}
         />
       ) : (
@@ -113,18 +134,22 @@ export function ClientReferencesSection({
 // ── Row ───────────────────────────────────────────────────────────────────────
 
 function ClientReferenceRow({
-  ref: cr,
+  reference,
   branchId,
   isAdmin,
+  repId,
+  repScoped,
 }: {
-  ref: ClientReference
+  reference: ClientReference
   branchId: number | null
   isAdmin: boolean
+  repId?: string
+  repScoped: boolean
 }) {
   const [editing, setEditing] = useState(false)
-  const deactivate = useDeactivateClientReference(branchId ?? 0)
+  const deactivate = useDeactivateClientReference(branchId ?? 0, repId)
 
-  const isCompanyWide = cr.aspireBranchId === null
+  const isCompanyWide = reference.aspireBranchId === null
   const canEdit = isAdmin || !isCompanyWide
 
   if (editing && canEdit) {
@@ -132,7 +157,8 @@ function ClientReferenceRow({
       <li>
         <ClientReferenceForm
           aspireBranchId={branchId}
-          existing={cr}
+          existing={reference}
+          repId={repId}
           onDone={() => setEditing(false)}
         />
       </li>
@@ -140,18 +166,23 @@ function ClientReferenceRow({
   }
 
   return (
-    <li className="flex items-start justify-between rounded-md border border-[var(--border)] px-3 py-2 text-xs">
+    <li className="rounded-md border border-[var(--border)] px-3 py-2 text-xs">
+      <div className="flex items-start justify-between">
       <div>
-        <span className="font-medium text-[var(--fg)]">{cr.propertyName}</span>
-        <span className="ml-2 text-[var(--fg)] opacity-60">{cr.contactName}</span>
-        <span className="ml-2 text-[var(--fg)] opacity-50">· {cr.clientSinceYear}</span>
-        {isCompanyWide && (
+        <span className="font-medium text-[var(--fg)]">{reference.propertyName}</span>
+        <AllRegionsBadge regionId={reference.regionId} testId={`client-ref-${reference.id}-all-regions`} />
+        <span className="ml-2 text-[var(--fg)] opacity-60">{reference.contactName}</span>
+        <span className="ml-2 text-[var(--fg)] opacity-50">· {reference.clientSinceYear}</span>
+        {!repScoped && isCompanyWide && (
           <span
-            data-testid={`client-ref-${cr.id}-readonly`}
+            data-testid={`client-ref-${reference.id}-readonly`}
             className="ml-2 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800"
           >
             Company-wide (read-only)
           </span>
+        )}
+        {reference.ownerUserId === null && (
+          <LegacyOwnerBadge testId={`client-ref-${reference.id}-legacy`} />
         )}
       </div>
       {canEdit && (
@@ -165,13 +196,19 @@ function ClientReferenceRow({
           </button>
           <button
             type="button"
-            onClick={() => deactivate.mutate(cr.id)}
+            onClick={() => deactivate.mutate(reference.id)}
             disabled={deactivate.isPending}
             className="text-red-600 opacity-70 hover:opacity-100 text-[10px] disabled:opacity-30"
           >
             Deactivate
           </button>
         </div>
+      )}
+      </div>
+      {deactivate.isError && (
+        <p role="alert" className="mt-1 text-[10px] text-red-600">
+          {errorDetail(deactivate.error, 'Could not deactivate.')}
+        </p>
       )}
     </li>
   )
@@ -182,10 +219,12 @@ function ClientReferenceRow({
 function ClientReferenceForm({
   aspireBranchId,
   existing,
+  repId,
   onDone,
 }: {
   aspireBranchId: number | null
   existing?: ClientReference
+  repId?: string
   onDone: () => void
 }) {
   const [propertyName, setPropertyName] = useState(existing?.propertyName ?? '')
@@ -199,12 +238,13 @@ function ClientReferenceForm({
     String(existing?.clientSinceYear ?? new Date().getFullYear()),
   )
 
-  const create = useCreateClientReference(aspireBranchId ?? 0)
-  const update = useUpdateClientReference(aspireBranchId ?? 0)
+  const create = useCreateClientReference(aspireBranchId ?? 0, repId)
+  const update = useUpdateClientReference(aspireBranchId ?? 0, repId)
 
   const isPending = create.isPending || update.isPending
   const isSuccess = create.isSuccess || update.isSuccess
   const isError = create.isError || update.isError
+  const saveError = create.error ?? update.error
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -269,7 +309,11 @@ function ClientReferenceForm({
           Cancel
         </button>
       </div>
-      <FormStatus isSuccess={isSuccess} isError={isError} />
+      <FormStatus
+        isSuccess={isSuccess}
+        isError={isError}
+        errorText={errorDetail(saveError, 'Could not save. Try again.')}
+      />
     </form>
   )
 }

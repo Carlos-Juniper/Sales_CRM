@@ -8,7 +8,7 @@
 // Submitting creates an install estimate with:
 //   estimateType = 'install' (immutable)
 //   status       = 'new_from_sales'
-//   dueBackDate  = SLA clock start (default +14 days)
+//   dueBackDate  = internal deadline, or business today + the SLA window when blank
 //
 // BRD II-6.1: proposal request form; II-6.2: RFI rule; II-9.1: bid intake.
 // Reference: New Install Proposal Request Form.xlsx.
@@ -29,11 +29,15 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { estimatingApi, estimatingConfigApi } from '@/api/estimating'
+import { ApiError } from '@/api/client'
 import type { Property } from '@/types/estimating'
 import { DEFAULT_SERVICE_LINE } from '@/lib/estimating/aspireOptions'
-import { SLA_CONFIG, toDateOnly } from '@/lib/estimating/sla'
+import { DUE_BACK_PAST_MESSAGE, defaultDueBackDate, isPastCalendarDate, toDateOnly } from '@/lib/estimating/sla'
+import { useSlaReturnWindowDays } from '@/hooks/useCompanySettings'
+import { useAuthStore } from '@/store/authStore'
 import { useEstimatingShell } from './useEstimatingShell'
 import { useToast } from './useToast'
+import { canStartIntake, intakeDeniedMessage } from '@/lib/intakeAccess'
 import type { InstallCustomerType } from '@/types/estimating'
 import type { Estimate } from '@/types/estimating'
 import type { AttachedFile } from './IntakeFileAttachRow'
@@ -69,8 +73,15 @@ export interface InstallIntakeModalProps {
 
 export function InstallIntakeModal({ open, onClose, onCreated, initialProperty = null }: InstallIntakeModalProps) {
   const { openEstimateAt } = useEstimatingShell()
+  const slaWindowDays = useSlaReturnWindowDays()
   const { show } = useToast()
-  const { upload: uploadFile } = useAttachmentUpload()
+  const { upload: uploadFile, lastUploadError } = useAttachmentUpload()
+  // Sales-author identity is no longer collected in the form. Submit still
+  // sends the same fields, falling back to the signed-in user when the form
+  // (or a resumed draft) does not already have them. Intake gating uses the
+  // same session user.
+  const currentUser = useAuthStore((s) => s.user)
+  const sessionUser = currentUser
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -175,13 +186,16 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
     estimatingApi
       .listIntakeDrafts('install')
       .then((drafts) => {
-        const latest = drafts[0]
+        const latest = drafts.find((d) => canStartIntake(sessionUser, d.estimateType))
         if (cancelled || !latest) return
         setForm({ ...defaultForm(), ...(latest.payload as Partial<FormState>) })
         setDraftId(latest.id)
       })
-      .catch(() => {
-        // Draft resume is best-effort — a fresh form is always a safe fallback.
+      .catch((err) => {
+        // A fresh form is a safe fallback. A 403 (resume of a locked type)
+        // still has to be visible — the server refuses that draft.
+        const denied = intakeDeniedMessage(err, '')
+        if (denied) show(denied)
       })
     return () => {
       cancelled = true
@@ -220,6 +234,17 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
   const rfpRef = useRef<HTMLInputElement>(null)
   const otherRef = useRef<HTMLInputElement>(null)
 
+  function salesAuthorFields(source: Pick<FormState, 'requestedBy' | 'phone' | 'email'>) {
+    return {
+      // A resumed draft keeps whatever it stored. A new request uses the
+      // signed-in user. Phone is not on the session user, so it stays the
+      // stored value (blank on a new form).
+      requestedBy: source.requestedBy || currentUser?.name || '',
+      phone: source.phone,
+      email: source.email || currentUser?.email || '',
+    }
+  }
+
   function setStr(field: keyof FormState, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
@@ -257,14 +282,15 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
   }
 
   function buildIntakePayload(branchCity: string | null) {
+    const author = salesAuthorFields(form)
     return {
       leadId: form.leadId || null,
-      requestedBy: form.requestedBy,
+      requestedBy: author.requestedBy,
       // Persist the human-readable city (identity travels on the estimate's
       // aspireBranchId); form.installBranch now holds the raw Aspire id string.
       installBranch: branchCity ?? form.installBranch,
-      phone: form.phone,
-      email: form.email,
+      phone: author.phone,
+      email: author.email,
       requestDate: form.requestDate,
       isNewClient: form.isNewClient,
       isBondRequired: form.isBondRequired,
@@ -348,13 +374,19 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       show('Select or create a property before submitting.')
       return
     }
+    if (form.internalDeadline && isPastCalendarDate(form.internalDeadline)) {
+      show(DUE_BACK_PAST_MESSAGE)
+      return
+    }
     setSubmitting(true)
 
     try {
-      // due_back_date is a SQL DATE column — must stay 'YYYY-MM-DD', not a full timestamp.
+      // due_back_date is a SQL DATE. The date input is already YYYY-MM-DD.
+      // A blank field is business today plus the SLA return window, not
+      // today (that made every blank intake a rush). Do not use toISOString.
       const dueBackDate = form.internalDeadline
-        ? toDateOnly(form.internalDeadline)
-        : toDateOnly(new Date(Date.now() + SLA_CONFIG.returnWindowDays * 86400000))
+        ? form.internalDeadline.slice(0, 10)
+        : defaultDueBackDate(slaWindowDays)
 
       const winProbability = Math.min(1.0, Math.max(0.2, Number(form.winProbabilityPct) / 100))
 
@@ -363,6 +395,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       const aspireBranchId = Number(form.installBranch)
       const branchCity = selectedBranchCity
 
+      const author = salesAuthorFields(form)
       const intakePayload = buildIntakePayload(branchCity)
       const created = await estimatingApi.create({
         estimateType: 'install',
@@ -391,7 +424,7 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
         serviceStartDate: form.startDate ? toDateOnly(form.startDate) : null,
         assignedLsEstimator: null,
         assignedIrrEstimator: null,
-        crmRep: form.requestedBy || null,
+        crmRep: author.requestedBy || null,
         // RFI status is tracked first-class on the estimate
         // row (surfaced in queue/editor), in addition to the verbatim payload.
         rfiStatus: form.rfiStatus || null,
@@ -402,24 +435,39 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       })
 
       // Upload each file directly to GCS — presign → XHR PUT → confirm per file.
+      // Sequential so each failure's API `detail` is reported on the toast.
+      // Errors are non-fatal: the estimate already exists.
       const uploads: Array<() => Promise<unknown>> = [
         ...(propertyMapFile ? [() => uploadFile(created.id, propertyMapFile.file, 'property_map')] : []),
         ...(rfpFile ? [() => uploadFile(created.id, rfpFile.file, 'rfp')] : []),
         ...otherFiles.map((f) => () => uploadFile(created.id, f.file, 'other')),
       ]
-      await Promise.allSettled(uploads.map((fn) => fn()))
+      const uploadErrors: string[] = []
+      for (const start of uploads) {
+        const attachment = await start()
+        const uploadError = lastUploadError()
+        if (!attachment && uploadError) uploadErrors.push(uploadError)
+      }
 
       // Submitted successfully — discard the server-side draft (best-effort).
       if (draftId) {
         estimatingApi.deleteIntakeDraft(draftId).catch(() => {})
         setDraftId(null)
       }
-      show('Install request sent to Estimating.')
+      show(
+        uploadErrors.length > 0
+          ? uploadErrors.join(' ')
+          : 'Install request sent to Estimating.',
+      )
       onCreated(created)
       openEstimateAt(created, 'editor')
       onClose()
-    } catch {
-      show('Failed to create estimate — please try again.')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 400) {
+        show(err.message || 'Failed to create estimate — please try again.')
+      } else {
+        show(intakeDeniedMessage(err, 'Failed to create estimate — please try again.'))
+      }
     } finally {
       setSubmitting(false)
     }
@@ -433,13 +481,13 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
     try {
       const saved = await estimatingApi.saveIntakeDraft({
         estimateType: 'install',
-        payload: { ...form },
+        payload: { ...form, ...salesAuthorFields(form) },
         ...(draftId ? { draftId } : {}),
       })
       setDraftId(saved.id)
       show('Draft saved.')
-    } catch {
-      show('Could not save draft — please try again.')
+    } catch (err) {
+      show(intakeDeniedMessage(err, 'Could not save draft — please try again.'))
     }
   }
 

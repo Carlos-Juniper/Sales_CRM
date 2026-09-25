@@ -27,13 +27,14 @@ from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 from contextlib import asynccontextmanager
 
+from api import authz
 from db import (
     query, execute, _in_clause,
     set_hoa_property_status,
@@ -41,6 +42,7 @@ from db import (
     has_won_lead_for_property,
     close_pool,
 )
+from api import authz
 SESSION_DURATION = 28800  # 8 hours in seconds
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
@@ -155,6 +157,19 @@ async def _fetch_lead(lead_id: str) -> dict:
 
 # ── Request / response models ────────────────────────────────────────────────
 
+# leads.notes is TEXT. 10_000 characters stays under the utf8mb4 TEXT byte
+# ceiling (65,535) for a first-touch note.
+LEAD_NOTES_MAX_LENGTH = 10_000
+
+
+def _lead_notes_for_insert(notes: Optional[str]) -> Optional[str]:
+    """Store blank notes as NULL so create matches a lead with no notes yet."""
+    if notes is None:
+        return None
+    stripped = notes.strip()
+    return stripped or None
+
+
 class CreateLeadBody(BaseModel):
     property_name: str
     city: str
@@ -171,6 +186,10 @@ class CreateLeadBody(BaseModel):
     property_id: Optional[str] = None
     # WS1: branch the lead belongs to (from the branch picker in AddLeadModal).
     branch_id: Optional[str] = None
+    # Same column the lead-detail Notes section edits via PATCH (leads.notes).
+    # Omitted, null, or blank stores NULL. The lead row's created_by and
+    # created_at are the creator and timestamp; notes itself is one text field.
+    notes: Optional[str] = Field(default=None, max_length=LEAD_NOTES_MAX_LENGTH)
 
 
 class PatchLeadBody(BaseModel):
@@ -430,6 +449,11 @@ async def list_leads(
     page_size: int = Query(default=25, le=100),
     _user: dict = Depends(require_auth),
 ) -> dict:
+    authz.require_not_estimating_only(_user, "leads")
+    # unassigned_only is the public qualification queue, not "my leads".
+    if unassigned_only and authz.hides_public_lead_queue(_user):
+        authz.require_public_leads_access(_user)
+
     if sort_by not in _ALLOWED_SORT:
         sort_by = "score"
     if sort_dir not in ("asc", "desc"):
@@ -470,17 +494,29 @@ async def list_leads(
             conditions.append(f"source IN ({placeholders})")
             params.extend(vals)
 
-    # User-scoped "Leads" tab. The identity comes from the JWT, never from a
+    # User-scoped book of leads. The identity comes from the JWT, never from a
     # client-supplied param (BRD I-9.5) — `mine` is a boolean switch, not an id.
-    if mine:
-        conditions.append("(assigned_to = %s OR created_by = %s)")
-        params.extend([_user["id"], _user["id"]])
+    # Field-sales roles (sales, maintenance_sales, install_sales, and legacy
+    # outside_sales) are always scoped, even when the client omits ?mine=true.
+    # The pipeline board and the analytics cards call this list that way.
+    # Admin, manager-type, and inside_sales keep the wider list.
+    owner_sql, owner_params = authz.own_lead_filter(_user)
+    if mine or owner_sql:
+        conditions.append(authz.OWN_LEAD_PREDICATE)
+        params.extend(owner_params or [_user["id"], _user["id"]])
 
     # Public Leads review queue: once a rep assigns a lead to a CRM it moves to
     # that CRM's "My Leads" (mine=true) and should drop out of the shared queue.
     # Never deleted — assigned_to alone gates queue membership.
     if unassigned_only:
         conditions.append("assigned_to IS NULL")
+
+    # Sales and every other non-qualifier still list their own leads, but the
+    # unassigned government queue stays inside sales / admin / management.
+    if authz.hides_public_lead_queue(_user):
+        placeholders = ", ".join(["%s"] * len(authz.PUBLIC_LEAD_SOURCES))
+        conditions.append(f"NOT (source IN ({placeholders}) AND assigned_to IS NULL)")
+        params.extend(list(authz.PUBLIC_LEAD_SOURCES))
 
     if min_score is not None:
         conditions.append("score >= %s")
@@ -515,11 +551,16 @@ async def list_leads(
 
 @app.get("/api/leads/{lead_id}")
 async def get_lead(lead_id: str, _user: dict = Depends(require_auth)) -> dict:
-    return await _fetch_lead(lead_id)
+    authz.require_not_estimating_only(_user, "leads")
+    lead = await _fetch_lead(lead_id)
+    authz.require_lead_access(_user, lead.get("source"), lead.get("assigned_to"))
+    authz.require_own_lead(_user, lead)
+    return lead
 
 
 @app.post("/api/leads", status_code=201)
 async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth)) -> dict:
+    authz.require_not_estimating_only(_user, "leads")
     new_id = str(uuid.uuid4())
 
     # WS1 auto-property safety net: if no property_id was supplied, create a
@@ -555,13 +596,13 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
         INSERT INTO leads
             (id, source, lead_type, property_name, address, city, state,
              estimated_contract_value, estimated_acreage, units, status,
-             contact_name, contact_email, property_id, branch_id, created_by,
-             created_at, updated_at)
+             contact_name, contact_email, property_id, branch_id, notes,
+             created_by, created_at, updated_at)
         VALUES
             (%s, 'manual', %s, %s, %s, %s, %s,
              %s, %s, %s, %s,
              %s, %s, %s, %s, %s,
-             CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+             %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
             new_id,
@@ -578,6 +619,7 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
             body.contact_email,
             property_id,
             body.branch_id,
+            _lead_notes_for_insert(body.notes),
             _user["id"],
         ],
     )
@@ -586,7 +628,10 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
 
 @app.patch("/api/leads/{lead_id}")
 async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(require_auth)) -> dict:
+    authz.require_not_estimating_only(_user, "leads")
     current = await _fetch_lead(lead_id)
+    authz.require_lead_access(_user, current.get("source"), current.get("assigned_to"))
+    authz.require_own_lead(_user, current)
 
     _PATCHABLE = frozenset({
         "status", "assigned_to", "notes", "priority",
@@ -664,7 +709,10 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
 
 @app.delete("/api/leads/{lead_id}", status_code=204)
 async def delete_lead(lead_id: str, _user: dict = Depends(require_auth)) -> None:
-    await _fetch_lead(lead_id)
+    authz.require_not_estimating_only(_user, "leads")
+    lead = await _fetch_lead(lead_id)
+    authz.require_lead_access(_user, lead.get("source"), lead.get("assigned_to"))
+    authz.require_own_lead(_user, lead)
     await execute(
         "UPDATE leads SET deleted_at = CURRENT_TIMESTAMP() WHERE id = %s AND deleted_at IS NULL",
         [lead_id],
@@ -713,6 +761,18 @@ _ACTION_TO_CHANNEL_FULL: dict[str, str] = {
 @app.get("/api/leads/{lead_id}/activity")
 async def get_lead_activity(lead_id: str, _user: dict = Depends(require_auth)) -> list:
     """Unified activity feed across all channels."""
+    authz.require_not_estimating_only(_user, "leads")
+    # Missing leads keep the historical empty feed. A public-queue row is
+    # refused for roles that cannot qualify those leads. Field sales
+    # (sales, maintenance_sales, install_sales) are limited to assigned_to
+    # or created_by.
+    meta = await query(
+        "SELECT source, assigned_to, created_by FROM leads WHERE id = %s AND deleted_at IS NULL",
+        [lead_id],
+    )
+    if meta:
+        authz.require_lead_access(_user, meta[0].get("source"), meta[0].get("assigned_to"))
+        authz.require_own_lead(_user, meta[0])
     rows = await query(
         """
         SELECT * FROM lead_actions
@@ -1590,14 +1650,30 @@ async def list_users(
     Filter rules:
       - ?role=<r>: restrict to that role AND active=1 (assignee pickers must
         exclude deactivated reps; Slice 6 deactivates, never deletes).
+        `GET /api/users?role=sales` (and `?role=outside_sales`, the same
+        alias) is the sales-role group: stored roles sales, outside_sales,
+        inside_sales, maintenance_sales, and install_sales. That is the
+        Settings rep dropdown and the lead-assignee picker. Each item's
+        `id` is the `rep_id` (alias `user_id`) to pass when marketing or
+        admin reads or writes that rep's client references and team roster.
+        Any other value, including `?role=inside_sales` or
+        `?role=maintenance_sales`, stays an exact match of that one role.
       - plain GET: returns ALL rows including inactive so historical name lookups
         on old estimates still resolve.
     """
     conditions: list[str] = []
     params: list[Any] = []
     if role:
-        conditions.append("role = %s")
-        params.append(role)
+        # role=sales is the sales-role group (see docstring). Every other
+        # role stays an exact match so an admin filter for one persona
+        # does not widen.
+        if authz.normalize_role(role) == "sales":
+            placeholders = ", ".join(["%s"] * len(authz.SALES_REP_DB_ROLES))
+            conditions.append(f"role IN ({placeholders})")
+            params.extend(authz.SALES_REP_DB_ROLES)
+        else:
+            conditions.append("role = %s")
+            params.append(role)
         # A role filter drives the assignee pickers (e.g. ?role=sales for the
         # lead-assignee picker, §2.8), so it must exclude DEACTIVATED users:
         # Slice 6 deactivates instead of deleting, and a deactivated rep must
@@ -1645,12 +1721,25 @@ async def list_users(
 
 @app.get("/api/dashboard/inside-sales")
 async def dashboard_inside_sales(_user: dict = Depends(require_auth)) -> dict:
+    # Admin and management only. Field sales and inside_sales are 403 here,
+    # matching the analytics allowlist. The own-lead predicate stays so a
+    # role that is both allowed on this dashboard and a field-sales rep
+    # would still see only its book.
+    authz.require_analytics_dashboard(_user)
+    owner_sql, owner_params = authz.own_lead_filter(_user)
+    scope = f" AND {owner_sql}" if owner_sql else ""
+
+    def _dash(sql: str):
+        if scope:
+            sql = sql.replace("deleted_at IS NULL", f"deleted_at IS NULL{scope}", 1)
+        return query(sql, list(owner_params) if owner_params else None)
+
     total_rows, new_rows, status_rows, avg_rows, state_rows = await asyncio.gather(
-        query("SELECT COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL"),
-        query("SELECT COUNT(*) AS cnt FROM leads WHERE status = 'new' AND deleted_at IS NULL"),
-        query("SELECT status, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY status"),
-        query("SELECT AVG(score) AS avg_score FROM leads WHERE score IS NOT NULL AND deleted_at IS NULL"),
-        query("SELECT state, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY state ORDER BY cnt DESC"),
+        _dash("SELECT COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL"),
+        _dash("SELECT COUNT(*) AS cnt FROM leads WHERE status = 'new' AND deleted_at IS NULL"),
+        _dash("SELECT status, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY status"),
+        _dash("SELECT AVG(score) AS avg_score FROM leads WHERE score IS NOT NULL AND deleted_at IS NULL"),
+        _dash("SELECT state, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY state ORDER BY cnt DESC"),
     )
     avg_val = avg_rows[0]["avg_score"] if avg_rows and avg_rows[0]["avg_score"] is not None else 0.0
     return {
@@ -1664,8 +1753,11 @@ async def dashboard_inside_sales(_user: dict = Depends(require_auth)) -> dict:
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
-def _issue_jwt(user: dict, response: Response) -> dict:
-    payload = {
+def _session_user(user: dict) -> dict:
+    """Public session user. `allowed_intake_types` is derived, not stored on the JWT."""
+    from api import authz
+
+    return {
         "id": user["id"],
         "name": user["name"],
         "email": user["email"],
@@ -1675,9 +1767,20 @@ def _issue_jwt(user: dict, response: Response) -> dict:
         # Aspire ContactID for defaulting an opportunity's SalesRepContactID; may be
         # null until the one-time backfill runs. .get keeps pre-backfill rows working.
         "aspire_rep_id": user.get("aspire_rep_id"),
+        "allowed_intake_types": authz.allowed_intake_types(user.get("role")),
+    }
+
+
+def _issue_jwt(user: dict, response: Response) -> dict:
+    payload = {
+        **_session_user(user),
         "exp": datetime.now(timezone.utc) + timedelta(seconds=SESSION_DURATION),
     }
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    # The intake flag is derived from role on every response. Keep it out of the
+    # cookie so a role already on the token picks up the flag without re-login,
+    # and so the claim set stays the identity fields require_auth already trusts.
+    token_payload = {k: v for k, v in payload.items() if k != "allowed_intake_types"}
+    token = jwt.encode(token_payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     response.set_cookie(
         key="session",
         value=token,
@@ -1699,6 +1802,7 @@ async def issue_render_token(
     used only for GET requests against /api/proposals/<proposal_id>/... and
     /api/proposals/config/... routes.
     """
+    authz.require_proposals_access(user)
     if not JWT_SECRET:
         raise HTTPException(status_code=500, detail="JWT_SECRET not configured")
     payload = {
@@ -1858,7 +1962,18 @@ async def logout(response: Response) -> dict:
 
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(require_auth)) -> dict:
-    return user
+    """Current session. `role` is the JWT claim; `allowed_intake_types` is derived.
+
+    The intake list is computed here (not stored on the token) so existing
+    sessions gain it on the next /me without a new login. It follows the JWT
+    role, the same staleness as every other non-approver route.
+    """
+    from api import authz
+
+    return {
+        **user,
+        "allowed_intake_types": authz.allowed_intake_types(user.get("role")),
+    }
 
 
 # ── Calendar ─────────────────────────────────────────────────────────────────
@@ -1975,6 +2090,11 @@ async def schedule_lead_meeting(
 ) -> dict:
     """Create a calendar event and record a meeting_scheduled lead action."""
     from api import graph as _graph
+
+    authz.require_not_estimating_only(user, "leads")
+    lead = await _fetch_lead(lead_id)
+    authz.require_lead_access(user, lead.get("source"), lead.get("assigned_to"))
+    authz.require_own_lead(user, lead)
 
     event = await _graph_call(
         _graph.create_event(

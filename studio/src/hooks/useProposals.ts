@@ -12,8 +12,8 @@
 //     →  individual parameterized hooks so callers can scope by branch/region
 // ---------------------------------------------------------------------------
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { proposalConfigApi, proposalsApi } from '@/api/proposals'
+import { useQuery, useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { proposalConfigApi, proposalsApi, type RegionScopedList } from '@/api/proposals'
 import { settingsApi } from '@/api/settings'
 import type {
   TeamMemberCreateBody,
@@ -96,21 +96,40 @@ export function useProposalConfig(): ProposalStaticConfig {
 // Config — parameterized (individual hooks, scoped by branch / region)
 // ---------------------------------------------------------------------------
 
+function asRoster<T>(query: UseQueryResult<RegionScopedList<T>>) {
+  return {
+    ...query,
+    data: query.data?.items,
+    regionFilter: query.data?.regionFilter ?? null,
+  }
+}
+
 /**
- * Team members for a branch, optionally filtered by teamType.
+ * Team members for a branch, optionally filtered by teamType and region.
  * When aspireBranchId is provided, null-branch (company-wide/executive) rows
  * are included in addition to branch matches (Amendment A null-branch-inclusion rule).
- * Query key: ['proposals', 'config', 'team-members', aspireBranchId, teamType]
+ * Omit regionId for the caller's region. Pass 'all' for every region.
+ * repId scopes the list to one sales rep. Proposal generation omits it.
+ * Query key: ['proposals', 'config', 'team-members', aspireBranchId, teamType, repId, regionId]
  */
 export function useTeamMembers(params?: {
   aspireBranchId?: number
   teamType?: TeamMemberType
+  repId?: string
+  regionId?: string
 }) {
-  return useQuery<TeamMember[]>({
-    queryKey: ['proposals', 'config', 'team-members', params?.aspireBranchId ?? null, params?.teamType ?? null],
+  const query = useQuery({
+    queryKey: [
+      'proposals', 'config', 'team-members',
+      params?.aspireBranchId ?? null,
+      params?.teamType ?? null,
+      params?.repId ?? null,
+      params?.regionId ?? null,
+    ],
     queryFn: () => proposalConfigApi.teamMembers(params),
     staleTime: 5 * 60_000,
   })
+  return asRoster<TeamMember>(query)
 }
 
 /**
@@ -133,14 +152,26 @@ export function useProposalRepBranches(proposalId?: string) {
 /**
  * Client references for a branch.
  * null-branch (company-wide) rows always included when aspireBranchId is set.
- * Query key: ['proposals', 'config', 'client-references', aspireBranchId]
+ * Omit regionId for the caller's region. Pass 'all' for every region.
+ * repId scopes the list to one sales rep. Proposal generation omits it.
+ * Query key: ['proposals', 'config', 'client-references', aspireBranchId, repId, regionId]
  */
-export function useClientReferences(params?: { aspireBranchId?: number }) {
-  return useQuery<ClientReference[]>({
-    queryKey: ['proposals', 'config', 'client-references', params?.aspireBranchId ?? null],
+export function useClientReferences(params?: {
+  aspireBranchId?: number
+  repId?: string
+  regionId?: string
+}) {
+  const query = useQuery({
+    queryKey: [
+      'proposals', 'config', 'client-references',
+      params?.aspireBranchId ?? null,
+      params?.repId ?? null,
+      params?.regionId ?? null,
+    ],
     queryFn: () => proposalConfigApi.clientReferences(params),
     staleTime: 5 * 60_000,
   })
+  return asRoster<ClientReference>(query)
 }
 
 /**
@@ -364,31 +395,31 @@ export function useProposalRenders(id: string | null) {
  * Creates a team member. aspireBranchId is accepted so callers can scope the
  * mutation to a branch (used for cache invalidation via the query key prefix).
  */
-export function useCreateTeamMember(_aspireBranchId: number) {
+export function useCreateTeamMember(_aspireBranchId: number, repId?: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: TeamMemberCreateBody) => settingsApi.createTeamMember(body),
+    mutationFn: (body: TeamMemberCreateBody) => settingsApi.createTeamMember(body, repId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['proposals', 'config', 'team-members'] })
     },
   })
 }
 
-export function useUpdateTeamMember(_aspireBranchId: number) {
+export function useUpdateTeamMember(_aspireBranchId: number, repId?: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ memberId, body }: { memberId: string; body: TeamMemberPatchBody }) =>
-      settingsApi.updateTeamMember(memberId, body),
+      settingsApi.updateTeamMember(memberId, body, repId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['proposals', 'config', 'team-members'] })
     },
   })
 }
 
-export function useDeactivateTeamMember(_aspireBranchId: number) {
+export function useDeactivateTeamMember(_aspireBranchId: number, repId?: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (memberId: string) => settingsApi.deactivateTeamMember(memberId),
+    mutationFn: (memberId: string) => settingsApi.deactivateTeamMember(memberId, repId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['proposals', 'config', 'team-members'] })
     },
@@ -397,32 +428,32 @@ export function useDeactivateTeamMember(_aspireBranchId: number) {
 
 // ── Client References ─────────────────────────────────────────────────────────
 
-export function useCreateClientReference(_aspireBranchId: number) {
+export function useCreateClientReference(_aspireBranchId: number, repId?: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: ClientReferenceCreateBody) =>
-      settingsApi.createClientReference(body),
+      settingsApi.createClientReference(body, repId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['proposals', 'config', 'client-references'] })
     },
   })
 }
 
-export function useUpdateClientReference(_aspireBranchId: number) {
+export function useUpdateClientReference(_aspireBranchId: number, repId?: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ refId, body }: { refId: string; body: ClientReferencePatchBody }) =>
-      settingsApi.updateClientReference(refId, body),
+      settingsApi.updateClientReference(refId, body, repId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['proposals', 'config', 'client-references'] })
     },
   })
 }
 
-export function useDeactivateClientReference(_aspireBranchId: number) {
+export function useDeactivateClientReference(_aspireBranchId: number, repId?: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (refId: string) => settingsApi.deactivateClientReference(refId),
+    mutationFn: (refId: string) => settingsApi.deactivateClientReference(refId, repId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['proposals', 'config', 'client-references'] })
     },
@@ -471,12 +502,12 @@ export function useDeletePortfolioProperty() {
 // the request is in flight.
 
 /** Upload (replace) one team member's headshot. */
-export function useUploadTeamMemberHeadshot() {
+export function useUploadTeamMemberHeadshot(repId?: string) {
   const qc = useQueryClient()
   const toast = useUIStore((s) => s.toast)
   return useMutation({
     mutationFn: ({ memberId, file }: { memberId: string; file: File }) =>
-      settingsApi.uploadTeamMemberHeadshot(memberId, file),
+      settingsApi.uploadTeamMemberHeadshot(memberId, file, repId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['proposals', 'config', 'team-members'] })
     },
@@ -485,11 +516,11 @@ export function useUploadTeamMemberHeadshot() {
 }
 
 /** Remove a team member's headshot (clears the column and deletes the object). */
-export function useDeleteTeamMemberHeadshot() {
+export function useDeleteTeamMemberHeadshot(repId?: string) {
   const qc = useQueryClient()
   const toast = useUIStore((s) => s.toast)
   return useMutation({
-    mutationFn: (memberId: string) => settingsApi.deleteTeamMemberHeadshot(memberId),
+    mutationFn: (memberId: string) => settingsApi.deleteTeamMemberHeadshot(memberId, repId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['proposals', 'config', 'team-members'] })
     },

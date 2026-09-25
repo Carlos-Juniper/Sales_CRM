@@ -577,6 +577,35 @@ class TestListEstimatesLeadIdFilter:
 
 # ── GET /api/proposals/packages ──────────────────────────────────────────────
 
+def _package_list_row(**over) -> dict:
+    """A proposal-packages join row as the DB returns it."""
+    row = {
+        "id": "prop-abc123def456",
+        "lead_id": "lead-001",
+        "created_at": datetime(2026, 6, 16, 12, 0, 0),
+        "updated_at": datetime(2026, 6, 16, 15, 0, 0),
+        "property_name": "Lakewood Pines HOA",
+        "property_id": "prop-1",
+        "city": "Tampa",
+        "state": "FL",
+        "notes": None,
+        "handoff_notes": None,
+        "lead_status": "proposal_sent",
+        "estimated_contract_value": 1000,
+        "assignee_id": None,
+        "assignee_name": None,
+        "assignee_email": None,
+        "assignee_role": None,
+        "assignee_branch_id": None,
+        "assignee_initials": None,
+        "render_version": None,
+        "page_count": None,
+        "closed_at": None,
+    }
+    row.update(over)
+    return row
+
+
 class TestListProposalPackages:
     def test_returns_lead_joined_summary_without_sections(self, authed):
         row = {
@@ -662,7 +691,7 @@ class TestListProposalPackages:
         assert "closed_at" in sql
 
     def test_no_exclude_status_omits_lead_actions_where(self, authed):
-        """Without exclude_status the WHERE clause is absent — no spurious join."""
+        """Without exclude_status the closed-lead filter is absent."""
         with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
             mock_q.return_value = []
             client.get("/api/proposals/packages")
@@ -734,3 +763,126 @@ class TestListProposalPackages:
             res = client.get("/api/proposals/packages")
         item = res.json()[0]
         assert item["closedAt"] is None
+
+    def test_several_proposals_for_one_lead_returns_newest(self, authed):
+        """Regenerating a proposal must not duplicate the lead on the list.
+
+        Newest is created_at, not updated_at: an older generation that was
+        edited later still loses to the proposal generated after it.
+        """
+        older = _package_list_row(
+            id="prop-older00001",
+            created_at=datetime(2026, 6, 1, 9, 0, 0),
+            updated_at=datetime(2026, 7, 1, 9, 0, 0),
+            property_name="Older draft",
+        )
+        newest = _package_list_row(
+            id="prop-newest0001",
+            created_at=datetime(2026, 6, 20, 9, 0, 0),
+            updated_at=datetime(2026, 6, 20, 9, 0, 0),
+            property_name="Latest generation",
+        )
+        middle = _package_list_row(
+            id="prop-middle0001",
+            created_at=datetime(2026, 6, 10, 9, 0, 0),
+            updated_at=datetime(2026, 6, 10, 9, 0, 0),
+        )
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = [older, middle, newest]
+            res = client.get("/api/proposals/packages")
+
+        assert res.status_code == 200
+        body = res.json()
+        assert len(body) == 1
+        assert body[0]["id"] == "prop-newest0001"
+        assert body[0]["leadId"] == "lead-001"
+        assert body[0]["title"] == "Latest generation"
+        sql = mock_q.call_args.args[0]
+        assert "pr_latest.lead_id = pr.lead_id" in sql
+        assert "ORDER BY pr_latest.created_at DESC, pr_latest.id DESC" in sql
+        assert "LIMIT 1" in sql
+
+    def test_several_leads_return_one_newest_row_each(self, authed):
+        """Each lead contributes its newest proposal, and no other lead's."""
+        rows = [
+            _package_list_row(
+                id="prop-a-old0001",
+                lead_id="lead-a",
+                created_at=datetime(2026, 5, 1, 8, 0, 0),
+                updated_at=datetime(2026, 5, 1, 8, 0, 0),
+                property_name="Lead A old",
+            ),
+            _package_list_row(
+                id="prop-a-new0001",
+                lead_id="lead-a",
+                created_at=datetime(2026, 6, 2, 8, 0, 0),
+                updated_at=datetime(2026, 6, 2, 8, 0, 0),
+                property_name="Lead A new",
+            ),
+            _package_list_row(
+                id="prop-b-old0001",
+                lead_id="lead-b",
+                created_at=datetime(2026, 4, 1, 8, 0, 0),
+                updated_at=datetime(2026, 8, 1, 8, 0, 0),
+                property_name="Lead B old",
+            ),
+            _package_list_row(
+                id="prop-b-new0001",
+                lead_id="lead-b",
+                created_at=datetime(2026, 7, 15, 8, 0, 0),
+                updated_at=datetime(2026, 7, 15, 8, 0, 0),
+                property_name="Lead B new",
+            ),
+        ]
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = rows
+            res = client.get("/api/proposals/packages")
+
+        assert res.status_code == 200
+        body = res.json()
+        assert len(body) == 2
+        by_lead = {item["leadId"]: item for item in body}
+        assert set(by_lead) == {"lead-a", "lead-b"}
+        assert by_lead["lead-a"]["id"] == "prop-a-new0001"
+        assert by_lead["lead-a"]["title"] == "Lead A new"
+        assert by_lead["lead-b"]["id"] == "prop-b-new0001"
+        assert by_lead["lead-b"]["title"] == "Lead B new"
+        # List order stays updated_at DESC among the surviving rows.
+        assert [item["id"] for item in body] == ["prop-b-new0001", "prop-a-new0001"]
+
+    def test_created_at_tie_breaks_on_id(self, authed):
+        """Ids are not time-ordered; they only decide a same-second tie."""
+        earlier_id = _package_list_row(
+            id="prop-aaa0000001",
+            created_at=datetime(2026, 6, 16, 12, 0, 0),
+        )
+        later_id = _package_list_row(
+            id="prop-zzz0000001",
+            created_at=datetime(2026, 6, 16, 12, 0, 0),
+        )
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = [earlier_id, later_id]
+            res = client.get("/api/proposals/packages")
+
+        assert res.status_code == 200
+        body = res.json()
+        assert len(body) == 1
+        assert body[0]["id"] == "prop-zzz0000001"
+
+    def test_lead_history_still_returns_every_generation(self, authed):
+        """GET /api/proposals?leadId= is the history list and stays uncollapsed."""
+        rows = [
+            _proposal_row(id="prop-older00001", created_at=datetime(2026, 6, 1, 9, 0, 0)),
+            _proposal_row(id="prop-newer00001", created_at=datetime(2026, 6, 20, 9, 0, 0)),
+        ]
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.return_value = rows
+            res = client.get("/api/proposals?leadId=lead-001")
+
+        assert res.status_code == 200
+        body = res.json()
+        assert len(body) == 2
+        assert {item["id"] for item in body} == {"prop-older00001", "prop-newer00001"}
+        sql = mock_q.call_args.args[0]
+        assert "pr_latest" not in sql
+        assert "LIMIT 1" not in sql

@@ -25,6 +25,7 @@ import type {
   TakeoffLine,
 } from '@/types/estimating'
 import type { EstimateLifecycle } from '@/types/estimating'
+import type { OccurrenceCountKey } from '@/lib/estimating/occurrences'
 import type { StatusTransitionRecord } from '@/lib/estimating/transitions'
 
 // Omit that distributes over the Estimate discriminated union so the
@@ -38,8 +39,24 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
  */
 export type CreateEstimatePayload = DistributiveOmit<
   Estimate,
-  'id' | 'createdAt' | 'updatedAt' | 'aspireOpportunityId' | 'aspireSyncStatus'
-> & {
+  | 'id'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'aspireOpportunityId'
+  | 'aspireSyncStatus'
+  // Server-computed from dueBackDate. Never sent by the client.
+  | 'isRush'
+  // Optional on create: omit stores null. A sent 0 stays 0.
+  | 'homesBudget'
+  | 'commonAreaBudget'
+  // Optional on create: omit or null stores NULL. Install intake omits them.
+  | OccurrenceCountKey
+> &
+  Partial<Pick<Estimate, OccurrenceCountKey>> & {
+  /** Homes budget in dollars. Omit or null → unknown. 0 stays 0. */
+  homesBudget?: number | null
+  /** Common-area budget in dollars. Omit or null → unknown. 0 stays 0. */
+  commonAreaBudget?: number | null
   /**
    * Opportunity service line (→ Aspire DivisionID). Not persisted on the estimate
    * row; the backend reads it to build the opportunity payload. Defaults per type.
@@ -74,6 +91,13 @@ export type UpdateEstimatePayload = Partial<{
   branchCity: string | null
   customerType: Estimate['customerType']
   acreage: number | null
+  /** Yearly visit counts. Omit to leave unchanged; null clears; 0 stores 0. */
+  mowingOccurrences: number | null
+  pruningOccurrences: number | null
+  turfFertOccurrences: number | null
+  shrubFertOccurrences: number | null
+  ipmOccurrences: number | null
+  irrigationOccurrences: number | null
   contractValueCents: number
   targetMargin: number
   status: EstimateStatus
@@ -99,6 +123,13 @@ export type UpdateEstimatePayload = Partial<{
    * persisted display column; the backend stores it for the write-back + sweep.
    */
   lostReasonId: number
+  /**
+   * Homes budget in dollars. Omit to keep the stored value. Null or blank
+   * clears it back to unknown. 0 stores 0. Estimator-owned.
+   */
+  homesBudget: number | null
+  /** Common-area budget in dollars. Same omit / null / 0 rules as homesBudget. */
+  commonAreaBudget: number | null
 }>
 
 /** Body for POST /api/estimating/intake/drafts. */
@@ -202,6 +233,14 @@ function assertNoEstimateTypeMutation(body: object): void {
   }
 }
 
+/** `isRush` is computed by the server. Drop it if a caller still has it. */
+function stripIsRush<T extends object>(body: T): T {
+  if (!('isRush' in body)) return body
+  const copy = { ...body }
+  delete (copy as { isRush?: unknown }).isRush
+  return copy
+}
+
 export const estimatingApi = {
   list: (params?: ListEstimatesParams) => {
     const qs = new URLSearchParams()
@@ -215,10 +254,10 @@ export const estimatingApi = {
   },
   get: (id: string) => apiClient.get<Estimate>(`/estimating/estimates/${id}`),
   create: (body: CreateEstimatePayload) =>
-    apiClient.post<Estimate>('/estimating/estimates', body),
+    apiClient.post<Estimate>('/estimating/estimates', stripIsRush(body)),
   update: async (id: string, body: UpdateEstimatePayload) => {
     assertNoEstimateTypeMutation(body)
-    return apiClient.patch<Estimate>(`/estimating/estimates/${id}`, body)
+    return apiClient.patch<Estimate>(`/estimating/estimates/${id}`, stripIsRush(body))
   },
 
   /**
@@ -277,12 +316,16 @@ export const estimatingApi = {
   retryAspireSync: (id: string) =>
     apiClient.post<{ status: string }>(`/estimating/estimates/${id}/retry-aspire-sync`, {}),
 
-  /** Presign a GCS resumable upload session for a single PDF attachment. */
+  /**
+   * Presign a GCS resumable upload session. RFP (`kind: "rfp"`) accepts PDF,
+   * Word, and Excel; every other kind stays on its own allowlist. The returned
+   * `contentType` is the MIME the browser PUT must send.
+   */
   presignAttachment: (
     estimateId: string,
     body: { kind: import('@/types/estimating').AttachmentKind; fileName: string; contentType: string; sizeBytes: number },
   ) =>
-    apiClient.post<{ attachmentId: string; objectKey: string; uploadUrl: string }>(
+    apiClient.post<{ attachmentId: string; objectKey: string; uploadUrl: string; contentType: string }>(
       `/estimating/estimates/${estimateId}/attachments/presign`,
       body,
     ),
@@ -328,7 +371,7 @@ export const estimatingApi = {
     leadId: string,
     body: { kind: import('@/types/estimating').AttachmentKind; fileName: string; contentType: string; sizeBytes: number },
   ) =>
-    apiClient.post<{ attachmentId: string; objectKey: string; uploadUrl: string }>(
+    apiClient.post<{ attachmentId: string; objectKey: string; uploadUrl: string; contentType?: string }>(
       `/leads/${leadId}/attachments/presign`,
       body,
     ),

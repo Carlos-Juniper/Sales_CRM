@@ -264,6 +264,51 @@ describe('UsersSection — enriched backend fields', () => {
     expect(screen.getByTestId('aspire-rep-hint-u-sal')).toBeInTheDocument()
   })
 
+  it('shows the Aspire rep hint for maintenance_sales and install_sales with no Aspire contact', async () => {
+    mockUsers([
+      {
+        id: 'u-maint',
+        name: 'Mia Maint',
+        email: 'mia@juniper.com',
+        role: 'maintenance_sales',
+        active: 1,
+        aspire_rep_id: null,
+        branches: [],
+      },
+      {
+        id: 'u-inst',
+        name: 'Ian Install',
+        email: 'ian@juniper.com',
+        role: 'install_sales',
+        active: 1,
+        aspire_rep_id: null,
+        branches: [],
+      },
+    ])
+    renderSection()
+    expect(await screen.findByText('Role: Maintenance Sales')).toBeInTheDocument()
+    expect(screen.getByText('Role: Install Sales')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /edit mia maint/i }))
+    expect(screen.getByTestId('aspire-rep-hint-u-maint')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /edit ian install/i }))
+    expect(screen.getByTestId('aspire-rep-hint-u-inst')).toBeInTheDocument()
+  })
+
+  it('offers Maintenance Sales and Install Sales in the role picker', async () => {
+    renderSection()
+    await screen.findByText('Carla Reyes')
+    fireEvent.change(screen.getByTestId('directory-search'), {
+      target: { value: 'nina' },
+    })
+    fireEvent.click(await screen.findByText('nina.park@juniper.com'))
+    const select = screen.getByTestId('authorize-role') as HTMLSelectElement
+    const labels = Array.from(select.options).map((option) => option.text)
+    expect(labels).toEqual(expect.arrayContaining(['Maintenance Sales', 'Install Sales']))
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(
+      expect.arrayContaining(['maintenance_sales', 'install_sales']),
+    )
+  })
+
   it('does NOT show the Aspire rep hint for a sales user with a resolved aspireRepId', async () => {
     // Carla has aspire_rep_id: 42 — no hint should appear.
     renderSection()

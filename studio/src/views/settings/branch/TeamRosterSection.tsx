@@ -9,6 +9,7 @@ import {
   useDeleteTeamMemberHeadshot,
 } from '@/hooks/useProposals'
 import { teamMemberTitleLabel, TEAM_MEMBER_TITLE_LABELS } from '@/lib/proposal/titleLabels'
+import { AllRegionsBadge } from '@/components/proposal/RegionSwitcher'
 import { ImageUploadField } from '@/components/settings/ImageUploadField'
 import type { TeamMember } from '@/types/proposal'
 import { TEAM_MEMBER_BIO_MAX_LENGTH } from '@/types/proposal'
@@ -16,7 +17,8 @@ import type {
   TeamMemberCreateBody,
   TeamMemberPatchBody,
 } from '@/api/settings'
-import { SettingsFormShell, FormStatus } from '../company/formStatus'
+import { SettingsFormShell, FormStatus, LegacyOwnerBadge } from '../company/formStatus'
+import { errorDetail } from '../errorDetail'
 
 /**
  * Branch team roster management section (Slice 13b).
@@ -41,18 +43,30 @@ import { SettingsFormShell, FormStatus } from '../company/formStatus'
 export function TeamRosterSection({
   aspireBranchId,
   canEditCompanyWide = false,
+  repId,
 }: {
   aspireBranchId: number | null
   canEditCompanyWide?: boolean
+  /** When set, list and writes are scoped to this sales rep (Settings). */
+  repId?: string
 }) {
   const companyWide = aspireBranchId === null
-  const { data, isLoading, isError } = useTeamMembers(
-    companyWide ? undefined : { aspireBranchId },
+  const repScoped = repId !== undefined
+  // Roster management must keep seeing every region. An omitted region_id
+  // narrows to the caller once that default is live. repId scopes Settings
+  // to one sales rep without dropping the other regions.
+  const { data, isLoading, isError, error } = useTeamMembers(
+    repScoped
+      ? { repId, regionId: 'all' }
+      : companyWide
+        ? { regionId: 'all' }
+        : { aspireBranchId, regionId: 'all' },
   )
   const { isAdmin } = useRole()
   // In company-wide mode, marketing (or admin) may edit; the branch view keeps
   // its original rule (company-wide rows admin-only, branch rows BM-editable).
-  const canEditCompany = isAdmin || canEditCompanyWide
+  // A rep-scoped list is that rep's rows, so the caller may edit them.
+  const canEditCompany = repScoped || isAdmin || canEditCompanyWide
   const [showCreate, setShowCreate] = useState(false)
 
   if (isLoading) {
@@ -66,7 +80,7 @@ export function TeamRosterSection({
     return (
       <SettingsFormShell slug="team-roster" title="Team roster">
         <p role="alert" className="text-xs text-red-600">
-          Could not load team members. The branch may be out of your scope.
+          {errorDetail(error, 'Could not load team members. The branch may be out of your scope.')}
         </p>
       </SettingsFormShell>
     )
@@ -75,7 +89,7 @@ export function TeamRosterSection({
   // Company-wide mode shows only the company-wide (null-branch) rows; the
   // branch view keeps the API's null-inclusion behaviour.
   const members = (data ?? []).filter((m) =>
-    companyWide ? m.aspireBranchId === null : true,
+    repScoped ? true : companyWide ? m.aspireBranchId === null : true,
   )
 
   return (
@@ -83,14 +97,20 @@ export function TeamRosterSection({
       slug="team-roster"
       title="Team roster"
       description={
-        companyWide
-          ? 'Company-wide team members (leadership / executive) included in every proposal package.'
-          : 'Branch team members included in proposal packages. Company-wide rows are read-only here — edit them as admin.'
+        repScoped
+          ? 'This rep’s team members included in their proposal packages.'
+          : companyWide
+            ? 'Company-wide team members (leadership / executive) included in every proposal package.'
+            : 'Branch team members included in proposal packages. Company-wide rows are read-only here — edit them as admin.'
       }
     >
       {members.length === 0 && !showCreate && (
         <p className="text-xs text-[var(--fg)] opacity-60 mb-3">
-          {companyWide ? 'No company-wide team members yet.' : 'No team members yet for this branch.'}
+          {repScoped
+            ? 'No team members yet for this rep.'
+            : companyWide
+              ? 'No company-wide team members yet.'
+              : 'No team members yet for this branch.'}
         </p>
       )}
 
@@ -101,6 +121,8 @@ export function TeamRosterSection({
             member={member}
             branchId={aspireBranchId}
             isAdmin={canEditCompany}
+            repId={repId}
+            repScoped={repScoped}
           />
         ))}
       </ul>
@@ -108,6 +130,7 @@ export function TeamRosterSection({
       {showCreate ? (
         <TeamMemberForm
           aspireBranchId={aspireBranchId}
+          repId={repId}
           onDone={() => setShowCreate(false)}
         />
       ) : (
@@ -129,17 +152,21 @@ function TeamMemberRow({
   member,
   branchId,
   isAdmin,
+  repId,
+  repScoped,
 }: {
   member: TeamMember
   branchId: number | null
   isAdmin: boolean
+  repId?: string
+  repScoped: boolean
 }) {
   const [editing, setEditing] = useState(false)
   // The branch id is only a cache-key hint (unused by the hook); 0 is a safe
   // company-wide sentinel since invalidation is by query-key prefix.
-  const deactivate = useDeactivateTeamMember(branchId ?? 0)
-  const upload = useUploadTeamMemberHeadshot()
-  const removeHeadshot = useDeleteTeamMemberHeadshot()
+  const deactivate = useDeactivateTeamMember(branchId ?? 0, repId)
+  const upload = useUploadTeamMemberHeadshot(repId)
+  const removeHeadshot = useDeleteTeamMemberHeadshot(repId)
 
   // Company-wide rows (aspireBranchId === null): admin/marketing edit freely; a
   // branch manager sees them read-only. The `isAdmin` prop already carries the
@@ -153,6 +180,7 @@ function TeamMemberRow({
         <TeamMemberForm
           aspireBranchId={branchId}
           existing={member}
+          repId={repId}
           onDone={() => setEditing(false)}
         />
       </li>
@@ -164,17 +192,21 @@ function TeamMemberRow({
       <div className="flex items-start justify-between">
         <div>
           <span className="font-medium text-[var(--fg)]">{member.name}</span>
+          <AllRegionsBadge regionId={member.regionId} testId={`team-member-${member.id}-all-regions`} />
           <span className="ml-2 text-[var(--fg)] opacity-60">{teamMemberTitleLabel(member.title)}</span>
           {member.location && (
             <span className="ml-2 text-[var(--fg)] opacity-50">— {member.location}</span>
           )}
-          {isCompanyWide && (
+          {!repScoped && isCompanyWide && (
             <span
               data-testid={`team-member-${member.id}-readonly`}
               className="ml-2 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800"
             >
               Company-wide (read-only)
             </span>
+          )}
+          {member.ownerUserId === null && (
+            <LegacyOwnerBadge testId={`team-member-${member.id}-legacy`} />
           )}
         </div>
         {canEdit && (
@@ -197,6 +229,11 @@ function TeamMemberRow({
           </div>
         )}
       </div>
+      {deactivate.isError && (
+        <p role="alert" className="mt-1 text-[10px] text-red-600">
+          {errorDetail(deactivate.error, 'Could not deactivate.')}
+        </p>
+      )}
       {canEdit && (
         <div className="mt-2">
           <ImageUploadField
@@ -239,10 +276,12 @@ const OTHER_TITLE = '__other__'
 function TeamMemberForm({
   aspireBranchId,
   existing,
+  repId,
   onDone,
 }: {
   aspireBranchId: number | null
   existing?: TeamMember
+  repId?: string
   onDone: () => void
 }) {
   const [name, setName] = useState(existing?.name ?? '')
@@ -250,12 +289,13 @@ function TeamMemberForm({
   const [bio, setBio] = useState(existing?.bio ?? '')
   const [location, setLocation] = useState(existing?.location ?? '')
 
-  const create = useCreateTeamMember(aspireBranchId ?? 0)
-  const update = useUpdateTeamMember(aspireBranchId ?? 0)
+  const create = useCreateTeamMember(aspireBranchId ?? 0, repId)
+  const update = useUpdateTeamMember(aspireBranchId ?? 0, repId)
 
   const isPending = create.isPending || update.isPending
   const isSuccess = create.isSuccess || update.isSuccess
   const isError = create.isError || update.isError
+  const saveError = create.error ?? update.error
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -323,7 +363,11 @@ function TeamMemberForm({
           Cancel
         </button>
       </div>
-      <FormStatus isSuccess={isSuccess} isError={isError} />
+      <FormStatus
+        isSuccess={isSuccess}
+        isError={isError}
+        errorText={errorDetail(saveError, 'Could not save. Try again.')}
+      />
     </form>
   )
 }

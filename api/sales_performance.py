@@ -63,16 +63,19 @@ def register(app, require_auth) -> None:
         records — it returns every user in a sales role so the dropdown populates
         even on a fresh DB or when a rep hasn't closed any deals yet.
         """
+        authz.require_sales_performance_access(user)
         if not _can_view_all(user):
             raise HTTPException(status_code=403)
 
+        placeholders = ", ".join(["%s"] * len(authz.SALES_REP_DB_ROLES))
         rows = await query(
-            """
+            f"""
             SELECT id, name, email
             FROM users
-            WHERE role IN ('sales', 'inside_sales', 'outside_sales')
+            WHERE role IN ({placeholders})
             ORDER BY name
-            """
+            """,
+            list(authz.SALES_REP_DB_ROLES),
         )
         return [_coerce_row(row) for row in rows]
 
@@ -88,6 +91,7 @@ def register(app, require_auth) -> None:
         Admins (CROSS_BRANCH_ROLES) may pass ?user_id= to scope to a specific rep, or
         omit it to aggregate across all reps.  Non-admins are always scoped to themselves.
         """
+        authz.require_sales_performance_access(user)
         can_view_all = _can_view_all(user)
 
         # Determine the target user: non-admins are always self-scoped.
@@ -225,6 +229,7 @@ def register(app, require_auth) -> None:
         Each row includes the property name, estimate type, notes, Aspire number,
         and the rep's name/email for admin views.
         """
+        authz.require_sales_performance_access(user)
         can_view_all = _can_view_all(user)
 
         if not can_view_all:
@@ -283,6 +288,7 @@ def register(app, require_auth) -> None:
         Groups by estimate so each deal appears once even if the status was
         toggled multiple times; lost_at is the most recent 'lost' transition.
         """
+        authz.require_sales_performance_access(user)
         can_view_all = _can_view_all(user)
 
         if not can_view_all:

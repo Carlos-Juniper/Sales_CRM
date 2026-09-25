@@ -60,11 +60,19 @@ export interface TeamMember {
   // Amendment A.4: when set, name/title/branch derive from users + user_branches.
   // Non-CRM users (production managers, foremen) carry userId: null with their own name/title.
   userId: string | null
+  /** Owning sales rep (`users.id`). Null is a legacy company or branch row. */
+  ownerUserId: string | null
   location: string | null
   bio: string
   headshotObjectKey: string | null   // GCS, same pattern as IntakeAttachment.objectKey
   active: boolean
   sortOrder: number
+  /**
+   * `branches.region_id` for this row's branch.
+   * null = company-wide, a missing branch, or a branch whose region was never
+   * set. Those rows stay in every region filter; label them "All regions".
+   */
+  regionId: string | null
 }
 
 /**
@@ -140,6 +148,8 @@ export interface InsuranceCert {
 export interface ClientReference {
   id: string
   aspireBranchId: number | null   // Amendment A.1: null = usable company-wide
+  /** Owning sales rep (`users.id`). Null is a legacy company or branch row. */
+  ownerUserId: string | null
   propertyName: string
   servicesProvided: string
   contactName: string
@@ -149,6 +159,12 @@ export interface ClientReference {
   address: string
   clientSinceYear: number
   active: boolean
+  /**
+   * `branches.region_id` for this reference's branch.
+   * null = company-wide or a branch with no region. Those rows stay in every
+   * region filter; label them "All regions".
+   */
+  regionId: string | null
 }
 
 export interface PortfolioProperty {

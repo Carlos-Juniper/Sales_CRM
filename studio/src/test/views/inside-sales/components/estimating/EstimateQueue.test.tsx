@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // Estimate Queue tests (Acceptance Criteria §3).
 //
-// The queue is the estimator's landing view: live stat cards, filter/sort bar
-// with the branch-scope lock-chip, the two intake CTAs,
+// The queue is the estimator's landing view: live stat cards, filter/sort bar,
+// the two intake CTAs,
 // and clickable estimate cards that open the Line-Item Editor with the engine
 // keyed off `estimateType` (no mode prompt, ever).
 // ---------------------------------------------------------------------------
@@ -23,6 +23,12 @@ import {
 } from '@/views/inside-sales/components/estimating/useEstimatingShell'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 import type { Estimate } from '@/types/estimating'
+import { localDateOnly } from '@/lib/estimating/sla'
+
+function calendarShift(days: number): string {
+  const [y, m, d] = localDateOnly().split('-').map(Number)
+  return localDateOnly(new Date(y, m - 1, d + days))
+}
 
 // Radix Select needs these DOM APIs that jsdom does not implement.
 window.HTMLElement.prototype.hasPointerCapture = vi.fn()
@@ -390,19 +396,10 @@ describe('EstimateQueue — role & branch scoping (BRD I-9.5)', () => {
     expect(await cardNames()).toHaveLength(4)
   })
 
-  it('shows the lock-chip reflecting the user branch for scoped roles', async () => {
+  it('does not render the role and branch scope badge', async () => {
     renderQueue()
-    expect(
-      await screen.findByText('Role & branch scoped — b1'),
-    ).toBeInTheDocument()
-  })
-
-  it('shows "All branches" for cross-branch exec roles', async () => {
-    useAuthStore.setState({ user: makeUser({ role: 'ceo', branch_id: 'b1' }) })
-    renderQueue()
-    expect(
-      await screen.findByText('Role & branch scoped — All branches'),
-    ).toBeInTheDocument()
+    await screen.findAllByTestId('queue-card')
+    expect(screen.queryByText(/role & branch scoped/i)).not.toBeInTheDocument()
   })
 })
 
@@ -502,11 +499,71 @@ describe('EstimateQueue — RFI status surfaced (§3.2)', () => {
     )
   })
 
+  it('renders a null maintenance budget as an em dash and a real zero as $0', async () => {
+    renderQueue({
+      estimates: [
+        buildMaintenanceEstimate({
+          id: 'q-budgets',
+          name: 'Split Budget HOA',
+          homesBudget: null,
+          commonAreaBudget: 0,
+        }),
+      ],
+    })
+    const card = await screen.findByTestId('queue-card')
+    const budgets = within(card).getByTestId('queue-contract-budgets')
+    expect(budgets).toHaveTextContent(/Homes budget\s+—/)
+    expect(budgets).toHaveTextContent(/Common area budget\s+\$0/)
+    expect(budgets).not.toHaveTextContent(/Homes budget\s+\$0/)
+  })
+
   it('renders no RFI chip when rfiStatus is absent', async () => {
     renderQueue({
       estimates: [buildInstallEstimate({ id: 'q-no-rfi', name: 'No RFI Job' })],
     })
     await screen.findByTestId('queue-card')
     expect(screen.queryByTestId('queue-rfi-status')).not.toBeInTheDocument()
+  })
+})
+
+describe('EstimateQueue — rush badge', () => {
+  it('shows Rush on a queue row only when isRush is true', async () => {
+    renderQueue({
+      estimates: [
+        buildMaintenanceEstimate({
+          id: 'q-rush',
+          name: 'Rush Job',
+          dueBackDate: calendarShift(2),
+          isRush: true,
+        }),
+        buildMaintenanceEstimate({
+          id: 'q-later',
+          name: 'Later Job',
+          dueBackDate: calendarShift(30),
+          isRush: false,
+        }),
+      ],
+    })
+    const cards = await screen.findAllByTestId('queue-card')
+    const rush = cards.find((c) => within(c).queryByText('Rush Job'))!
+    const later = cards.find((c) => within(c).queryByText('Later Job'))!
+    expect(within(rush).getByTestId('rush-badge')).toHaveTextContent('Rush')
+    expect(within(later).queryByTestId('rush-badge')).not.toBeInTheDocument()
+  })
+
+  it('keeps the overdue label on past-due rows and does not badge them Rush', async () => {
+    renderQueue({
+      estimates: [
+        buildInstallEstimate({
+          id: 'q-late',
+          name: 'Late Job',
+          dueBackDate: calendarShift(-3),
+          isRush: false,
+        }),
+      ],
+    })
+    const card = await screen.findByTestId('queue-card')
+    expect(within(card).getByText(/overdue — SLA breached/)).toBeInTheDocument()
+    expect(within(card).queryByTestId('rush-badge')).not.toBeInTheDocument()
   })
 })

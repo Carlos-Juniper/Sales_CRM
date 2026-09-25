@@ -181,6 +181,7 @@ def test_schedule_meeting_creates_event_and_logs_action():
     created = {**_SAMPLE_EVENT, "id": "sched-evt-001"}
     with (
         patch("api.graph.create_event", new_callable=AsyncMock, return_value=created),
+        patch("api.server.query", new_callable=AsyncMock, return_value=[{"id": "lead-uuid-1", "source": "manual", "assigned_to": "u1"}]),
         patch("api.server.execute", new_callable=AsyncMock) as mock_exec,
     ):
         resp = client.post(
@@ -206,7 +207,10 @@ def test_schedule_meeting_creates_event_and_logs_action():
 
 def test_schedule_meeting_returns_400_when_no_graph_token():
     """AC-server-9: no Graph token → 400 with clear message."""
-    with patch("api.graph.create_event", new_callable=AsyncMock, side_effect=ValueError("no Graph token")):
+    with (
+        patch("api.server.query", new_callable=AsyncMock, return_value=[{"id": "lead-uuid-1", "source": "manual", "assigned_to": "u1"}]),
+        patch("api.graph.create_event", new_callable=AsyncMock, side_effect=ValueError("no Graph token")),
+    ):
         resp = client.post(
             "/api/leads/lead-uuid-1/schedule-meeting",
             json={

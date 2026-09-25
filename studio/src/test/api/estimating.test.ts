@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { estimatingApi } from '@/api/estimating'
-import { apiClient } from '@/api/client'
+import { apiClient, ApiError } from '@/api/client'
+import { server } from '@/mocks/server'
+import { DUE_BACK_PAST_MESSAGE, SLA_CONFIG, addCalendarDays, businessDateOnly } from '@/lib/estimating/sla'
 import {
   buildMaintenanceEstimate,
   buildInstallEstimate,
@@ -75,6 +78,62 @@ describe('estimating data-access layer (MSW round-trip)', () => {
     const installs = await estimatingApi.list({ estimateType: 'install' })
     expect(installs.length).toBeGreaterThan(0)
     expect(installs.every((e: Estimate) => e.estimateType === 'install')).toBe(true)
+  })
+
+  it('stores occurrence counts as integers or null and returns them on get and list', async () => {
+    const payload = toCreatePayload(buildMaintenanceEstimate({ name: 'Counts' }))
+    const created = await estimatingApi.create({
+      ...payload,
+      mowingOccurrences: 0,
+      pruningOccurrences: null,
+      turfFertOccurrences: 6,
+    })
+    expect(created.mowingOccurrences).toBe(0)
+    expect(created.pruningOccurrences).toBeNull()
+    expect(created.turfFertOccurrences).toBe(6)
+    expect(created.shrubFertOccurrences).toBeNull()
+    expect(created.ipmOccurrences).toBeNull()
+    expect(created.irrigationOccurrences).toBeNull()
+
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.mowingOccurrences).toBe(0)
+    const listed = (await estimatingApi.list()).find((row) => row.id === created.id)
+    expect(listed?.irrigationOccurrences).toBeNull()
+
+    const patched = await estimatingApi.update(created.id, { pruningOccurrences: 12 })
+    expect(patched.pruningOccurrences).toBe(12)
+    expect(patched.mowingOccurrences).toBe(0)
+
+    const cleared = await estimatingApi.update(created.id, { mowingOccurrences: null })
+    expect(cleared.mowingOccurrences).toBeNull()
+    expect(cleared.pruningOccurrences).toBe(12)
+  })
+
+  it('rejects a non-integer occurrence count with the 422 detail and writes nothing', async () => {
+    const payload = toCreatePayload(buildMaintenanceEstimate({ name: 'Bad count' }))
+    await expect(
+      estimatingApi.create({ ...payload, mowingOccurrences: 1.5 }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: 'mowingOccurrences must be an integer from 0 to 366, or null',
+    })
+    await expect(
+      estimatingApi.create({ ...payload, ipmOccurrences: '4' as unknown as number }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: 'ipmOccurrences must be an integer from 0 to 366, or null',
+    })
+
+    const created = await estimatingApi.create({ ...payload, mowingOccurrences: 10 })
+    await expect(
+      estimatingApi.update(created.id, { turfFertOccurrences: 367 }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: 'turfFertOccurrences must be an integer from 0 to 366, or null',
+    })
+    const unchanged = await estimatingApi.get(created.id)
+    expect(unchanged.mowingOccurrences).toBe(10)
+    expect(unchanged.turfFertOccurrences).toBeNull()
   })
 
   it('patches mutable estimate fields', async () => {
@@ -201,7 +260,178 @@ describe('attachment API round-trip (GCS feature)', () => {
         contentType: 'application/vnd.ms-excel',
         sizeBytes: 1024,
       }),
+    ).rejects.toMatchObject({ status: 400, message: 'Only PDF attachments are supported' })
+  })
+
+  it('presign accepts an rfp docx and confirm stores that content type after a matching PUT', async () => {
+    const estimateId = await createWithIntake('RFP docx')
+    const contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    const presign = await estimatingApi.presignAttachment(estimateId, {
+      kind: 'rfp',
+      fileName: 'scope.docx',
+      contentType,
+      sizeBytes: 2048,
+    })
+    expect(presign.contentType).toBe(contentType)
+    expect(presign.objectKey).toMatch(/\.docx$/)
+
+    const put = await fetch(presign.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': presign.contentType },
+      body: new Uint8Array(32),
+    })
+    expect(put.ok).toBe(true)
+
+    const confirmed = await estimatingApi.confirmAttachment(estimateId, presign.attachmentId)
+    expect(confirmed.status).toBe('stored')
+    expect(confirmed.contentType).toBe(contentType)
+
+    const download = await estimatingApi.getAttachmentDownloadUrl(estimateId, presign.attachmentId)
+    expect(download.url).toContain(presign.objectKey)
+    expect(download.expiresIn).toBe(600)
+  })
+
+  it('confirm returns 400 when the uploaded blob content type does not match the presign', async () => {
+    const estimateId = await createWithIntake('RFP mismatch confirm')
+    const presign = await estimatingApi.presignAttachment(estimateId, {
+      kind: 'rfp',
+      fileName: 'pricing.xlsx',
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      sizeBytes: 1024,
+    })
+    await fetch(presign.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/pdf' },
+      body: new Uint8Array(16),
+    })
+    await expect(estimatingApi.confirmAttachment(estimateId, presign.attachmentId)).rejects.toMatchObject({
+      status: 400,
+      message: 'Upload validation failed',
+    })
+  })
+
+  it('presign rejects an rfp extension that is not PDF, Word, or Excel', async () => {
+    const estimateId = await createWithIntake('RFP exe')
+    await expect(
+      estimatingApi.presignAttachment(estimateId, {
+        kind: 'rfp',
+        fileName: 'payload.exe',
+        contentType: 'application/pdf',
+        sizeBytes: 128,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'RFP documents must be PDF, Word (.doc, .docx), or Excel (.xls, .xlsx)',
+    })
+  })
+
+  it('presign rejects an rfp whose extension does not match its content type', async () => {
+    const estimateId = await createWithIntake('RFP mismatch')
+    await expect(
+      estimatingApi.presignAttachment(estimateId, {
+        kind: 'rfp',
+        fileName: 'scope.docx',
+        contentType: 'application/pdf',
+        sizeBytes: 128,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'RFP file extension does not match its content type',
+    })
+  })
+
+  it('presign still rejects a docx for a non-rfp kind', async () => {
+    const estimateId = await createWithIntake('Property map docx')
+    await expect(
+      estimatingApi.presignAttachment(estimateId, {
+        kind: 'property_map',
+        fileName: 'notes.docx',
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        sizeBytes: 128,
+      }),
+    ).rejects.toMatchObject({ status: 400, message: 'Only PDF attachments are supported' })
+  })
+})
+
+describe('contract-structure budgets (MSW contract)', () => {
+  function payloadWithoutBudgets(name: string) {
+    const payload = toCreatePayload(buildMaintenanceEstimate({ name }))
+    delete payload.homesBudget
+    delete payload.commonAreaBudget
+    return payload
+  }
+
+  it('stores null when both budgets are omitted', async () => {
+    const created = await estimatingApi.create(payloadWithoutBudgets('Omitted budgets'))
+    expect(created.homesBudget).toBeNull()
+    expect(created.commonAreaBudget).toBeNull()
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.homesBudget).toBeNull()
+    expect(fetched.commonAreaBudget).toBeNull()
+    const listed = await estimatingApi.list()
+    const row = listed.find((e) => e.id === created.id)
+    expect(row?.homesBudget).toBeNull()
+    expect(row?.commonAreaBudget).toBeNull()
+  })
+
+  it('stores null for blank strings and 0 for a typed zero', async () => {
+    const created = await estimatingApi.create({
+      ...payloadWithoutBudgets('Blank and zero'),
+      intake: { payload: { homesBudget: '   ', commonAreaBudget: '0' } },
+    })
+    expect(created.homesBudget).toBeNull()
+    expect(created.commonAreaBudget).toBe(0)
+    const [submission] = await estimatingApi.listIntake(created.id)
+    expect(submission.payload.homesBudget).toBeNull()
+    expect(submission.payload.commonAreaBudget).toBe(0)
+  })
+
+  it('stores typed dollar amounts and lets a top-level value win', async () => {
+    const created = await estimatingApi.create({
+      ...payloadWithoutBudgets('Top-level wins'),
+      homesBudget: 120000,
+      commonAreaBudget: 10.005,
+      intake: { payload: { homesBudget: 1, commonAreaBudget: '' } },
+    })
+    expect(created.homesBudget).toBe(120000)
+    expect(created.commonAreaBudget).toBe(10.01)
+    const [submission] = await estimatingApi.listIntake(created.id)
+    expect(submission.payload.homesBudget).toBe(120000)
+    expect(submission.payload.commonAreaBudget).toBe(10.01)
+  })
+
+  it('returns 400 and inserts nothing for a negative or non-numeric budget', async () => {
+    await expect(
+      estimatingApi.create({ ...payloadWithoutBudgets('Negative budget'), homesBudget: -1 }),
     ).rejects.toMatchObject({ status: 400 })
+    await expect(
+      estimatingApi.create({
+        ...payloadWithoutBudgets('Non-numeric budget'),
+        commonAreaBudget: 'abc' as unknown as number,
+      }),
+    ).rejects.toMatchObject({ status: 400 })
+    const listed = await estimatingApi.list()
+    expect(listed.some((e) => e.name === 'Negative budget' || e.name === 'Non-numeric budget')).toBe(false)
+  })
+
+  it('PATCH clears with null, keeps an omitted field, stores 0, and 400s on a negative', async () => {
+    const created = await estimatingApi.create({
+      ...payloadWithoutBudgets('Patch budgets'),
+      homesBudget: 500,
+      commonAreaBudget: 80,
+    })
+    const cleared = await estimatingApi.update(created.id, { homesBudget: null })
+    expect(cleared.homesBudget).toBeNull()
+    expect(cleared.commonAreaBudget).toBe(80)
+    const zeroed = await estimatingApi.update(created.id, { commonAreaBudget: 0 })
+    expect(zeroed.homesBudget).toBeNull()
+    expect(zeroed.commonAreaBudget).toBe(0)
+    await expect(
+      estimatingApi.update(created.id, { homesBudget: -2 }),
+    ).rejects.toMatchObject({ status: 400 })
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.homesBudget).toBeNull()
+    expect(fetched.commonAreaBudget).toBe(0)
   })
 })
 
@@ -222,5 +452,66 @@ describe('estimateType immutability guard (§2)', () => {
     // and the stored record is untouched
     const fetched = await estimatingApi.get(created.id)
     expect(fetched.estimateType).toBe('install')
+  })
+})
+
+function calendarShift(days: number): string {
+  return addCalendarDays(businessDateOnly(), days)
+}
+
+describe('dueBackDate rush contract (MSW)', () => {
+  it('rejects a past dueBackDate with the server detail and writes nothing', async () => {
+    const before = (await estimatingApi.list()).length
+    const err = await estimatingApi
+      .create(toCreatePayload(buildMaintenanceEstimate({ dueBackDate: calendarShift(-1) })))
+      .catch((e) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err).toMatchObject({ status: 400, message: DUE_BACK_PAST_MESSAGE })
+    expect((await estimatingApi.list()).length).toBe(before)
+  })
+
+  it('returns isRush from create, get, list, and patch, and ignores a client flag', async () => {
+    const rush = await estimatingApi.create(
+      toCreatePayload(buildMaintenanceEstimate({ name: 'Rush RT', dueBackDate: calendarShift(0) })),
+    )
+    expect(rush.isRush).toBe(true)
+    expect(await estimatingApi.get(rush.id)).toMatchObject({ isRush: true })
+    const listed = await estimatingApi.list()
+    expect(listed.find((e) => e.id === rush.id)?.isRush).toBe(true)
+
+    const outside = await estimatingApi.create(
+      toCreatePayload(
+        buildInstallEstimate({
+          name: 'Outside RT',
+          dueBackDate: calendarShift(SLA_CONFIG.returnWindowDays),
+        }),
+      ),
+    )
+    expect(outside.isRush).toBe(false)
+
+    const moved = await estimatingApi.update(outside.id, { dueBackDate: calendarShift(1) })
+    expect(moved.isRush).toBe(true)
+    await expect(
+      estimatingApi.update(outside.id, { dueBackDate: calendarShift(-2) }),
+    ).rejects.toMatchObject({ status: 400, message: DUE_BACK_PAST_MESSAGE })
+    expect((await estimatingApi.get(outside.id)).dueBackDate.slice(0, 10)).toBe(calendarShift(1))
+  })
+
+  it('never sends isRush on create', async () => {
+    let sent: Record<string, unknown> | null = null
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        sent = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(
+          { ...buildMaintenanceEstimate({ id: 'stripped' }), ...sent, isRush: false },
+          { status: 201 },
+        )
+      }),
+    )
+    await estimatingApi.create({
+      ...toCreatePayload(buildMaintenanceEstimate({ dueBackDate: calendarShift(1) })),
+      isRush: true,
+    } as never)
+    expect(sent).not.toHaveProperty('isRush')
   })
 })

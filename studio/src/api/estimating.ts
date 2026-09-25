@@ -486,7 +486,7 @@ export const estimatingApi = {
     apiClient.post<LifecycleTransitionResult>(`/estimating/estimates/${id}/lifecycle`, { to }),
 }
 
-/** Filters for GET /api/estimating/catalog-items (empty until the table is populated). */
+/** Filters for GET /api/estimating/service-kits (alias: /catalog-items). */
 export interface ListCatalogItemsParams {
   branch?: string
   kitType?: KitType
@@ -495,7 +495,7 @@ export interface ListCatalogItemsParams {
 
 /**
  * Config-Table Read APIs. The seeded config tables
- * (approval_tiers, margin_bands, material_calcs, itb_scopes, catalog_items)
+ * (approval_tiers, margin_bands, material_calcs, itb_scopes, service_kits)
  * are the source of truth; the config.ts literals are only the offline
  * fallback. READ-ONLY by locked decision — there are no write endpoints.
  */
@@ -516,7 +516,7 @@ export const estimatingConfigApi = {
     if (params?.kitType) qs.set('kit_type', params.kitType)
     if (params?.active !== undefined) qs.set('active', String(params.active))
     const q = qs.toString()
-    return apiClient.get<CatalogItem[]>(`/estimating/catalog-items${q ? `?${q}` : ''}`)
+    return apiClient.get<CatalogItem[]>(`/estimating/service-kits${q ? `?${q}` : ''}`)
   },
 }
 

@@ -74,6 +74,7 @@ for at least one real deploy cycle.
 - **062** — adds `owner_user_id` to `team_members` and `client_references` (guarded). Not the same change as 058.
 - **063** — nullable `estimates.homes_budget` / `common_area_budget`. Renumbered from 059 so it does not share a number with the branch-manager migration on `integrate/staging-proposals`.
 - **064** — yearly maintenance occurrence counts on `estimates`. Renumbered from 061 for the same reason.
+- **065** — renames kit table `catalog_items` to `service_kits` (and `catalog_item_id` to `service_kit_id` on `section_services` and `takeoff_lines`), then creates a new `catalog_items` item master and `catalog_prices` cost history. No sell price and no cost column on the item. Rollback: `sql/rollbacks/065_service_kits_and_materials_catalog_down.sql` (not run by the migrator).
 
 ### Numbering history
 

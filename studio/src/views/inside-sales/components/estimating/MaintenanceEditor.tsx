@@ -125,7 +125,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   const toast = useToast()
   // Actor identity for the lifecycle audit comes from the JWT server-side —
   // the client no longer sends or records it.
-  // approval_tiers + catalog_items come from the API-fetched config;
+  // approval_tiers + service_kits come from the API-fetched config;
   // the config.ts / maintenance.ts literals are only the offline fallback.
   const { approvalTiers, catalogItems } = useEstimatingConfig()
 
@@ -144,7 +144,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     () => tiersForType(approvalTiers, 'maintenance'),
     [approvalTiers],
   )
-  // Kits come from GET /catalog-items; literal = offline fallback.
+  // Kits come from GET /service-kits; literal = offline fallback.
   const maintCatalog = useMemo(() => maintenanceCatalogFromItems(catalogItems), [catalogItems])
   const tier = tierForValue(contractCents, maintenanceTiers)
   const removeTarget = draft.sections.find((s) => s.id === confirmRemoveId) ?? null

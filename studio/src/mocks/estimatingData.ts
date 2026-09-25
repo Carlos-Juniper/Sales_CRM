@@ -684,7 +684,7 @@ export const mockEstimatesV2: Estimate[] = [buildMaintenanceEstimate(), buildIns
 export const mockTakeoffLines: TakeoffLine[] = buildTakeoffLines(mockEstimatesV2[1].id)
 
 // ---------------------------------------------------------------------------
-// catalog_items seed for GET /catalog-items. The maintenance
+// service_kits seed for GET /service-kits. The maintenance
 // rows mirror real workbook kits from sql/migrations/009_seed_catalog_items.sql
 // (rated + deliberately UNRATED rows, so the production-rate save guard is
 // exercisable in dev); the install rows reuse the kit literals (same ids, so

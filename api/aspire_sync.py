@@ -79,11 +79,12 @@ class PropertySyncResult:
 class TakeoffQtyLine:
     """One takeoff line's locally-owned opportunity qty, keyed by catalog item.
 
-    catalog_item_id is OUR takeoff_lines.catalog_item_id value; it is compared
+    service_kit_id is OUR takeoff_lines.service_kit_id value; it is compared
     (string-tolerant) against Aspire's OpportunityServiceItem.CatalogItemID —
-    the kit-migration workstream keeps the two aligned.
+    the kit-migration workstream keeps the two aligned. The Aspire field
+    name is unchanged.
     """
-    catalog_item_id: str
+    service_kit_id: str
     qty: float
     uom: Optional[str] = None
 

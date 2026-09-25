@@ -93,7 +93,7 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
       http.get('/api/estimating/config/margin-bands', fail),
       http.get('/api/estimating/config/material-calcs', fail),
       http.get('/api/estimating/config/itb-scopes', fail),
-      http.get('/api/estimating/catalog-items', fail),
+      http.get('/api/estimating/service-kits', fail),
     )
     const { wrapper } = createWrapper()
     const { result } = renderHook(() => useEstimatingConfig(), { wrapper })

@@ -122,6 +122,7 @@ class TestAuthRequired:
         "/api/estimating/config/material-calcs",
         "/api/estimating/config/itb-scopes",
         "/api/estimating/catalog-items",
+        "/api/estimating/service-kits",
     ])
     def test_unauthenticated_is_rejected(self, path):
         res = client.get(path)
@@ -325,6 +326,7 @@ class TestCatalogItems:
             )
         assert res.status_code == 200
         sql, params = mock_query.call_args.args[0], mock_query.call_args.args[1]
+        assert "FROM service_kits" in sql
         assert "branch = %s" not in sql
         assert "kit_type = %s" in sql
         assert "active = %s" in sql
@@ -347,6 +349,17 @@ class TestCatalogItems:
             res = client.get("/api/estimating/catalog-items?kit_type=bogus")
         assert res.status_code == 400
 
+    def test_service_kits_route_matches_catalog_items_alias(self, authed):
+        """Staggered deploys keep GET /catalog-items. Both routes read service_kits."""
+        with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
+            mock_query.return_value = [_kit_row()]
+            alias = client.get("/api/estimating/catalog-items")
+            canonical = client.get("/api/estimating/service-kits")
+        assert alias.status_code == 200
+        assert canonical.json() == alias.json()
+        assert "FROM service_kits" in mock_query.call_args_list[0].args[0]
+        assert "FROM service_kits" in mock_query.call_args_list[1].args[0]
+
 
 # ── Locked decision: read-only — no write/admin endpoints ────────────────────
 
@@ -358,6 +371,7 @@ class TestReadOnly:
             "/api/estimating/config/material-calcs",
             "/api/estimating/config/itb-scopes",
             "/api/estimating/catalog-items",
+            "/api/estimating/service-kits",
         ]
         for route in app.routes:
             path = getattr(route, "path", "")

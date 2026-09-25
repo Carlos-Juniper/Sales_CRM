@@ -310,7 +310,7 @@ class TestDiscrepancyThresholdSource:
         line_rows = [{
             "id": "tk-1", "estimate_id": "est-1", "description": "d", "uom": "sf",
             "plan_qty": 100, "add_pct": 0, "measured_qty": 118,
-            "opportunity_qty": 0, "catalog_item_id": None, "created_at": None,
+            "opportunity_qty": 0, "service_kit_id": None, "created_at": None,
         }]
         seq = [est_rows, line_rows, settings_rows]
 

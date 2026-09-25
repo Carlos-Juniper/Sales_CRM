@@ -22,7 +22,7 @@ export interface ManageableBranch {
  * branch with no configured rate hands back `crewRateCentsPerHour: null` (the
  * §2.3 no-fallback contract: never an invented number). Material factors and
  * production rates are NOT on this payload; they are read from the estimating
- * config endpoints (material-calcs / catalog-items) and written back through
+ * config endpoints (material-calcs / service-kits) and written back through
  * this endpoint's PATCH.
  */
 export interface BranchProductionRate {

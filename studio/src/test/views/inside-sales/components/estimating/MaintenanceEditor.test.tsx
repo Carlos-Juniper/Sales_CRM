@@ -53,7 +53,7 @@ beforeEach(() => {
   // These specs exercise the OFFLINE-FALLBACK catalog (the
   // maintenance.ts literal). The API-driven catalog + save-guard specs at the
   // bottom override this handler per test.
-  server.use(http.get('/api/estimating/catalog-items', () => HttpResponse.json([])))
+  server.use(http.get('/api/estimating/service-kits', () => HttpResponse.json([])))
 })
 
 /** A production-rated maintenance kit, as GET /catalog-items returns it. */
@@ -528,7 +528,7 @@ describe('MaintenanceEditor — Reset / Save', () => {
 describe('MaintenanceEditor — kit catalog + production-rate save guard', () => {
   it('feeds the add-line dropdown from GET /catalog-items, not the literal', async () => {
     server.use(
-      http.get('/api/estimating/catalog-items', () => HttpResponse.json([RATED_KIT])),
+      http.get('/api/estimating/service-kits', () => HttpResponse.json([RATED_KIT])),
     )
     renderMaint()
     const s1 = sectionCard('Common Area')
@@ -580,7 +580,7 @@ describe('MaintenanceEditor — kit catalog + production-rate save guard', () =>
       productionRate: null,
     }
     server.use(
-      http.get('/api/estimating/catalog-items', () =>
+      http.get('/api/estimating/service-kits', () =>
         HttpResponse.json([RATED_KIT, unrated]),
       ),
     )

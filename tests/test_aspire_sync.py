@@ -318,8 +318,8 @@ class TestPushProperty:
 
 def _qty_lines():
     return [
-        sync.TakeoffQtyLine(catalog_item_id="501", qty=110, uom="ea"),
-        sync.TakeoffQtyLine(catalog_item_id="502", qty=1640, uom="FT"),
+        sync.TakeoffQtyLine(service_kit_id="501", qty=110, uom="ea"),
+        sync.TakeoffQtyLine(service_kit_id="502", qty=1640, uom="FT"),
     ]
 
 

@@ -71,7 +71,7 @@ export interface InstallIntakeModalProps {
 export function InstallIntakeModal({ open, onClose, onCreated, initialProperty = null }: InstallIntakeModalProps) {
   const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
-  const { upload: uploadFile } = useAttachmentUpload()
+  const { upload: uploadFile, lastUploadError } = useAttachmentUpload()
   // Sales-author identity is no longer collected in the form. Submit still
   // sends the same fields, falling back to the signed-in user when the form
   // (or a resumed draft) does not already have them.
@@ -420,19 +420,30 @@ export function InstallIntakeModal({ open, onClose, onCreated, initialProperty =
       })
 
       // Upload each file directly to GCS — presign → XHR PUT → confirm per file.
+      // Sequential so each failure's API `detail` is reported on the toast.
+      // Errors are non-fatal: the estimate already exists.
       const uploads: Array<() => Promise<unknown>> = [
         ...(propertyMapFile ? [() => uploadFile(created.id, propertyMapFile.file, 'property_map')] : []),
         ...(rfpFile ? [() => uploadFile(created.id, rfpFile.file, 'rfp')] : []),
         ...otherFiles.map((f) => () => uploadFile(created.id, f.file, 'other')),
       ]
-      await Promise.allSettled(uploads.map((fn) => fn()))
+      const uploadErrors: string[] = []
+      for (const start of uploads) {
+        const attachment = await start()
+        const uploadError = lastUploadError()
+        if (!attachment && uploadError) uploadErrors.push(uploadError)
+      }
 
       // Submitted successfully — discard the server-side draft (best-effort).
       if (draftId) {
         estimatingApi.deleteIntakeDraft(draftId).catch(() => {})
         setDraftId(null)
       }
-      show('Install request sent to Estimating.')
+      show(
+        uploadErrors.length > 0
+          ? uploadErrors.join(' ')
+          : 'Install request sent to Estimating.',
+      )
       onCreated(created)
       openEstimateAt(created, 'editor')
       onClose()

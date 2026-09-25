@@ -51,6 +51,12 @@ import {
   ITB_SCOPE_SEED,
   MATERIAL_FORMULA_ROWS,
 } from '@/lib/estimating/config'
+import {
+  extensionForStoredContentType,
+  normalizeContentType,
+  validateAttachmentSize,
+  validateRfpDocument,
+} from '@/lib/estimating/rfpContentTypes'
 
 const API = '/api'
 const leads = [...mockLeads]
@@ -104,6 +110,10 @@ const attachments: IntakeAttachment[] = []
 
 // In-memory resumable sessions: sessionId → { attachmentId, estimateId }.
 const resumableSessions: Map<string, { attachmentId: string; estimateId: string }> = new Map()
+
+// Content-Type the browser actually PUT, keyed by attachment id. Confirm
+// compares it to the presigned type and returns 400 when they disagree.
+const uploadedContentTypeByAttachment = new Map<string, string>()
 
 /** Attachment authz: linked directly (takeoff scans) or via the intake submission. */
 function attachmentBelongsTo(a: IntakeAttachment, estimateId: string): boolean {
@@ -1287,7 +1297,7 @@ allHandlers.push(
   http.post(`${API}/estimating/estimates/:estimateId/attachments/presign`, async ({ params, request }) => {
     const { estimateId } = params as { estimateId: string }
     const est = estimates.find((e) => e.id === estimateId)
-    if (!est) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+    if (!est) return HttpResponse.json({ detail: 'Estimate not found' }, { status: 404 })
 
     const body = (await request.json()) as {
       kind?: AttachmentKind
@@ -1298,35 +1308,44 @@ allHandlers.push(
     const kind = body.kind ?? 'other'
 
     // Estimate-scoped kinds (takeoff scans + the three proposal kinds) need no
-    // intake submission; measurements/other/takeoff_scan may be images, while
-    // the contract and intake kinds stay PDF-only (Handoff 47 §3.2).
+    // intake submission. RFP accepts PDF, Word, and Excel when the extension
+    // and MIME agree. measurements/other/takeoff_scan may be images. The
+    // contract and every other intake kind stay PDF-only.
     const scanTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp']
     const estimateScoped = ['takeoff_scan', 'proposal_contract', 'proposal_measurements', 'proposal_other']
     const imageOrPdf = ['takeoff_scan', 'proposal_measurements', 'proposal_other']
-    if (imageOrPdf.includes(kind)) {
+    let contentType = body.contentType
+    if (kind === 'rfp') {
+      const checked = validateRfpDocument(body.fileName, body.contentType)
+      if (!checked.ok) {
+        return HttpResponse.json({ detail: checked.detail }, { status: 400 })
+      }
+      contentType = checked.contentType
+    } else if (imageOrPdf.includes(kind)) {
       if (!scanTypes.includes(body.contentType)) {
         return HttpResponse.json(
-          { error: 'This attachment must be PNG, JPEG, WebP, or PDF' },
+          { detail: 'This attachment must be PNG, JPEG, WebP, or PDF' },
           { status: 400 },
         )
       }
     } else if (body.contentType !== 'application/pdf') {
-      return HttpResponse.json({ error: 'Only PDF attachments are supported' }, { status: 400 })
+      return HttpResponse.json({ detail: 'Only PDF attachments are supported' }, { status: 400 })
     }
-    if (body.sizeBytes > 2 * 1024 * 1024 * 1024) {
-      return HttpResponse.json({ error: 'File exceeds the 2 GiB limit' }, { status: 400 })
+    const sizeError = validateAttachmentSize(body.sizeBytes)
+    if (sizeError) {
+      return HttpResponse.json({ detail: sizeError }, { status: 400 })
     }
 
     const sub = intakeSubmissions.find((s) => s.estimateId === estimateId)
     if (!estimateScoped.includes(kind) && !sub) {
-      return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+      return HttpResponse.json(
+        { detail: 'No intake submission found for this estimate' },
+        { status: 404 },
+      )
     }
 
     const attachmentId = eid('att')
-    const ext =
-      { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[
-        body.contentType
-      ] ?? 'bin'
+    const ext = extensionForStoredContentType(contentType)
     const objectKey = `estimating/${estimateId}/${attachmentId}.${ext}`
     const sessionId = eid('sess')
 
@@ -1335,7 +1354,7 @@ allHandlers.push(
       intakeSubmissionId: estimateScoped.includes(kind) ? null : (sub?.id ?? null),
       estimateId,
       fileName: body.fileName,
-      contentType: body.contentType,
+      contentType,
       sizeBytes: body.sizeBytes,
       kind,
       uploadedBy: null,
@@ -1351,16 +1370,20 @@ allHandlers.push(
 
     // Fake resumable upload endpoint URL — MSW intercepts it below.
     const uploadUrl = `http://localhost/__mock_gcs_upload/${sessionId}`
-    return HttpResponse.json({ attachmentId, objectKey, uploadUrl }, { status: 201 })
+    return HttpResponse.json({ attachmentId, objectKey, uploadUrl, contentType }, { status: 201 })
   }),
 )
 
 // PUT /__mock_gcs_upload/:sessionId — fake GCS resumable upload endpoint
 allHandlers.push(
-  http.put('http://localhost/__mock_gcs_upload/:sessionId', ({ params }) => {
+  http.put('http://localhost/__mock_gcs_upload/:sessionId', ({ params, request }) => {
     const { sessionId } = params as { sessionId: string }
     const session = resumableSessions.get(sessionId)
     if (!session) return new HttpResponse(null, { status: 404 })
+    uploadedContentTypeByAttachment.set(
+      session.attachmentId,
+      request.headers.get('content-type') ?? '',
+    )
     // Mark the object as uploaded so confirm can succeed.
     const att = attachments.find((a) => a.id === session.attachmentId)
     if (att) att.status = 'pending'  // still pending until confirm fires
@@ -1377,7 +1400,15 @@ allHandlers.push(
       const att = attachments.find(
         (a) => a.id === attachmentId && attachmentBelongsTo(a, estimateId),
       )
-      if (!att) return HttpResponse.json({ error: 'Not found' }, { status: 404 })
+      if (!att) return HttpResponse.json({ detail: 'Not found' }, { status: 404 })
+      const uploadedType = uploadedContentTypeByAttachment.get(attachmentId)
+      if (
+        uploadedType != null &&
+        (normalizeContentType(uploadedType) !== normalizeContentType(att.contentType) || !att.sizeBytes)
+      ) {
+        att.status = 'failed'
+        return HttpResponse.json({ detail: 'Upload validation failed' }, { status: 400 })
+      }
       att.status = 'stored'
       att.downloadable = true
       return HttpResponse.json(att)

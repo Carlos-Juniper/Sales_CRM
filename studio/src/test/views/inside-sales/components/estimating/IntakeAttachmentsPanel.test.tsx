@@ -115,6 +115,79 @@ describe('IntakeAttachmentsPanel', () => {
     }
   })
 
+  it('shows a PDF, Word, or Excel icon from contentType', async () => {
+    server.use(
+      http.get(`${API}/estimating/estimates/:id/attachments`, () =>
+        HttpResponse.json([
+          buildAtt({ id: 'pdf', fileName: 'spec.pdf', contentType: 'application/pdf', kind: 'rfp' }),
+          buildAtt({ id: 'doc', fileName: 'scope.doc', contentType: 'application/msword', kind: 'rfp' }),
+          buildAtt({
+            id: 'docx',
+            fileName: 'scope.docx',
+            contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            kind: 'rfp',
+          }),
+          buildAtt({ id: 'xls', fileName: 'pricing.xls', contentType: 'application/vnd.ms-excel', kind: 'rfp' }),
+          buildAtt({
+            id: 'xlsx',
+            fileName: 'pricing.xlsx',
+            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            kind: 'rfp',
+          }),
+        ]),
+      ),
+    )
+
+    render(<IntakeAttachmentsPanel estimateId="est-1" />)
+
+    await screen.findByText('spec.pdf')
+    expect(screen.getByRole('img', { name: 'PDF document' })).toBeInTheDocument()
+    expect(screen.getAllByRole('img', { name: 'Word document' })).toHaveLength(2)
+    expect(screen.getAllByRole('img', { name: 'Excel workbook' })).toHaveLength(2)
+    expect(screen.getByTestId('attachment-icon-pdf')).toBeInTheDocument()
+    expect(screen.getAllByTestId('attachment-icon-word')).toHaveLength(2)
+    expect(screen.getAllByTestId('attachment-icon-excel')).toHaveLength(2)
+  })
+
+  it('downloads an Excel RFP with the original filename', async () => {
+    const clickSpy = vi.fn()
+    const anchorEl = { href: '', download: '', click: clickSpy }
+    const origCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      if (tag === 'a') return anchorEl as unknown as HTMLElement
+      return origCreateElement(tag)
+    })
+
+    server.use(
+      http.get(`${API}/estimating/estimates/:id/attachments`, () =>
+        HttpResponse.json([
+          buildAtt({
+            id: 'xlsx',
+            fileName: 'pricing.xlsx',
+            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            kind: 'rfp',
+            objectKey: 'estimating/est-1/xlsx.xlsx',
+          }),
+        ]),
+      ),
+      http.get(`${API}/estimating/estimates/:estimateId/attachments/:attachmentId/download-url`, () =>
+        HttpResponse.json({ url: 'https://gcs.example.com/pricing.xlsx', expiresIn: 600 }),
+      ),
+    )
+
+    try {
+      const user = userEvent.setup()
+      render(<IntakeAttachmentsPanel estimateId="est-1" />)
+      const btn = await screen.findByRole('button', { name: /download pricing\.xlsx/i })
+      await user.click(btn)
+      await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1))
+      expect(anchorEl.download).toBe('pricing.xlsx')
+      expect(anchorEl.href).toContain('pricing.xlsx')
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
   it('shows RFP badge for rfp kind', async () => {
     server.use(
       http.get(`${API}/estimating/estimates/:id/attachments`, () =>

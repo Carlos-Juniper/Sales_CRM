@@ -17,7 +17,7 @@ function seedUser() {
 const ALL_TAB_LABELS = [
   'Estimate Queue',
   'Line-Item Editor',
-  'Takeoff Insert',
+  'Takeoff',
   'Materials Calculator',
   'Margin Analysis',
   'Discrepancy Review',
@@ -88,12 +88,12 @@ describe('EstimatingPage shell', () => {
       render(<EstimatingPage initialOpenEstimate={buildMaintenanceEstimate()} />)
       expect(screen.queryByRole('tab', { name: 'Materials Calculator' })).not.toBeInTheDocument()
       expect(screen.queryByRole('tab', { name: 'Discrepancy Review' })).not.toBeInTheDocument()
-      expect(screen.getByRole('tab', { name: 'Takeoff Insert' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Takeoff' })).toBeInTheDocument()
     })
 
-    it('an open install estimate hides Takeoff Insert', () => {
+    it('an open install estimate hides Takeoff', () => {
       render(<EstimatingPage initialOpenEstimate={buildInstallEstimate()} />)
-      expect(screen.queryByRole('tab', { name: 'Takeoff Insert' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('tab', { name: 'Takeoff' })).not.toBeInTheDocument()
       expect(screen.getByRole('tab', { name: 'Materials Calculator' })).toBeInTheDocument()
       expect(screen.getByRole('tab', { name: 'Discrepancy Review' })).toBeInTheDocument()
     })

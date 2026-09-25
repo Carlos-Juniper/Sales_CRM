@@ -32,7 +32,7 @@ describe('ESTIMATING_TABS config', () => {
     expect(ESTIMATING_TABS.map((t) => t.label)).toEqual([
       'Estimate Queue',
       'Line-Item Editor',
-      'Takeoff Insert',
+      'Takeoff',
       'Materials Calculator',
       'Margin Analysis',
       'Discrepancy Review',

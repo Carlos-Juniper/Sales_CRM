@@ -62,7 +62,7 @@ export function TakeoffInsert() {
           <ImageIcon className="h-6 w-6 text-[hsl(var(--muted-fg))]" />
         </div>
         <div>
-          <p className="text-sm font-semibold text-[hsl(var(--fg))]">Takeoff insert</p>
+          <p className="text-sm font-semibold text-[hsl(var(--fg))]">Takeoff</p>
           <p className="mt-1 text-xs text-[hsl(var(--muted-fg))]">
             Open a maintenance estimate from the queue to build its takeoff insert.
           </p>
@@ -237,7 +237,7 @@ function TakeoffInsertBody({
       {/* Header + actions */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-[hsl(var(--fg))]">Takeoff insert</h3>
+          <h3 className="text-base font-semibold text-[hsl(var(--fg))]">Takeoff</h3>
           <p className="mt-1 text-xs text-[hsl(var(--muted-fg))]">
             Estimating's only output to the CRM — the scanned property image + acreage. The
             proposal packet is built by the CRM, not here.

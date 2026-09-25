@@ -68,7 +68,7 @@ function stubXhr({ networkError = false }: { networkError?: boolean } = {}) {
 async function openTakeoffTab(estimate: MaintenanceEstimate | null) {
   const user = userEvent.setup()
   const view = render(<EstimatingPage initialOpenEstimate={estimate} />)
-  await user.click(screen.getByRole('tab', { name: 'Takeoff Insert' }))
+  await user.click(screen.getByRole('tab', { name: 'Takeoff' }))
   return { user, view }
 }
 
@@ -96,7 +96,7 @@ afterEach(() => {
 describe('TakeoffInsert — maintenance-only visibility', () => {
   it('renders the insert for an open maintenance estimate', async () => {
     await openTakeoffTab(buildMaintenanceEstimate())
-    expect(screen.getByRole('heading', { name: 'Takeoff insert' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Takeoff' })).toBeInTheDocument()
     expect(
       screen.getByText(/Estimating's only output to the CRM — the scanned property image \+ acreage/i),
     ).toBeInTheDocument()
@@ -104,8 +104,9 @@ describe('TakeoffInsert — maintenance-only visibility', () => {
 
   it('shows an open-an-estimate empty state when no estimate is open', async () => {
     await openTakeoffTab(null)
-    expect(screen.queryByRole('heading', { name: 'Takeoff insert' })).not.toBeInTheDocument()
-    expect(screen.getByText(/open a maintenance estimate/i)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Takeoff' })).not.toBeInTheDocument()
+    const prompt = screen.getByText(/open a maintenance estimate/i)
+    expect(prompt.previousElementSibling).toHaveTextContent(/^Takeoff$/)
   })
 })
 

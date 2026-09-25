@@ -688,21 +688,18 @@ export function MaintenanceIntakeModal({
             </div>
           </section>
 
-          {/* ── Scope & Dates (I-6.1 / I-9.2) ────────────────── */}
+          {/* ── Scope and dates (I-6.1 / I-9.2) ────────────────── */}
           <section>
             <p className="text-xs font-semibold text-[hsl(var(--muted-fg))] uppercase tracking-wide mb-2">
-              Scope &amp; Dates
+              Scope and dates
             </p>
             <div className="space-y-3">
-              <fieldset aria-label="Occurrences per year" className="m-0 min-w-0 space-y-2 border-0 p-0">
-                <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))]">
-                  Occurrences per year
-                </legend>
+              <div className="space-y-2">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {OCCURRENCE_COUNT_FIELDS.map(({ key, label }) => (
                     <div key={key} className="space-y-1">
                       <Label htmlFor={`mi-occ-${key}`} className="text-xs">
-                        {label} occurrences per year
+                        {label}
                       </Label>
                       <Input
                         id={`mi-occ-${key}`}
@@ -720,7 +717,9 @@ export function MaintenanceIntakeModal({
                           show(message)
                         }}
                         aria-invalid={occurrenceErrors[key] ? true : undefined}
-                        aria-describedby={occurrenceErrors[key] ? `mi-occ-${key}-error` : undefined}
+                        aria-describedby={
+                          occurrenceErrors[key] ? `mi-occ-hint mi-occ-${key}-error` : 'mi-occ-hint'
+                        }
                         className="h-8 text-xs"
                       />
                       {occurrenceErrors[key] && (
@@ -735,11 +734,11 @@ export function MaintenanceIntakeModal({
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-[hsl(var(--muted-fg))]">
+                <p id="mi-occ-hint" className="text-[10px] text-[hsl(var(--muted-fg))]">
                   Occurrences per year. Leave a field blank if it is unknown; enter 0 if that
                   service is not in the contract.
                 </p>
-              </fieldset>
+              </div>
               <div className="space-y-1">
                 <Label htmlFor="mi-scope" className="text-xs">
                   Additional scope notes (optional)

@@ -215,6 +215,23 @@ def column_exists(conn, table: str, column: str) -> bool:
     return bool(row and row["cnt"])
 
 
+def column_nullable(conn, table: str, column: str) -> bool:
+    """True only when the column exists and IS_NULLABLE = 'YES'.
+
+    A missing column is not nullable. Detectors that require NULL stay False
+    until the ADD or MODIFY has actually landed.
+    """
+    row = _fetch_one(
+        conn,
+        "SELECT IS_NULLABLE AS nullable FROM INFORMATION_SCHEMA.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+        (table, column),
+    )
+    if not row:
+        return False
+    return str(row.get("nullable", "")).upper() == "YES"
+
+
 def table_row_count(conn, table: str) -> int:
     row = _fetch_one(conn, f"SELECT COUNT(*) AS cnt FROM `{table}`")
     return int(row["cnt"]) if row else 0
@@ -788,6 +805,20 @@ def detect_042(conn) -> bool:
     return column_exists(conn, "proposal_renders", "overflowing_pages")
 
 
+def detect_059(conn) -> bool:
+    """059 applied ↔ both contract-structure budget columns exist and are nullable.
+
+    Keyed on estimates.homes_budget AND estimates.common_area_budget being
+    nullable — the file's own effect. A missing column or a NOT NULL column
+    reports not-applied so the guarded ADD/MODIFY still runs. Existence alone
+    is not enough: the point of the migration is that NULL (unknown) is legal.
+    """
+    return (
+        column_nullable(conn, "estimates", "homes_budget")
+        and column_nullable(conn, "estimates", "common_area_budget")
+    )
+
+
 # ── Detection dispatch table ──────────────────────────────────────────────────
 
 _DETECT: dict = {
@@ -830,6 +861,7 @@ _DETECT: dict = {
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
     "046_section_services_billing_type":          detect_046,
+    "059_estimate_optional_contract_budgets":     detect_059,
 }
 
 

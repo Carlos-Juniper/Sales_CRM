@@ -23,7 +23,7 @@ import math
 import os
 import uuid
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Optional
 
 from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request, Response
@@ -265,6 +265,155 @@ def _int_or_none(v: Any) -> Optional[int]:
     return int(v)
 
 
+# Contract-structure budgets on a maintenance estimate (split: homes vs common
+# area). Dollars, not cents — the intake form collects them as dollar amounts.
+# NULL is unknown. A known zero stays zero. Do not coerce NULL to 0.
+_CONTRACT_BUDGET_FIELDS: tuple[tuple[str, str], ...] = (
+    ("homesBudget", "homes_budget"),
+    ("commonAreaBudget", "common_area_budget"),
+)
+_BUDGET_QUANT = Decimal("0.01")
+_BUDGET_MAX = Decimal("9999999999999.99")
+
+
+def parse_optional_budget(value: Any, field: str) -> Optional[Decimal]:
+    """Parse one contract-structure budget.
+
+    Omitted, null, and blank (including whitespace) are unknown → None.
+    0 / "0" / 0.0 stay zero. Non-numeric values and negatives are rejected.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise HTTPException(status_code=400, detail=f"{field} must be a number, blank, or null")
+    if isinstance(value, str):
+        text = value.strip()
+        if text == "":
+            return None
+        try:
+            amount = Decimal(text)
+        except InvalidOperation:
+            raise HTTPException(
+                status_code=400, detail=f"{field} must be a number, blank, or null"
+            )
+    elif isinstance(value, (int, float, Decimal)):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise HTTPException(
+                status_code=400, detail=f"{field} must be a number, blank, or null"
+            )
+        try:
+            amount = value if isinstance(value, Decimal) else Decimal(str(value))
+        except InvalidOperation:
+            raise HTTPException(
+                status_code=400, detail=f"{field} must be a number, blank, or null"
+            )
+    else:
+        raise HTTPException(status_code=400, detail=f"{field} must be a number, blank, or null")
+    if not amount.is_finite():
+        raise HTTPException(status_code=400, detail=f"{field} must be a number, blank, or null")
+    amount = amount.quantize(_BUDGET_QUANT, rounding=ROUND_HALF_UP)
+    if amount < 0:
+        raise HTTPException(status_code=400, detail=f"{field} cannot be negative")
+    if amount > _BUDGET_MAX:
+        raise HTTPException(status_code=400, detail=f"{field} is too large")
+    return amount
+
+
+def _budget_json_number(amount: Decimal) -> int | float:
+    """Whole dollar amounts stay ints so 0 is 0, not 0.0."""
+    integral = amount.to_integral_value()
+    if amount == integral:
+        return int(integral)
+    return float(amount)
+
+
+def _budget_db_value(amount: Optional[Decimal]) -> Optional[int | float]:
+    if amount is None:
+        return None
+    return _budget_json_number(amount)
+
+
+def _budget_out(value: Any) -> Optional[int | float]:
+    """Serialize a stored budget. None stays None — never an invented zero."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, Decimal):
+        return _budget_json_number(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return _budget_json_number(Decimal(str(value)))
+    return None
+
+
+def combine_contract_budgets(homes: Any, common_area: Any) -> Optional[Decimal]:
+    """Sum the two contract-structure budgets.
+
+    A null budget is unknown, not zero, so the total is unknown unless both
+    amounts are known: None + 0 is None, and 0 + 0 is 0. Priced totals
+    (contract_value_cents, the ITB LS/IR split, commissions, sales performance)
+    must not substitute this figure, and Aspire's opportunity payload does not
+    carry it — sending 0 for an unknown budget would understate the deal.
+    """
+    if homes is None or common_area is None:
+        return None
+    return Decimal(str(homes)) + Decimal(str(common_area))
+
+
+def _intake_payload_dict(body: dict) -> Optional[dict]:
+    """The dict create_estimate will persist as the intake payload, if any."""
+    intake = body.get("intake")
+    if not isinstance(intake, dict):
+        return None
+    nested = intake.get("payload")
+    if isinstance(nested, dict):
+        return nested
+    if "payload" not in intake:
+        return intake
+    return None
+
+
+def _normalize_present_budgets(payload: dict) -> None:
+    """Rewrite budget keys already on a payload: blank → null, numeric string → number."""
+    for camel, _col in _CONTRACT_BUDGET_FIELDS:
+        if camel in payload:
+            payload[camel] = _budget_db_value(parse_optional_budget(payload[camel], camel))
+
+
+def _resolve_contract_budgets(body: dict) -> tuple[Optional[int | float], Optional[int | float]]:
+    """Column values for homes_budget and common_area_budget.
+
+    Top-level body keys win over the same names inside intake.payload (the
+    maintenance form posts them there). Omitted from both → None. When a value
+    is resolved from either place, the payload copy is rewritten so the stored
+    intake JSON matches the columns (blank strings do not survive).
+    """
+    payload = _intake_payload_dict(body)
+    if payload is not None:
+        _normalize_present_budgets(payload)
+    resolved: list[Optional[int | float]] = []
+    for camel, _col in _CONTRACT_BUDGET_FIELDS:
+        if camel in body:
+            number = _budget_db_value(parse_optional_budget(body[camel], camel))
+            if payload is not None:
+                payload[camel] = number
+        elif payload is not None and camel in payload:
+            number = payload[camel]
+        else:
+            number = None
+        resolved.append(number)
+    return resolved[0], resolved[1]
+
+
+def _coerce_budget_patch(body: dict) -> None:
+    """Normalize budget keys on a PATCH body in place. Absent keys are left absent."""
+    for camel, _col in _CONTRACT_BUDGET_FIELDS:
+        if camel in body:
+            body[camel] = _budget_db_value(parse_optional_budget(body[camel], camel))
+
+
 def _iso(v: Any) -> Any:
     if isinstance(v, (datetime, date)):
         return v.isoformat()
@@ -458,6 +607,11 @@ def _estimate_out(
         # show "Crew rate changed $X → $Y since this was submitted".
         "priorCrewRateCentsPerHour": r.get("prior_crew_rate_cents_per_hour"),
         "customerType": r["customer_type"],
+        # Split-contract budgets in dollars. Null is unknown (the rep did not
+        # have the number), distinct from a known zero. Single-structure
+        # contracts and pre-migration rows come back null.
+        "homesBudget": _budget_out(r.get("homes_budget")),
+        "commonAreaBudget": _budget_out(r.get("common_area_budget")),
         "acreage": _num(r["acreage"]),
         # Yearly maintenance visit counts (migration 061). Null when the rep
         # left the field blank, on install estimates, and on rows created
@@ -1533,6 +1687,9 @@ _UPDATABLE = {
     # No caller should send it; if they do it is silently ignored (the key
     # simply won't appear in _UPDATABLE so no SET clause is generated for it).
     "customerType": "customer_type",
+    # Dollars. Null clears the value back to unknown; omitting the key leaves it.
+    "homesBudget": "homes_budget",
+    "commonAreaBudget": "common_area_budget",
     "acreage": "acreage",
     "contractValueCents": "contract_value_cents",
     "targetMargin": "target_margin",
@@ -1721,6 +1878,11 @@ def register(app, require_auth) -> None:
                 for section in (body.get("sections") or [])
                 for svc in (section.get("services") or [])
             ])
+        # Budgets are optional. Resolve before the INSERT so a 400 persists
+        # nothing, and so a blank string is NULL rather than 0. These dollars
+        # are not the priced contract value — contract_value_cents, the ITB
+        # split, commissions, and Aspire stay on their own numbers.
+        homes_budget, common_area_budget = _resolve_contract_budgets(body)
         estimate_id = _new_id("est")
         # Auto-assign the next sequential estimate number (contract generator).
         next_num_row = await query("SELECT COALESCE(MAX(estimate_number), 0) + 1 AS next_num FROM estimates")
@@ -1734,8 +1896,9 @@ def register(app, require_auth) -> None:
                   service_start_date, assigned_ls_estimator, assigned_irr_estimator, crm_rep,
                   notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status,
                   mowing_occurrences, pruning_occurrences, turf_fert_occurrences,
-                  shrub_fert_occurrences, ipm_occurrences, irrigation_occurrences)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                  shrub_fert_occurrences, ipm_occurrences, irrigation_occurrences,
+                  homes_budget, common_area_budget)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 estimate_id,
                 est_type,
@@ -1767,6 +1930,9 @@ def register(app, require_auth) -> None:
                 # RFI status tracked first-class (install).
                 body.get("rfiStatus"),
                 *_occurrence_insert_values(body),
+                # NULL when the rep left the budget blank. 0 only when they sent 0.
+                homes_budget,
+                common_area_budget,
             ],
         )
         for si, section in enumerate(body.get("sections") or []):
@@ -1843,6 +2009,9 @@ def register(app, require_auth) -> None:
         payload = body.get("payload")
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="payload must be an object")
+        # Same blank-vs-zero rule as create: a draft that leaves the budget
+        # empty stores null, not 0 and not "".
+        _normalize_present_budgets(payload)
         user_id = user.get("id") or "unknown"
 
         draft_id = body.get("draftId")
@@ -1936,6 +2105,9 @@ def register(app, require_auth) -> None:
         # leaves the row untouched. Applies to every estimate type — the
         # columns live on estimates, and install clients simply omit them.
         _validate_occurrence_counts(body)
+        # Blank budget strings become NULL before the UPDATE so MySQL cannot
+        # coerce "" to 0 on the DECIMAL columns.
+        _coerce_budget_patch(body)
         current = rows[0]
         # Same needed-back rule as create: past dates rejected, short
         # turnarounds kept and flagged isRush on the reloaded estimate.

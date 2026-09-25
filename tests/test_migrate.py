@@ -1367,3 +1367,50 @@ class TestConcurrencyLock:
         # At least one run succeeded; none crashed with a duplicate-apply error
         assert len(results) == 2
         assert any(r is True for r in results)  # at least one run completed cleanly
+
+
+class TestMigration059:
+    """059 makes the contract-structure budget columns nullable.
+
+    Detector keys on that effect (both columns exist AND are nullable), not on
+    a sibling artifact. The file itself is guarded dynamic SQL so a re-run
+    after a partial apply is safe.
+    """
+
+    PATH = REPO / "sql" / "migrations" / "059_estimate_optional_contract_budgets.sql"
+
+    def test_registered_in_detect_dispatch(self):
+        assert "059_estimate_optional_contract_budgets" in M._DETECT
+        assert M._DETECT["059_estimate_optional_contract_budgets"] is M.detect_059
+
+    def test_detect_true_only_when_both_columns_are_nullable(self, monkeypatch):
+        monkeypatch.setattr(
+            M, "column_nullable",
+            lambda conn, t, c: t == "estimates" and c in {"homes_budget", "common_area_budget"},
+        )
+        assert M.detect_059(None) is True
+
+    def test_detect_false_when_a_column_is_missing_or_not_null(self, monkeypatch):
+        monkeypatch.setattr(
+            M, "column_nullable",
+            lambda conn, t, c: t == "estimates" and c == "homes_budget",
+        )
+        assert M.detect_059(None) is False
+        monkeypatch.setattr(M, "column_nullable", lambda conn, t, c: False)
+        assert M.detect_059(None) is False
+
+    def test_sql_is_guarded_and_covers_add_and_modify(self):
+        text = self.PATH.read_text(encoding="utf-8")
+        assert "homes_budget" in text
+        assert "common_area_budget" in text
+        upper = text.upper()
+        assert "ADD COLUMN" in upper
+        assert "MODIFY COLUMN" in upper
+        assert "IS_NULLABLE" in upper
+        stmts = M.split_statements(text)
+        assert stmts, "059 must contain executable statements"
+        for stmt in stmts:
+            first = stmt.strip().split()[0].upper()
+            assert first in ("SET", "PREPARE", "EXECUTE", "DEALLOCATE"), (
+                f"059 must be all guarded dynamic SQL — found bare: {stmt[:80]}"
+            )

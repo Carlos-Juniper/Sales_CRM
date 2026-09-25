@@ -18,8 +18,7 @@ export type Period = 'this_year' | 'this_quarter' | 'last_quarter' | 'this_month
  * All arithmetic is UTC-based to avoid timezone-shifted boundaries
  * (the same class of bug fixed in commit 5f7ac8a for the contract generator).
  */
-export function getPeriodDates(period: Period): { start_date?: string; end_date?: string } {
-  const now = new Date()
+export function getPeriodDates(period: Period, now = new Date()): { start_date?: string; end_date?: string } {
   const year = now.getUTCFullYear()
   const month = now.getUTCMonth()          // 0-indexed
   const quarter = Math.floor(month / 3)   // 0-indexed
@@ -83,7 +82,7 @@ export function getCommissionPeriodDates(period: Period, now = new Date()): { st
   if (period === 'all_time') {
     return { start_date: '1970-01-01', end_date: now.toISOString().slice(0, 10) }
   }
-  return getPeriodDates(period)
+  return getPeriodDates(period, now)
 }
 
 /**
@@ -181,6 +180,28 @@ export function payoutAmountLabel(row: {
   const money = formatCents(row.amount_cents)
   if (row.amount_partial) return `${money} + pending`
   return money
+}
+
+export type PayoutDescription =
+  | { kind: 'pending' }
+  | { kind: 'known'; month: string; amount: number | null }
+
+/**
+ * One description for a check or installment row.
+ * A null amount is pending. A known amount keeps its month label and cents.
+ */
+export function describePayout(row: {
+  bucket?: CommissionPayoutBucket | null
+  payout_period: string | null
+  payout_date: string | null
+  amount_cents: number | null
+}): PayoutDescription {
+  if (row.amount_cents == null) return { kind: 'pending' }
+  return {
+    kind: 'known',
+    month: payoutGroupLabel(row),
+    amount: row.amount_cents,
+  }
 }
 
 /**

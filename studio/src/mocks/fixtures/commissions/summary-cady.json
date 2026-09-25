@@ -1,0 +1,10 @@
+{
+  "scheduled_ytd_cents": 0,
+  "paid_ytd_cents": 0,
+  "next_payout": null,
+  "upcoming_cents": 0,
+  "due_cents": 0,
+  "balances_period_filtered": false,
+  "plan_key": null,
+  "plan_name": null
+}

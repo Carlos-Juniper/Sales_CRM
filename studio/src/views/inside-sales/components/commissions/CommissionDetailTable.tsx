@@ -1,13 +1,13 @@
 import { Fragment, useState } from 'react'
-import { ChevronDown, ChevronUp, CheckCircle, Search } from 'lucide-react'
+import { ChevronDown, ChevronUp, CheckCircle, Loader2, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TableRowSkeleton } from '@/components/shared/LoadingSkeleton'
 import { useMarkCommissionPaid, useMarkInstallmentPaid } from '@/hooks/useCommissions'
 import { formatCents } from '@/lib/estimating/maintenance'
-import { formatRate, formatPaymentPeriod, formatContractNumber, payoutAmountLabel, payoutGroupLabel } from '@/lib/commissions'
+import { describePayout, formatRate, formatPaymentPeriod, formatContractNumber, PENDING_BILLING_DATA_LABEL, payoutAmountLabel } from '@/lib/commissions'
 import type { Commission, CommissionEstimateType, CommissionFilters, CommissionInstallment } from '@/types/commissions'
 import { InstallmentStatusBadge } from './InstallmentStatusBadge'
 
@@ -22,34 +22,46 @@ interface CommissionDetailTableProps {
 type SortField = 'created_at' | 'commission_amount_cents' | 'property_name'
 type SortDirection = 'asc' | 'desc'
 
-const STATUS_BADGE: Record<Commission['status'], { label: string; className: string }> = {
-  approved: { label: 'Approved', className: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800' },
-  paid:     { label: 'Paid',     className: 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800' },
-  cancelled:{ label: 'Cancelled',className: 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700' },
+const STATUS_BADGE: Record<Commission['status'], { label: string; variant: NonNullable<BadgeProps['variant']> }> = {
+  approved: { label: 'Approved', variant: 'blue' },
+  paid: { label: 'Paid', variant: 'green' },
+  cancelled: { label: 'Cancelled', variant: 'zinc' },
+}
+
+function SortIcon({
+  field,
+  sortField,
+  sortDirection,
+}: {
+  field: SortField
+  sortField: SortField
+  sortDirection: SortDirection
+}) {
+  if (sortField !== field) return null
+  return sortDirection === 'asc'
+    ? <ChevronUp className="h-3.5 w-3.5 inline ml-1" />
+    : <ChevronDown className="h-3.5 w-3.5 inline ml-1" />
 }
 
 function InstallmentLines({
   installments,
+  propertyName,
   canMark,
   pendingId,
   onMarkPaid,
 }: {
   installments: CommissionInstallment[]
+  propertyName: string
   canMark: boolean
   pendingId: string | undefined
   onMarkPaid: (installmentId: string) => void
 }) {
-  if (installments.length === 0) {
-    return <p className="text-[11px] text-[hsl(var(--muted-fg))]">No installment schedule on this deal</p>
-  }
-
   return (
     <ul className="space-y-1.5" data-testid="commission-installments">
       {installments.map((installment) => {
-        const month = payoutGroupLabel(installment)
-        const amount = payoutAmountLabel(installment)
-        const showAmount = amount !== month
+        const payout = describePayout(installment)
         const canPay = canMark && installment.status !== 'paid' && installment.status !== 'cancelled'
+        const marking = pendingId === installment.id
         return (
           <li
             key={installment.id}
@@ -57,8 +69,14 @@ function InstallmentLines({
             data-testid={`installment-${installment.id}`}
           >
             <span className="text-[hsl(var(--muted-fg))] w-20">Payment {installment.installment_number}</span>
-            <span className="text-[hsl(var(--fg))]">{month}</span>
-            {showAmount && <span className="font-mono text-[hsl(var(--fg))]">{amount}</span>}
+            <span className="text-[hsl(var(--fg))]">
+              {payout.kind === 'pending' ? PENDING_BILLING_DATA_LABEL : payout.month}
+            </span>
+            {payout.kind === 'known' && payout.amount != null && (
+              <span className="font-mono text-[hsl(var(--fg))]">
+                {payoutAmountLabel({ amount_cents: payout.amount })}
+              </span>
+            )}
             <InstallmentStatusBadge status={installment.status} />
             {installment.status === 'pending_billing_data' && installment.billing_installment_number != null && (
               <span className="text-[11px] text-[hsl(var(--muted-fg))]">
@@ -75,11 +93,13 @@ function InstallmentLines({
                 size="sm"
                 variant="ghost"
                 onClick={() => onMarkPaid(installment.id)}
-                disabled={pendingId != null}
-                aria-label={`Mark installment ${installment.id} paid`}
+                disabled={marking}
+                aria-label={`Mark payment ${installment.installment_number} on ${propertyName} paid`}
                 className="gap-1.5 h-7 text-xs"
               >
-                <CheckCircle className="h-3.5 w-3.5" />
+                {marking
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <CheckCircle className="h-3.5 w-3.5" />}
                 Mark paid
               </Button>
             )}
@@ -90,10 +110,10 @@ function InstallmentLines({
   )
 }
 
-const TYPE_BADGE: Record<CommissionEstimateType, { label: string; className: string }> = {
-  maintenance: { label: 'Maintenance', className: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800' },
-  install: { label: 'Install', className: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800' },
-  enhancement: { label: 'Enhancement', className: 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800' },
+const TYPE_BADGE: Record<CommissionEstimateType, { label: string; variant: NonNullable<BadgeProps['variant']> }> = {
+  maintenance: { label: 'Maintenance', variant: 'blue' },
+  install: { label: 'Install', variant: 'amber' },
+  enhancement: { label: 'Enhancement', variant: 'purple' },
 }
 
 export function CommissionDetailTable({
@@ -140,12 +160,7 @@ export function CommissionDetailTable({
     markPaid.mutate({ commissionId, paymentPeriod: formatPaymentPeriod(new Date()) })
   }
 
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return null
-    return sortDirection === 'asc'
-      ? <ChevronUp className="h-3.5 w-3.5 inline ml-1" />
-      : <ChevronDown className="h-3.5 w-3.5 inline ml-1" />
-  }
+  const payingCommissionId = markPaid.isPending ? markPaid.variables?.commissionId : undefined
 
   const colCount = isAdmin ? 9 : 7
 
@@ -210,13 +225,13 @@ export function CommissionDetailTable({
                 className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none whitespace-nowrap"
                 onClick={() => handleSort('created_at')}
               >
-                Date <SortIcon field="created_at" />
+                Date <SortIcon field="created_at" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
                 className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none"
                 onClick={() => handleSort('property_name')}
               >
-                Property <SortIcon field="property_name" />
+                Property <SortIcon field="property_name" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] whitespace-nowrap">Contract #</th>
               <th className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] whitespace-nowrap">Contract Value</th>
@@ -225,7 +240,7 @@ export function CommissionDetailTable({
                 className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none"
                 onClick={() => handleSort('commission_amount_cents')}
               >
-                Commission <SortIcon field="commission_amount_cents" />
+                Commission <SortIcon field="commission_amount_cents" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Status</th>
               {isAdmin && (
@@ -271,7 +286,7 @@ export function CommissionDetailTable({
                         <div className="flex items-center gap-1.5">
                           {commission.property_name}
                           {typeBadge && (
-                            <Badge variant="outline" className={`${typeBadge.className} text-[10px] px-1.5 py-0 font-medium`}>
+                            <Badge variant={typeBadge.variant} className="text-[10px] px-1.5 py-0 font-medium">
                               {typeBadge.label}
                             </Badge>
                           )}
@@ -288,7 +303,7 @@ export function CommissionDetailTable({
                     <td className="px-4 py-3 text-right font-mono text-xs">{formatRate(commission.commission_rate)}</td>
                     <td className="px-4 py-3 text-right font-mono text-xs font-semibold">{formatCents(commission.commission_amount_cents)}</td>
                     <td className="px-4 py-3">
-                      <Badge variant="outline" className={badge.className}>{badge.label}</Badge>
+                      <Badge variant={badge.variant}>{badge.label}</Badge>
                     </td>
                     {isAdmin && (
                       <td className="px-4 py-3">
@@ -306,10 +321,12 @@ export function CommissionDetailTable({
                             size="sm"
                             variant="ghost"
                             onClick={() => handleMarkPaid(commission.id)}
-                            disabled={markPaid.isPending || markInstallmentPaid.isPending}
+                            disabled={payingCommissionId === commission.id}
                             className="gap-1.5 h-7 text-xs"
                           >
-                            <CheckCircle className="h-3.5 w-3.5" />
+                            {payingCommissionId === commission.id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <CheckCircle className="h-3.5 w-3.5" />}
                             Mark Paid
                           </Button>
                         )}
@@ -319,16 +336,19 @@ export function CommissionDetailTable({
                       </td>
                     )}
                   </tr>
-                  <tr className="border-b border-[hsl(var(--border))] last:border-0">
-                    <td colSpan={colCount} className="px-4 py-2 bg-[hsl(var(--muted))]">
-                      <InstallmentLines
-                        installments={installments}
-                        canMark={canMarkInstallment}
-                        pendingId={markInstallmentPaid.isPending ? markInstallmentPaid.variables : undefined}
-                        onMarkPaid={(installmentId) => markInstallmentPaid.mutate(installmentId)}
-                      />
-                    </td>
-                  </tr>
+                  {installments.length > 0 && (
+                    <tr className="border-b border-[hsl(var(--border))] last:border-0">
+                      <td colSpan={colCount} className="px-4 py-2 bg-[hsl(var(--muted))]">
+                        <InstallmentLines
+                          installments={installments}
+                          propertyName={commission.property_name ?? 'this deal'}
+                          canMark={canMarkInstallment}
+                          pendingId={markInstallmentPaid.isPending ? markInstallmentPaid.variables : undefined}
+                          onMarkPaid={(installmentId) => markInstallmentPaid.mutate(installmentId)}
+                        />
+                      </td>
+                    </tr>
+                  )}
                 </Fragment>
               )
             })}

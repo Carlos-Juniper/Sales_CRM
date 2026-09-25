@@ -1,0 +1,14 @@
+{
+  "scheduled_ytd_cents": 125000,
+  "paid_ytd_cents": 80000,
+  "next_payout": {
+    "payout_period": "June 2026",
+    "payout_date": "2026-06-30",
+    "amount_cents": 15000
+  },
+  "upcoming_cents": 7500,
+  "due_cents": 15000,
+  "balances_period_filtered": false,
+  "plan_key": "standard",
+  "plan_name": "Standard Sales Commission"
+}

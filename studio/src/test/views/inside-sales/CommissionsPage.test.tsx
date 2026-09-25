@@ -99,15 +99,24 @@ describe('CommissionsPage rep picker', () => {
     await waitFor(() => {
       expect(
         calls.some(
-          (url) => url.startsWith('/api/commissions/summary') && url.includes('user_id=rep-1'),
+          (url) => url.startsWith('/api/commissions/summary') && url.includes('user_id=rep-alex'),
         ),
       ).toBe(true)
     })
     expect(
-      calls.some((url) => url.startsWith('/api/commissions/list') && url.includes('user_id=rep-1')),
+      calls.some((url) => url.startsWith('/api/commissions/list') && url.includes('user_id=rep-alex')),
     ).toBe(true)
     expect(screen.getByRole('heading', { name: "Alex Rivera's Commissions" })).toBeInTheDocument()
     expect(screen.getByText('Standard Sales Commission')).toBeInTheDocument()
+  })
+
+  it('keeps the captured close total after the calendar year rolls over', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2027-01-01T15:00:00Z'))
+    seed('sales')
+    render(<CommissionsPage />)
+    await waitForSummary()
+    vi.useRealTimers()
   })
 
   it('shows the signed-in rep their plan from the summary', async () => {

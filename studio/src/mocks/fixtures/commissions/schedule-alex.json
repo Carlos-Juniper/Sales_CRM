@@ -1,0 +1,150 @@
+{
+  "user_id": "rep-alex",
+  "year": 2026,
+  "quarters": [
+    {
+      "close_quarter": "2026-Q1",
+      "sales_count": 1,
+      "commission_total_cents": 80000,
+      "installments": [
+        {
+          "installment_number": 1,
+          "payout_period": "March 2026",
+          "payout_date": "2026-03-31",
+          "amount_cents": 40000,
+          "amount_partial": false,
+          "status": "paid",
+          "bucket": "dated"
+        },
+        {
+          "installment_number": 2,
+          "payout_period": "Unscheduled",
+          "payout_date": null,
+          "amount_cents": 40000,
+          "amount_partial": false,
+          "status": "paid",
+          "bucket": "unscheduled"
+        },
+        {
+          "installment_number": 3,
+          "payout_period": null,
+          "payout_date": null,
+          "amount_cents": null,
+          "amount_partial": false,
+          "status": "paid",
+          "bucket": "pending_billing_data"
+        }
+      ]
+    },
+    {
+      "close_quarter": "2026-Q2",
+      "sales_count": 1,
+      "commission_total_cents": 30000,
+      "installments": [
+        {
+          "installment_number": 1,
+          "payout_period": "June 2026",
+          "payout_date": "2026-06-30",
+          "amount_cents": 15000,
+          "amount_partial": false,
+          "status": "due",
+          "bucket": "dated"
+        },
+        {
+          "installment_number": 2,
+          "payout_period": "Unscheduled",
+          "payout_date": null,
+          "amount_cents": 15000,
+          "amount_partial": false,
+          "status": "pending_billing_data",
+          "bucket": "unscheduled"
+        },
+        {
+          "installment_number": 3,
+          "payout_period": null,
+          "payout_date": null,
+          "amount_cents": null,
+          "amount_partial": false,
+          "status": "pending_billing_data",
+          "bucket": "pending_billing_data"
+        }
+      ]
+    },
+    {
+      "close_quarter": "2026-Q3",
+      "sales_count": 1,
+      "commission_total_cents": 15000,
+      "installments": [
+        {
+          "installment_number": 1,
+          "payout_period": "September 2026",
+          "payout_date": "2026-09-30",
+          "amount_cents": 7500,
+          "amount_partial": false,
+          "status": "upcoming",
+          "bucket": "dated"
+        },
+        {
+          "installment_number": 2,
+          "payout_period": "Unscheduled",
+          "payout_date": null,
+          "amount_cents": 7500,
+          "amount_partial": false,
+          "status": "pending_billing_data",
+          "bucket": "unscheduled"
+        },
+        {
+          "installment_number": 3,
+          "payout_period": null,
+          "payout_date": null,
+          "amount_cents": null,
+          "amount_partial": false,
+          "status": "pending_billing_data",
+          "bucket": "pending_billing_data"
+        }
+      ]
+    }
+  ],
+  "by_payout_period": [
+    {
+      "payout_period": "March 2026",
+      "payout_date": "2026-03-31",
+      "amount_cents": 40000,
+      "amount_partial": false,
+      "status": "paid",
+      "bucket": "dated"
+    },
+    {
+      "payout_period": "June 2026",
+      "payout_date": "2026-06-30",
+      "amount_cents": 15000,
+      "amount_partial": false,
+      "status": "due",
+      "bucket": "dated"
+    },
+    {
+      "payout_period": "September 2026",
+      "payout_date": "2026-09-30",
+      "amount_cents": 7500,
+      "amount_partial": false,
+      "status": "upcoming",
+      "bucket": "dated"
+    },
+    {
+      "payout_period": "Unscheduled",
+      "payout_date": null,
+      "amount_cents": 62500,
+      "amount_partial": false,
+      "status": "pending_billing_data",
+      "bucket": "unscheduled"
+    },
+    {
+      "payout_period": null,
+      "payout_date": null,
+      "amount_cents": null,
+      "amount_partial": false,
+      "status": "pending_billing_data",
+      "bucket": "pending_billing_data"
+    }
+  ]
+}

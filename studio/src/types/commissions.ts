@@ -1,7 +1,9 @@
 /**
- * Commissions feature types.
+ * Commissions feature types owned by the studio UI.
  * Formatting helpers live in lib/commissions.ts (not here) to match the
  * repo convention of types files containing only data shapes.
+ * Keep every shape this page reads here. A backend cleanup that drops
+ * unused commission types must not remove these.
  */
 
 export type CommissionInstallmentStatus =

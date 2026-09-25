@@ -124,11 +124,11 @@ describe('CommissionDetailTable installments', () => {
     renderTable(true)
 
     expect(screen.getByRole('button', { name: 'Mark Paid' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Mark installment dob-2 paid' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Mark installment dob-3 paid' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Mark installment dob-1 paid' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Mark payment 2 on Dobson Ranch HOA paid' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Mark payment 3 on Dobson Ranch HOA paid' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Mark payment 1 on Dobson Ranch HOA paid' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Mark installment dob-3 paid' }))
+    await user.click(screen.getByRole('button', { name: 'Mark payment 3 on Dobson Ranch HOA paid' }))
     await waitFor(() => expect(calls.some((call) => call.url.includes('/installments/dob-3/mark-paid'))).toBe(true))
 
     await user.click(screen.getByRole('button', { name: 'Mark Paid' }))
@@ -140,6 +140,6 @@ describe('CommissionDetailTable installments', () => {
   it('hides mark-paid actions when the role cannot mark commissions paid', () => {
     renderTable(false)
     expect(screen.queryByRole('button', { name: 'Mark Paid' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Mark installment/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Mark payment/ })).not.toBeInTheDocument()
   })
 })

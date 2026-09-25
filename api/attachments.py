@@ -60,14 +60,53 @@ def _gcs() -> storage.Client:
     return _client
 
 
+class RfpDocumentRejected(ValueError):
+    """Client-facing rejection of an RFP upload that is not PDF, Word, or Excel."""
+
+
+# RFP documents on the maintenance and install intakes. The extension and the
+# MIME must agree; the value stored (and served back) is this canonical type.
+# Longest entry is 71 chars — intake_attachments.content_type is VARCHAR(100).
+RFP_CONTENT_TYPE_BY_EXT: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+_RFP_REJECTED = (
+    "RFP documents must be PDF, Word (.doc, .docx), or Excel (.xls, .xlsx)"
+)
+_RFP_MISMATCH = "RFP file extension does not match its content type"
+
+
+def validate_rfp_document(file_name: str, content_type: str) -> str:
+    """Return the canonical MIME when an RFP filename and content type agree.
+
+    Comparison is case-insensitive, and MIME parameters (``; charset=...``)
+    are ignored. The returned value is what the resumable session and the
+    attachment row store, so a later download serves that content type.
+    """
+    ext = os.path.splitext((file_name or "").strip())[1].lower()
+    mime = (content_type or "").split(";")[0].strip().lower()
+    expected = RFP_CONTENT_TYPE_BY_EXT.get(ext)
+    if expected is None:
+        raise RfpDocumentRejected(_RFP_REJECTED)
+    if mime != expected:
+        raise RfpDocumentRejected(_RFP_MISMATCH)
+    return expected
+
+
 # Extension derived from the VALIDATED content type — never from the user
-# filename. Image types are added for the takeoff_scan kind; intake
-# kinds remain PDF-only at the endpoint layer.
+# filename. Image types are for the takeoff scan; Word/Excel are for RFP
+# documents. Other intake kinds stay PDF-only at the endpoint layer.
 _EXT_BY_CONTENT_TYPE = {
     "application/pdf": "pdf",
     "image/png": "png",
     "image/jpeg": "jpg",
     "image/webp": "webp",
+    **{mime: ext.lstrip(".") for ext, mime in RFP_CONTENT_TYPE_BY_EXT.items()},
 }
 
 
@@ -123,26 +162,38 @@ def content_disposition(original_name: str) -> str:
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
-def signed_get_url(key: str, original_name: str, bucket: str | None = None) -> str:
+def signed_get_url(
+    key: str,
+    original_name: str,
+    bucket: str | None = None,
+    content_type: str | None = None,
+) -> str:
     """Return a short-lived v4 signed GET URL that forces Save-As with the original filename.
 
     Uses IAM signBlob because Cloud Run ADC has no private key for local RSA signing.
     Requires roles/iam.serviceAccountTokenCreator on the runtime SA (on itself) and
     iamcredentials.googleapis.com enabled. Pass `bucket` to sign from a non-default
     bucket (e.g. GCS_CREDENTIALS_BUCKET for credential documents).
+
+    `content_type` sets the response Content-Type (GCS `response_type`) so a
+    stored Word or Excel RFP downloads as that type. Omit it to leave the
+    object's own content type untouched.
     """
     creds, _ = google.auth.default()
     creds.refresh(google.auth.transport.requests.Request())
 
     blob = _gcs().bucket(bucket or GCS_ATTACHMENTS_BUCKET).blob(key)
-    return blob.generate_signed_url(
-        version="v4",
-        expiration=timedelta(minutes=GCS_SIGNED_URL_TTL_MIN),
-        method="GET",
-        response_disposition=content_disposition(original_name),
-        service_account_email=GCS_SIGNER_SA_EMAIL,
-        access_token=creds.token,
-    )
+    sign_kwargs: dict = {
+        "version": "v4",
+        "expiration": timedelta(minutes=GCS_SIGNED_URL_TTL_MIN),
+        "method": "GET",
+        "response_disposition": content_disposition(original_name),
+        "service_account_email": GCS_SIGNER_SA_EMAIL,
+        "access_token": creds.token,
+    }
+    if content_type:
+        sign_kwargs["response_type"] = content_type
+    return blob.generate_signed_url(**sign_kwargs)
 
 
 def delete(key: str) -> None:

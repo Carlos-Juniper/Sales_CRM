@@ -456,3 +456,251 @@ class TestDownloadUrl:
                 "/api/estimating/estimates/est-other/attachments/att-abc123/download-url"
             )
         assert resp.status_code == 404
+
+
+# ── RFP documents: PDF, Word, and Excel on both intakes ───────────────────────
+#
+# Maintenance and install intake both upload kind="rfp" through this presign
+# endpoint. Extension and MIME must agree; other intake kinds stay PDF-only.
+
+_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+class TestRfpDocumentUploads:
+    @pytest.mark.parametrize(
+        "file_name,content_type,ext",
+        [
+            ("scope.pdf", "application/pdf", ".pdf"),
+            ("scope.PDF", "Application/PDF", ".pdf"),
+            ("bid.doc", "application/msword", ".doc"),
+            ("bid.docx", _DOCX, ".docx"),
+            ("pricing.xls", "application/vnd.ms-excel", ".xls"),
+            ("pricing.xlsx", _XLSX, ".xlsx"),
+        ],
+    )
+    def test_presign_accepts_rfp_types_and_stores_canonical_mime(
+        self, authed, file_name, content_type, ext
+    ):
+        with (
+            patch("api.estimating.query", new_callable=AsyncMock) as mock_query,
+            patch("api.estimating.execute", new_callable=AsyncMock) as mock_exec,
+            patch("api.attachments.begin_resumable_session") as mock_session,
+        ):
+            mock_query.side_effect = [
+                [{"id": "est-1"}],
+                [{"id": "ins-1"}],
+            ]
+            mock_session.return_value = _FAKE_UPLOAD_URL
+            mock_exec.return_value = 1
+
+            resp = client.post(
+                "/api/estimating/estimates/est-1/attachments/presign",
+                json={
+                    "kind": "rfp",
+                    "fileName": file_name,
+                    "contentType": content_type,
+                    "sizeBytes": 2048,
+                },
+            )
+
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["objectKey"].startswith("estimating/est-1/")
+        assert body["objectKey"].endswith(ext)
+        assert body["uploadUrl"] == _FAKE_UPLOAD_URL
+        canonical = content_type.split(";")[0].strip().lower()
+        assert body["contentType"] == canonical
+
+        session_key, session_type, _origin = mock_session.call_args.args
+        assert session_key == body["objectKey"]
+        assert session_type == canonical
+
+        _sql, params = mock_exec.call_args.args
+        assert "rfp" in params
+        assert session_type in params
+        assert file_name in params
+        assert "pending" in params
+
+    def test_presign_rejects_exe(self, authed):
+        with (
+            patch("api.estimating.query", new_callable=AsyncMock) as mock_query,
+            patch("api.estimating.execute", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_query.return_value = [{"id": "est-1"}]
+            resp = client.post(
+                "/api/estimating/estimates/est-1/attachments/presign",
+                json={
+                    "kind": "rfp",
+                    "fileName": "payload.exe",
+                    "contentType": "application/pdf",
+                    "sizeBytes": 1024,
+                },
+            )
+
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == (
+            "RFP documents must be PDF, Word (.doc, .docx), or Excel (.xls, .xlsx)"
+        )
+        mock_exec.assert_not_called()
+
+    def test_presign_rejects_extension_mime_mismatch(self, authed):
+        with (
+            patch("api.estimating.query", new_callable=AsyncMock) as mock_query,
+            patch("api.estimating.execute", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_query.return_value = [{"id": "est-1"}]
+            resp = client.post(
+                "/api/estimating/estimates/est-1/attachments/presign",
+                json={
+                    "kind": "rfp",
+                    "fileName": "budget.xlsx",
+                    "contentType": "application/pdf",
+                    "sizeBytes": 1024,
+                },
+            )
+
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == (
+            "RFP file extension does not match its content type"
+        )
+        mock_exec.assert_not_called()
+
+    def test_other_intake_kinds_stay_pdf_only(self, authed):
+        with (
+            patch("api.estimating.query", new_callable=AsyncMock) as mock_query,
+            patch("api.estimating.execute", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_query.return_value = [{"id": "est-1"}]
+            resp = client.post(
+                "/api/estimating/estimates/est-1/attachments/presign",
+                json={
+                    "kind": "property_map",
+                    "fileName": "budget.xlsx",
+                    "contentType": _XLSX,
+                    "sizeBytes": 1024,
+                },
+            )
+
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "Only PDF attachments are supported"
+        mock_exec.assert_not_called()
+
+    def test_confirm_stores_docx_content_type(self, authed):
+        with (
+            patch("api.estimating.query", new_callable=AsyncMock) as mock_query,
+            patch("api.estimating.execute", new_callable=AsyncMock) as mock_exec,
+            patch("api.attachments.head") as mock_head,
+        ):
+            mock_query.return_value = [
+                _att_row(
+                    status="pending",
+                    kind="rfp",
+                    file_name="bid.docx",
+                    content_type=_DOCX,
+                    object_key="estimating/est-1/att-abc123.docx",
+                )
+            ]
+            blob = MagicMock()
+            blob.content_type = _DOCX
+            blob.size = 80_000
+            mock_head.return_value = blob
+
+            resp = client.post(
+                "/api/estimating/estimates/est-1/attachments/att-abc123/confirm",
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "stored"
+        assert body["kind"] == "rfp"
+        assert body["contentType"] == _DOCX
+        assert body["downloadable"] is True
+        _sql, params = mock_exec.call_args.args
+        assert "stored" in params
+        assert _DOCX in params
+
+    @pytest.mark.parametrize(
+        "file_name,content_type,ext",
+        [
+            ("scope.pdf", "application/pdf", ".pdf"),
+            ("bid.doc", "application/msword", ".doc"),
+            ("pricing.xlsx", _XLSX, ".xlsx"),
+        ],
+    )
+    def test_download_url_serves_stored_content_type(
+        self, authed, file_name, content_type, ext
+    ):
+        with (
+            patch("api.estimating.query", new_callable=AsyncMock) as mock_query,
+            patch("api.attachments.signed_get_url") as mock_sign,
+        ):
+            mock_query.return_value = [
+                _att_row(
+                    kind="rfp",
+                    file_name=file_name,
+                    content_type=content_type,
+                    object_key=f"estimating/est-1/att-abc123{ext}",
+                )
+            ]
+            mock_sign.return_value = "https://storage.googleapis.com/signed?token=x"
+
+            resp = client.get(
+                "/api/estimating/estimates/est-1/attachments/att-abc123/download-url"
+            )
+
+        assert resp.status_code == 200
+        mock_sign.assert_called_once_with(
+            f"estimating/est-1/att-abc123{ext}",
+            file_name,
+            content_type=content_type,
+        )
+
+
+class TestSignedUrlContentType:
+    def test_response_type_is_set_when_content_type_given(self):
+        import api.attachments as att
+
+        blob = MagicMock()
+        blob.generate_signed_url.return_value = "https://storage.googleapis.com/signed"
+        bucket = MagicMock()
+        bucket.blob.return_value = blob
+        gcs = MagicMock()
+        gcs.bucket.return_value = bucket
+        creds = MagicMock()
+        creds.token = "tok"
+
+        with (
+            patch.object(att, "_gcs", return_value=gcs),
+            patch("google.auth.default", return_value=(creds, None)),
+        ):
+            url = att.signed_get_url(
+                "estimating/est-1/att-1.xlsx",
+                "pricing.xlsx",
+                content_type=_XLSX,
+            )
+
+        assert url == "https://storage.googleapis.com/signed"
+        kwargs = blob.generate_signed_url.call_args.kwargs
+        assert kwargs["response_type"] == _XLSX
+        assert "pricing.xlsx" in kwargs["response_disposition"]
+
+    def test_response_type_omitted_when_content_type_absent(self):
+        import api.attachments as att
+
+        blob = MagicMock()
+        blob.generate_signed_url.return_value = "https://storage.googleapis.com/signed"
+        bucket = MagicMock()
+        bucket.blob.return_value = blob
+        gcs = MagicMock()
+        gcs.bucket.return_value = bucket
+        creds = MagicMock()
+        creds.token = "tok"
+
+        with (
+            patch.object(att, "_gcs", return_value=gcs),
+            patch("google.auth.default", return_value=(creds, None)),
+        ):
+            att.signed_get_url("estimating/est-1/att-1.pdf", "scope.pdf")
+
+        assert "response_type" not in blob.generate_signed_url.call_args.kwargs

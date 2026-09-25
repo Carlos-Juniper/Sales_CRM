@@ -7,6 +7,7 @@ import {
   CROSS_BRANCH_ROLES,
   REP_SELECTOR_ROLES,
   ANALYTICS_NAV_ROLES,
+  ROSTER_REP_PICKER_ROLES,
 } from '@/lib/roles'
 
 // ── Canonical role model (mirrors api/authz.py) ─────────────────
@@ -43,6 +44,8 @@ export function useRole() {
     seesAllBranches: role !== null && CROSS_BRANCH_ROLES.includes(role),
     canViewRepSelector: role !== null && REP_SELECTOR_ROLES.includes(role),
     canViewAnalytics: role !== null && ANALYTICS_NAV_ROLES.includes(role),
+    // Proposal settings: marketing/admin pick a rep; a sales rep does not.
+    canPickRosterRep: role !== null && ROSTER_REP_PICKER_ROLES.includes(role),
     canAccess: (requiredRole: UserRole | readonly UserRole[]) => {
       if (!role) return false
       if (role === 'admin') return true

@@ -20,6 +20,7 @@ import {
   ANALYTICS_NAV_ROLES,
   FULL_ACCESS_ROLES,
   REP_SELECTOR_ROLES,
+  ROSTER_REP_PICKER_ROLES,
   defaultRouteForRole,
 } from '@/lib/roles'
 import { CANONICAL_ROLES } from '@/types'
@@ -197,6 +198,14 @@ describe('useRole', () => {
     expect(withRole('admin').isEstimatingOnly).toBe(false)
     expect(withRole('manager').isEstimatingOnly).toBe(false)
     expect(withRole('sales').isEstimatingOnly).toBe(false)
+  })
+
+  it('roster rep picker is marketing and admin only', () => {
+    expect([...ROSTER_REP_PICKER_ROLES].sort()).toEqual(['admin', 'marketing'])
+    expect(withRole('marketing').canPickRosterRep).toBe(true)
+    expect(withRole('admin').canPickRosterRep).toBe(true)
+    expect(withRole('sales').canPickRosterRep).toBe(false)
+    expect(withRole('manager').canPickRosterRep).toBe(false)
   })
 
   it('returns null role when logged out', () => {

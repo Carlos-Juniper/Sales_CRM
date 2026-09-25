@@ -139,6 +139,7 @@ function makeTeamMember(over: Partial<TeamMember> & Pick<TeamMember, 'id' | 'nam
     teamType: 'branch',
     aspireBranchId: DEV_ASPIRE_BRANCH_ID,
     userId: null,
+    ownerUserId: null,
     location: 'Fort Myers, FL',
     bio: '',
     // null, not an object key: a key would send useProposalMediaUrl to the
@@ -263,6 +264,7 @@ const CLIENT_REFERENCES: ClientReference[] = [
   {
     id: 'cr-001',
     aspireBranchId: null,
+    ownerUserId: null,
     propertyName: 'Pelican Landing Community Association',
     servicesProvided: 'Landscape Maintenance, Irrigation, Arboriculture',
     contactName: 'Robert Sherman',
@@ -277,6 +279,7 @@ const CLIENT_REFERENCES: ClientReference[] = [
   {
     id: 'cr-002',
     aspireBranchId: null,
+    ownerUserId: null,
     propertyName: 'Fiddler’s Creek',
     servicesProvided: 'Landscape Maintenance, Enhancements',
     contactName: 'Diane Whitfield',
@@ -291,6 +294,7 @@ const CLIENT_REFERENCES: ClientReference[] = [
   {
     id: 'cr-003',
     aspireBranchId: null,
+    ownerUserId: null,
     propertyName: 'Heritage Isles Golf & Country Club',
     servicesProvided: 'Landscape Maintenance, Aquatics, Turf',
     contactName: 'Marcus Reed',

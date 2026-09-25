@@ -147,6 +147,16 @@ export interface UserAdminPatch {
   active?: boolean
 }
 
+/** Optional `rep_id` query on roster writes. Portfolio paths never pass one. */
+function rosterPath(path: string, repId?: string): string {
+  if (!repId) return path
+  const qIndex = path.indexOf('?')
+  const base = qIndex === -1 ? path : path.slice(0, qIndex)
+  const qs = new URLSearchParams(qIndex === -1 ? '' : path.slice(qIndex + 1))
+  qs.set('rep_id', repId)
+  return `${base}?${qs.toString()}`
+}
+
 export const settingsApi = {
   /** Operating branches the caller may manage, sorted by branch name. */
   branches: () => apiClient.get<ManageableBranch[]>('/settings/branches'),
@@ -236,30 +246,46 @@ export const settingsApi = {
   // ── Slice 13b: H37 config table write paths ─────────────────────────────────
   // Read paths live in proposalConfigApi (proposals.ts) under /proposals/config/*.
   // Write paths live here under /settings/* (server-side scoped by role).
+  //
+  // Client references and team members are owned by a sales rep. Marketing and
+  // admin pass that rep; a sales rep passes their own id (omitting it is the
+  // same on the server). Portfolio writes stay unscoped — no rep_id.
 
-  /** POST /api/settings/team-members — branch rows require BM/RD scope */
-  createTeamMember: (body: TeamMemberCreateBody) =>
-    apiClient.post<TeamMemberRow>('/settings/team-members', body),
+  /** POST /api/settings/team-members — body repId, optional query rep_id */
+  createTeamMember: (body: TeamMemberCreateBody, repId?: string) =>
+    apiClient.post<TeamMemberRow>(
+      rosterPath('/settings/team-members', repId),
+      repId ? { ...body, repId } : body,
+    ),
 
-  /** PATCH /api/settings/team-members/:id — scope from existing row */
-  updateTeamMember: (memberId: string, body: TeamMemberPatchBody) =>
-    apiClient.patch<TeamMemberRow>(`/settings/team-members/${memberId}`, body),
+  /** PATCH /api/settings/team-members/:id — optional query rep_id */
+  updateTeamMember: (memberId: string, body: TeamMemberPatchBody, repId?: string) =>
+    apiClient.patch<TeamMemberRow>(
+      rosterPath(`/settings/team-members/${memberId}`, repId),
+      body,
+    ),
 
   /** DELETE /api/settings/team-members/:id — soft-delete (active=0) */
-  deactivateTeamMember: (memberId: string) =>
-    apiClient.delete<void>(`/settings/team-members/${memberId}`),
+  deactivateTeamMember: (memberId: string, repId?: string) =>
+    apiClient.delete<void>(rosterPath(`/settings/team-members/${memberId}`, repId)),
 
-  /** POST /api/settings/client-references — branch rows require BM/RD scope */
-  createClientReference: (body: ClientReferenceCreateBody) =>
-    apiClient.post<ClientReferenceRow>('/settings/client-references', body),
+  /** POST /api/settings/client-references — body repId, optional query rep_id */
+  createClientReference: (body: ClientReferenceCreateBody, repId?: string) =>
+    apiClient.post<ClientReferenceRow>(
+      rosterPath('/settings/client-references', repId),
+      repId ? { ...body, repId } : body,
+    ),
 
-  /** PATCH /api/settings/client-references/:id */
-  updateClientReference: (refId: string, body: ClientReferencePatchBody) =>
-    apiClient.patch<ClientReferenceRow>(`/settings/client-references/${refId}`, body),
+  /** PATCH /api/settings/client-references/:id — optional query rep_id */
+  updateClientReference: (refId: string, body: ClientReferencePatchBody, repId?: string) =>
+    apiClient.patch<ClientReferenceRow>(
+      rosterPath(`/settings/client-references/${refId}`, repId),
+      body,
+    ),
 
   /** DELETE /api/settings/client-references/:id — soft-delete */
-  deactivateClientReference: (refId: string) =>
-    apiClient.delete<void>(`/settings/client-references/${refId}`),
+  deactivateClientReference: (refId: string, repId?: string) =>
+    apiClient.delete<void>(rosterPath(`/settings/client-references/${refId}`, repId)),
 
   /** POST /api/settings/portfolio — admin-only */
   createPortfolioProperty: (body: PortfolioPropertyCreateBody) =>
@@ -339,19 +365,19 @@ export const settingsApi = {
   // path traversal into the renderer's own proposal/generated/ prefix.
 
   /** POST /api/settings/team-members/:id/headshot — replaces any existing headshot. */
-  uploadTeamMemberHeadshot: (memberId: string, file: File) => {
+  uploadTeamMemberHeadshot: (memberId: string, file: File, repId?: string) => {
     const form = new FormData()
     form.append('file', file)
     return apiClient.postForm<{ id: string; headshotObjectKey: string }>(
-      `/settings/team-members/${memberId}/headshot`,
+      rosterPath(`/settings/team-members/${memberId}/headshot`, repId),
       form,
     )
   },
 
   /** DELETE /api/settings/team-members/:id/headshot — clears the column and the object. */
-  deleteTeamMemberHeadshot: (memberId: string) =>
+  deleteTeamMemberHeadshot: (memberId: string, repId?: string) =>
     apiClient.delete<{ id: string; headshotObjectKey: null }>(
-      `/settings/team-members/${memberId}/headshot`,
+      rosterPath(`/settings/team-members/${memberId}/headshot`, repId),
     ),
 
   /** POST /api/settings/portfolio/:id/photos — appends; returns the full new array. */
@@ -408,6 +434,8 @@ export interface TeamMemberCreateBody {
   title: string
   teamType: string
   aspireBranchId: number | null
+  /** Owning sales rep. Same meaning as the rep_id query parameter. */
+  repId?: string
   userId?: string | null
   location?: string | null
   bio?: string
@@ -427,6 +455,8 @@ export interface ClientReferenceCreateBody {
   address: string
   clientSinceYear: number
   aspireBranchId: number | null
+  /** Owning sales rep. Same meaning as the rep_id query parameter. */
+  repId?: string
 }
 
 export type ClientReferencePatchBody = Partial<Omit<ClientReferenceCreateBody, 'aspireBranchId'>>

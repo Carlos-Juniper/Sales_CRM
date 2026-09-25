@@ -75,18 +75,25 @@ export const proposalConfigApi = {
   branchCoverage: () => apiClient.get<BranchCoverageGroup[]>('/proposals/config/branch-coverage'),
 
   /**
-   * GET /api/proposals/config/team-members?aspire_branch_id=&team_type=&region_id=
+   * GET /api/proposals/config/team-members?aspire_branch_id=&team_type=&rep_id=&region_id=
    * When aspire_branch_id is supplied, returns both branch-scoped rows AND
    * null-branch (company-wide/executive) rows — Amendment A, null-branch-inclusion rule.
    *
    * regionId omitted = the caller's own region(s). 'all' = no region filter.
-   * A region id limits to that region. Rows with regionId null stay in every list.
+   * Omit rep_id for the unscoped list proposal generation still uses.
+   * Settings passes rep_id plus region_id=all so one rep's full set is returned.
    * The X-Region-Filter header is returned when the browser can read it.
    */
-  teamMembers: async (params?: { aspireBranchId?: number; teamType?: TeamMemberType; regionId?: string }) => {
+  teamMembers: async (params?: {
+    aspireBranchId?: number
+    teamType?: TeamMemberType
+    repId?: string
+    regionId?: string
+  }) => {
     const qs = new URLSearchParams()
     if (params?.aspireBranchId !== undefined) qs.set('aspire_branch_id', String(params.aspireBranchId))
     if (params?.teamType) qs.set('team_type', params.teamType)
+    if (params?.repId) qs.set('rep_id', params.repId)
     if (params?.regionId) qs.set('region_id', params.regionId)
     const q = qs.toString()
     const { data, headers } = await apiClient.getWithHeaders<TeamMember[]>(
@@ -96,14 +103,22 @@ export const proposalConfigApi = {
   },
 
   /**
-   * GET /api/proposals/config/client-references?aspire_branch_id=&region_id=
+   * GET /api/proposals/config/client-references?aspire_branch_id=&rep_id=&region_id=
    * When aspire_branch_id is supplied, null-branch (company-wide) rows are included
    * in addition to branch matches — same OR-IS-NULL pattern as team-members.
    * regionId behaves the same as on team-members.
+   *
+   * Omit rep_id for the unscoped list proposal generation still uses.
+   * Settings passes rep_id plus region_id=all.
    */
-  clientReferences: async (params?: { aspireBranchId?: number; regionId?: string }) => {
+  clientReferences: async (params?: {
+    aspireBranchId?: number
+    repId?: string
+    regionId?: string
+  }) => {
     const qs = new URLSearchParams()
     if (params?.aspireBranchId !== undefined) qs.set('aspire_branch_id', String(params.aspireBranchId))
+    if (params?.repId) qs.set('rep_id', params.repId)
     if (params?.regionId) qs.set('region_id', params.regionId)
     const q = qs.toString()
     const { data, headers } = await apiClient.getWithHeaders<ClientReference[]>(

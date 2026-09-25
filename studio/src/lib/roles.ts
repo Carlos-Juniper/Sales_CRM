@@ -50,6 +50,15 @@ export const REP_SELECTOR_ROLES: readonly UserRole[] = [
   'regional_director',
 ]
 
+/**
+ * Roles that pick which sales rep's client references and team roster to edit.
+ * A sales rep edits only their own rows and sees no picker. Marketing and
+ * admin are listed here; `admin` is explicit (same pattern as
+ * REP_SELECTOR_ROLES) because useRole checks membership, not the super-role
+ * bypass.
+ */
+export const ROSTER_REP_PICKER_ROLES: readonly UserRole[] = ['marketing', 'admin']
+
 // ── Workspace navigation role-groups ───────────────────────────────────────
 //
 // These are the single source of truth for which roles may reach which

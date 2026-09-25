@@ -64,6 +64,7 @@ const mockTeamMember: TeamMember = {
   active: true,
   sortOrder: 1,
   regionId: 'west-coast',
+  ownerUserId: null,
 }
 
 const mockClientRef: ClientReference = {
@@ -79,6 +80,7 @@ const mockClientRef: ClientReference = {
   clientSinceYear: 2018,
   active: true,
   regionId: null,
+  ownerUserId: null,
 }
 
 const mockPortfolio: PortfolioProperty = {
@@ -225,10 +227,10 @@ describe('useTeamMembers — query key scoping', () => {
   })
 
   it('fetches all team members when no params are given', async () => {
-    let regionId: string | null = 'sentinel'
+    let url: URL | undefined
     server.use(
       http.get('/api/proposals/config/team-members', ({ request }) => {
-        regionId = new URL(request.url).searchParams.get('region_id')
+        url = new URL(request.url)
         return HttpResponse.json([mockTeamMember])
       }),
     )
@@ -236,7 +238,9 @@ describe('useTeamMembers — query key scoping', () => {
     const { result } = renderHook(() => useTeamMembers(), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toHaveLength(1)
-    expect(regionId).toBeNull()
+    // Proposal generation omits both; Settings is what adds them.
+    expect(url?.searchParams.has('rep_id')).toBe(false)
+    expect(url?.searchParams.has('region_id')).toBe(false)
   })
 
   it('sends region_id, keeps it in the query key, and reads X-Region-Filter', async () => {
@@ -260,9 +264,31 @@ describe('useTeamMembers — query key scoping', () => {
     expect(result.current.data?.[0].regionId).toBe('west-coast')
     expect(
       queryClient.getQueryCache().find({
-        queryKey: ['proposals', 'config', 'team-members', 1403, null, 'central'],
+        queryKey: ['proposals', 'config', 'team-members', 1403, null, null, 'central'],
       }),
     ).toBeTruthy()
+  })
+
+  it('sends rep_id and region_id and keys the cache on both', async () => {
+    let url: URL | undefined
+    server.use(
+      http.get('/api/proposals/config/team-members', ({ request }) => {
+        url = new URL(request.url)
+        return HttpResponse.json([mockTeamMember])
+      }),
+    )
+    const { wrapper, queryClient } = createWrapper()
+    const { result } = renderHook(
+      () => useTeamMembers({ repId: 'rep-2', regionId: 'all' }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(url?.searchParams.get('rep_id')).toBe('rep-2')
+    expect(url?.searchParams.get('region_id')).toBe('all')
+    const cached = queryClient.getQueryCache().findAll({
+      queryKey: ['proposals', 'config', 'team-members', null, null, 'rep-2', 'all'],
+    })
+    expect(cached).toHaveLength(1)
   })
 })
 
@@ -298,7 +324,7 @@ describe('useClientReferences — query key scoping', () => {
     expect(result.current.regionFilter).toBe('all')
     expect(
       queryClient.getQueryCache().find({
-        queryKey: ['proposals', 'config', 'client-references', null, 'all'],
+        queryKey: ['proposals', 'config', 'client-references', null, null, 'all'],
       }),
     ).toBeTruthy()
   })

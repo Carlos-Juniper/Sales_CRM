@@ -43,6 +43,7 @@ export function OrgChartPage({
           teamType: 'branch',
           aspireBranchId: null,
           userId: null,
+          ownerUserId: null,
           location: null,
           bio: '',
           headshotObjectKey: null,

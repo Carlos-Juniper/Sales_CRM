@@ -14,6 +14,7 @@ import type {
   PortfolioPropertyPatchBody,
 } from '@/api/settings'
 import { SettingsFormShell, FormStatus } from './formStatus'
+import { errorDetail } from '../errorDetail'
 
 /**
  * Portfolio properties management section (Slice 13b).
@@ -32,7 +33,7 @@ import { SettingsFormShell, FormStatus } from './formStatus'
  * halves are present; a lone "after" shot is not a comparison.
  */
 export function PortfolioSection() {
-  const { data, isLoading, isError } = usePortfolio()
+  const { data, isLoading, isError, error } = usePortfolio()
   const [showCreate, setShowCreate] = useState(false)
 
   if (isLoading) {
@@ -46,7 +47,7 @@ export function PortfolioSection() {
     return (
       <SettingsFormShell slug="portfolio" title="Portfolio">
         <p role="alert" className="text-xs text-red-600">
-          Could not load portfolio properties.
+          {errorDetail(error, 'Could not load portfolio properties.')}
         </p>
       </SettingsFormShell>
     )
@@ -222,6 +223,7 @@ function PortfolioPropertyForm({
   const isPending = create.isPending || update.isPending
   const isSuccess = create.isSuccess || update.isSuccess
   const isError = create.isError || update.isError
+  const saveError = create.error ?? update.error
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -269,7 +271,11 @@ function PortfolioPropertyForm({
           Cancel
         </button>
       </div>
-      <FormStatus isSuccess={isSuccess} isError={isError} />
+      <FormStatus
+        isSuccess={isSuccess}
+        isError={isError}
+        errorText={errorDetail(saveError, 'Could not save. Try again.')}
+      />
     </form>
   )
 }

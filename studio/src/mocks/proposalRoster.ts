@@ -38,6 +38,7 @@ function member(
     headshotObjectKey: null,
     active: true,
     sortOrder: 1,
+    ownerUserId: null,
     ...over,
   }
 }
@@ -55,6 +56,7 @@ function reference(
     address: '1 Main St',
     clientSinceYear: 2018,
     active: true,
+    ownerUserId: null,
     ...over,
   }
 }

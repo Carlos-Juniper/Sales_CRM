@@ -34,6 +34,7 @@ import api.attachments as _att_mod
 from db import execute, query
 from api import aspire_sync
 from api import authz
+from api import commissions
 from api import properties as _props_mod
 from api.aspire_sync import OpportunityInput
 from api.aspire_config import ASPIRE_BRANCH_MAP, ASPIRE_BRANCH_INSTALL_FALLBACKS
@@ -75,61 +76,6 @@ async def _write_back_lead_status(lead_id: Optional[str], status: str) -> None:
     if not lead_id:
         return
     await execute("UPDATE leads SET status = %s WHERE id = %s", [status, lead_id])
-
-
-async def _create_commission_on_won(estimate_id: str) -> None:
-    """Insert a commission record when an estimate transitions to 'won'.
-
-    No-ops silently when: the estimate has no lead, the lead has no crm_rep,
-    or the rep has no active commission rate. Idempotent — the UNIQUE KEY on
-    estimate_id means a duplicate won transition is a no-op at the DB layer.
-    """
-    rows = await query(
-        """
-        SELECT e.contract_value_cents, e.lead_id,
-               l.crm_rep AS crm_rep_id
-        FROM estimates e
-        JOIN leads l ON l.id = e.lead_id
-        WHERE e.id = %s
-        """,
-        [estimate_id],
-    )
-    if not rows:
-        return
-    row = rows[0]
-    crm_rep_id = row.get("crm_rep_id")
-    lead_id = row.get("lead_id")
-    contract_value_cents = row.get("contract_value_cents") or 0
-    if not crm_rep_id:
-        return
-
-    rate_rows = await query(
-        """
-        SELECT commission_rate
-        FROM commission_rates
-        WHERE user_id = %s
-          AND effective_date <= CURDATE()
-          AND (expires_date IS NULL OR expires_date > CURDATE())
-        ORDER BY effective_date DESC
-        LIMIT 1
-        """,
-        [crm_rep_id],
-    )
-    if not rate_rows:
-        return
-    commission_rate = float(rate_rows[0]["commission_rate"])
-    commission_amount_cents = round(contract_value_cents * commission_rate)
-
-    await execute(
-        """
-        INSERT IGNORE INTO commissions
-            (estimate_id, lead_id, user_id, contract_value_cents,
-             commission_rate, commission_amount_cents, status, approved_at)
-        VALUES (%s, %s, %s, %s, %s, %s, 'approved', NOW())
-        """,
-        [estimate_id, lead_id, crm_rep_id, contract_value_cents,
-         commission_rate, commission_amount_cents],
-    )
 
 
 # ── Crew-rate snapshot on transitions (Handoff 38 §2.6 — LOCKED) ─────────────
@@ -2245,9 +2191,11 @@ def register(app, require_auth) -> None:
                 _sync_status_bg, estimate_id, target_status, body.get("lostReasonId")
             )
 
-        # Commission creation — fires only on the actual won transition.
+        # Commission creation and cancellation — only on the actual transition.
         if target_status == "won" and current.get("status") != "won":
-            background.add_task(_create_commission_on_won, estimate_id)
+            background.add_task(commissions.create_on_won, estimate_id)
+        if target_status == "lost" and current.get("status") != "lost":
+            background.add_task(commissions.cancel_for_estimate, estimate_id)
 
         # Estimate Save triggers ONE batched, best-effort
         # push of the takeoff quantities that carry a catalog_item_id. Never

@@ -37,6 +37,12 @@ def authed():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _stub_commission_transitions(monkeypatch):
+    monkeypatch.setattr("api.estimating.commissions.create_on_won", AsyncMock())
+    monkeypatch.setattr("api.estimating.commissions.cancel_for_estimate", AsyncMock())
+
+
 def _current(status: str) -> list[dict]:
     return [{"estimate_type": "maintenance", "status": status,
              "aspire_opportunity_id": None}]

@@ -34,6 +34,12 @@ from api import authz  # noqa: E402
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _stub_commission_transitions(monkeypatch):
+    monkeypatch.setattr("api.estimating.commissions.create_on_won", AsyncMock())
+    monkeypatch.setattr("api.estimating.commissions.cancel_for_estimate", AsyncMock())
+
+
 def _user(role: str, branch_id: str | None = "b1", **over) -> dict:
     u = {
         "id": "u1",

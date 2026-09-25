@@ -45,11 +45,22 @@ GRANT ALL PRIVILEGES ON crm.* TO 'crmadmin'@'localhost';
 FLUSH PRIVILEGES;
 SQL
 
-# Bootstrap schema only on the first boot (when the DB has no `leads` table yet).
+# First boot loads sql/create_table and the numbered migrations. Later boots
+# still run scripts/migrate.py. The baseline snapshot already has `leads`, so
+# skipping migrations after that leaves new files (including 065's
+# v_current_commission_plans view) unapplied.
 if ! mysql -h127.0.0.1 -P3306 -ucrmadmin -pcrmpassword crm \
       -e "SELECT 1 FROM leads LIMIT 1" >/dev/null 2>&1; then
   echo "==> [start] Fresh database detected — bootstrapping schema"
   bash "$REPO/.cursor/init_db.sh"
+else
+  echo "==> [start] Applying pending migrations"
+  # shellcheck disable=SC1091
+  . "$REPO/.venv/bin/activate"
+  export MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=crmadmin MYSQL_PASSWORD=crmpassword MYSQL_DB=crm
+  # 066 blocks when Michelle Cady and Rodrigo Leon are not exactly one user
+  # each. That must not skip 065 or take the dev server down.
+  python -m scripts.migrate || echo "==> [start] WARNING: migrations did not all apply"
 fi
 
 echo "==> [start] done"

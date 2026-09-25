@@ -1,0 +1,30 @@
+/*
+ * The proposal generator sits inside the lead panel, which is painted with
+ * fixed light colors (bg-white) in both themes. The form itself uses the
+ * shared hsl(var(--*)) tokens, so under .dark it inherits a near-black
+ * surface and light text. Re-declare the light palette from index.css :root
+ * on this subtree only — keep these values in sync with that block.
+ *
+ * The same component is the New Proposal Package dialog, so that entry stays
+ * on this white surface too. Nothing outside .proposal-generator changes.
+ */
+.proposal-generator {
+  color-scheme: light;
+  --bg: 0 0% 98%;
+  --fg: 224 71% 4%;
+  --card: 0 0% 100%;
+  --card-fg: 224 71% 4%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 153 47% 34%;
+  --primary: #2E7D52;
+  --primary-fg: #ffffff;
+  --muted: 220 14% 96%;
+  --muted-fg: 220 9% 46%;
+  --destructive: 0 84% 60%;
+  --destructive-fg: 0 0% 100%;
+  /* Literal white, matching the lead panel's bg-white, so the form surface
+     does not depend on a token that .dark would otherwise darken. */
+  background-color: #ffffff;
+  color: hsl(var(--fg));
+}

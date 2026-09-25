@@ -13,7 +13,9 @@
 //  5. Reopen (proposalId) — hydrates form from useProposal
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render, makeUser } from '@/test/utils'
@@ -772,5 +774,68 @@ describe('ProposalBuilder — reopen from proposalId', () => {
     expect(screen.getByLabelText('Search leads')).toBeInTheDocument()
     expect(screen.getByTestId('proposal-lead-prompt')).toBeInTheDocument()
     expect(screen.queryByTestId('submit-proposal')).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Light surface — the lead panel stays white in dark mode, and this form
+// shares that surface. Tokens are pinned on .proposal-generator.
+// ---------------------------------------------------------------------------
+
+describe('ProposalBuilder — light surface in dark mode', () => {
+  const DARK_TOKENS = ['--bg', '--fg', '--card', '--border', '--muted-fg'] as const
+  // Vitest does not inject the component's CSS import into jsdom. Apply the
+  // same stylesheet the component imports so computed tokens are real.
+  const generatorCss = readFileSync(
+    path.resolve('src/views/inside-sales/components/estimating/proposal-generator.css'),
+    'utf8',
+  )
+
+  beforeEach(() => {
+    document.documentElement.classList.add('dark')
+    document.documentElement.style.setProperty('--bg', '224 71% 4%')
+    document.documentElement.style.setProperty('--fg', '210 20% 98%')
+    document.documentElement.style.setProperty('--card', '220 14% 8%')
+    document.documentElement.style.setProperty('--border', '215 14% 18%')
+    document.documentElement.style.setProperty('--muted-fg', '217 10% 64%')
+    const style = document.createElement('style')
+    style.setAttribute('data-proposal-generator-test', '')
+    style.textContent = generatorCss
+    document.head.appendChild(style)
+  })
+
+  afterEach(() => {
+    document.documentElement.classList.remove('dark')
+    for (const token of DARK_TOKENS) {
+      document.documentElement.style.removeProperty(token)
+    }
+    document.querySelector('[data-proposal-generator-test]')?.remove()
+  })
+
+  function expectLightSurface(root: HTMLElement) {
+    const style = getComputedStyle(root)
+    expect(style.getPropertyValue('--bg').trim()).toBe('0 0% 98%')
+    expect(style.getPropertyValue('--fg').trim()).toBe('224 71% 4%')
+    expect(style.getPropertyValue('--card').trim()).toBe('0 0% 100%')
+    expect(style.getPropertyValue('--border').trim()).toBe('220 13% 91%')
+    expect(style.getPropertyValue('--muted-fg').trim()).toBe('220 9% 46%')
+    expect(style.colorScheme).toBe('light')
+    expect(style.backgroundColor).toBe('rgb(255, 255, 255)')
+  }
+
+  it('keeps the light palette on the lead-panel generator while the document is dark', () => {
+    render(<ProposalBuilder lead={mockLead} estimate={mockEstimate} />)
+    const root = screen.getByTestId('proposal-generator')
+    expectLightSurface(root)
+
+    const heading = screen.getByRole('heading', { name: 'Optional sections' })
+    expect(getComputedStyle(heading).getPropertyValue('--fg').trim()).toBe('224 71% 4%')
+    expect(getComputedStyle(document.documentElement).getPropertyValue('--fg').trim()).toBe('210 20% 98%')
+  })
+
+  it('keeps the same white surface when opened as New Proposal Package', () => {
+    render(<ProposalBuilder lead={null} pickLead showHeader={false} />)
+    expectLightSurface(screen.getByTestId('proposal-generator'))
+    expect(screen.getByLabelText('Search leads')).toBeInTheDocument()
   })
 })

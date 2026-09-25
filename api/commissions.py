@@ -2,12 +2,12 @@
 
 Tracks sales rep commission rates and earned commissions. Commission rates are
 entered manually by administrators. Commissions are inserted by
-api/estimating.py (_create_commission_on_won) when an estimate transitions to
-'won' — no DB trigger.
+api/commission_service.py (create_on_won) when an estimate transitions to
+'won', and cancelled by cancel_for_estimate when it transitions to 'lost'.
 
 Payout cadence is the plan rule's payout_schedule. Maintenance has three
 installments: the first is scheduled at the end of the contract-start quarter,
-and the other two wait on billing. Construction and enhancement payouts stay
+and the other two wait on billing. Construction payouts stay
 pending_billing_data until collections exist. Due vs upcoming is derived at
 read time from America/New_York today and is not stored.
 
@@ -26,13 +26,16 @@ from pydantic import BaseModel
 
 from db import query, execute
 from api import authz
-from api.commission_calc import (
+from api.commission_calc import calendar_date, close_quarter_label, et_today
+from api.commission_schedule import (
     build_payout_schedule,
-    close_date_of,
-    close_quarter_label,
-    et_today,
     public_installment,
     summarize_open_installments,
+)
+from api.commission_service import (  # noqa: F401  (re-exported for estimating)
+    cancel_commission,
+    cancel_for_estimate,
+    create_on_won,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,14 +83,9 @@ def _require_mark_paid(user: dict) -> None:
 
 
 _REP_PLAN_SQL = """
-SELECT ucp.plan_key, cp.name AS plan_name
-FROM user_commission_plans ucp
-JOIN commission_plans cp ON cp.plan_key = ucp.plan_key
-WHERE ucp.user_id = %s
-  AND ucp.effective_date <= CURDATE()
-  AND (ucp.expires_date IS NULL OR ucp.expires_date > CURDATE())
-ORDER BY ucp.effective_date DESC
-LIMIT 1
+SELECT plan_key, plan_name
+FROM v_current_commission_plans
+WHERE user_id = %s
 """
 
 
@@ -105,29 +103,31 @@ async def _current_rep_plan(user_id: str) -> tuple[Optional[str], Optional[str]]
     return plan_key, plan_name
 
 
-async def cancel_commission(commission_id: str) -> None:
-    """Cancel a commission and every installment that has not been paid.
+def _not_payable(row: dict) -> bool:
+    """True when an installment must not be flipped to paid.
 
-    Paid installments stay paid. Call this instead of a raw status update so
-    the installment rows follow the commission.
+    pending_billing_data and a null amount are still unknown. Cancelled
+    rows stay cancelled.
     """
-    await execute(
-        """
-        UPDATE commissions
-        SET status = 'cancelled', updated_at = NOW()
-        WHERE id = %s
-        """,
-        [commission_id],
+    if row.get("status") in ("pending_billing_data", "cancelled"):
+        return True
+    return row.get("amount_cents") is None
+
+
+def _latest_dated_period(siblings: list[dict]) -> Optional[str]:
+    """payment_period from the latest payout_date, then installment_number.
+
+    An undated row, including a higher installment number with a null date,
+    does not win over a dated row.
+    """
+    dated = [row for row in siblings if row.get("payout_date") is not None]
+    if not dated:
+        return None
+    chosen = max(
+        dated,
+        key=lambda row: (row["payout_date"], int(row.get("installment_number") or 0)),
     )
-    await execute(
-        """
-        UPDATE commission_installments
-        SET status = 'cancelled', updated_at = NOW()
-        WHERE commission_id = %s
-          AND status != 'paid'
-        """,
-        [commission_id],
-    )
+    return chosen.get("payout_period_label")
 
 
 def register(app, require_auth) -> None:
@@ -347,7 +347,7 @@ def register(app, require_auth) -> None:
         for row in rows:
             if row.get("created_at") is None or row.get("commission_id") is None:
                 continue
-            if close_date_of(row["created_at"]).year != close_year:
+            if calendar_date(row["created_at"]).year != close_year:
                 continue
             deal = deals_by_id.get(row["commission_id"])
             if deal is None:
@@ -380,8 +380,8 @@ def register(app, require_auth) -> None:
         _require_mark_paid(user)
         rows = await query(
             """
-            SELECT i.id, i.commission_id, i.status, i.payout_period_label,
-                   c.status AS commission_status
+            SELECT i.id, i.commission_id, i.status, i.amount_cents, i.payout_date,
+                   i.payout_period_label, c.status AS commission_status
             FROM commission_installments i
             JOIN commissions c ON c.id = i.commission_id
             WHERE i.id = %s
@@ -393,6 +393,11 @@ def register(app, require_auth) -> None:
         row = rows[0]
         if row.get("status") == "cancelled" or row.get("commission_status") == "cancelled":
             raise HTTPException(status_code=409, detail="Cancelled installment cannot be marked paid")
+        if row.get("status") == "pending_billing_data" or row.get("amount_cents") is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Installment is not payable until its amount and billing data are known",
+            )
         await execute(
             """
             UPDATE commission_installments
@@ -403,22 +408,20 @@ def register(app, require_auth) -> None:
         )
         siblings = await query(
             """
-            SELECT installment_number, status, payout_period_label
+            SELECT installment_number, status, payout_period_label, payout_date
             FROM commission_installments
             WHERE commission_id = %s
             """,
             [row["commission_id"]],
         )
         if siblings and all(s.get("status") == "paid" for s in siblings):
-            final_row = max(siblings, key=lambda s: int(s["installment_number"]))
-            final = final_row.get("payout_period_label") or row.get("payout_period_label")
             await execute(
                 """
                 UPDATE commissions
                 SET status = 'paid', paid_at = NOW(), payment_period = %s, updated_at = NOW()
                 WHERE id = %s AND status != 'cancelled'
                 """,
-                [final, row["commission_id"]],
+                [_latest_dated_period(siblings), row["commission_id"]],
             )
         return {"success": True}
 
@@ -428,7 +431,28 @@ def register(app, require_auth) -> None:
         body: MarkPaidBody,
         user: dict = Depends(require_auth),
     ) -> dict:
+        """Mark the commission and every installment paid.
+
+        Returns 409 and writes nothing when any installment is
+        pending_billing_data, cancelled, or has a null amount. Those rows
+        are not payable, so this does not flip them to paid. A commission
+        id that matches no row is 404. The request body's payment_period
+        is stored on the commission.
+        """
         _require_mark_paid(user)
+        installments = await query(
+            """
+            SELECT status, amount_cents
+            FROM commission_installments
+            WHERE commission_id = %s
+            """,
+            [commission_id],
+        )
+        if any(_not_payable(row) for row in installments):
+            raise HTTPException(
+                status_code=409,
+                detail="Commission has installments that are not payable",
+            )
 
         result = await execute(
             """
@@ -485,27 +509,15 @@ def register(app, require_auth) -> None:
                  WHERE v.user_id = u.id
                  ORDER BY v.effective_date DESC
                  LIMIT 1) AS effective_date,
-                (SELECT ucp.plan_key
-                 FROM user_commission_plans ucp
-                 WHERE ucp.user_id = u.id
-                   AND ucp.effective_date <= CURDATE()
-                   AND (ucp.expires_date IS NULL OR ucp.expires_date > CURDATE())
-                 ORDER BY ucp.effective_date DESC
-                 LIMIT 1) AS plan_key,
-                (SELECT cp.name
-                 FROM user_commission_plans ucp
-                 JOIN commission_plans cp ON cp.plan_key = ucp.plan_key
-                 WHERE ucp.user_id = u.id
-                   AND ucp.effective_date <= CURDATE()
-                   AND (ucp.expires_date IS NULL OR ucp.expires_date > CURDATE())
-                 ORDER BY ucp.effective_date DESC
-                 LIMIT 1) AS plan_name
+                p.plan_key,
+                p.plan_name
             FROM (
                 SELECT DISTINCT u2.id, u2.name, u2.email
                 FROM users u2
                 JOIN commissions c ON u2.id = c.user_id
                 WHERE u2.role IN ({role_placeholders})
             ) u
+            LEFT JOIN v_current_commission_plans p ON p.user_id = u.id
             ORDER BY u.name
             """,
             list(authz.SALES_REP_DB_ROLES),

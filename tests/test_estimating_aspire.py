@@ -35,6 +35,12 @@ def authed():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _stub_commission_transitions(monkeypatch):
+    monkeypatch.setattr("api.estimating.commissions.create_on_won", AsyncMock())
+    monkeypatch.setattr("api.estimating.commissions.cancel_for_estimate", AsyncMock())
+
+
 def _est_row(**over):
     row = {
         "id": "est-1", "estimate_type": "maintenance", "name": "Sunny HOA",

@@ -58,6 +58,12 @@ def authed():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _stub_commission_transitions(monkeypatch):
+    monkeypatch.setattr("api.estimating.commissions.create_on_won", AsyncMock())
+    monkeypatch.setattr("api.estimating.commissions.cancel_for_estimate", AsyncMock())
+
+
 def _estimate_row(status: str, *, crew_rate=None, branch_id=_BRANCH_ID) -> dict:
     """The estimates row update_estimate SELECTs before applying a transition."""
     return {

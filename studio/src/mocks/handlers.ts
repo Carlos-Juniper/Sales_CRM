@@ -6,6 +6,7 @@ import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockCo
 import { MOCK_BRANCH_COVERAGE } from './proposalRoster'
 import { rosterHandlers } from './rosterHandlers'
 import { CATALOG_ITEM_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
+import { commissionHandlers, commissionReps } from './commissionHandlers'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid, UserRole } from '@/types'
 import type { ProposalPackageSummary } from '@/types/proposal'
@@ -584,6 +585,7 @@ const allHandlers = [
   // Rep-scoped team roster and client references (reads, writes, 403/400/404).
   // Reads without rep_id keep the region-filtered shared roster. Portfolio stays unscoped.
   ...rosterHandlers,
+  ...commissionHandlers,
   http.get(`${API}/proposals/config/portfolio`, async () => HttpResponse.json([])),
 
   // GET /api/users
@@ -1650,27 +1652,10 @@ allHandlers.push(
   ),
 )
 
-// Commissions + sales performance. Rep lists are only fetched by roles in
-// REP_SELECTOR_ROLES (api/authz.py REP_VIEWER_ROLES); summary and list
-// endpoints auto-scope when no user_id is supplied.
-const mockReps = [
-  {
-    id: 'rep-1',
-    name: 'Alex Rivera',
-    email: 'alex.rivera@example.com',
-    commission_rate: 0.05,
-    effective_date: '2026-01-01',
-  },
-]
-
+// Sales performance rep list. Commission routes live in commissionHandlers.ts.
 allHandlers.push(
-  http.get(`${API}/commissions/reps`, () => HttpResponse.json(mockReps)),
-  http.get(`${API}/commissions/summary`, () =>
-    HttpResponse.json({ scheduled_ytd_cents: 125_000, paid_ytd_cents: 80_000 }),
-  ),
-  http.get(`${API}/commissions/list`, () => HttpResponse.json([])),
   http.get(`${API}/sales-performance/reps`, () =>
-    HttpResponse.json(mockReps.map(({ id, name, email }) => ({ id, name, email }))),
+    HttpResponse.json(commissionReps.map(({ id, name, email }) => ({ id, name, email }))),
   ),
   http.get(`${API}/sales-performance/summary`, () =>
     HttpResponse.json({

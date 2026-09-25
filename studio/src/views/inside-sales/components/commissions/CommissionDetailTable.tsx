@@ -1,14 +1,16 @@
-import { useState } from 'react'
-import { ChevronDown, ChevronUp, CheckCircle, Search } from 'lucide-react'
+import { Fragment, useState } from 'react'
+import { ChevronDown, ChevronUp, CheckCircle, Loader2, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TableRowSkeleton } from '@/components/shared/LoadingSkeleton'
-import { useMarkCommissionPaid } from '@/hooks/useCommissions'
+import { useMarkCommissionPaid, useMarkInstallmentPaid } from '@/hooks/useCommissions'
 import { formatCents } from '@/lib/estimating/maintenance'
-import { formatRate, formatPaymentPeriod, formatContractNumber } from '@/lib/commissions'
-import type { Commission, CommissionFilters } from '@/types/commissions'
+import { describePayout, formatRate, formatPaymentPeriod, formatContractNumber } from '@/lib/commissions'
+import type { Commission, CommissionFilters, CommissionInstallment } from '@/types/commissions'
+import { InstallmentStatusBadge } from './InstallmentStatusBadge'
+import { PayoutLine } from './PayoutLine'
 
 interface CommissionDetailTableProps {
   commissions: Commission[]
@@ -21,10 +23,94 @@ interface CommissionDetailTableProps {
 type SortField = 'created_at' | 'commission_amount_cents' | 'property_name'
 type SortDirection = 'asc' | 'desc'
 
-const STATUS_BADGE: Record<Commission['status'], { label: string; className: string }> = {
-  approved: { label: 'Approved', className: 'bg-blue-50 text-blue-700 border-blue-200' },
-  paid:     { label: 'Paid',     className: 'bg-green-50 text-green-700 border-green-200' },
-  cancelled:{ label: 'Cancelled',className: 'bg-gray-50 text-gray-700 border-gray-200' },
+const STATUS_BADGE: Record<Commission['status'], { label: string; variant: NonNullable<BadgeProps['variant']> }> = {
+  approved: { label: 'Approved', variant: 'blue' },
+  paid: { label: 'Paid', variant: 'green' },
+  cancelled: { label: 'Cancelled', variant: 'zinc' },
+}
+
+function SortIcon({
+  field,
+  sortField,
+  sortDirection,
+}: {
+  field: SortField
+  sortField: SortField
+  sortDirection: SortDirection
+}) {
+  if (sortField !== field) return null
+  return sortDirection === 'asc'
+    ? <ChevronUp className="h-3.5 w-3.5 inline ml-1" />
+    : <ChevronDown className="h-3.5 w-3.5 inline ml-1" />
+}
+
+function InstallmentLines({
+  installments,
+  propertyName,
+  canMark,
+  pendingId,
+  onMarkPaid,
+}: {
+  installments: CommissionInstallment[]
+  propertyName: string
+  canMark: boolean
+  pendingId: string | undefined
+  onMarkPaid: (installmentId: string) => void
+}) {
+  return (
+    <ul className="space-y-1.5" data-testid="commission-installments">
+      {installments.map((installment) => {
+        const payout = describePayout(installment)
+        const canPay = canMark && installment.status !== 'paid' && installment.status !== 'cancelled'
+        const marking = pendingId === installment.id
+        return (
+          <li
+            key={installment.id}
+            className="flex items-center gap-2 flex-wrap text-xs"
+            data-testid={`installment-${installment.id}`}
+          >
+            <span className="text-[hsl(var(--muted-fg))] w-20">Payment {installment.installment_number}</span>
+            <PayoutLine
+              payout={payout}
+              labelClassName="text-[hsl(var(--fg))]"
+              amountClassName="font-mono text-[hsl(var(--fg))]"
+            />
+            <InstallmentStatusBadge status={installment.status} />
+            {installment.status === 'pending_billing_data' && installment.billing_installment_number != null && (
+              <span className="text-[11px] text-[hsl(var(--muted-fg))]">
+                Billing installment {installment.billing_installment_number}
+              </span>
+            )}
+            {installment.collected_amount_cents != null && (
+              <span className="text-[11px] text-[hsl(var(--muted-fg))]">
+                Collected {formatCents(installment.collected_amount_cents)}
+              </span>
+            )}
+            {canPay && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onMarkPaid(installment.id)}
+                disabled={marking}
+                aria-label={`Mark payment ${installment.installment_number} on ${propertyName} paid`}
+                className="gap-1.5 h-7 text-xs"
+              >
+                {marking
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <CheckCircle className="h-3.5 w-3.5" />}
+                Mark paid
+              </Button>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+const TYPE_BADGE: Record<'maintenance' | 'install', { label: string; variant: NonNullable<BadgeProps['variant']> }> = {
+  maintenance: { label: 'Maintenance', variant: 'blue' },
+  install: { label: 'Install', variant: 'amber' },
 }
 
 export function CommissionDetailTable({
@@ -38,6 +124,7 @@ export function CommissionDetailTable({
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [searchQuery, setSearchQuery] = useState('')
   const markPaid = useMarkCommissionPaid()
+  const markInstallmentPaid = useMarkInstallmentPaid()
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -70,12 +157,7 @@ export function CommissionDetailTable({
     markPaid.mutate({ commissionId, paymentPeriod: formatPaymentPeriod(new Date()) })
   }
 
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return null
-    return sortDirection === 'asc'
-      ? <ChevronUp className="h-3.5 w-3.5 inline ml-1" />
-      : <ChevronDown className="h-3.5 w-3.5 inline ml-1" />
-  }
+  const payingCommissionId = markPaid.isPending ? markPaid.variables?.commissionId : undefined
 
   const colCount = isAdmin ? 9 : 7
 
@@ -139,13 +221,13 @@ export function CommissionDetailTable({
                 className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none whitespace-nowrap"
                 onClick={() => handleSort('created_at')}
               >
-                Date <SortIcon field="created_at" />
+                Date <SortIcon field="created_at" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th
                 className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none"
                 onClick={() => handleSort('property_name')}
               >
-                Property <SortIcon field="property_name" />
+                Property <SortIcon field="property_name" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] whitespace-nowrap">Contract #</th>
               <th className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] whitespace-nowrap">Contract Value</th>
@@ -154,7 +236,7 @@ export function CommissionDetailTable({
                 className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none"
                 onClick={() => handleSort('commission_amount_cents')}
               >
-                Commission <SortIcon field="commission_amount_cents" />
+                Commission <SortIcon field="commission_amount_cents" sortField={sortField} sortDirection={sortDirection} />
               </th>
               <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Status</th>
               {isAdmin && (
@@ -180,72 +262,90 @@ export function CommissionDetailTable({
 
             {!isLoading && sortedCommissions.map((commission) => {
               const badge = STATUS_BADGE[commission.status]
+              const typeBadge = commission.estimate_type ? TYPE_BADGE[commission.estimate_type] : undefined
+              const installments = commission.installments ?? []
+              const canMarkInstallment = isAdmin && commission.status === 'approved'
               return (
-                <tr
-                  key={commission.id}
-                  className="border-b border-[hsl(var(--border))] last:border-0 hover:bg-[hsl(var(--muted))] transition-colors"
-                >
-                  <td className="px-4 py-3 text-xs whitespace-nowrap">
-                    {new Date(commission.created_at).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </td>
-                  <td className="px-4 py-3 text-xs">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        {commission.property_name}
-                        {commission.estimate_type === 'maintenance' && (
-                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] px-1.5 py-0 font-medium">Maintenance</Badge>
-                        )}
-                        {commission.estimate_type === 'install' && (
-                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] px-1.5 py-0 font-medium">Install</Badge>
+                <Fragment key={commission.id}>
+                  <tr
+                    className="border-b border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))] transition-colors"
+                  >
+                    <td className="px-4 py-3 text-xs whitespace-nowrap">
+                      {new Date(commission.created_at).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          {commission.property_name}
+                          {typeBadge && (
+                            <Badge variant={typeBadge.variant} className="text-[10px] px-1.5 py-0 font-medium">
+                              {typeBadge.label}
+                            </Badge>
+                          )}
+                        </div>
+                        {commission.notes && (
+                          <p className="text-[11px] text-[hsl(var(--muted-fg))] truncate max-w-[240px] mt-0.5">
+                            {commission.notes}
+                          </p>
                         )}
                       </div>
-                      {commission.notes && (
-                        <p className="text-[11px] text-[hsl(var(--muted-fg))] truncate max-w-[240px] mt-0.5">
-                          {commission.notes}
-                        </p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs">{formatContractNumber(commission.aspire_number, commission.estimate_number)}</td>
-                  <td className="px-4 py-3 text-right font-mono text-xs">{formatCents(commission.contract_value_cents)}</td>
-                  <td className="px-4 py-3 text-right font-mono text-xs">{formatRate(commission.commission_rate)}</td>
-                  <td className="px-4 py-3 text-right font-mono text-xs font-semibold">{formatCents(commission.commission_amount_cents)}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant="outline" className={badge.className}>{badge.label}</Badge>
-                  </td>
-                  {isAdmin && (
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs">{formatContractNumber(commission.aspire_number, commission.estimate_number)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-xs">{formatCents(commission.contract_value_cents)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-xs">{formatRate(commission.commission_rate)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-xs font-semibold">{formatCents(commission.commission_amount_cents)}</td>
                     <td className="px-4 py-3">
-                      {commission.rep_name && (
-                        <span className="inline-flex items-center rounded-full bg-[hsl(var(--muted))] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--fg))]">
-                          {commission.rep_name}
-                        </span>
-                      )}
+                      <Badge variant={badge.variant}>{badge.label}</Badge>
                     </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3">
+                        {commission.rep_name && (
+                          <span className="inline-flex items-center rounded-full bg-[hsl(var(--muted))] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--fg))]">
+                            {commission.rep_name}
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right">
+                        {commission.status === 'approved' && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleMarkPaid(commission.id)}
+                            disabled={payingCommissionId === commission.id}
+                            className="gap-1.5 h-7 text-xs"
+                          >
+                            {payingCommissionId === commission.id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <CheckCircle className="h-3.5 w-3.5" />}
+                            Mark Paid
+                          </Button>
+                        )}
+                        {commission.status === 'paid' && commission.payment_period && (
+                          <span className="text-xs text-[hsl(var(--muted-fg))]">{commission.payment_period}</span>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                  {installments.length > 0 && (
+                    <tr className="border-b border-[hsl(var(--border))] last:border-0">
+                      <td colSpan={colCount} className="px-4 py-2 bg-[hsl(var(--muted))]">
+                        <InstallmentLines
+                          installments={installments}
+                          propertyName={commission.property_name ?? 'this deal'}
+                          canMark={canMarkInstallment}
+                          pendingId={markInstallmentPaid.isPending ? markInstallmentPaid.variables : undefined}
+                          onMarkPaid={(installmentId) => markInstallmentPaid.mutate(installmentId)}
+                        />
+                      </td>
+                    </tr>
                   )}
-                  {isAdmin && (
-                    <td className="px-4 py-3 text-right">
-                      {commission.status === 'approved' && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleMarkPaid(commission.id)}
-                          disabled={markPaid.isPending}
-                          className="gap-1.5 h-7 text-xs"
-                        >
-                          <CheckCircle className="h-3.5 w-3.5" />
-                          Mark Paid
-                        </Button>
-                      )}
-                      {commission.status === 'paid' && commission.payment_period && (
-                        <span className="text-xs text-[hsl(var(--muted-fg))]">{commission.payment_period}</span>
-                      )}
-                    </td>
-                  )}
-                </tr>
+                </Fragment>
               )
             })}
           </tbody>

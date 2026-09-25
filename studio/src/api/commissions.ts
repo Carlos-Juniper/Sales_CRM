@@ -1,5 +1,11 @@
 import { apiClient } from './client'
-import type { Commission, CommissionSummary, CommissionRep, CommissionFilters } from '@/types/commissions'
+import type {
+  Commission,
+  CommissionSummary,
+  CommissionRep,
+  CommissionFilters,
+  CommissionPayoutSchedule,
+} from '@/types/commissions'
 
 export const commissionsApi = {
   getSummary: (filters?: CommissionFilters) => {
@@ -26,6 +32,20 @@ export const commissionsApi = {
     apiClient.post<{ success: boolean }>(`/commissions/${commissionId}/mark-paid`, {
       payment_period: paymentPeriod,
     }),
+
+  markInstallmentPaid: (installmentId: string) =>
+    apiClient.post<{ success: boolean }>(`/commissions/installments/${installmentId}/mark-paid`, {}),
+
+  // start_date/end_date select deals by close date. When either is set, the
+  // API skips the close-year clip, so this client does not send year.
+  getPayoutSchedule: (params?: { user_id?: string; start_date?: string; end_date?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.user_id) qs.set('user_id', params.user_id)
+    if (params?.start_date) qs.set('start_date', params.start_date)
+    if (params?.end_date) qs.set('end_date', params.end_date)
+    const q = qs.toString()
+    return apiClient.get<CommissionPayoutSchedule>(`/commissions/payout-schedule${q ? `?${q}` : ''}`)
+  },
 
   getReps: () => apiClient.get<CommissionRep[]>('/commissions/reps'),
 }

@@ -110,7 +110,7 @@ const SALES_GROUP_ROLES = new Set([
   'inside_sales',
   'maintenance_sales',
   'install_sales',
-  'regional_sales_rep',
+  'regional_sales',
   'vp_sales',
   'sales',
   'outside_sales',

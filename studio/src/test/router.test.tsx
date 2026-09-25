@@ -289,7 +289,7 @@ describe('Per-route workspace guards (role-scoped navigation)', () => {
 
   // ── Analytics is management only ─────────────────────────────────────────
 
-  it.each(['admin', 'regional_sales_rep', 'vp_sales', 'manager', 'regional_director', 'vice_president', 'ceo'] as const)(
+  it.each(['admin', 'vp_sales', 'manager', 'regional_director', 'vice_president', 'ceo'] as const)(
     '%s can open Analytics',
     (role) => {
       renderRoute(['/inside-sales'], makeUser({ role }))
@@ -299,6 +299,7 @@ describe('Per-route workspace guards (role-scoped navigation)', () => {
 
   it.each([
     ['sales', 'Pipeline'],
+    ['regional_sales', 'Pipeline'],
     ['inside_sales', 'Public Leads'],
     ['maintenance_estimating', 'Estimating'],
     ['install_estimating', 'Estimating'],
@@ -315,6 +316,7 @@ describe('Per-route workspace guards (role-scoped navigation)', () => {
 
   it.each([
     ['sales', 'Pipeline'],
+    ['regional_sales', 'Pipeline'],
     ['inside_sales', 'Public Leads'],
     ['maintenance_estimating', 'Estimating'],
     ['procurement', 'Estimating'],

@@ -1855,7 +1855,7 @@ async def _assert_lead_visible(user: dict, lead_id: str) -> None:
     if not rows:
         raise HTTPException(status_code=404, detail="Lead not found")
     authz.require_lead_access(user, rows[0].get("source"), rows[0].get("assigned_to"))
-    authz.require_own_lead(user, rows[0])
+    await authz.enforce_lead_visibility(user, rows[0])
 
 
 def register(app, require_auth) -> None:
@@ -1893,6 +1893,13 @@ def register(app, require_auth) -> None:
             placeholders = ", ".join(["%s"] * len(scope.ids))
             conditions.append(f"aspire_branch_id IN ({placeholders})")
             params.extend(scope.ids)
+        if authz.is_regional_sales(_user.get("role")):
+            # Own estimates plus direct reports, still inside the branch list.
+            conditions.append(
+                "(crm_rep = %s OR crm_rep IN"
+                " (SELECT id FROM users WHERE reports_to_user_id = %s))"
+            )
+            params.extend([_user.get("id"), _user.get("id")])
         if lead_id:
             # Filter to estimates linked to the given lead (migration 010 column).
             conditions.append("lead_id = %s")

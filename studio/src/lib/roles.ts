@@ -13,7 +13,7 @@ export const SALES_TEAM_ROLES: readonly UserRole[] = [
   'inside_sales',
   'maintenance_sales',
   'install_sales',
-  'regional_sales_rep',
+  'regional_sales',
   'vp_sales',
 ]
 
@@ -37,13 +37,13 @@ export const SALES_REP_ROLES: readonly string[] = [
 ]
 
 /**
- * Admin and the two sales roles that share every admin grant.
- * Mirrors api/authz.py ADMIN_EQUIVALENT_ROLES. regional_director and
- * vice_president are not members.
+ * Admin and VP of Sales share every admin grant. regional_sales is
+ * field sales and is not a member. Mirrors api/authz.py
+ * ADMIN_EQUIVALENT_ROLES. regional_director and vice_president are not
+ * members.
  */
 export const ADMIN_EQUIVALENT_ROLES: readonly UserRole[] = [
   'admin',
-  'regional_sales_rep',
   'vp_sales',
 ]
 
@@ -127,7 +127,7 @@ export const FULL_ACCESS_ROLES: readonly UserRole[] = [
 ]
 
 /**
- * Field sales: maintenance_sales and install_sales, plus legacy `sales`.
+ * Field sales: maintenance_sales, install_sales, regional_sales, plus legacy `sales`.
  * Own leads, proposals, self-scoped performance. Not the rep-selector
  * viewer list, and not Public Leads. outside_sales normalizes to sales
  * before this check. Mirrors api/authz.py FIELD_SALES_ROLES.
@@ -135,6 +135,7 @@ export const FULL_ACCESS_ROLES: readonly UserRole[] = [
 export const FIELD_SALES_ROLES: readonly UserRole[] = [
   'maintenance_sales',
   'install_sales',
+  'regional_sales',
   'sales',
 ]
 
@@ -142,7 +143,7 @@ export const FIELD_SALES_ROLES: readonly UserRole[] = [
  * Analytics nav item and `/inside-sales` (GET /api/dashboard/inside-sales).
  *
  * Defined once as FULL_ACCESS_ROLES: admin-equivalent roles (admin,
- * regional_sales_rep, vp_sales), manager, regional_director, vice_president,
+ * vp_sales), manager, regional_director, vice_president,
  * and ceo. Field sales, including maintenance_sales and install_sales, are
  * not on this list — they use the pipeline. REP_SELECTOR_ROLES lists the
  * same people, but that constant is the sales-performance / commission rep
@@ -179,14 +180,14 @@ export function defaultRouteForRole(role: UserRole | null): string {
   if (role === 'inside_sales') return '/inside-sales/leads'
   if (role === 'maintenance_estimating' || role === 'install_estimating' || role === 'procurement')
     return '/inside-sales/estimating'
-  // Field sales (maintenance_sales, install_sales, and legacy sales) share
+  // Field sales (maintenance, install, regional, and legacy sales) share
   // the sales workspace but not Analytics. Pipeline is a page they can open,
   // so a denied visit to /inside-sales does not bounce back onto itself.
   if (role !== null && (FIELD_SALES_ROLES as readonly string[]).includes(role)) {
     return '/inside-sales/pipeline'
   }
-  // Management and admin-equivalent roles (admin, regional_sales_rep,
-  // vp_sales) land on Analytics. Any other role (marketing, null, unknown)
+  // Management and admin-equivalent roles (admin, vp_sales) land on Analytics.
+  // Any other role (marketing, null, unknown)
   // has no inside-sales access — redirect to /settings, which is open to
   // every authenticated user, to avoid an infinite redirect loop.
   if (role !== null && ANALYTICS_NAV_ROLES.includes(role)) return '/inside-sales'

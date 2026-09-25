@@ -48,7 +48,12 @@ function UsersAdmin({ slug, label }: { slug: string; label: string }) {
         </p>
       </div>
 
-      <AuthorizeUserForm branches={branchList} />
+      <AuthorizeUserForm
+        branches={branchList}
+        regionalManagers={(users.data ?? []).filter(
+          (manager) => manager.role === 'regional_sales' && manager.active !== 0 && manager.active !== false,
+        )}
+      />
 
       <div>
         <h3 className="mb-2 text-sm font-semibold text-[var(--fg)]">
@@ -66,7 +71,14 @@ function UsersAdmin({ slug, label }: { slug: string; label: string }) {
         {users.data && users.data.length > 0 && (
           <ul className="space-y-2">
             {users.data.map((u) => (
-              <UserRow key={u.id} user={u} branches={branchList} />
+              <UserRow
+                key={u.id}
+                user={u}
+                branches={branchList}
+                regionalManagers={(users.data ?? []).filter(
+                  (manager) => manager.role === 'regional_sales' && manager.active !== 0 && manager.active !== false,
+                )}
+              />
             ))}
           </ul>
         )}

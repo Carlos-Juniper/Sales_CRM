@@ -46,6 +46,16 @@ def _can_view_all(user: dict) -> bool:
     return authz.normalize_role(user.get("role")) in authz.REP_VIEWER_ROLES
 
 
+def _ids_clause(column: str, ids: Optional[list[str]]) -> tuple[str, list]:
+    """AND-fragment restricting `column` to ids. Empty when ids is None (all reps)."""
+    if ids is None:
+        return "", []
+    if len(ids) == 1:
+        return f"AND {column} = %s", list(ids)
+    placeholders = ", ".join(["%s"] * len(ids))
+    return f"AND {column} IN ({placeholders})", list(ids)
+
+
 def register(app, require_auth) -> None:
     """Attach all commission routes to the FastAPI app with the shared auth dep."""
 
@@ -56,10 +66,8 @@ def register(app, require_auth) -> None:
         end_date: Optional[str] = Query(default=None),
         user: dict = Depends(require_auth),
     ) -> dict:
-        target_user_id = user_id or user["id"]
-
-        if not _can_view_all(user) and target_user_id != user["id"]:
-            raise HTTPException(status_code=403, detail="You can only view your own commissions")
+        visible = await authz.assert_can_view_rep(user, user_id, surface="commissions")
+        user_clause, user_params = _ids_clause("user_id", visible)
 
         now = datetime.now(tz=timezone.utc)
         if not start_date:
@@ -68,17 +76,17 @@ def register(app, require_auth) -> None:
             end_date = now.date().isoformat()
 
         rows = await query(
-            """
+            f"""
             SELECT
                 SUM(CASE WHEN status IN ('approved', 'paid') THEN commission_amount_cents ELSE 0 END) AS scheduled_ytd_cents,
                 SUM(CASE WHEN status = 'paid' THEN commission_amount_cents ELSE 0 END) AS paid_ytd_cents
             FROM commissions
-            WHERE user_id = %s
-              AND created_at >= %s
+            WHERE created_at >= %s
               AND created_at <= %s
               AND status != 'cancelled'
+              {user_clause}
             """,
-            [target_user_id, start_date, end_date],
+            [start_date, end_date, *user_params],
         )
         result = rows[0] if rows else {}
         return {
@@ -95,13 +103,14 @@ def register(app, require_auth) -> None:
         end_date: Optional[str] = Query(default=None),
         user: dict = Depends(require_auth),
     ) -> list:
-        target_user_id = user_id or user["id"]
+        visible = await authz.assert_can_view_rep(user, user_id, surface="commissions")
+        user_clause, user_params = _ids_clause("c.user_id", visible)
 
-        if not _can_view_all(user) and target_user_id != user["id"]:
-            raise HTTPException(status_code=403, detail="You can only view your own commissions")
-
-        conditions: list[str] = ["c.user_id = %s"]
-        params: list[Any] = [target_user_id]
+        conditions: list[str] = ["1 = 1"]
+        params: list[Any] = []
+        if user_clause:
+            conditions.append(user_clause.removeprefix("AND ").strip())
+            params.extend(user_params)
 
         if status:
             conditions.append("c.status = %s")
@@ -164,6 +173,30 @@ def register(app, require_auth) -> None:
     async def get_commission_reps(
         user: dict = Depends(require_auth),
     ) -> list:
+        if authz.is_regional_sales(user.get("role")):
+            rows = await query(
+                """
+                SELECT
+                    u.id, u.name, u.email,
+                    (SELECT v.commission_rate
+                     FROM v_current_commission_rates v
+                     WHERE v.user_id = u.id
+                     ORDER BY v.effective_date DESC
+                     LIMIT 1) AS commission_rate,
+                    (SELECT v.effective_date
+                     FROM v_current_commission_rates v
+                     WHERE v.user_id = u.id
+                     ORDER BY v.effective_date DESC
+                     LIMIT 1) AS effective_date
+                FROM users u
+                WHERE u.active = 1
+                  AND (u.id = %s OR u.reports_to_user_id = %s)
+                ORDER BY u.name
+                """,
+                [user["id"], user["id"]],
+            )
+            return [_coerce_row(row) for row in rows]
+
         if not _can_view_all(user):
             raise HTTPException(status_code=403, detail="Only admin, VP, or CEO can view all reps")
 

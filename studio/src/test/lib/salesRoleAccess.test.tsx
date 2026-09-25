@@ -69,7 +69,7 @@ describe('split field-sales role gates', () => {
     expect(requiresAspireSalesRep('install_sales')).toBe(true)
     expect(requiresAspireSalesRep('inside_sales')).toBe(false)
     expect(requiresAspireSalesRep('manager')).toBe(false)
-    expect(requiresAspireSalesRep('regional_sales_rep')).toBe(false)
+    expect(requiresAspireSalesRep('regional_sales')).toBe(true)
     expect(requiresAspireSalesRep('vp_sales')).toBe(false)
     expect(requiresAspireSalesRep('regional_director')).toBe(false)
     expect(requiresAspireSalesRep('vice_president')).toBe(false)
@@ -88,7 +88,7 @@ describe('split field-sales role gates', () => {
     expect(roleLabel('inside_sales')).toBe('Inside Sales')
     expect(roleLabel('sales')).toBe('Legacy: Sales (reassign)')
     expect(roleLabel('outside_sales')).toBe('Legacy: Sales (reassign)')
-    expect(roleLabel('regional_sales_rep')).toBe('Regional Sales Rep')
+    expect(roleLabel('regional_sales')).toBe('Regional Sales')
     expect(roleLabel('vp_sales')).toBe('VP of Sales')
     expect(roleLabel('regional_director')).toBe('Regional Director')
     expect(roleLabel('vice_president')).toBe('Vice President')
@@ -113,17 +113,27 @@ describe('split field-sales role gates', () => {
 })
 
 describe('admin-equivalent sales roles', () => {
-  it('lands on Analytics and is not field-sales scoped', () => {
-    for (const role of ['regional_sales_rep', 'vp_sales'] as const) {
-      expect(defaultRouteForRole(role)).toBe('/inside-sales')
-      expect(ANALYTICS_NAV_ROLES).toContain(role)
-      expect(PUBLIC_LEADS_NAV_ROLES).toContain(role)
-      expect(SALES_NAV_ROLES).toContain(role)
-      expect(REP_SELECTOR_ROLES).toContain(role)
-      expect(withRole(role).isAdmin).toBe(true)
-      expect(withRole(role).isSales).toBe(false)
-      expect(withRole(role).canAccess(ANALYTICS_NAV_ROLES)).toBe(true)
-    }
+  it('vp_sales lands on Analytics; regional_sales is field sales', () => {
+    expect(defaultRouteForRole('vp_sales')).toBe('/inside-sales')
+    expect(ANALYTICS_NAV_ROLES).toContain('vp_sales')
+    expect(PUBLIC_LEADS_NAV_ROLES).toContain('vp_sales')
+    expect(SALES_NAV_ROLES).toContain('vp_sales')
+    expect(REP_SELECTOR_ROLES).toContain('vp_sales')
+    expect(withRole('vp_sales').isAdmin).toBe(true)
+    expect(withRole('vp_sales').isSales).toBe(false)
+    expect(withRole('vp_sales').canAccess(ANALYTICS_NAV_ROLES)).toBe(true)
+
+    expect(defaultRouteForRole('regional_sales')).toBe('/inside-sales/pipeline')
+    expect(ANALYTICS_NAV_ROLES).not.toContain('regional_sales')
+    expect(PUBLIC_LEADS_NAV_ROLES).not.toContain('regional_sales')
+    expect(SALES_NAV_ROLES).toContain('regional_sales')
+    expect(REP_SELECTOR_ROLES).not.toContain('regional_sales')
+    expect(withRole('regional_sales').isAdmin).toBe(false)
+    expect(withRole('regional_sales').isSales).toBe(true)
+    expect(withRole('regional_sales').canAccess(ANALYTICS_NAV_ROLES)).toBe(false)
+    expect(withRole('regional_sales').canAccess(PUBLIC_LEADS_NAV_ROLES)).toBe(false)
+    expect(withRole('regional_sales').canViewRepSelector).toBe(true)
+
     expect(defaultRouteForRole('regional_director')).toBe('/inside-sales')
     expect(defaultRouteForRole('vice_president')).toBe('/inside-sales')
     expect(withRole('regional_director').isAdmin).toBe(false)
@@ -135,7 +145,7 @@ describe('admin-equivalent sales roles', () => {
       'inside_sales',
       'maintenance_sales',
       'install_sales',
-      'regional_sales_rep',
+      'regional_sales',
       'vp_sales',
     ])
     for (const role of SALES_TEAM_ROLES) {
@@ -149,7 +159,7 @@ describe('admin-equivalent sales roles', () => {
     expect(requiresAspireSalesRep('sales')).toBe(true)
     expect(requiresAspireSalesRep('outside_sales')).toBe(true)
     expect(requiresAspireSalesRep('inside_sales')).toBe(false)
-    expect(requiresAspireSalesRep('regional_sales_rep')).toBe(false)
+    expect(requiresAspireSalesRep('regional_sales')).toBe(true)
     expect(requiresAspireSalesRep('vp_sales')).toBe(false)
   })
 })

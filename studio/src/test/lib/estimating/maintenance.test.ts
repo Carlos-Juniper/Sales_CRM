@@ -171,7 +171,7 @@ describe('canonical auth role → estimating role mapping', () => {
     expect(estimatingRolesForUser('maintenance_estimating')).toContain('estimator')
     expect(estimatingRolesForUser('install_estimating')).toContain('estimator')
     expect(estimatingRolesForUser('admin')).toContain('estimator')
-    expect(estimatingRolesForUser('regional_sales_rep')).toContain('estimator')
+    expect(estimatingRolesForUser('regional_sales')).not.toContain('estimator')
     expect(estimatingRolesForUser('vp_sales')).toContain('estimator')
     expect(estimatingRolesForUser('regional_director')).not.toContain('estimator')
     expect(estimatingRolesForUser('vice_president')).not.toContain('estimator')
@@ -180,7 +180,7 @@ describe('canonical auth role → estimating role mapping', () => {
   })
 
   it('approvers = manager/RD/VP/CEO (+ admin)', () => {
-    for (const r of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin', 'regional_sales_rep', 'vp_sales'] as const) {
+    for (const r of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin', 'vp_sales'] as const) {
       expect(estimatingRolesForUser(r)).toContain('approver')
     }
     expect(estimatingRolesForUser('maintenance_estimating')).not.toContain('approver')

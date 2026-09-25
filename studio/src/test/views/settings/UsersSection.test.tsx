@@ -313,7 +313,7 @@ describe('UsersSection — enriched backend fields', () => {
       'Inside Sales',
       'Maintenance Sales',
       'Install Sales',
-      'Regional Sales Rep',
+      'Regional Sales',
       'VP of Sales',
       'Regional Director',
       'Vice President',
@@ -322,7 +322,7 @@ describe('UsersSection — enriched backend fields', () => {
       'inside_sales',
       'maintenance_sales',
       'install_sales',
-      'regional_sales_rep',
+      'regional_sales',
       'vp_sales',
       'regional_director',
       'vice_president',
@@ -330,6 +330,59 @@ describe('UsersSection — enriched backend fields', () => {
     expect(values).not.toContain('sales')
     expect(values).not.toContain('outside_sales')
     expect(labels).not.toContain('Legacy: Sales (reassign)')
+  })
+
+  it('shows Reports to for field sales, limited to active Regional Sales users', async () => {
+    mockUsers([
+      ...USERS,
+      {
+        id: 'u-riley',
+        name: 'Riley Regional',
+        email: 'riley@juniper.com',
+        role: 'regional_sales',
+        active: 1,
+        aspire_rep_id: 9,
+        branches: [101, 202],
+      },
+      {
+        id: 'u-old',
+        name: 'Old Regional',
+        email: 'old@juniper.com',
+        role: 'regional_sales',
+        active: 0,
+        aspire_rep_id: 8,
+        branches: [],
+      },
+    ])
+    renderSection()
+    await screen.findByText('Carla Reyes')
+    expect(screen.queryByTestId('authorize-reports-to')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId('directory-search'), {
+      target: { value: 'nina' },
+    })
+    fireEvent.click(await screen.findByText('nina.park@juniper.com'))
+    fireEvent.change(screen.getByTestId('authorize-role'), {
+      target: { value: 'maintenance_sales' },
+    })
+    const picker = screen.getByTestId('authorize-reports-to') as HTMLSelectElement
+    expect(picker).toHaveAttribute('aria-label', 'Reports to')
+    const optionLabels = Array.from(picker.options).map((option) => option.text)
+    const optionValues = Array.from(picker.options).map((option) => option.value)
+    expect(optionLabels).toEqual(['None', 'Riley Regional'])
+    expect(optionValues).toEqual(['', 'u-riley'])
+    expect(optionLabels).not.toContain('Omar Diaz')
+    expect(optionLabels).not.toContain('Old Regional')
+
+    fireEvent.click(screen.getByRole('button', { name: /edit carla reyes/i }))
+    const editPicker = screen.getByTestId('edit-reports-to-u-carla') as HTMLSelectElement
+    expect(Array.from(editPicker.options).map((option) => option.text)).toEqual([
+      'None',
+      'Riley Regional',
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: /edit omar diaz/i }))
+    expect(screen.queryByTestId('edit-reports-to-u-omar')).not.toBeInTheDocument()
   })
 
   it('does NOT show the Aspire rep hint for a sales user with a resolved aspireRepId', async () => {

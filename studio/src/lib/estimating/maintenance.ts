@@ -342,8 +342,8 @@ export function assertCanEdit(role: EstimatingRole, field: OwnedField): void {
 
 /**
  * Map the canonical auth roles (mirrors api/authz.py) onto the
- * estimating ownership roles. Admin-equivalent roles (admin,
- * regional_sales_rep, vp_sales) hold BOTH scopes. regional_director and
+ * estimating ownership roles. Admin-equivalent roles (admin and
+ * vp_sales) hold BOTH scopes. regional_sales is field sales. regional_director and
  * vice_president stay approver-only. This mapping is advisory for the UI —
  * the server enforces it on every mutation.
  */

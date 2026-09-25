@@ -324,15 +324,14 @@ class TestMarketingEditsAnyRep:
         assert r.status_code == 201
         assert r.json()["ownerUserId"] == "rep-2"
 
-    @pytest.mark.parametrize("role", ("regional_sales_rep", "vp_sales"))
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
-    async def test_admin_equivalent_sales_role_creates_client_reference_for_a_rep(
-        self, mock_query, mock_exec, mock_authz_query, as_role, role
+    async def test_vp_sales_creates_client_reference_for_a_rep(
+        self, mock_query, mock_exec, mock_authz_query, as_role
     ):
-        as_role(role, id="lead-1")
-        mock_authz_query.return_value = _live(role)
+        as_role("vp_sales", id="lead-1")
+        mock_authz_query.return_value = _live("vp_sales")
         mock_query.return_value = [{"id": "rep-2", "role": "sales", "active": 1}]
         r = client.post(
             "/api/settings/client-references",
@@ -341,14 +340,35 @@ class TestMarketingEditsAnyRep:
         assert r.status_code == 201, r.text
         assert r.json()["ownerUserId"] == "rep-2"
 
-    def test_new_roles_are_not_field_sales(self):
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_regional_sales_cannot_edit_another_reps_roster(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("regional_sales", id="lead-1")
+        mock_authz_query.return_value = _live("regional_sales")
+        r = client.post(
+            "/api/settings/client-references",
+            json=_ref_body(repId="rep-2"),
+        )
+        assert r.status_code == 403
+        mock_exec.assert_not_awaited()
+
+    def test_vp_sales_is_not_field_sales_and_regional_sales_is(self):
         from api import authz
-        for role in ("regional_sales_rep", "vp_sales"):
-            assert role not in authz.FIELD_SALES_ROLES
-            assert not authz.requires_aspire_sales_rep(role)
-            assert not authz.is_sales_rep(role)
-            assert authz.own_lead_filter({"role": role, "id": "lead-1"}) == ("", [])
-            assert role in authz.SALES_REP_DB_ROLES
+        assert "vp_sales" not in authz.FIELD_SALES_ROLES
+        assert not authz.requires_aspire_sales_rep("vp_sales")
+        assert not authz.is_sales_rep("vp_sales")
+        assert authz.own_lead_filter({"role": "vp_sales", "id": "lead-1"}) == ("", [])
+        assert "vp_sales" in authz.SALES_REP_DB_ROLES
+        assert "regional_sales" in authz.FIELD_SALES_ROLES
+        assert authz.requires_aspire_sales_rep("regional_sales")
+        assert authz.is_sales_rep("regional_sales")
+        sql, params = authz.own_lead_filter({"role": "regional_sales", "id": "lead-1"})
+        assert sql != ""
+        assert params == ["lead-1"] * 5
+        assert "regional_sales" in authz.SALES_REP_DB_ROLES
         assert "regional_director" not in authz.ADMIN_EQUIVALENT_ROLES
         assert "vice_president" not in authz.ADMIN_EQUIVALENT_ROLES
         assert authz.normalize_role("regional_director") == "regional_director"
@@ -550,7 +570,7 @@ class TestSplitRolesAreRosterReps:
         assert r.status_code == 201, role
 
 
-_FIELD_SALES = ("sales", "maintenance_sales", "install_sales", "outside_sales")
+_FIELD_SALES = ("sales", "maintenance_sales", "install_sales", "regional_sales", "outside_sales")
 _ROSTER_READS = (
     "/api/proposals/config/client-references",
     "/api/proposals/config/team-members",
@@ -588,7 +608,7 @@ class TestRosterReadIsolation:
     @pytest.mark.parametrize(
         "role",
         (
-            "marketing", "admin", "regional_sales_rep", "vp_sales",
+            "marketing", "admin", "vp_sales",
             "manager", "regional_director",
         ),
     )

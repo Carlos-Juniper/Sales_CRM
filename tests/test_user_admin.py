@@ -656,10 +656,10 @@ class TestListUsersEnriched:
         assert 3696 in u["branches"]
 
 
-# ── regional_sales_rep / vp_sales ────────────────────────────────────────────
+# ── regional_sales / vp_sales ────────────────────────────────────────────
 
 
-_ADMIN_EQUIVALENT_SALES = ("regional_sales_rep", "vp_sales")
+_ADMIN_EQUIVALENT_SALES = ("vp_sales",)
 
 _COMPANY_ROW = {
     "id": 1,
@@ -681,7 +681,7 @@ class TestRetiredSalesAssignment:
             "inside_sales",
             "maintenance_sales",
             "install_sales",
-            "regional_sales_rep",
+            "regional_sales",
             "vp_sales",
         })
         for role in SALES_TEAM_ROLES:
@@ -764,7 +764,7 @@ class TestRetiredSalesAssignment:
 
 class TestAdminEquivalentRoleAssignment:
     def test_sales_rep_db_roles_include_the_new_roles_only(self):
-        assert "regional_sales_rep" in SALES_REP_DB_ROLES
+        assert "regional_sales" in SALES_REP_DB_ROLES
         assert "vp_sales" in SALES_REP_DB_ROLES
         assert "regional_director" not in SALES_REP_DB_ROLES
         assert "vice_president" not in SALES_REP_DB_ROLES
@@ -860,6 +860,147 @@ class TestAdminEquivalentRoleAssignment:
         assert r.status_code == 403
         mock_exec.assert_not_awaited()
 
+    @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_create_regional_sales_requires_aspire(
+        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role
+    ):
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = []
+        mock_resolve.return_value = None
+        r = client.post(
+            "/api/settings/users",
+            json={
+                "name": "Riley Region",
+                "email": "riley.region@juniperlandscaping.com",
+                "role": "regional_sales",
+            },
+        )
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"] == SALES_BLOCK_COPY
+        mock_exec.assert_not_awaited()
+
+    @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_create_regional_sales_stores_aspire_and_reports_to(
+        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role
+    ):
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = [
+            {"id": "reg-1", "role": "regional_sales", "active": 1}
+        ]
+        mock_resolve.return_value = 4242
+        r = client.post(
+            "/api/settings/users",
+            json={
+                "name": "Pat Field",
+                "email": "pat.field@juniperlandscaping.com",
+                "role": "regional_sales",
+                "reports_to_user_id": "reg-1",
+            },
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["role"] == "regional_sales"
+        assert r.json()["aspire_rep_id"] == 4242
+        assert r.json()["reports_to_user_id"] == "reg-1"
+        inserts = [
+            c for c in mock_exec.await_args_list if "INSERT INTO users" in c.args[0]
+        ]
+        assert len(inserts) == 1
+        assert "reports_to_user_id" in inserts[0].args[0]
+        assert "reg-1" in inserts[0].args[1]
+
+    @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_reports_to_must_be_active_regional_sales(
+        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role
+    ):
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = [{"id": "mgr-1", "role": "manager", "active": 1}]
+        mock_resolve.return_value = 7
+        r = client.post(
+            "/api/settings/users",
+            json={
+                "name": "Pat Field",
+                "email": "pat.field@juniperlandscaping.com",
+                "role": "maintenance_sales",
+                "reports_to_user_id": "mgr-1",
+            },
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"] == "Reports to must be an active Regional Sales user."
+        mock_exec.assert_not_awaited()
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_reports_to_applies_only_to_field_sales(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        r = client.post(
+            "/api/settings/users",
+            json={
+                "name": "Morgan Manager",
+                "email": "morgan.manager@juniperlandscaping.com",
+                "role": "manager",
+                "reports_to_user_id": "reg-1",
+            },
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"] == "Reports to applies only to field sales roles."
+        mock_exec.assert_not_awaited()
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_user_cannot_report_to_themselves(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = [
+            {"id": "u9", "email": "pat@juniperlandscaping.com", "name": "Pat",
+             "role": "maintenance_sales", "active": 1, "aspire_rep_id": 7,
+             "reports_to_user_id": None}
+        ]
+        r = client.patch(
+            "/api/settings/users/u9",
+            json={"reports_to_user_id": "u9"},
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"] == "A user cannot report to themselves."
+        mock_exec.assert_not_awaited()
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_live_regional_sales_cannot_create_users(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("regional_sales")
+        mock_authz_query.return_value = _live("regional_sales")
+        r = client.post(
+            "/api/settings/users",
+            json={
+                "name": "Jane Doe",
+                "email": "jane.doe@juniperlandscaping.com",
+                "role": "manager",
+            },
+        )
+        assert r.status_code == 403
+        mock_exec.assert_not_awaited()
+
 
 class TestAdminEquivalentCompanySettings:
     @pytest.mark.parametrize("role", _ADMIN_EQUIVALENT_SALES)
@@ -879,7 +1020,7 @@ class TestAdminEquivalentCompanySettings:
         ]
         assert len(update_sqls) == 1
 
-    @pytest.mark.parametrize("role", ("regional_director", "vice_president", "manager"))
+    @pytest.mark.parametrize("role", ("regional_sales", "regional_director", "vice_president", "manager"))
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)

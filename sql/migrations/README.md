@@ -74,6 +74,7 @@ for at least one real deploy cycle.
 - **062** — adds `owner_user_id` to `team_members` and `client_references` (guarded). Not the same change as 058.
 - **063** — nullable `estimates.homes_budget` / `common_area_budget`. Renumbered from 059 so it does not share a number with the branch-manager migration on `integrate/staging-proposals`.
 - **064** — yearly maintenance occurrence counts on `estimates`. Renumbered from 061 for the same reason.
+- **066** — nullable `users.reports_to_user_id` (FK to `users.id`, ON DELETE SET NULL) so a Regional Sales user can see direct reports. Numbered 066 because 065 is reserved for the open commissions migration.
 
 ### Numbering history
 

@@ -88,9 +88,14 @@ describe('visibleTabs (role-aware visibility — Handoff 50 §2)', () => {
   })
 
   it('manager-tier approver roles see every tab', () => {
-    for (const role of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin', 'regional_sales_rep', 'vp_sales'] as const) {
+    for (const role of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin', 'vp_sales'] as const) {
       expect(visibleTabs(null, role)).toEqual(ESTIMATING_TABS)
     }
+  })
+
+  it('regional_sales sees only the queue, same as field sales', () => {
+    expect(visibleTabs(null, 'regional_sales').map((t) => t.key)).toEqual(['queue'])
+    expect(visibleTabs('maintenance', 'regional_sales').map((t) => t.key)).toEqual(['queue'])
   })
 
   it('marketing does not reach estimator tabs — sees only the queue at most', () => {

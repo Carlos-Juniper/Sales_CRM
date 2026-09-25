@@ -11,7 +11,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   install_sales: 'Install Sales',
   inside_sales: 'Inside Sales',
   admin: 'Admin',
-  regional_sales_rep: 'Regional Sales Rep',
+  regional_sales: 'Regional Sales',
   vp_sales: 'VP of Sales',
   manager: 'Branch Manager',
   regional_director: 'Regional Director',

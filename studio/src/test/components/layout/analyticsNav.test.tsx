@@ -7,7 +7,6 @@ import type { UserRole } from '@/types'
 
 const MANAGEMENT: UserRole[] = [
   'admin',
-  'regional_sales_rep',
   'vp_sales',
   'manager',
   'regional_director',
@@ -16,6 +15,7 @@ const MANAGEMENT: UserRole[] = [
 ]
 const DENIED: UserRole[] = [
   'sales',
+  'regional_sales',
   'inside_sales',
   'maintenance_estimating',
   'install_estimating',

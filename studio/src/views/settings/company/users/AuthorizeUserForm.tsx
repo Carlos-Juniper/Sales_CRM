@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import type { DirectoryCandidate, ManageableBranch } from '@/api/settings'
+import type { AdminUser, DirectoryCandidate, ManageableBranch } from '@/api/settings'
 import type { UserRole } from '@/types'
 import { useAuthorizeUser, useDirectorySearch } from '@/hooks/useUserAdmin'
+import { FIELD_SALES_ROLES, requiresAspireSalesRep } from '@/lib/roles'
 import { RoleSelect } from './RoleSelect'
 import { BranchMultiSelect } from './BranchMultiSelect'
+import { ReportsToSelect } from './ReportsToSelect'
 
 /**
  * Authorize a NEW user (§2.8 "authorize, not create"): the admin searches the
@@ -16,10 +18,17 @@ import { BranchMultiSelect } from './BranchMultiSelect'
  * re-word) beside a "Link Aspire Rep" action, which re-attempts the authorize
  * once the admin has created the matching Aspire contact.
  */
-export function AuthorizeUserForm({ branches }: { branches: ManageableBranch[] }) {
+export function AuthorizeUserForm({
+  branches,
+  regionalManagers,
+}: {
+  branches: ManageableBranch[]
+  regionalManagers: AdminUser[]
+}) {
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<DirectoryCandidate | null>(null)
   const [role, setRole] = useState<UserRole>('procurement')
+  const [reportsTo, setReportsTo] = useState('')
   const [selectedBranches, setSelectedBranches] = useState<number[]>([])
   // The verbatim §2.8 copy the backend returned on a sales block, or null.
   const [blockCopy, setBlockCopy] = useState<string | null>(null)
@@ -34,6 +43,7 @@ export function AuthorizeUserForm({ branches }: { branches: ManageableBranch[] }
     setQuery('')
     setPicked(null)
     setRole('procurement')
+    setReportsTo('')
     setSelectedBranches([])
     setBlockCopy(null)
   }
@@ -53,11 +63,13 @@ export function AuthorizeUserForm({ branches }: { branches: ManageableBranch[] }
   function submit() {
     if (!picked) return
     setBlockCopy(null)
+    const fieldSales = requiresAspireSalesRep(role)
     authorize.mutate({
       name: picked.name,
       email: picked.email,
       role,
       branches: selectedBranches,
+      reports_to_user_id: fieldSales && reportsTo ? reportsTo : null,
     })
   }
 
@@ -139,10 +151,29 @@ export function AuthorizeUserForm({ branches }: { branches: ManageableBranch[] }
               onChange={(r) => {
                 if (r === 'outside_sales') return
                 setRole(r)
+                if (!(FIELD_SALES_ROLES as readonly string[]).includes(r)) setReportsTo('')
                 setBlockCopy(null)
               }}
             />
           </div>
+
+          {(FIELD_SALES_ROLES as readonly string[]).includes(role) && (
+            <div>
+              <label
+                htmlFor="authorize-reports-to"
+                className="block text-xs font-medium opacity-70 mb-1"
+              >
+                Reports to
+              </label>
+              <ReportsToSelect
+                id="authorize-reports-to"
+                testId="authorize-reports-to"
+                value={reportsTo}
+                onChange={setReportsTo}
+                managers={regionalManagers}
+              />
+            </div>
+          )}
 
           <div>
             <p className="text-xs font-medium opacity-70 mb-1">Branches</p>

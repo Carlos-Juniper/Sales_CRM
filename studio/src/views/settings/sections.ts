@@ -22,8 +22,8 @@ export interface SettingsGroup {
   label: string
   /**
    * Roles that may see this group (in ADDITION to admin-equivalent roles —
-   * admin, regional_sales_rep, vp_sales — who pass every gate via useRole's
-   * super-role). An empty array + `adminOnly: false` means "any authed user";
+   * admin and vp_sales — who pass every gate via useRole's super-role).
+   * regional_sales does not. An empty array + `adminOnly: false` means "any authed user";
    * an empty array + `adminOnly: true` means "admin-equivalent only".
    */
   roles: UserRole[]
@@ -67,7 +67,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   {
     id: 'marketing',
     label: 'Sales',
-    roles: ['sales', 'inside_sales', 'maintenance_sales', 'install_sales', 'marketing', 'manager', 'regional_director', 'vice_president', 'ceo'],
+    roles: ['sales', 'inside_sales', 'maintenance_sales', 'install_sales', 'regional_sales', 'marketing', 'manager', 'regional_director', 'vice_president', 'ceo'],
     adminOnly: false,
     branchScoped: false,
     sections: [

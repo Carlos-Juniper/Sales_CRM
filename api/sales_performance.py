@@ -40,6 +40,16 @@ def _can_view_all(user: dict) -> bool:
     return authz.normalize_role(user.get("role")) in authz.REP_VIEWER_ROLES
 
 
+def _ids_clause(column: str, ids: Optional[list[str]]) -> tuple[str, list]:
+    """AND-fragment restricting `column`. Empty when ids is None (every rep)."""
+    if ids is None:
+        return "", []
+    if len(ids) == 1:
+        return f"AND {column} = %s", list(ids)
+    placeholders = ", ".join(["%s"] * len(ids))
+    return f"AND {column} IN ({placeholders})", list(ids)
+
+
 def _default_date_range(start_date: Optional[str], end_date: Optional[str]) -> tuple[str, str]:
     """Return (start_date, end_date), defaulting to Jan 1 of the current year through today."""
     now = datetime.now(tz=timezone.utc)
@@ -64,6 +74,18 @@ def register(app, require_auth) -> None:
         even on a fresh DB or when a rep hasn't closed any deals yet.
         """
         authz.require_sales_performance_access(user)
+        if authz.is_regional_sales(user.get("role")):
+            rows = await query(
+                """
+                SELECT id, name, email
+                FROM users
+                WHERE active = 1
+                  AND (id = %s OR reports_to_user_id = %s)
+                ORDER BY name
+                """,
+                [user["id"], user["id"]],
+            )
+            return [_coerce_row(row) for row in rows]
         if not _can_view_all(user):
             raise HTTPException(status_code=403)
 
@@ -92,28 +114,15 @@ def register(app, require_auth) -> None:
         omit it to aggregate across all reps.  Non-admins are always scoped to themselves.
         """
         authz.require_sales_performance_access(user)
-        can_view_all = _can_view_all(user)
-
-        # Determine the target user: non-admins are always self-scoped.
-        # Admins with no user_id param get aggregate data (target_user_id=None).
-        if not can_view_all:
-            if user_id and user_id != user["id"]:
-                raise HTTPException(
-                    status_code=403,
-                    detail="You can only view your own sales performance",
-                )
-            target_user_id: Optional[str] = user["id"]
-        else:
-            target_user_id = user_id or None  # None → all reps
+        visible = await authz.assert_can_view_rep(
+            user, user_id, surface="sales performance"
+        )
 
         start_date, end_date = _default_date_range(start_date, end_date)
 
         # ── Won query: commissions table (one row per won deal) ──────────────
-        won_params: list[Any] = [start_date, end_date]
-        won_user_clause = ""
-        if target_user_id:
-            won_user_clause = "AND user_id = %s"
-            won_params.append(target_user_id)
+        won_user_clause, won_user_params = _ids_clause("user_id", visible)
+        won_params: list[Any] = [start_date, end_date, *won_user_params]
 
         won_rows = await query(
             f"""
@@ -135,12 +144,8 @@ def register(app, require_auth) -> None:
         # Use MAX(at) per estimate so we match on the most recent 'lost' transition,
         # which is the canonical lost date even if the estimate was re-opened and
         # re-lost (edge case).
-        lost_params: list[Any] = [start_date, end_date]
-        lost_user_clause = ""
-        if target_user_id:
-            # estimates has no user_id; the salesperson is crm_rep (users.id).
-            lost_user_clause = "AND e.crm_rep = %s"
-            lost_params.append(target_user_id)
+        lost_user_clause, lost_user_params = _ids_clause("e.crm_rep", visible)
+        lost_params: list[Any] = [start_date, end_date, *lost_user_params]
 
         lost_rows = await query(
             f"""
@@ -165,9 +170,7 @@ def register(app, require_auth) -> None:
         lost_total_cents = int(lost.get("lost_total_cents") or 0)
 
         # ── Loss category breakdown ───────────────────────────────────────────
-        cat_params: list[Any] = [start_date, end_date]
-        if target_user_id:
-            cat_params.append(target_user_id)
+        cat_params: list[Any] = [start_date, end_date, *lost_user_params]
 
         cat_rows = await query(
             f"""
@@ -230,25 +233,14 @@ def register(app, require_auth) -> None:
         and the rep's name/email for admin views.
         """
         authz.require_sales_performance_access(user)
-        can_view_all = _can_view_all(user)
-
-        if not can_view_all:
-            if user_id and user_id != user["id"]:
-                raise HTTPException(
-                    status_code=403,
-                    detail="You can only view your own sales performance",
-                )
-            target_user_id: Optional[str] = user["id"]
-        else:
-            target_user_id = user_id or None
+        visible = await authz.assert_can_view_rep(
+            user, user_id, surface="sales performance"
+        )
 
         start_date, end_date = _default_date_range(start_date, end_date)
 
-        params: list[Any] = [start_date, end_date]
-        user_clause = ""
-        if target_user_id:
-            user_clause = "AND c.user_id = %s"
-            params.append(target_user_id)
+        user_clause, user_params = _ids_clause("c.user_id", visible)
+        params: list[Any] = [start_date, end_date, *user_params]
 
         rows = await query(
             f"""
@@ -289,26 +281,15 @@ def register(app, require_auth) -> None:
         toggled multiple times; lost_at is the most recent 'lost' transition.
         """
         authz.require_sales_performance_access(user)
-        can_view_all = _can_view_all(user)
-
-        if not can_view_all:
-            if user_id and user_id != user["id"]:
-                raise HTTPException(
-                    status_code=403,
-                    detail="You can only view your own sales performance",
-                )
-            target_user_id: Optional[str] = user["id"]
-        else:
-            target_user_id = user_id or None
+        visible = await authz.assert_can_view_rep(
+            user, user_id, surface="sales performance"
+        )
 
         start_date, end_date = _default_date_range(start_date, end_date)
 
-        params: list[Any] = [start_date, end_date]
-        user_clause = ""
-        if target_user_id:
-            # estimates has no user_id; the salesperson is crm_rep (users.id).
-            user_clause = "AND e.crm_rep = %s"
-            params.append(target_user_id)
+        # estimates has no user_id; the salesperson is crm_rep (users.id).
+        user_clause, user_params = _ids_clause("e.crm_rep", visible)
+        params: list[Any] = [start_date, end_date, *user_params]
 
         rows = await query(
             f"""

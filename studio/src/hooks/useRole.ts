@@ -30,7 +30,7 @@ export function useRole() {
   return {
     role,
     isSales: role !== null && FIELD_SALES_ROLES.includes(role),
-    // Admin-equivalent roles (admin, regional_sales_rep, vp_sales) are the
+    // Admin-equivalent roles (admin, vp_sales) are the
     // super-role. `manager` narrows to its approval tier. regional_director
     // and vice_president are not admin-equivalent.
     isAdmin: role !== null && ADMIN_EQUIVALENT_ROLES.includes(role),
@@ -47,7 +47,10 @@ export function useRole() {
     isEstimatingOnly: role !== null && ESTIMATING_ONLY_ROLES.includes(role),
     isApprover: role !== null && APPROVER_ROLES.includes(role),
     seesAllBranches: role !== null && CROSS_BRANCH_ROLES.includes(role),
-    canViewRepSelector: role !== null && REP_SELECTOR_ROLES.includes(role),
+    // REP_SELECTOR_ROLES sees every rep. regional_sales gets the same picker
+    // but the API limits it to themselves and their direct reports.
+    canViewRepSelector:
+      role !== null && (REP_SELECTOR_ROLES.includes(role) || role === 'regional_sales'),
     canViewAnalytics: role !== null && ANALYTICS_NAV_ROLES.includes(role),
     // Proposal settings: marketing/admin pick a rep; a sales rep does not.
     canPickRosterRep: role !== null && ROSTER_REP_PICKER_ROLES.includes(role),

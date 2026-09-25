@@ -73,18 +73,25 @@ describe('RoleGate', () => {
     expect(screen.getByText('Protected Content')).toBeInTheDocument()
   })
 
-  it.each(['regional_sales_rep', 'vp_sales'] as const)(
-    '%s shares the admin super-role and passes any gate',
-    (role) => {
-      setUser(role)
-      render(
-        <RoleGate roles={['manager']}>
-          <div>Protected Content</div>
-        </RoleGate>,
-      )
-      expect(screen.getByText('Protected Content')).toBeInTheDocument()
-    },
-  )
+  it('vp_sales shares the admin super-role and passes any gate', () => {
+    setUser('vp_sales')
+    render(
+      <RoleGate roles={['manager']}>
+        <div>Protected Content</div>
+      </RoleGate>,
+    )
+    expect(screen.getByText('Protected Content')).toBeInTheDocument()
+  })
+
+  it('regional_sales does not pass an admin-only gate', () => {
+    setUser('regional_sales')
+    render(
+      <RoleGate roles={['manager']} redirectTo="/inside-sales/pipeline">
+        <div>Protected Content</div>
+      </RoleGate>,
+    )
+    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
+  })
 
   it('regional_director is not a super-role', () => {
     setUser('regional_director')

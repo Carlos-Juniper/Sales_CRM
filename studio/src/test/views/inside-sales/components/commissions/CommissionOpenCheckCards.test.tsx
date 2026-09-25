@@ -10,7 +10,6 @@ describe('CommissionOpenCheckCards', () => {
         dueCents={15_000}
         upcomingCents={7_500}
         isLoading={false}
-        balancesPeriodFiltered={false}
       />,
     )
 
@@ -24,21 +23,6 @@ describe('CommissionOpenCheckCards', () => {
     expect(screen.getByText(/Not period-filtered/)).toBeInTheDocument()
   })
 
-  it('hides the period-filter note when balances are period-filtered', () => {
-    render(
-      <CommissionOpenCheckCards
-        nextPayout={{ payout_period: 'June 2026', payout_date: '2026-06-30', amount_cents: 15_000 }}
-        dueCents={15_000}
-        upcomingCents={7_500}
-        isLoading={false}
-        balancesPeriodFiltered
-      />,
-    )
-
-    expect(screen.getByText(/Pending billing data is not included/)).toBeInTheDocument()
-    expect(screen.queryByText(/Not period-filtered/)).not.toBeInTheDocument()
-  })
-
   it('does not invent a date or amount when there is no next payout', () => {
     render(
       <CommissionOpenCheckCards
@@ -46,7 +30,6 @@ describe('CommissionOpenCheckCards', () => {
         dueCents={0}
         upcomingCents={0}
         isLoading={false}
-        balancesPeriodFiltered={false}
       />,
     )
 

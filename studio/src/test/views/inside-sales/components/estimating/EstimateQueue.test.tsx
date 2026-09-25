@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // Estimate Queue tests (Acceptance Criteria §3).
 //
-// The queue is the estimator's landing view: live stat cards, filter/sort bar
-// with the branch-scope lock-chip, the two intake CTAs,
+// The queue is the estimator's landing view: live stat cards, filter/sort bar,
+// the two intake CTAs,
 // and clickable estimate cards that open the Line-Item Editor with the engine
 // keyed off `estimateType` (no mode prompt, ever).
 // ---------------------------------------------------------------------------
@@ -390,19 +390,10 @@ describe('EstimateQueue — role & branch scoping (BRD I-9.5)', () => {
     expect(await cardNames()).toHaveLength(4)
   })
 
-  it('shows the lock-chip reflecting the user branch for scoped roles', async () => {
+  it('does not render the role and branch scope badge', async () => {
     renderQueue()
-    expect(
-      await screen.findByText('Role & branch scoped — b1'),
-    ).toBeInTheDocument()
-  })
-
-  it('shows "All branches" for cross-branch exec roles', async () => {
-    useAuthStore.setState({ user: makeUser({ role: 'ceo', branch_id: 'b1' }) })
-    renderQueue()
-    expect(
-      await screen.findByText('Role & branch scoped — All branches'),
-    ).toBeInTheDocument()
+    await screen.findAllByTestId('queue-card')
+    expect(screen.queryByText(/role & branch scoped/i)).not.toBeInTheDocument()
   })
 })
 

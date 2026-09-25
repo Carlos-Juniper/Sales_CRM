@@ -12,7 +12,16 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useAuthStore } from '@/store/authStore'
 import { useRole, normalizeRole } from '@/hooks/useRole'
-import { ESTIMATOR_ROLES, APPROVER_ROLES, CROSS_BRANCH_ROLES, REP_SELECTOR_ROLES } from '@/lib/roles'
+import {
+  ESTIMATOR_ROLES,
+  ESTIMATING_ONLY_ROLES,
+  APPROVER_ROLES,
+  CROSS_BRANCH_ROLES,
+  ANALYTICS_NAV_ROLES,
+  FULL_ACCESS_ROLES,
+  REP_SELECTOR_ROLES,
+  defaultRouteForRole,
+} from '@/lib/roles'
 import { CANONICAL_ROLES } from '@/types'
 import { makeUser } from '@/test/utils'
 
@@ -48,6 +57,40 @@ describe('roles.ts — canonical role constants (mirrors api/authz.py)', () => {
     expect([...REP_SELECTOR_ROLES].sort()).toEqual(
       ['admin', 'ceo', 'manager', 'regional_director', 'vice_president'].sort(),
     )
+  })
+
+  it('ANALYTICS_NAV_ROLES is the five management roles, defined once as FULL_ACCESS_ROLES', () => {
+    expect(ANALYTICS_NAV_ROLES).toBe(FULL_ACCESS_ROLES)
+    expect([...ANALYTICS_NAV_ROLES].sort()).toEqual(
+      ['admin', 'ceo', 'manager', 'regional_director', 'vice_president'].sort(),
+    )
+    // Same members as the rep picker today, but a different permission.
+    expect([...ANALYTICS_NAV_ROLES].sort()).toEqual([...REP_SELECTOR_ROLES].sort())
+    expect(ANALYTICS_NAV_ROLES).not.toBe(REP_SELECTOR_ROLES)
+  })
+
+  it('ESTIMATING_ONLY_ROLES is the two estimating disciplines, not admin or management', () => {
+    expect([...ESTIMATING_ONLY_ROLES].sort()).toEqual(
+      ['install_estimating', 'maintenance_estimating'].sort(),
+    )
+  })
+})
+
+describe('defaultRouteForRole', () => {
+  it('sends only management to Analytics, and everyone else to a page they can open', () => {
+    expect(defaultRouteForRole('admin')).toBe('/inside-sales')
+    expect(defaultRouteForRole('manager')).toBe('/inside-sales')
+    expect(defaultRouteForRole('regional_director')).toBe('/inside-sales')
+    expect(defaultRouteForRole('vice_president')).toBe('/inside-sales')
+    expect(defaultRouteForRole('ceo')).toBe('/inside-sales')
+
+    expect(defaultRouteForRole('sales')).toBe('/inside-sales/pipeline')
+    expect(defaultRouteForRole('inside_sales')).toBe('/inside-sales/leads')
+    expect(defaultRouteForRole('maintenance_estimating')).toBe('/inside-sales/estimating')
+    expect(defaultRouteForRole('install_estimating')).toBe('/inside-sales/estimating')
+    expect(defaultRouteForRole('procurement')).toBe('/inside-sales/estimating')
+    expect(defaultRouteForRole('marketing')).toBe('/settings')
+    expect(defaultRouteForRole(null)).toBe('/settings')
   })
 })
 
@@ -137,6 +180,23 @@ describe('useRole', () => {
     expect(withRole('manager').seesAllBranches).toBe(false)
     expect(withRole('sales').seesAllBranches).toBe(false)
     expect(withRole('regional_director').seesAllBranches).toBe(false)
+  })
+
+  it('canViewAnalytics is management only', () => {
+    for (const role of ['admin', 'manager', 'regional_director', 'vice_president', 'ceo'] as const) {
+      expect(withRole(role).canViewAnalytics).toBe(true)
+    }
+    for (const role of ['sales', 'inside_sales', 'maintenance_estimating', 'install_estimating', 'procurement', 'marketing'] as const) {
+      expect(withRole(role).canViewAnalytics).toBe(false)
+    }
+  })
+
+  it('isEstimatingOnly is the two disciplines, not admin or sales', () => {
+    expect(withRole('maintenance_estimating').isEstimatingOnly).toBe(true)
+    expect(withRole('install_estimating').isEstimatingOnly).toBe(true)
+    expect(withRole('admin').isEstimatingOnly).toBe(false)
+    expect(withRole('manager').isEstimatingOnly).toBe(false)
+    expect(withRole('sales').isEstimatingOnly).toBe(false)
   })
 
   it('returns null role when logged out', () => {

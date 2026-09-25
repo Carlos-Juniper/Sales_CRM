@@ -125,9 +125,14 @@ describe('AuthCallbackPage — Entra sign-in completion', () => {
   // ── role-based routing ──────────────────────────────────────────────────────
 
   it.each([
-    ['inside_sales', '/inside-sales'],
-    ['outside_sales', '/outside-sales'],
+    ['inside_sales', '/inside-sales/leads'],
+    ['outside_sales', '/inside-sales/pipeline'],
+    ['sales', '/inside-sales/pipeline'],
+    ['maintenance_estimating', '/inside-sales/estimating'],
+    ['marketing', '/settings'],
+    ['ceo', '/inside-sales'],
     // BranchManagerPage removed in Slice 12; managers land on settings.
+    // Analytics stays in the nav for them.
     ['manager', '/settings'],
   ])('navigates %s users to %s', async (role, route) => {
     setCallbackUrl({ code: 'auth-code', state: 'st-123' })

@@ -13,6 +13,7 @@ import {
   SALES_NAV_ROLES,
   PUBLIC_LEADS_NAV_ROLES,
   ESTIMATING_NAV_ROLES,
+  ANALYTICS_NAV_ROLES,
 } from '@/lib/roles'
 import type { User, UserRole } from '@/types'
 
@@ -25,7 +26,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: SALES_NAV_ROLES },
+  { label: 'Analytics', icon: LayoutDashboard, href: '/inside-sales', roles: ANALYTICS_NAV_ROLES },
   { label: 'Sales Performance', icon: TrendingUp, href: '/inside-sales/sales-performance', roles: SALES_NAV_ROLES },
   { label: 'Commissions', icon: DollarSign, href: '/inside-sales/commissions', roles: SALES_NAV_ROLES },
   { label: 'Pipeline', icon: GitBranch, href: '/inside-sales/pipeline', roles: SALES_NAV_ROLES },

@@ -28,6 +28,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { estimatingApi, estimatingConfigApi } from '@/api/estimating'
 import { leadsApi } from '@/api/leads'
+import { useRole } from '@/hooks/useRole'
 import {
   crmLeadFromLead,
   DEFAULT_WIN_PROBABILITY,
@@ -108,6 +109,7 @@ export function MaintenanceIntakeModal({
 }: MaintenanceIntakeModalProps) {
   const { openEstimateAt } = useEstimatingShell()
   const { show } = useToast()
+  const { isEstimatingOnly } = useRole()
   const { upload: uploadFile } = useAttachmentUpload()
 
   const [form, setForm] = useState<FormState>(() => ({
@@ -156,10 +158,13 @@ export function MaintenanceIntakeModal({
   // REAL lead context. When the caller didn't resolve it, source
   // it from the selected property via leads.property_id (there is always a lead
   // on the "Request estimate" path — the action is gated on it, §1a).
+  // Estimating disciplines get 403 on GET /api/leads, so they skip the lookup
+  // and submit without a linked lead. A failure for any other role stays quiet:
+  // no toast, no error banner.
   const [fetchedLead, setFetchedLead] = useState<CrmLeadContext | null>(null)
   const selectedPropertyId = selectedProperty?.id ?? null
   useEffect(() => {
-    if (!open || crmLead || !selectedPropertyId) return
+    if (!open || crmLead || !selectedPropertyId || isEstimatingOnly) return
     let cancelled = false
     leadsApi
       .list({ property_id: selectedPropertyId, page_size: 100 })
@@ -170,12 +175,12 @@ export function MaintenanceIntakeModal({
         setFetchedLead(active ? crmLeadFromLead(active) : null)
       })
       .catch(() => {
-        /* best-effort — banner simply shows no lead */
+        /* best-effort — banner simply shows no lead; never toast or throw */
       })
     return () => {
       cancelled = true
     }
-  }, [open, crmLead, selectedPropertyId])
+  }, [open, crmLead, selectedPropertyId, isEstimatingOnly])
 
   const leadCtx = crmLead ?? fetchedLead
 
@@ -370,6 +375,8 @@ export function MaintenanceIntakeModal({
               <strong>#{leadCtx.leadNumber}</strong>, {leadCtx.rep} · win probability{' '}
               <strong>{winPct}%</strong>
             </span>
+          ) : isEstimatingOnly ? (
+            <span>No linked CRM lead — this intake continues without one.</span>
           ) : (
             <span>Sourced from CRM pipeline — select a property to link its lead</span>
           )}

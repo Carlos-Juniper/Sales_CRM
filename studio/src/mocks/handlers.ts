@@ -1,4 +1,7 @@
 import { http, HttpResponse, delay } from 'msw'
+import { useAuthStore } from '@/store/authStore'
+import { normalizeRole } from '@/hooks/useRole'
+import { ANALYTICS_NAV_ROLES } from '@/lib/roles'
 import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockConnections, mockProposalPackages } from './data'
 import { CATALOG_ITEM_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
 import { PAGE_SIZE } from '../lib/constants'
@@ -488,9 +491,19 @@ const allHandlers = [
     return HttpResponse.json(mockMonthlyRevenue)
   }),
 
-  // GET /api/dashboard/inside-sales
+  // GET /api/dashboard/inside-sales — management only, matching
+  // require_analytics_dashboard. The route guard hides the page; this 403
+  // is what a direct call gets for every other role.
   http.get(`${API}/dashboard/inside-sales`, async () => {
     await delay(200)
+    const user = useAuthStore.getState().user
+    const role = user ? normalizeRole(user.role) : null
+    if (!role || !ANALYTICS_NAV_ROLES.includes(role)) {
+      return HttpResponse.json(
+        { detail: 'The analytics dashboard is limited to admin and management.' },
+        { status: 403 },
+      )
+    }
     return HttpResponse.json(mockSummary)
   }),
 

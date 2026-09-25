@@ -3,6 +3,8 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@/test/utils'
 import { AddLeadModal } from '@/views/inside-sales/components/AddLeadModal'
+import { ApiError } from '@/api/client'
+import { LEAD_NOTES_MAX_LENGTH } from '@/api/leads'
 import type { Property } from '@/types/estimating'
 
 // ── Hook mocks ────────────────────────────────────────────────────
@@ -228,6 +230,81 @@ describe('AddLeadModal — WS1 property required', () => {
 
     await user.click(screen.getByRole('button', { name: /add lead/i }))
     expect(await screen.findByRole('alert')).toBeInTheDocument()
+  })
+})
+
+describe('AddLeadModal — notes', () => {
+  async function selectRequired(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByTestId('mock-select-property'))
+    await user.selectOptions(screen.getByRole('combobox', { name: /branch/i }), '1')
+  }
+
+  it('creates the lead without notes when the field is blank', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await selectRequired(user)
+    await user.click(screen.getByRole('button', { name: /add lead/i }))
+
+    await waitFor(() => expect(mockCreateLead).toHaveBeenCalledTimes(1))
+    const payload = mockCreateLead.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.notes).toBeUndefined()
+  })
+
+  it('omits whitespace-only notes', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await selectRequired(user)
+    await user.type(screen.getByRole('textbox', { name: 'Notes' }), '   ')
+    await user.click(screen.getByRole('button', { name: /add lead/i }))
+
+    await waitFor(() => expect(mockCreateLead).toHaveBeenCalledTimes(1))
+    const payload = mockCreateLead.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.notes).toBeUndefined()
+  })
+
+  it('sends trimmed notes when the field is filled in', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await selectRequired(user)
+    await user.type(screen.getByRole('textbox', { name: 'Notes' }), '  met at the CAI trade show  ')
+    await user.click(screen.getByRole('button', { name: /add lead/i }))
+
+    await waitFor(() => expect(mockCreateLead).toHaveBeenCalledTimes(1))
+    const payload = mockCreateLead.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.notes).toBe('met at the CAI trade show')
+  })
+
+  it('shows a character counter and stops at the 10000 maxlength', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    const notes = screen.getByRole('textbox', { name: 'Notes' })
+    expect(notes).toHaveAttribute('maxLength', String(LEAD_NOTES_MAX_LENGTH))
+    expect(screen.getByText(`0/${LEAD_NOTES_MAX_LENGTH}`)).toBeInTheDocument()
+
+    await user.type(notes, 'hello')
+    expect(notes).toHaveValue('hello')
+    expect(screen.getByText(`5/${LEAD_NOTES_MAX_LENGTH}`)).toBeInTheDocument()
+
+    await user.clear(notes)
+    await user.paste('x'.repeat(LEAD_NOTES_MAX_LENGTH + 25))
+    expect(notes).toHaveValue('x'.repeat(LEAD_NOTES_MAX_LENGTH))
+    expect(screen.getByText(`${LEAD_NOTES_MAX_LENGTH}/${LEAD_NOTES_MAX_LENGTH}`)).toBeInTheDocument()
+  })
+
+  it('shows a notes 422 on the form alert', async () => {
+    const user = userEvent.setup()
+    mockCreateLead.mockRejectedValueOnce(new ApiError(
+      422,
+      'String should have at most 10000 characters',
+      [{ loc: ['body', 'notes'], msg: 'String should have at most 10000 characters' }],
+    ))
+    renderModal()
+    await selectRequired(user)
+    await user.click(screen.getByRole('button', { name: /add lead/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'String should have at most 10000 characters',
+    )
   })
 })
 

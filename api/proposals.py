@@ -48,6 +48,7 @@ from typing import Any, Optional
 from fastapi import Depends, HTTPException, Query, Response
 
 from db import execute, query
+from api import authz
 from api._serialize import coerce_row
 
 logger = logging.getLogger(__name__)
@@ -691,6 +692,12 @@ def register(app, require_auth) -> None:
 
     Mount point: every route here is under /api/proposals.
     """
+
+    async def _proposal_auth(user: dict = Depends(require_auth)) -> dict:
+        authz.require_proposals_access(user)
+        return user
+
+    require_auth = _proposal_auth
 
     # ── GET /api/proposals/config/branches ─────────────────────────────────
     # Returns BranchProfile[] projected from crm.branches JOIN crm.regions.

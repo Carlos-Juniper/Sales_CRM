@@ -3084,6 +3084,16 @@ def register(app, require_auth) -> None:
     # re-anchors lead-scoped rows to the estimate (two separate statements,
     # not transactional) so the render pipeline finds them via estimate_id as usual.
 
+    async def _require_lead_surface(user: dict, lead_id: str) -> None:
+        """Estimators cannot use lead routes. Public-queue rows stay qualified-only."""
+        authz.require_not_estimating_only(user, "leads")
+        rows = await query(
+            "SELECT source, assigned_to FROM leads WHERE id = %s",
+            [lead_id],
+        )
+        if rows:
+            authz.require_lead_access(user, rows[0].get("source"), rows[0].get("assigned_to"))
+
     # Lead-only attachment presign
     @app.post("/api/leads/{lead_id}/attachments/presign", status_code=201)
     async def presign_lead_attachment(
@@ -3097,7 +3107,9 @@ def register(app, require_auth) -> None:
         Only the three proposal document kinds are accepted; intake/takeoff kinds
         must be uploaded against an estimate (estimate-scoped presign endpoint).
         """
-        # 1. Lead must exist, and a sales rep may only attach to their own lead.
+        # Estimators and the public queue are refused first. A sales rep may
+        # only attach to their own lead, and a missing lead is 404.
+        await _require_lead_surface(user, lead_id)
         await _assert_lead_visible(user, lead_id)
 
         # 2. Only proposal kinds are accepted at the lead level.
@@ -3168,6 +3180,7 @@ def register(app, require_auth) -> None:
         Looks up the attachment by both id AND lead_id so a rep cannot confirm
         an attachment belonging to a different lead.
         """
+        await _require_lead_surface(_user, lead_id)
         await _assert_lead_visible(_user, lead_id)
         rows = await query(
             "SELECT ia.* FROM intake_attachments ia WHERE ia.id = %s AND ia.lead_id = %s",
@@ -3237,6 +3250,7 @@ def register(app, require_auth) -> None:
         Returns only the three proposal kinds; intake/takeoff attachments are
         always estimate-scoped and will not appear here.
         """
+        await _require_lead_surface(_user, lead_id)
         await _assert_lead_visible(_user, lead_id)
 
         rows = await query(
@@ -3263,6 +3277,7 @@ def register(app, require_auth) -> None:
         an already-absent object must not block the soft-delete of the row.
         A sales rep cannot delete an attachment on a lead they do not own.
         """
+        await _require_lead_surface(_user, lead_id)
         await _assert_lead_visible(_user, lead_id)
         rows = await query(
             "SELECT * FROM intake_attachments WHERE id = %s AND lead_id = %s",

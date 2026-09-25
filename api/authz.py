@@ -69,6 +69,27 @@ CROSS_BRANCH_ROLES = frozenset({"admin", "vice_president", "ceo"})
 # cross-branch write privileges (mark-paid, etc. remain CROSS_BRANCH_ROLES).
 REP_VIEWER_ROLES = frozenset({"admin", "vice_president", "ceo", "manager", "regional_director"})
 
+# Estimating disciplines only. `admin` is an estimator for line-item edits but
+# remains a super-role for every other surface — do not use ESTIMATOR_ROLES here.
+ESTIMATING_ONLY_ROLES = frozenset({"maintenance_estimating", "install_estimating"})
+
+# Branch and company leadership. Admin is listed separately so public-lead and
+# analytics comments can say "admin and management" without folding them together.
+MANAGEMENT_ROLES = frozenset({"manager", "regional_director", "vice_president", "ceo"})
+FULL_ACCESS_ROLES = MANAGEMENT_ROLES | frozenset({"admin"})
+
+# Public-lead qualification queue (unassigned higher_gov / sam_gov rows).
+PUBLIC_LEADS_ROLES = frozenset({"inside_sales"}) | FULL_ACCESS_ROLES
+
+# Analytics dashboard is management only: admin plus manager, regional
+# director, vice president, and CEO. Sales, inside sales, estimators,
+# procurement, and marketing are refused.
+ANALYTICS_DASHBOARD_ROLES = FULL_ACCESS_ROLES
+
+# Scraper sources that feed the public-lead queue. A row leaves the queue once
+# assigned_to is set (it then belongs to that rep's leads).
+PUBLIC_LEAD_SOURCES = ("higher_gov", "sam_gov")
+
 # Handoff 50 §3: roles that may manage the company-wide proposal assets —
 # portfolio_properties, client_references, team_members, org-chart config.
 # Marketing owns these cross-branch; admin retains its super-role access.
@@ -144,6 +165,72 @@ def require_own_lead(user: dict, lead: dict) -> None:
         status_code=403,
         detail="You can only access your own leads.",
     )
+
+
+def is_estimating_only(role: Optional[str]) -> bool:
+    """True for the two estimating disciplines. Admin is not included."""
+    return normalize_role(role) in ESTIMATING_ONLY_ROLES
+
+
+def is_public_lead(source: Optional[str], assigned_to: Optional[str]) -> bool:
+    """Unassigned government-scraper leads are the public qualification queue."""
+    return (source or "") in PUBLIC_LEAD_SOURCES and not assigned_to
+
+
+def hides_public_lead_queue(user: dict) -> bool:
+    """True when a lead list must omit unassigned government leads."""
+    return normalize_role(user.get("role")) not in PUBLIC_LEADS_ROLES
+
+
+def require_not_estimating_only(user: dict, surface: str) -> None:
+    """403 for maintenance/install estimating. Admin and sales roles pass."""
+    if is_estimating_only(user.get("role")):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Estimators cannot access {surface}.",
+        )
+
+
+def require_public_leads_access(user: dict) -> None:
+    """403 unless the role may open the public-lead qualification queue."""
+    require_not_estimating_only(user, "public leads")
+    if normalize_role(user.get("role")) not in PUBLIC_LEADS_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Public leads are limited to inside sales, admin, and management.",
+        )
+
+
+def require_lead_access(
+    user: dict,
+    source: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+) -> None:
+    """Leads are closed to estimating disciplines. Public-queue rows are
+    further limited to inside sales, admin, and management.
+    """
+    require_not_estimating_only(user, "leads")
+    if is_public_lead(source, assigned_to):
+        require_public_leads_access(user)
+
+
+def require_proposals_access(user: dict) -> None:
+    """403 for estimating disciplines. Sales and leadership may open proposals."""
+    require_not_estimating_only(user, "proposals")
+
+
+def require_sales_performance_access(user: dict) -> None:
+    """403 for estimating disciplines. Own-vs-all scoping is separate."""
+    require_not_estimating_only(user, "sales performance")
+
+
+def require_analytics_dashboard(user: dict) -> None:
+    """403 unless the role is admin or management."""
+    if normalize_role(user.get("role")) not in ANALYTICS_DASHBOARD_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="The analytics dashboard is limited to admin and management.",
+        )
 
 
 async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:

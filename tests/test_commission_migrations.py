@@ -17,6 +17,7 @@ class TestMigration065:
 
         monkeypatch.setattr(M, "_fetch_one", boom)
         monkeypatch.setattr(M, "table_exists", lambda conn, name: False)
+        monkeypatch.setattr(M, "view_exists", lambda conn, name: False)
         monkeypatch.setattr(M, "column_exists", lambda conn, table, column: True)
         monkeypatch.setattr(M, "index_exists", lambda conn, table, index: True)
         assert M.detect_065(None) is False
@@ -37,11 +38,10 @@ class TestMigration065:
         assert M.detect_065(None) is False
 
         monkeypatch.setattr(M, "column_exists", lambda conn, table, column: True)
-        monkeypatch.setattr(
-            M, "table_exists",
-            lambda conn, name: name != "v_current_commission_plans",
-        )
+        monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
+        monkeypatch.setattr(M, "view_exists", lambda conn, name: False)
         assert M.detect_065(None) is False
+        monkeypatch.setattr(M, "view_exists", lambda conn, name: True)
 
         monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
         monkeypatch.setattr(
@@ -62,6 +62,7 @@ class TestMigration065:
     def test_detector_requires_seeds_not_installment_counts(self, monkeypatch):
         """A commission with zero installments does not flip detect_065."""
         monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
+        monkeypatch.setattr(M, "view_exists", lambda conn, name: True)
         monkeypatch.setattr(M, "column_exists", lambda conn, table, column: True)
         monkeypatch.setattr(M, "index_exists", lambda conn, table, index: True)
         state = {"maint": 1, "install": 1}
@@ -130,6 +131,13 @@ class TestMigration065:
         assert "calendar_year_cumulative_revenue" in sql
         assert "v_current_commission_plans" in sql
         assert "CREATE OR REPLACE VIEW v_current_commission_plans" in sql
+        view_stmts = [
+            stmt for stmt in M.split_statements(sql)
+            if "v_current_commission_plans" in stmt
+        ]
+        assert len(view_stmts) == 1
+        assert view_stmts[0].lstrip().upper().startswith("CREATE OR REPLACE VIEW")
+        assert "WHERE rn = 1" in view_stmts[0]
         stmts = M.split_statements(sql)
         joined = "\n".join(stmts).upper()
         assert "DELETE" not in joined
@@ -286,6 +294,8 @@ class TestMigration065Gate:
     def test_step_blocks_when_installments_already_have_billing_data(self, monkeypatch):
         monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
         monkeypatch.setattr(M, "detect_065", lambda conn: False)
+        monkeypatch.setattr(M, "view_exists", lambda conn, name: False)
+        monkeypatch.setattr(M, "table_exists", lambda conn, name: False)
         monkeypatch.setattr(M, "check_065_gate", lambda conn: 2)
         applied = {"n": 0}
 
@@ -319,6 +329,41 @@ class TestMigration065Gate:
         )
         assert tag == "ok"
         assert message == "will-apply"
+
+    def test_tracked_065_creates_missing_view_without_rerunning_the_file(self, monkeypatch, capsys):
+        """A tracking row from before the view existed must still create the view."""
+        monkeypatch.setattr(
+            M, "get_tracked",
+            lambda conn, mid: {"checksum": "stale", "detected": 0},
+        )
+        monkeypatch.setattr(M, "view_exists", lambda conn, name: False)
+        monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
+        monkeypatch.setattr(M, "detect_065", lambda conn: False)
+        monkeypatch.setattr(M, "check_065_gate", lambda conn: 3)
+        seen = {}
+
+        def exec_statements(_conn, stmts, verbose=False):
+            seen["stmts"] = stmts
+
+        def forbid_file(*_args, **_kwargs):
+            raise AssertionError("065 must not re-run the whole file")
+
+        monkeypatch.setattr(M, "exec_statements", exec_statements)
+        monkeypatch.setattr(M, "exec_file", forbid_file)
+        tag, message = M._step(
+            None,
+            "065_commission_cadence_and_plans",
+            M.MIGRATIONS_DIR / "065_commission_cadence_and_plans.sql",
+            dry_run=False,
+            verbose=False,
+        )
+        assert tag == "ok"
+        assert "already-applied" in message
+        assert len(seen["stmts"]) == 1
+        assert seen["stmts"][0].lstrip().upper().startswith("CREATE OR REPLACE VIEW")
+        assert "v_current_commission_plans" in seen["stmts"][0]
+        assert "WHERE rn = 1" in seen["stmts"][0]
+        assert "checksum mismatch" in capsys.readouterr().err
 
 
 _TEST_DB = os.environ.get("MYSQL_TEST_DB", "crm_migrate_test")
@@ -449,6 +494,30 @@ class TestCommissionMigrationsOnMysql:
             )
 
         M.exec_file(conn, M.MIGRATIONS_DIR / "065_commission_cadence_and_plans.sql")
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM information_schema.VIEWS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'v_current_commission_plans'"
+            )
+            assert int(cur.fetchone()["cnt"]) == 1
+            cur.execute("DROP VIEW v_current_commission_plans")
+        M.ensure_tracking_table(conn)
+        tag, message = M._step(
+            conn,
+            "065_commission_cadence_and_plans",
+            M.MIGRATIONS_DIR / "065_commission_cadence_and_plans.sql",
+            dry_run=False,
+            verbose=False,
+        )
+        assert tag == "ok", message
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM information_schema.VIEWS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'v_current_commission_plans'"
+            )
+            assert int(cur.fetchone()["cnt"]) == 1
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT installment_number, status, amount_cents "

@@ -205,6 +205,17 @@ def table_exists(conn, table: str) -> bool:
     return bool(row and row["cnt"])
 
 
+def view_exists(conn, view: str) -> bool:
+    """True when INFORMATION_SCHEMA.VIEWS has this view in the current database."""
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.VIEWS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
+        (view,),
+    )
+    return bool(row and row["cnt"])
+
+
 def column_exists(conn, table: str, column: str) -> bool:
     row = _fetch_one(
         conn,
@@ -821,6 +832,30 @@ def check_065_gate(conn) -> int:
     return int(row["cnt"]) if row else 0
 
 
+def _ensure_current_plan_view(conn, path: Path) -> None:
+    """Create v_current_commission_plans when its tables exist and it does not.
+
+    CREATE OR REPLACE VIEW is safe to repeat. The rest of 065 is not: plain
+    ALTER TABLE and the installment backfill must not re-run once billing
+    data exists. A database that applied 065 before the view was added, or
+    a bootstrap that stopped after the tables, still needs this view.
+    """
+    if view_exists(conn, "v_current_commission_plans"):
+        return
+    if not table_exists(conn, "commission_plans") or not table_exists(conn, "user_commission_plans"):
+        return
+    stmts = [
+        stmt for stmt in split_statements(path.read_text(encoding="utf-8"))
+        if stmt.lstrip().upper().startswith("CREATE OR REPLACE VIEW")
+        and "v_current_commission_plans" in stmt
+    ]
+    if len(stmts) != 1:
+        raise RuntimeError(
+            "065 CREATE VIEW v_current_commission_plans was not parsed as one statement"
+        )
+    exec_statements(conn, stmts)
+
+
 def detect_065(conn) -> bool:
     """065 applied ↔ plan tables, the current-plan view, and the seed rows.
 
@@ -838,7 +873,6 @@ def detect_065(conn) -> bool:
         and table_exists(conn, "user_commission_plans")
         and table_exists(conn, "commission_installments")
         and table_exists(conn, "commission_billing_events")
-        and table_exists(conn, "v_current_commission_plans")
         and column_exists(conn, "commission_plan_rules", "payout_schedule")
         and column_exists(conn, "commissions", "plan_key")
         and column_exists(conn, "commissions", "client_type")
@@ -847,6 +881,7 @@ def detect_065(conn) -> bool:
         and column_exists(conn, "commission_installments", "collected_amount_cents")
         and index_exists(conn, "user_commission_plans", "uq_user_commission_plans_user_effective")
         and index_exists(conn, "commission_installments", "uq_commission_installment")
+        and view_exists(conn, "v_current_commission_plans")
     )
     if not schema_ok:
         return False
@@ -1035,7 +1070,10 @@ def _step(
 
     # ── already tracked ───────────────────────────────────────────────────────
     tracked = get_tracked(conn, migration_id)
-    if tracked:
+    # 065 is handled below even when a tracking row exists. The view was added
+    # to the file after the tables, and a checksum mismatch only warns. An
+    # already-tracked 065 must still create v_current_commission_plans.
+    if tracked and migration_id != "065_commission_cadence_and_plans":
         if tracked["checksum"] != checksum:
             print(
                 f"  WARNING: {migration_id} checksum mismatch — file edited after apply "
@@ -1094,10 +1132,27 @@ def _step(
 
     # ── 065: block a re-run once installments carry billing or payment data ──
     if migration_id == "065_commission_cadence_and_plans":
+        if not dry_run:
+            _ensure_current_plan_view(conn, path)
         if detect_065(conn):
-            if not dry_run:
+            if tracked and tracked["checksum"] != checksum:
+                print(
+                    f"  WARNING: {migration_id} checksum mismatch — file edited after apply "
+                    f"(recorded={tracked['checksum'][:12]}… current={checksum[:12]}…)",
+                    file=sys.stderr,
+                )
+            if not tracked and not dry_run:
                 record_migration(conn, migration_id, checksum, detected=True)
             return "ok", "already-applied (detected — schema present, no tracking row)"
+        if tracked:
+            if tracked["checksum"] != checksum:
+                print(
+                    f"  WARNING: {migration_id} checksum mismatch — file edited after apply "
+                    f"(recorded={tracked['checksum'][:12]}… current={checksum[:12]}…)",
+                    file=sys.stderr,
+                )
+            kind = "detected" if tracked["detected"] else "applied"
+            return "ok", f"already-applied ({kind})"
         live = check_065_gate(conn)
         if live != 0:
             return (

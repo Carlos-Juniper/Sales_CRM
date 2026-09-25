@@ -349,7 +349,10 @@ class TestSerializeOccurrenceCounts:
         load_src = inspect.getsource(est._load_estimate)
         assert "_estimate_out" in load_src
         list_src = inspect.getsource(est.register)
-        assert "return [await _load_estimate" in list_src
+        # Rush SLA loads each row through _load_estimate (with the window) and
+        # returns those estimates. Detail still returns the loaded estimate.
+        assert 'await _load_estimate(r["id"], sla_window_days=window)' in list_src
+        assert "return [est for est in loaded if est is not None]" in list_src
         assert "return est" in list_src
 
 

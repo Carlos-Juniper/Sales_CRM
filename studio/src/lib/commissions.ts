@@ -126,7 +126,7 @@ export function formatCloseQuarter(closeQuarter: string): string {
  * when the label is blank. A missing date stays pending — it is not inferred
  * from the installment number or the close quarter.
  */
-export function payoutMonthLabel(row: {
+function payoutMonthLabel(row: {
   payout_period: string | null
   payout_date: string | null
 }): string {
@@ -157,13 +157,14 @@ export function payoutAmountLabel(row: {
   return money
 }
 
-export type PayoutDescription =
-  | { kind: 'pending' }
-  | { kind: 'known'; month: string; amount: number | null }
+export type PayoutDescription = {
+  label: string
+  amount: number | null
+}
 
 /**
  * One description for a check or installment row.
- * A null amount is pending. A known amount keeps its month label and cents.
+ * A null amount uses the pending label. A known amount keeps its group label and cents.
  */
 export function describePayout(row: {
   bucket?: CommissionPayoutBucket | null
@@ -171,12 +172,8 @@ export function describePayout(row: {
   payout_date: string | null
   amount_cents: number | null
 }): PayoutDescription {
-  if (row.amount_cents == null) return { kind: 'pending' }
-  return {
-    kind: 'known',
-    month: payoutGroupLabel(row),
-    amount: row.amount_cents,
-  }
+  if (row.amount_cents == null) return { label: PENDING_BILLING_DATA_LABEL, amount: null }
+  return { label: payoutGroupLabel(row), amount: row.amount_cents }
 }
 
 /**
@@ -184,7 +181,7 @@ export function describePayout(row: {
  * Undated buckets use their own labels. A single installment has no bucket:
  * a known amount with no date is unscheduled, and a null amount stays pending.
  */
-export function payoutGroupLabel(row: {
+function payoutGroupLabel(row: {
   bucket?: CommissionPayoutBucket | null
   payout_period: string | null
   payout_date: string | null
@@ -192,12 +189,8 @@ export function payoutGroupLabel(row: {
 }): string {
   if (row.bucket === 'unscheduled') return UNSCHEDULED_AMOUNT_KNOWN_LABEL
   if (row.bucket === 'pending_billing_data') return PENDING_BILLING_DATA_LABEL
-  if (row.bucket === 'dated' || row.payout_date) return payoutMonthLabel(row)
-  if (row.amount_cents == null && !row.payout_period) return PENDING_BILLING_DATA_LABEL
-  if (!row.payout_date && row.amount_cents != null && !row.payout_period) {
-    return UNSCHEDULED_AMOUNT_KNOWN_LABEL
-  }
-  return payoutMonthLabel(row)
+  if (row.bucket === 'dated' || row.payout_date || row.payout_period) return payoutMonthLabel(row)
+  return row.amount_cents == null ? PENDING_BILLING_DATA_LABEL : UNSCHEDULED_AMOUNT_KNOWN_LABEL
 }
 
 /** Calendar date for a known payout_date. Do not call this with null. */

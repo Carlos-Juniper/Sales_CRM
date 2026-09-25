@@ -2,10 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-
 async function enableMocking() {
   if (import.meta.env.DEV && import.meta.env.VITE_MOCK === 'true') {
-    const { worker } = await import('./mocks/browser')
+    const { applyMockRole, worker } = await import('./mocks/browser')
+    applyMockRole()
     return worker.start({
       onUnhandledRequest: 'bypass',
       serviceWorker: { url: '/mockServiceWorker.js' },

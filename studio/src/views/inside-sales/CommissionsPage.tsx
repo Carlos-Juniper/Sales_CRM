@@ -203,7 +203,6 @@ export default function CommissionsPage() {
             dueCents={summary?.due_cents}
             upcomingCents={summary?.upcoming_cents}
             isLoading={summaryLoading}
-            balancesPeriodFiltered={summary?.balances_period_filtered ?? false}
           />
 
           {/* Attainment bars — Path A (proportional, no target) */}

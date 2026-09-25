@@ -7,9 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { TableRowSkeleton } from '@/components/shared/LoadingSkeleton'
 import { useMarkCommissionPaid, useMarkInstallmentPaid } from '@/hooks/useCommissions'
 import { formatCents } from '@/lib/estimating/maintenance'
-import { describePayout, formatRate, formatPaymentPeriod, formatContractNumber, PENDING_BILLING_DATA_LABEL, payoutAmountLabel } from '@/lib/commissions'
-import type { Commission, CommissionEstimateType, CommissionFilters, CommissionInstallment } from '@/types/commissions'
+import { describePayout, formatRate, formatPaymentPeriod, formatContractNumber } from '@/lib/commissions'
+import type { Commission, CommissionFilters, CommissionInstallment } from '@/types/commissions'
 import { InstallmentStatusBadge } from './InstallmentStatusBadge'
+import { PayoutLine } from './PayoutLine'
 
 interface CommissionDetailTableProps {
   commissions: Commission[]
@@ -69,14 +70,11 @@ function InstallmentLines({
             data-testid={`installment-${installment.id}`}
           >
             <span className="text-[hsl(var(--muted-fg))] w-20">Payment {installment.installment_number}</span>
-            <span className="text-[hsl(var(--fg))]">
-              {payout.kind === 'pending' ? PENDING_BILLING_DATA_LABEL : payout.month}
-            </span>
-            {payout.kind === 'known' && payout.amount != null && (
-              <span className="font-mono text-[hsl(var(--fg))]">
-                {payoutAmountLabel({ amount_cents: payout.amount })}
-              </span>
-            )}
+            <PayoutLine
+              payout={payout}
+              labelClassName="text-[hsl(var(--fg))]"
+              amountClassName="font-mono text-[hsl(var(--fg))]"
+            />
             <InstallmentStatusBadge status={installment.status} />
             {installment.status === 'pending_billing_data' && installment.billing_installment_number != null && (
               <span className="text-[11px] text-[hsl(var(--muted-fg))]">
@@ -110,10 +108,9 @@ function InstallmentLines({
   )
 }
 
-const TYPE_BADGE: Record<CommissionEstimateType, { label: string; variant: NonNullable<BadgeProps['variant']> }> = {
+const TYPE_BADGE: Record<'maintenance' | 'install', { label: string; variant: NonNullable<BadgeProps['variant']> }> = {
   maintenance: { label: 'Maintenance', variant: 'blue' },
   install: { label: 'Install', variant: 'amber' },
-  enhancement: { label: 'Enhancement', variant: 'purple' },
 }
 
 export function CommissionDetailTable({
@@ -211,7 +208,6 @@ export function CommissionDetailTable({
             <SelectItem value="all">All Types</SelectItem>
             <SelectItem value="maintenance">Maintenance</SelectItem>
             <SelectItem value="install">Install</SelectItem>
-            <SelectItem value="enhancement">Enhancement</SelectItem>
           </SelectContent>
         </Select>
       </div>

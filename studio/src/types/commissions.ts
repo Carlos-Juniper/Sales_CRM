@@ -13,8 +13,6 @@ export type CommissionInstallmentStatus =
   | 'cancelled'
   | 'pending_billing_data'
 
-export type CommissionEstimateType = 'maintenance' | 'install' | 'enhancement'
-
 export type CommissionPayoutBucket = 'dated' | 'unscheduled' | 'pending_billing_data'
 
 export interface CommissionInstallment {
@@ -50,7 +48,8 @@ export interface Commission {
   property_name?: string
   estimate_number?: number
   aspire_number?: string
-  estimate_type?: CommissionEstimateType
+  /** estimates.estimate_type is ENUM('maintenance','install'). Not a plan-rule type. */
+  estimate_type?: 'maintenance' | 'install'
 
   // Cadence + plan snapshot (added; existing fields above are unchanged).
   // plan_key is the plan stored on this commission. plan_name and
@@ -76,9 +75,9 @@ export interface CommissionSummary {
   next_payout: CommissionNextPayout | null
   upcoming_cents: number
   due_cents: number
-  // next_payout, upcoming_cents, and due_cents are as of today. They ignore
-  // start_date / end_date. False means those three fields are not period-filtered.
-  balances_period_filtered: boolean
+  // next_payout, upcoming_cents, and due_cents are as of today. The API
+  // always sends false. The open-check label does not branch on this field.
+  balances_period_filtered: false
   // Current user_commission_plans row for the requested rep. Null when the
   // rep has no assignment (legacy commission_rates still apply).
   plan_key: string | null
@@ -95,14 +94,17 @@ export interface CommissionRep {
   plan_name: string | null
 }
 
-export interface CommissionQuarterInstallment {
-  installment_number: number
+export interface CommissionPayoutRow {
   payout_period: string | null
   payout_date: string | null
   amount_cents: number | null
   amount_partial: boolean
   status: CommissionInstallmentStatus
   bucket: CommissionPayoutBucket
+}
+
+export interface CommissionQuarterInstallment extends CommissionPayoutRow {
+  installment_number: number
 }
 
 export interface CommissionCloseQuarter {
@@ -112,14 +114,7 @@ export interface CommissionCloseQuarter {
   installments: CommissionQuarterInstallment[]
 }
 
-export interface CommissionPayoutPeriod {
-  payout_period: string | null
-  payout_date: string | null
-  amount_cents: number | null
-  amount_partial: boolean
-  status: CommissionInstallmentStatus
-  bucket: CommissionPayoutBucket
-}
+export type CommissionPayoutPeriod = CommissionPayoutRow
 
 export interface CommissionPayoutSchedule {
   user_id: string
@@ -131,7 +126,7 @@ export interface CommissionPayoutSchedule {
 export interface CommissionFilters {
   user_id?: string
   status?: 'approved' | 'paid' | 'cancelled'
-  estimate_type?: CommissionEstimateType
+  estimate_type?: 'maintenance' | 'install'
   start_date?: string
   end_date?: string
 }

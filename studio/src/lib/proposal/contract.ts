@@ -17,6 +17,12 @@ export interface ContractRow {
   occurs: number | null
   /** Price per occurrence in cents */
   priceEachCents: number
+  /**
+   * True when the service has a unit sell price, including a real zero.
+   * False leaves the money cells blank. The rate still falls through to 0
+   * for the extended price, so a missing price adds nothing to the total.
+   */
+  hasUnitPrice: boolean
   /** Extended price in cents (qty × priceEach, computed from maintServiceLine) */
   extPriceCents: number
   /** Sales tax in cents (always 0 for v1) */
@@ -56,6 +62,7 @@ export function buildContractRows(estimate: Estimate): ContractRow[] {
     const sortedServices = [...section.services].sort((a, b) => a.sortOrder - b.sortOrder)
 
     for (const svc of sortedServices) {
+      const hasUnitPrice = svc.unitSellCents != null
       const rate = svc.unitSellCents ?? 0
       const complexity = svc.complexityPct ?? 0
       // All maintenance work bundles into the contract cost and is broken into
@@ -79,6 +86,7 @@ export function buildContractRows(estimate: Estimate): ContractRow[] {
         label: svc.label,
         occurs: isRecurring ? svc.qty : null,
         priceEachCents: priceEach,
+        hasUnitPrice,
         extPriceCents: extPrice,
         salesTaxCents: 0, // No tax engine in v1
         totalPriceCents: extPrice, // total = ext + tax

@@ -20,7 +20,7 @@ function makeEstimate(
     services: Array<{
       label: string
       qty: number
-      unitSellCents: number
+      unitSellCents: number | null
       complexityPct: number
       billingType?: 'recurring' | 'one_time' | null
     }>
@@ -140,6 +140,131 @@ describe('buildContractRows', () => {
     expect(rows[0].priceEachCents).toBe(5500)
     expect(rows[0].extPriceCents).toBe(66000)
   })
+
+  it('marks a known unit price, including a real zero', () => {
+    const estimate = makeEstimate([
+      {
+        squareFeet: 10000,
+        services: [
+          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
+          { label: 'Included', qty: 12, unitSellCents: 0, complexityPct: 0 },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+
+    expect(rows[0].hasUnitPrice).toBe(true)
+    expect(rows[0].extPriceCents).toBe(60000)
+    expect(rows[1].hasUnitPrice).toBe(true)
+    expect(rows[1].extPriceCents).toBe(0)
+  })
+
+  it('uses the extended price, not price-each times quantity, when those differ by rounding', () => {
+    // 1,500 sqft × 1¢ per 1,000 sqft rounds to 2¢ per occurrence, but
+    // 2¢ × 3 occurrences is 6¢ while maintServiceLine rounds 4.5¢ to 5¢.
+    const estimate = makeEstimate([
+      {
+        squareFeet: 1500,
+        services: [
+          { label: 'Mowing', qty: 3, unitSellCents: 1, complexityPct: 0 },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+
+    expect(rows[0].hasUnitPrice).toBe(true)
+    expect(rows[0].priceEachCents * 3).not.toBe(rows[0].extPriceCents)
+    expect(rows[0].extPriceCents).toBe(5)
+  })
+
+  it('flags a missing unit price and adds nothing to the extended price', () => {
+    const estimate = makeEstimate([
+      {
+        squareFeet: 10000,
+        services: [
+          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
+          { label: 'Unpriced', qty: 4, unitSellCents: null, complexityPct: 0 },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+    const unpriced = rows.find((r) => r.label === 'Unpriced')
+
+    expect(unpriced?.hasUnitPrice).toBe(false)
+    expect(unpriced?.extPriceCents).toBe(0)
+    expect(unpriced?.priceEachCents).toBe(0)
+  })
+
+  it('sums priced recurring rows to the annual maintenance total', () => {
+    const estimate = makeEstimate([
+      {
+        squareFeet: 342000,
+        services: [
+          { label: 'Mowing', qty: 12, unitSellCents: 350, complexityPct: 0 },
+          { label: 'Unpriced', qty: 4, unitSellCents: null, complexityPct: 0 },
+          { label: 'Mulch', qty: 1, unitSellCents: 420000, complexityPct: 0, billingType: 'one_time' },
+        ],
+      },
+      {
+        squareFeet: 28500,
+        services: [
+          { label: 'Irrigation', qty: 12, unitSellCents: 1000, complexityPct: 0 },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+    const recurring = rows.filter((row) => row.isRecurring)
+    const shown = recurring.reduce(
+      (sum, row) => sum + (row.hasUnitPrice ? row.extPriceCents : 0),
+      0,
+    )
+
+    expect(shown).toBe(buildContractTotals(recurring).extPriceCents)
+    expect(rows.find((row) => row.label === 'Mulch')?.isRecurring).toBe(false)
+    expect(rows.find((row) => row.label === 'Unpriced')?.hasUnitPrice).toBe(false)
+  })
+
+  it('sums the seeded Coral Bay recurring services to $40,014.00', () => {
+    // Same services, quantities, rates, and square footage as
+    // scripts/seed_contract_estimate.py.
+    const estimate = makeEstimate([
+      {
+        squareFeet: 342_000,
+        services: [
+          { label: 'Mowing & Edging', qty: 12, unitSellCents: 350, complexityPct: 0 },
+          { label: 'Landscape Bed Maintenance', qty: 12, unitSellCents: 200, complexityPct: 0 },
+          { label: 'Fertilization', qty: 4, unitSellCents: 300, complexityPct: 0 },
+          { label: 'Weed Control', qty: 6, unitSellCents: 200, complexityPct: 0 },
+          { label: 'Tree Canopy Trimming', qty: 4, unitSellCents: 250, complexityPct: 0 },
+        ],
+      },
+      {
+        squareFeet: 28_500,
+        services: [
+          { label: 'Shrub & Hedge Trimming', qty: 6, unitSellCents: 1400, complexityPct: 0 },
+          { label: 'Irrigation System Maint.', qty: 12, unitSellCents: 1000, complexityPct: 0 },
+          { label: 'Mulch Application', qty: 1, unitSellCents: 420_000, complexityPct: 0, billingType: 'one_time' },
+          { label: 'Annual Flower Installation', qty: 1, unitSellCents: 860_000, complexityPct: 0, billingType: 'one_time' },
+        ],
+      },
+    ])
+
+    const rows = buildContractRows(estimate)
+    const recurring = rows.filter((row) => row.isRecurring)
+    const shown = recurring.reduce(
+      (sum, row) => sum + (row.hasUnitPrice ? row.extPriceCents : 0),
+      0,
+    )
+
+    expect(recurring).toHaveLength(7)
+    expect(recurring.every((row) => row.hasUnitPrice)).toBe(true)
+    expect(shown).toBe(4_001_400)
+    expect(buildContractTotals(recurring).extPriceCents).toBe(4_001_400)
+  })
 })
 
 describe('buildContractTotals', () => {
@@ -149,6 +274,7 @@ describe('buildContractTotals', () => {
         label: 'Mowing',
         occurs: 12,
         priceEachCents: 5000,
+        hasUnitPrice: true,
         extPriceCents: 60000,
         salesTaxCents: 0,
         totalPriceCents: 60000,
@@ -158,6 +284,7 @@ describe('buildContractTotals', () => {
         label: 'Mulch',
         occurs: null,
         priceEachCents: 1500,
+        hasUnitPrice: true,
         extPriceCents: 1500,
         salesTaxCents: 0,
         totalPriceCents: 1500,
@@ -179,6 +306,7 @@ describe('buildPaymentSchedule', () => {
         label: 'Mowing',
         occurs: 12,
         priceEachCents: 5000,
+        hasUnitPrice: true,
         extPriceCents: 60000,
         salesTaxCents: 0,
         totalPriceCents: 60000,
@@ -198,6 +326,7 @@ describe('buildPaymentSchedule', () => {
         label: 'Mowing',
         occurs: 12,
         priceEachCents: 5000,
+        hasUnitPrice: true,
         extPriceCents: 60000,
         salesTaxCents: 0,
         totalPriceCents: 60000,
@@ -217,6 +346,7 @@ describe('buildPaymentSchedule', () => {
         label: 'Mowing',
         occurs: 12,
         priceEachCents: 5000,
+        hasUnitPrice: true,
         extPriceCents: 60000,
         salesTaxCents: 0,
         totalPriceCents: 60000,

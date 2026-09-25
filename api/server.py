@@ -27,7 +27,7 @@ from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -155,6 +155,19 @@ async def _fetch_lead(lead_id: str) -> dict:
 
 # ── Request / response models ────────────────────────────────────────────────
 
+# leads.notes is TEXT. 10_000 characters stays under the utf8mb4 TEXT byte
+# ceiling (65,535) for a first-touch note.
+LEAD_NOTES_MAX_LENGTH = 10_000
+
+
+def _lead_notes_for_insert(notes: Optional[str]) -> Optional[str]:
+    """Store blank notes as NULL so create matches a lead with no notes yet."""
+    if notes is None:
+        return None
+    stripped = notes.strip()
+    return stripped or None
+
+
 class CreateLeadBody(BaseModel):
     property_name: str
     city: str
@@ -171,6 +184,10 @@ class CreateLeadBody(BaseModel):
     property_id: Optional[str] = None
     # WS1: branch the lead belongs to (from the branch picker in AddLeadModal).
     branch_id: Optional[str] = None
+    # Same column the lead-detail Notes section edits via PATCH (leads.notes).
+    # Omitted, null, or blank stores NULL. The lead row's created_by and
+    # created_at are the creator and timestamp; notes itself is one text field.
+    notes: Optional[str] = Field(default=None, max_length=LEAD_NOTES_MAX_LENGTH)
 
 
 class PatchLeadBody(BaseModel):
@@ -555,13 +572,13 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
         INSERT INTO leads
             (id, source, lead_type, property_name, address, city, state,
              estimated_contract_value, estimated_acreage, units, status,
-             contact_name, contact_email, property_id, branch_id, created_by,
-             created_at, updated_at)
+             contact_name, contact_email, property_id, branch_id, notes,
+             created_by, created_at, updated_at)
         VALUES
             (%s, 'manual', %s, %s, %s, %s, %s,
              %s, %s, %s, %s,
              %s, %s, %s, %s, %s,
-             CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+             %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
         """,
         [
             new_id,
@@ -578,6 +595,7 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
             body.contact_email,
             property_id,
             body.branch_id,
+            _lead_notes_for_insert(body.notes),
             _user["id"],
         ],
     )

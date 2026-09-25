@@ -10,8 +10,12 @@ Rate precedence (the user's role is not a gate):
   4. Else no-op.
 
 Installment rows follow the matched rule's payout_schedule. A missing
-schedule is logged and the commission is inserted with no installment rows.
-The commission row and its installment rows commit in one transaction.
+schedule is logged and the commission still gets installment 1, stored as
+pending_billing_data with a null amount and a null date, so a won commission
+is never committed with zero installments. The commission insert and the
+installment insert commit in one transaction. If the installment insert
+fails, the commission insert rolls back, and a retry is not blocked by
+INSERT IGNORE.
 """
 from __future__ import annotations
 
@@ -24,6 +28,7 @@ from typing import Optional
 
 from db import execute, query, transaction
 from api.commission_calc import (
+    PENDING_BILLING_DATA,
     PLAN_ESTIMATE_TYPES,
     STANDARD_PLAN_KEY,
     build_installment_rows,
@@ -228,6 +233,23 @@ async def _resolve_basis(row: dict, estimate_id: str, close_year: int) -> Option
     return None
 
 
+def _pending_installment_one() -> dict:
+    """Installment 1 when the plan has no payout schedule.
+
+    The commission amount stays on the commission row. The check amount and
+    date stay null until a schedule exists.
+    """
+    return {
+        "installment_number": 1,
+        "payout_period": None,
+        "payout_date": None,
+        "amount_cents": None,
+        "status": PENDING_BILLING_DATA,
+        "billing_installment_number": None,
+        "collected_amount_cents": None,
+    }
+
+
 async def _insert_commission_installments(commission_id: str, rows: list[dict]) -> None:
     """Persist payout installments. Dates and amounts may be null."""
     if not rows:
@@ -270,6 +292,13 @@ async def _persist_won_commission(estimate_id: str, row: dict, basis: Commission
         installments = build_installment_rows(
             now_utc, basis.amount_cents, basis.payout_schedule, contract_start,
         )
+    if not installments:
+        logger.error(
+            "No payout schedule for estimate %s plan %s; "
+            "inserting installment 1 as pending_billing_data",
+            estimate_id, basis.plan_key,
+        )
+        installments = [_pending_installment_one()]
     commission_id = str(uuid.uuid4())
     async with transaction():
         inserted = await execute(

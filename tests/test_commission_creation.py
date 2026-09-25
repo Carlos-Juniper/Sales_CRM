@@ -210,7 +210,20 @@ class TestCreateCommissionOnWon:
         assert "2026-04-01" not in installment
         assert installment.count("pending_billing_data") == 2
 
-    async def test_missing_schedule_inserts_commission_without_installments(self):
+    async def test_missing_schedule_inserts_pending_installment_one(self):
+        """A missing schedule still writes installment 1 in the same transaction.
+
+        The row is pending_billing_data with a null amount. A commission is
+        not committed with zero installments.
+        """
+        events = []
+
+        @asynccontextmanager
+        async def tx():
+            events.append("begin")
+            yield None
+            events.append("commit")
+
         async def fake_query(sql, params=None):
             if "FROM estimates" in sql:
                 return [{
@@ -232,12 +245,21 @@ class TestCreateCommissionOnWon:
         execs = []
 
         async def fake_exec(sql, params=None):
-            execs.append(sql)
+            execs.append((sql, list(params or [])))
             return 1
 
-        await _run_create(fake_query, fake_exec)
-        assert len(execs) == 1
-        assert "INSERT IGNORE INTO commissions" in execs[0]
+        with patch("api.commission_service.query", new=fake_query), \
+             patch("api.commission_service.execute", new=fake_exec), \
+             patch("api.commission_service.transaction", new=tx):
+            await create_on_won("est-1")
+        assert events == ["begin", "commit"]
+        assert len(execs) == 2
+        assert "INSERT IGNORE INTO commissions" in execs[0][0]
+        assert "commission_installments" in execs[1][0]
+        installment = execs[1][1]
+        assert installment.count("pending_billing_data") == 1
+        assert 1 in installment
+        assert None in installment
 
     @pytest.mark.asyncio
     async def test_assignment_wins_over_legacy_rate(self):

@@ -136,7 +136,7 @@ ALTER TABLE commissions ADD COLUMN contract_start_date DATE NULL;
 INSERT INTO commission_plans (plan_key, name, description, active) VALUES (
   'standard',
   'Standard Sales Commission',
-  'Default company plan. Maintenance: 3 percent of first-year annual contract value, schedule maintenance_3_payment (three payments; only the first is dated until billing exists). Construction: marginal calendar-year tiers for new clients (0.4 percent to $1M, 0.8 percent to $2M, 1.2 percent above) and existing clients (0 percent on the first $3M, 0.4 percent above), schedule construction_billing_quarterly.',
+  'Default company plan. Maintenance: 3 percent of first-year annual contract value, schedule maintenance_3_payment (three payments, and only the first is dated until billing exists). Construction: marginal calendar-year tiers for new clients (0.4 percent to $1M, 0.8 percent to $2M, 1.2 percent above) and existing clients (0 percent on the first $3M, 0.4 percent above), schedule construction_billing_quarterly.',
   1
 )
 ON DUPLICATE KEY UPDATE

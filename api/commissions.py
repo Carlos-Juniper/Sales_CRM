@@ -103,17 +103,6 @@ async def _current_rep_plan(user_id: str) -> tuple[Optional[str], Optional[str]]
     return plan_key, plan_name
 
 
-def _not_payable(row: dict) -> bool:
-    """True when an installment must not be flipped to paid.
-
-    pending_billing_data and a null amount are still unknown. Cancelled
-    rows stay cancelled.
-    """
-    if row.get("status") in ("pending_billing_data", "cancelled"):
-        return True
-    return row.get("amount_cents") is None
-
-
 def _latest_dated_period(siblings: list[dict]) -> Optional[str]:
     """payment_period from the latest payout_date, then installment_number.
 
@@ -128,6 +117,134 @@ def _latest_dated_period(siblings: list[dict]) -> Optional[str]:
         key=lambda row: (row["payout_date"], int(row.get("installment_number") or 0)),
     )
     return chosen.get("payout_period_label")
+
+
+_CANCELLED_PAID = "Cancelled installment cannot be marked paid"
+_CANCELLED_COMMISSION = "Cancelled commission cannot be marked paid"
+_INSTALLMENT_NOT_PAYABLE = (
+    "Installment is not payable until its amount and billing data are known"
+)
+_COMMISSION_NOT_PAYABLE = "Commission has installments that are not payable"
+
+
+def _reject_unpayable(row: dict, *, cancelled_detail: str, unknown_detail: str) -> None:
+    """409 when a row is cancelled, pending billing data, or has a null amount."""
+    if row.get("status") == "cancelled" or row.get("commission_status") == "cancelled":
+        raise HTTPException(status_code=409, detail=cancelled_detail)
+    if row.get("status") == "pending_billing_data" or row.get("amount_cents") is None:
+        raise HTTPException(status_code=409, detail=unknown_detail)
+
+
+async def _apply_paid(
+    commission_id: str,
+    installment_id: Optional[str] = None,
+    payment_period: Optional[str] = None,
+) -> None:
+    """Mark one installment, or every open installment on a commission, paid.
+
+    One guard, then one cascade, for both mark-paid routes. A cancelled
+    commission or installment is 409. pending_billing_data and a null amount
+    are 409. An already-paid row is left alone, including paid_at. The
+    installment update never matches a cancelled row.
+    """
+    if installment_id is not None:
+        rows = await query(
+            """
+            SELECT i.id, i.commission_id, i.status, i.amount_cents, i.payout_date,
+                   i.payout_period_label, i.installment_number,
+                   c.status AS commission_status
+            FROM commission_installments i
+            JOIN commissions c ON c.id = i.commission_id
+            WHERE i.id = %s
+            """,
+            [installment_id],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Installment not found")
+        row = rows[0]
+        commission_id = row["commission_id"]
+        _reject_unpayable(
+            row,
+            cancelled_detail=_CANCELLED_PAID,
+            unknown_detail=_INSTALLMENT_NOT_PAYABLE,
+        )
+        if row.get("status") != "paid":
+            await execute(
+                """
+                UPDATE commission_installments
+                SET status = 'paid', paid_at = NOW(), updated_at = NOW()
+                WHERE id = %s
+                  AND status NOT IN ('paid', 'cancelled')
+                """,
+                [installment_id],
+            )
+        siblings = await query(
+            """
+            SELECT installment_number, status, payout_period_label, payout_date
+            FROM commission_installments
+            WHERE commission_id = %s
+            """,
+            [commission_id],
+        )
+        if row.get("commission_status") == "paid":
+            return
+        if siblings and all(sibling.get("status") == "paid" for sibling in siblings):
+            await execute(
+                """
+                UPDATE commissions
+                SET status = 'paid', paid_at = NOW(), payment_period = %s, updated_at = NOW()
+                WHERE id = %s
+                  AND status NOT IN ('paid', 'cancelled')
+                """,
+                [
+                    payment_period if payment_period is not None else _latest_dated_period(siblings),
+                    commission_id,
+                ],
+            )
+        return
+
+    commission_rows = await query(
+        "SELECT id, status FROM commissions WHERE id = %s",
+        [commission_id],
+    )
+    if not commission_rows:
+        raise HTTPException(status_code=404, detail="Commission not found")
+    commission = commission_rows[0]
+    if commission.get("status") == "cancelled":
+        raise HTTPException(status_code=409, detail=_CANCELLED_COMMISSION)
+    installments = await query(
+        """
+        SELECT id, status, amount_cents, installment_number, payout_period_label, payout_date
+        FROM commission_installments
+        WHERE commission_id = %s
+        """,
+        [commission_id],
+    )
+    for row in installments:
+        _reject_unpayable(
+            row,
+            cancelled_detail=_COMMISSION_NOT_PAYABLE,
+            unknown_detail=_COMMISSION_NOT_PAYABLE,
+        )
+    if commission.get("status") != "paid":
+        await execute(
+            """
+            UPDATE commissions
+            SET status = 'paid', paid_at = NOW(), payment_period = %s, updated_at = NOW()
+            WHERE id = %s
+              AND status NOT IN ('paid', 'cancelled')
+            """,
+            [payment_period, commission_id],
+        )
+    await execute(
+        """
+        UPDATE commission_installments
+        SET status = 'paid', paid_at = NOW(), updated_at = NOW()
+        WHERE commission_id = %s
+          AND status NOT IN ('paid', 'cancelled')
+        """,
+        [commission_id],
+    )
 
 
 def register(app, require_auth) -> None:
@@ -396,52 +513,9 @@ def register(app, require_auth) -> None:
         installment_id: str,
         user: dict = Depends(require_auth),
     ) -> dict:
+        """Mark one installment paid. See `_apply_paid` for the guard and cascade."""
         _require_mark_paid(user)
-        rows = await query(
-            """
-            SELECT i.id, i.commission_id, i.status, i.amount_cents, i.payout_date,
-                   i.payout_period_label, c.status AS commission_status
-            FROM commission_installments i
-            JOIN commissions c ON c.id = i.commission_id
-            WHERE i.id = %s
-            """,
-            [installment_id],
-        )
-        if not rows:
-            raise HTTPException(status_code=404, detail="Installment not found")
-        row = rows[0]
-        if row.get("status") == "cancelled" or row.get("commission_status") == "cancelled":
-            raise HTTPException(status_code=409, detail="Cancelled installment cannot be marked paid")
-        if row.get("status") == "pending_billing_data" or row.get("amount_cents") is None:
-            raise HTTPException(
-                status_code=409,
-                detail="Installment is not payable until its amount and billing data are known",
-            )
-        await execute(
-            """
-            UPDATE commission_installments
-            SET status = 'paid', paid_at = NOW(), updated_at = NOW()
-            WHERE id = %s
-            """,
-            [installment_id],
-        )
-        siblings = await query(
-            """
-            SELECT installment_number, status, payout_period_label, payout_date
-            FROM commission_installments
-            WHERE commission_id = %s
-            """,
-            [row["commission_id"]],
-        )
-        if siblings and all(s.get("status") == "paid" for s in siblings):
-            await execute(
-                """
-                UPDATE commissions
-                SET status = 'paid', paid_at = NOW(), payment_period = %s, updated_at = NOW()
-                WHERE id = %s AND status != 'cancelled'
-                """,
-                [_latest_dated_period(siblings), row["commission_id"]],
-            )
+        await _apply_paid("", installment_id=installment_id)
         return {"success": True}
 
     @app.post("/api/commissions/{commission_id}/mark-paid")
@@ -450,47 +524,16 @@ def register(app, require_auth) -> None:
         body: MarkPaidBody,
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Mark the commission and every installment paid.
+        """Mark the commission and its open installments paid.
 
-        Returns 409 and writes nothing when any installment is
-        pending_billing_data, cancelled, or has a null amount. Those rows
-        are not payable, so this does not flip them to paid. A commission
-        id that matches no row is 404. The request body's payment_period
-        is stored on the commission.
+        `_apply_paid` returns 409 and writes nothing when the commission is
+        cancelled or any installment is pending_billing_data, cancelled, or
+        has a null amount. Already-paid rows keep paid_at. The installment
+        update excludes cancelled rows. A missing commission is 404. The
+        request body's payment_period is stored on the commission.
         """
         _require_mark_paid(user)
-        installments = await query(
-            """
-            SELECT status, amount_cents
-            FROM commission_installments
-            WHERE commission_id = %s
-            """,
-            [commission_id],
-        )
-        if any(_not_payable(row) for row in installments):
-            raise HTTPException(
-                status_code=409,
-                detail="Commission has installments that are not payable",
-            )
-
-        result = await execute(
-            """
-            UPDATE commissions
-            SET status = 'paid', paid_at = NOW(), payment_period = %s, updated_at = NOW()
-            WHERE id = %s
-            """,
-            [body.payment_period, commission_id],
-        )
-        if result == 0:
-            raise HTTPException(status_code=404, detail="Commission not found")
-        await execute(
-            """
-            UPDATE commission_installments
-            SET status = 'paid', paid_at = NOW(), updated_at = NOW()
-            WHERE commission_id = %s
-            """,
-            [commission_id],
-        )
+        await _apply_paid(commission_id, payment_period=body.payment_period)
         return {"success": True}
 
     @app.get("/api/commissions/reps")

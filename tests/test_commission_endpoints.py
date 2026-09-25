@@ -419,7 +419,7 @@ class TestCommissionEndpoints:
                 json={"payment_period": "April 2026"},
             )
         assert resp.status_code == 404
-        assert missing.await_count == 1
+        missing.assert_not_awaited()
 
         with patch(
             "api.commissions.query",
@@ -446,7 +446,9 @@ class TestCommissionEndpoints:
         assert resp.json() == {"success": True}
         sqls = [call.args[0] for call in paid.await_args_list]
         assert "payment_period" in sqls[0]
+        assert "status NOT IN ('paid', 'cancelled')" in sqls[0]
         assert "commission_installments" in sqls[1]
+        assert "status NOT IN ('paid', 'cancelled')" in sqls[1]
         assert paid.await_args_list[1].args[1] == ["c1"]
 
     def test_installment_mark_paid(self, as_role):
@@ -655,6 +657,124 @@ class TestCommissionEndpoints:
         assert "UPDATE commissions" in commission_sql
         # Later payout_date wins over the higher installment number.
         assert commission_params[0] == "December 2026"
+
+    def test_mark_paid_rules_share_one_guard(self, as_role):
+        """Cancelled, unknown, and already-paid rows follow one helper.
+
+        Already-paid does not rewrite paid_at. The whole-commission
+        installment update excludes cancelled rows.
+        """
+        as_role("admin")
+
+        async def cancelled_commission(sql, params=None):
+            if "FROM commissions" in sql:
+                return [{"id": "c1", "status": "cancelled"}]
+            raise AssertionError(sql)
+
+        with patch("api.commissions.query", new=cancelled_commission), \
+             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+            resp = client.post(
+                "/api/commissions/c1/mark-paid",
+                json={"payment_period": "April 2026"},
+            )
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Cancelled commission cannot be marked paid"
+        exec_mock.assert_not_awaited()
+
+        calls = {"n": 0}
+
+        async def cancelled_installment(sql, params=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return [{"id": "c1", "status": "approved"}]
+            return [{"id": "i2", "status": "cancelled", "amount_cents": 10}]
+
+        with patch("api.commissions.query", new=cancelled_installment), \
+             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+            resp = client.post(
+                "/api/commissions/c1/mark-paid",
+                json={"payment_period": "April 2026"},
+            )
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Commission has installments that are not payable"
+        exec_mock.assert_not_awaited()
+
+        async def null_amount(sql, params=None):
+            if "FROM commissions" in sql and "commission_installments" not in sql:
+                return [{"id": "c1", "status": "approved"}]
+            return [{"id": "i1", "status": "scheduled", "amount_cents": None}]
+
+        with patch("api.commissions.query", new=null_amount), \
+             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+            resp = client.post(
+                "/api/commissions/c1/mark-paid",
+                json={"payment_period": "April 2026"},
+            )
+        assert resp.status_code == 409
+        exec_mock.assert_not_awaited()
+
+        async def already_paid_installment(sql, params=None):
+            if "WHERE i.id = %s" in sql:
+                return [{
+                    "id": "i1",
+                    "commission_id": "c1",
+                    "status": "paid",
+                    "amount_cents": 40,
+                    "payout_period_label": "April 2026",
+                    "payout_date": date(2026, 4, 1),
+                    "commission_status": "paid",
+                }]
+            return [{
+                "installment_number": 1,
+                "status": "paid",
+                "payout_period_label": "April 2026",
+                "payout_date": date(2026, 4, 1),
+            }]
+
+        with patch("api.commissions.query", new=already_paid_installment), \
+             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+            resp = client.post("/api/commissions/installments/i1/mark-paid")
+        assert resp.status_code == 200
+        exec_mock.assert_not_awaited()
+
+        async def parent_cancelled(sql, params=None):
+            return [{
+                "id": "i1",
+                "commission_id": "c1",
+                "status": "scheduled",
+                "amount_cents": 40,
+                "commission_status": "cancelled",
+            }]
+
+        with patch("api.commissions.query", new=parent_cancelled), \
+             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+            resp = client.post("/api/commissions/installments/i1/mark-paid")
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Cancelled installment cannot be marked paid"
+        exec_mock.assert_not_awaited()
+
+        async def already_paid_commission(sql, params=None):
+            if "FROM commissions" in sql and "commission_installments" not in sql:
+                return [{"id": "c1", "status": "paid"}]
+            return [{
+                "id": "i1",
+                "status": "paid",
+                "amount_cents": 40,
+                "installment_number": 1,
+            }]
+
+        with patch("api.commissions.query", new=already_paid_commission), \
+             patch("api.commissions.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
+            resp = client.post(
+                "/api/commissions/c1/mark-paid",
+                json={"payment_period": "April 2026"},
+            )
+        assert resp.status_code == 200
+        assert exec_mock.await_count == 1
+        sql = exec_mock.await_args.args[0]
+        assert "commission_installments" in sql
+        assert "status NOT IN ('paid', 'cancelled')" in sql
+        assert "UPDATE commissions" not in sql
 
     @pytest.mark.asyncio
     async def test_cancel_commission_cancels_unpaid_installments(self):

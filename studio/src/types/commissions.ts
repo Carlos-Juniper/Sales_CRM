@@ -39,9 +39,13 @@ export interface Commission {
   aspire_number?: string
   estimate_type?: 'maintenance' | 'install'
 
-  // Cadence + plan snapshot (added; existing fields above are unchanged)
+  // Cadence + plan snapshot (added; existing fields above are unchanged).
+  // plan_key is the plan stored on this commission. plan_name and
+  // rep_plan_key are the rep's current assignment (null if none).
   close_quarter: string | null
   plan_key: string | null
+  rep_plan_key: string | null
+  plan_name: string | null
   client_type: string | null
   contract_start_date: string | null
   installments: CommissionInstallment[]
@@ -59,6 +63,13 @@ export interface CommissionSummary {
   next_payout: CommissionNextPayout | null
   upcoming_cents: number
   due_cents: number
+  // next_payout, upcoming_cents, and due_cents are as of today. They ignore
+  // start_date / end_date. False means those three fields are not period-filtered.
+  balances_period_filtered: boolean
+  // Current user_commission_plans row for the requested rep. Null when the
+  // rep has no assignment (legacy commission_rates still apply).
+  plan_key: string | null
+  plan_name: string | null
 }
 
 export interface CommissionRep {
@@ -67,8 +78,8 @@ export interface CommissionRep {
   email: string
   commission_rate?: number   // null/undefined = no active rate on file
   effective_date?: string
-  plan_key: string
-  plan_name: string
+  plan_key: string | null
+  plan_name: string | null
 }
 
 export interface CommissionQuarterInstallment {
@@ -76,7 +87,9 @@ export interface CommissionQuarterInstallment {
   payout_period: string | null
   payout_date: string | null
   amount_cents: number | null
+  amount_partial: boolean
   status: 'paid' | 'cancelled' | 'due' | 'upcoming' | 'pending_billing_data'
+  bucket: 'dated' | 'unscheduled' | 'pending_billing_data'
 }
 
 export interface CommissionCloseQuarter {
@@ -90,7 +103,9 @@ export interface CommissionPayoutPeriod {
   payout_period: string | null
   payout_date: string | null
   amount_cents: number | null
+  amount_partial: boolean
   status: 'paid' | 'cancelled' | 'due' | 'upcoming' | 'pending_billing_data'
+  bucket: 'dated' | 'unscheduled' | 'pending_billing_data'
 }
 
 export interface CommissionPayoutSchedule {

@@ -31,6 +31,7 @@ from api.commission_calc import (  # noqa: E402
     effective_rate,
     resolve_rate_source,
     maintenance_known_halves,
+    rollup_status,
     sum_prior_install_cents,
 )
 import scripts.migrate as M  # noqa: E402
@@ -714,6 +715,9 @@ class TestCommissionEndpoints:
             "payout_date": "2026-04-01",
             "amount_cents": 100,
         }
+        assert body["balances_period_filtered"] is False
+        assert body["plan_key"] is None
+        assert body["plan_name"] is None
 
     def test_list_includes_quarter_plan_and_installments(self, as_role, monkeypatch):
         as_role("sales", user_id="rep-1")
@@ -852,6 +856,129 @@ class TestCommissionEndpoints:
         assert row["plan_key"] == "standard"
         assert row["plan_name"] == "Standard Sales Commission"
         assert row["commission_rate"] == 0.05
+
+    def test_reps_without_assignment_keep_null_plan(self, as_role):
+        as_role("admin")
+        seen = {}
+
+        async def fake_query(sql, params=None):
+            seen["sql"] = sql
+            return [{
+                "id": "rep-cady",
+                "name": "Michelle Cady",
+                "email": "michelle.cady@example.com",
+                "commission_rate": Decimal("0.04000"),
+                "effective_date": date(2026, 1, 1),
+                "plan_key": None,
+                "plan_name": None,
+            }]
+
+        with patch("api.commissions.query", new=fake_query):
+            resp = client.get("/api/commissions/reps")
+        assert resp.status_code == 200
+        row = resp.json()[0]
+        assert row["plan_key"] is None
+        assert row["plan_name"] is None
+        assert row["commission_rate"] == 0.04
+        assert "COALESCE" not in seen["sql"]
+        assert "'standard'" not in seen["sql"]
+
+    def test_open_checks_ignore_period_and_summary_returns_rep_plan(self, as_role, monkeypatch):
+        as_role("vice_president", user_id="vp-1")
+        monkeypatch.setattr("api.commissions.et_today", lambda: date(2026, 9, 25))
+
+        async def fake_query(sql, params=None):
+            if "scheduled_ytd_cents" in sql:
+                assert params[0] == "rep-9"
+                assert params[1] == "2026-01-01"
+                return [{"scheduled_ytd_cents": 1, "paid_ytd_cents": 0}]
+            if "commission_installments" in sql:
+                assert params == ["rep-9"]
+                assert "created_at" not in sql
+                return [{
+                    "id": "i1",
+                    "installment_number": 1,
+                    "payout_period_label": "October 2026",
+                    "payout_date": date(2026, 10, 1),
+                    "amount_cents": 80,
+                    "status": "scheduled",
+                    "commission_status": "approved",
+                }]
+            if "user_commission_plans" in sql:
+                assert params == ["rep-9"]
+                return [{"plan_key": "standard", "plan_name": "Standard Sales Commission"}]
+            raise AssertionError(sql)
+
+        with patch("api.commissions.query", new=fake_query):
+            resp = client.get(
+                "/api/commissions/summary?user_id=rep-9&start_date=2026-01-01&end_date=2026-01-31"
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["balances_period_filtered"] is False
+        assert body["upcoming_cents"] == 80
+        assert body["plan_key"] == "standard"
+        assert body["plan_name"] == "Standard Sales Commission"
+
+    def test_list_includes_rep_plan_without_replacing_snapshot(self, as_role):
+        as_role("sales", user_id="rep-1")
+        created = datetime(2026, 2, 10, 16, 0, tzinfo=timezone.utc)
+
+        async def fake_query(sql, params=None):
+            if "commission_installments" in sql:
+                return []
+            if "user_commission_plans" in sql:
+                assert params == ["rep-1"]
+                return []
+            return [{
+                "id": "c1",
+                "estimate_id": "e1",
+                "lead_id": "l1",
+                "user_id": "rep-1",
+                "contract_value_cents": 100,
+                "commission_rate": Decimal("0.03000"),
+                "commission_amount_cents": 3,
+                "status": "approved",
+                "approved_at": created,
+                "paid_at": None,
+                "payment_period": None,
+                "notes": None,
+                "created_at": created,
+                "updated_at": created,
+                "plan_key": None,
+                "client_type": None,
+                "rep_name": "Michelle Cady",
+                "rep_email": "m@x.com",
+                "property_name": "Oak",
+                "estimate_number": 4,
+                "aspire_number": None,
+                "estimate_type": "maintenance",
+            }]
+
+        with patch("api.commissions.query", new=fake_query):
+            resp = client.get("/api/commissions/list")
+        assert resp.status_code == 200
+        row = resp.json()[0]
+        assert row["plan_key"] is None
+        assert row["rep_plan_key"] is None
+        assert row["plan_name"] is None
+
+    def test_installment_mark_paid_excludes_manager_and_regional_director(self, as_role):
+        for role in ("manager", "regional_director"):
+            as_role(role)
+            denied = client.post("/api/commissions/installments/i1/mark-paid")
+            assert denied.status_code == 403
+            assert denied.json()["detail"] == "Only admin, VP, or CEO can mark commissions as paid"
+            whole = client.post(
+                "/api/commissions/c1/mark-paid",
+                json={"payment_period": "April 2026"},
+            )
+            assert whole.status_code == 403
+
+        as_role("ceo")
+        with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
+            missing = client.post("/api/commissions/installments/nope/mark-paid")
+        assert missing.status_code == 404
 
     def test_mark_paid_updates_installments_and_keeps_auth(self, as_role):
         as_role("sales")
@@ -1075,7 +1202,148 @@ class TestScheduleRollup:
         assert quarter["installments"][0]["status"] == "due"
         april = schedule["by_payout_period"][0]
         assert april["amount_cents"] == 70
+        assert april["amount_partial"] is False
         assert april["status"] == "due"
+        assert april["bucket"] == "dated"
+
+    def test_null_amounts_stay_null_and_partial_sums_are_flagged(self):
+        schedule = build_payout_schedule([
+            {
+                "close_quarter": "2026-Q3",
+                "commission_amount_cents": 300,
+                "installments": [
+                    {
+                        "installment_number": 3,
+                        "payout_period": None,
+                        "payout_date": None,
+                        "amount_cents": None,
+                        "status": "pending_billing_data",
+                    },
+                ],
+            },
+            {
+                "close_quarter": "2026-Q1",
+                "commission_amount_cents": 80,
+                "installments": [
+                    {
+                        "installment_number": 1,
+                        "payout_period": "April 2026",
+                        "payout_date": "2026-04-01",
+                        "amount_cents": 50,
+                        "status": "upcoming",
+                    },
+                    {
+                        "installment_number": 1,
+                        "payout_period": "April 2026",
+                        "payout_date": "2026-04-01",
+                        "amount_cents": None,
+                        "status": "upcoming",
+                    },
+                ],
+            },
+        ])
+        pending = schedule["quarters"][1]["installments"][0]
+        assert pending["amount_cents"] is None
+        assert pending["amount_partial"] is False
+        mixed = schedule["quarters"][0]["installments"][0]
+        assert mixed["amount_cents"] == 50
+        assert mixed["amount_partial"] is True
+        april = next(row for row in schedule["by_payout_period"] if row["payout_date"] == "2026-04-01")
+        assert april["amount_cents"] == 50
+        assert april["amount_partial"] is True
+
+    def test_undated_known_amounts_do_not_share_a_bucket_with_unknown(self):
+        schedule = build_payout_schedule([
+            {
+                "close_quarter": "2026-Q3",
+                "commission_amount_cents": 900,
+                "installments": [
+                    {
+                        "installment_number": 1,
+                        "payout_period": "September 2026",
+                        "payout_date": "2026-09-30",
+                        "amount_cents": 150,
+                        "status": "upcoming",
+                    },
+                    {
+                        "installment_number": 2,
+                        "payout_period": None,
+                        "payout_date": None,
+                        "amount_cents": 150,
+                        "status": "pending_billing_data",
+                    },
+                    {
+                        "installment_number": 3,
+                        "payout_period": None,
+                        "payout_date": None,
+                        "amount_cents": None,
+                        "status": "pending_billing_data",
+                    },
+                ],
+            },
+            {
+                "close_quarter": "2026-Q3",
+                "commission_amount_cents": 400,
+                "installments": [
+                    {
+                        "installment_number": 1,
+                        "payout_period": None,
+                        "payout_date": None,
+                        "amount_cents": None,
+                        "status": "pending_billing_data",
+                    },
+                ],
+            },
+        ])
+        periods = schedule["by_payout_period"]
+        assert [row["bucket"] for row in periods] == [
+            "dated", "unscheduled", "pending_billing_data",
+        ]
+        assert periods[0]["amount_cents"] == 150
+        assert periods[0]["amount_partial"] is False
+        assert periods[1]["payout_date"] is None
+        assert periods[1]["payout_period"] == "Unscheduled"
+        assert periods[1]["amount_cents"] == 150
+        assert periods[1]["amount_partial"] is False
+        assert periods[2]["amount_cents"] is None
+        assert periods[2]["amount_partial"] is False
+        assert periods[2]["status"] == "pending_billing_data"
+
+    def test_upcoming_is_not_hidden_by_a_pending_sibling(self):
+        assert rollup_status(["upcoming", "pending_billing_data"]) == "upcoming"
+        assert rollup_status(["due", "upcoming", "pending_billing_data"]) == "due"
+        assert rollup_status(["pending_billing_data", "paid"]) == "pending_billing_data"
+        schedule = build_payout_schedule([
+            {
+                "close_quarter": "2026-Q3",
+                "commission_amount_cents": 300,
+                "installments": [
+                    {
+                        "installment_number": 1,
+                        "payout_period": "September 2026",
+                        "payout_date": "2026-09-30",
+                        "amount_cents": 150,
+                        "status": "upcoming",
+                    },
+                    {
+                        "installment_number": 1,
+                        "payout_period": None,
+                        "payout_date": None,
+                        "amount_cents": None,
+                        "status": "pending_billing_data",
+                    },
+                ],
+            },
+        ])
+        rows = schedule["quarters"][0]["installments"]
+        assert len(rows) == 2
+        upcoming = next(row for row in rows if row["status"] == "upcoming")
+        pending = next(row for row in rows if row["status"] == "pending_billing_data")
+        assert upcoming["payout_date"] == "2026-09-30"
+        assert upcoming["amount_cents"] == 150
+        assert upcoming["amount_partial"] is False
+        assert pending["amount_cents"] is None
+        assert pending["payout_date"] is None
 
 
 # ── migration 065 ────────────────────────────────────────────────────────────

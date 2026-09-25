@@ -246,8 +246,10 @@ def public_installment(row: dict, commission_status: str, today: date) -> dict:
 def rollup_status(statuses: Sequence[str]) -> str:
     """One status for a check that holds several installments.
 
-    Cancelled rows drop out unless they are the whole group. A mix of paid
-    and still-open money reports the open state (due before upcoming).
+    Cancelled rows drop out unless they are the whole group. The most
+    actionable open state wins: due, then upcoming, then
+    pending_billing_data, then paid. An upcoming check is not hidden by a
+    pending sibling.
     """
     active = [s for s in statuses if s != "cancelled"]
     if not active:
@@ -256,9 +258,81 @@ def rollup_status(statuses: Sequence[str]) -> str:
         return "paid"
     if any(s == "due" for s in active):
         return "due"
+    if any(s == "upcoming" for s in active):
+        return "upcoming"
     if any(s == PENDING_BILLING_DATA for s in active):
         return PENDING_BILLING_DATA
     return "upcoming"
+
+
+# by_payout_period / quarter installment buckets. Dated rows keep their date.
+# Undated known amounts (maintenance payment 2) stay out of the unknown bucket
+# (payment 3, construction, enhancement).
+BUCKET_DATED = "dated"
+BUCKET_UNSCHEDULED = "unscheduled"
+BUCKET_PENDING = "pending_billing_data"
+_UNSCHEDULED_LABEL = "Unscheduled"
+
+
+def _installment_bucket(inst: dict) -> str:
+    if inst.get("payout_date"):
+        return BUCKET_DATED
+    if inst.get("amount_cents") is None:
+        return BUCKET_PENDING
+    return BUCKET_UNSCHEDULED
+
+
+def _new_amount_group() -> dict:
+    return {
+        "known_cents": 0,
+        "known": 0,
+        "unknown": 0,
+        "_statuses": [],
+        "_labels": [],
+        "payout_date": None,
+    }
+
+
+def _add_to_amount_group(group: dict, inst: dict) -> None:
+    group["_statuses"].append(inst.get("status"))
+    label = inst.get("payout_period")
+    if label:
+        group["_labels"].append(label)
+    if group["payout_date"] is None and inst.get("payout_date"):
+        group["payout_date"] = inst.get("payout_date")
+    if inst.get("status") == "cancelled":
+        return
+    raw_amount = inst.get("amount_cents")
+    if raw_amount is None:
+        group["unknown"] += 1
+        return
+    group["known"] += 1
+    group["known_cents"] += int(raw_amount)
+
+
+def _finish_amount_group(group: dict, *, default_label: Optional[str]) -> dict:
+    """Sum known cents. All-unknown is null, not 0. A mix sets amount_partial."""
+    if group["known"] == 0 and group["unknown"] > 0:
+        amount: Optional[int] = None
+        partial = False
+    elif group["unknown"] > 0:
+        amount = group["known_cents"]
+        partial = True
+    else:
+        amount = group["known_cents"]
+        partial = False
+    labels = group["_labels"]
+    if labels and all(label == labels[0] for label in labels):
+        period = labels[0]
+    else:
+        period = default_label
+    return {
+        "payout_period": period,
+        "payout_date": group["payout_date"],
+        "amount_cents": amount,
+        "amount_partial": partial,
+        "status": rollup_status(group["_statuses"]),
+    }
 
 
 def summarize_open_installments(installments: Sequence[dict]) -> dict:
@@ -295,60 +369,73 @@ def summarize_open_installments(installments: Sequence[dict]) -> dict:
 
 
 def build_payout_schedule(deals: Sequence[dict]) -> dict:
-    """Group closed deals into quarters and quarterly checks.
+    """Group closed deals into quarters and checks.
 
     Each deal has `close_quarter`, `commission_amount_cents`, and public
     `installments`. Cancelled installments stay in the status rollup and
     do not add to the check amount.
+
+    A group whose amounts are all null returns `amount_cents` null.
+    A group with both known and null amounts sums the known cents and sets
+    `amount_partial`. Quarter rows that share an installment number still
+    roll up only when they are the same check (same date, or the same
+    undated bucket). A dated upcoming payment is not folded into an undated
+    pending sibling.
+
+    `by_payout_period` keeps one row per payout date. Undated rows split
+    into `unscheduled` (amount known, date not) and `pending_billing_data`
+    (amount unknown). Those two are never added together.
     """
     quarters: dict[str, dict] = {}
-    periods: dict[str, dict] = {}
+    periods: dict[tuple, dict] = {}
     for deal in deals:
         quarter = deal["close_quarter"]
         bucket = quarters.setdefault(quarter, {
             "close_quarter": quarter,
             "sales_count": 0,
             "commission_total_cents": 0,
-            "_by_number": {},
+            "_groups": {},
         })
         bucket["sales_count"] += 1
         bucket["commission_total_cents"] += int(deal.get("commission_amount_cents") or 0)
         for inst in deal.get("installments") or []:
             number = int(inst["installment_number"])
-            agg = bucket["_by_number"].setdefault(number, {
-                "installment_number": number,
-                "payout_period": inst.get("payout_period"),
-                "payout_date": inst.get("payout_date"),
-                "amount_cents": 0,
-                "_statuses": [],
-            })
-            agg["_statuses"].append(inst.get("status"))
-            raw_amount = inst.get("amount_cents")
-            if inst.get("status") != "cancelled" and raw_amount is not None:
-                agg["amount_cents"] += int(raw_amount)
-            period_key = inst.get("payout_date") or ""
-            period = periods.setdefault(period_key, {
-                "payout_period": inst.get("payout_period"),
-                "payout_date": inst.get("payout_date"),
-                "amount_cents": 0,
-                "_statuses": [],
-            })
-            period["_statuses"].append(inst.get("status"))
-            if inst.get("status") != "cancelled" and raw_amount is not None:
-                period["amount_cents"] += int(raw_amount)
+            kind = _installment_bucket(inst)
+            group_key = (kind, number, inst.get("payout_date"))
+            agg = bucket["_groups"].setdefault(group_key, _new_amount_group())
+            agg["installment_number"] = number
+            agg["bucket"] = kind
+            _add_to_amount_group(agg, inst)
+
+            if kind == BUCKET_DATED:
+                period_key = (BUCKET_DATED, inst.get("payout_date"))
+            else:
+                period_key = (kind,)
+            period = periods.setdefault(period_key, _new_amount_group())
+            period["bucket"] = kind
+            _add_to_amount_group(period, inst)
 
     quarter_rows = []
     for quarter in sorted(quarters):
         bucket = quarters[quarter]
         installments = []
-        for number in sorted(bucket["_by_number"]):
-            agg = bucket["_by_number"][number]
+        kind_order = {BUCKET_DATED: 0, BUCKET_UNSCHEDULED: 1, BUCKET_PENDING: 2}
+        for key in sorted(
+            bucket["_groups"],
+            key=lambda item: (item[1], kind_order.get(item[0], 9), item[2] or ""),
+        ):
+            agg = bucket["_groups"][key]
+            kind = agg["bucket"]
+            default_label = _UNSCHEDULED_LABEL if kind == BUCKET_UNSCHEDULED else None
+            finished = _finish_amount_group(agg, default_label=default_label)
             installments.append({
                 "installment_number": agg["installment_number"],
-                "payout_period": agg["payout_period"],
-                "payout_date": agg["payout_date"],
-                "amount_cents": agg["amount_cents"],
-                "status": rollup_status(agg["_statuses"]),
+                "payout_period": finished["payout_period"],
+                "payout_date": finished["payout_date"],
+                "amount_cents": finished["amount_cents"],
+                "amount_partial": finished["amount_partial"],
+                "status": finished["status"],
+                "bucket": kind,
             })
         quarter_rows.append({
             "close_quarter": bucket["close_quarter"],
@@ -356,14 +443,26 @@ def build_payout_schedule(deals: Sequence[dict]) -> dict:
             "commission_total_cents": bucket["commission_total_cents"],
             "installments": installments,
         })
+
+    def _period_sort(key: tuple) -> tuple:
+        kind = key[0]
+        order = {BUCKET_DATED: 0, BUCKET_UNSCHEDULED: 1, BUCKET_PENDING: 2}
+        date_key = key[1] if len(key) > 1 and key[1] else ""
+        return (order.get(kind, 9), date_key)
+
     by_payout_period = []
-    for key in sorted(periods):
+    for key in sorted(periods, key=_period_sort):
         period = periods[key]
+        kind = period["bucket"]
+        default_label = _UNSCHEDULED_LABEL if kind == BUCKET_UNSCHEDULED else None
+        finished = _finish_amount_group(period, default_label=default_label)
         by_payout_period.append({
-            "payout_period": period["payout_period"],
-            "payout_date": period["payout_date"],
-            "amount_cents": period["amount_cents"],
-            "status": rollup_status(period["_statuses"]),
+            "payout_period": finished["payout_period"],
+            "payout_date": finished["payout_date"],
+            "amount_cents": finished["amount_cents"],
+            "amount_partial": finished["amount_partial"],
+            "status": finished["status"],
+            "bucket": kind,
         })
     return {"quarters": quarter_rows, "by_payout_period": by_payout_period}
 

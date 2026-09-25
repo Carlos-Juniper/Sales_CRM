@@ -27,8 +27,6 @@ from pydantic import BaseModel
 from db import query, execute
 from api import authz
 from api.commission_calc import (
-    STANDARD_PLAN_KEY,
-    STANDARD_PLAN_NAME,
     build_payout_schedule,
     close_date_of,
     close_quarter_label,
@@ -71,19 +69,40 @@ def _require_own_or_viewer(user: dict, target_user_id: str) -> None:
 
 
 def _require_mark_paid(user: dict) -> None:
-    # Same gate as the original mark-paid route (REP_VIEWER_ROLES).
-    if not _can_view_all(user):
+    """Admin, VP, or CEO only.
+
+    Manager and regional director may view another rep's commissions. They
+    cannot mark a commission or an installment paid. regional_sales_rep was
+    scrapped and is not a mark-paid role.
+    """
+    if authz.normalize_role(user.get("role")) not in authz.CROSS_BRANCH_ROLES:
         raise HTTPException(status_code=403, detail=_MARK_PAID_FORBIDDEN)
 
 
-def _with_plan(row: dict) -> dict:
-    """Reps with no assignment resolve to the standard plan."""
-    out = _coerce_row(row)
-    if not out.get("plan_key"):
-        out["plan_key"] = STANDARD_PLAN_KEY
-    if not out.get("plan_name"):
-        out["plan_name"] = STANDARD_PLAN_NAME
-    return out
+_REP_PLAN_SQL = """
+SELECT ucp.plan_key, cp.name AS plan_name
+FROM user_commission_plans ucp
+JOIN commission_plans cp ON cp.plan_key = ucp.plan_key
+WHERE ucp.user_id = %s
+  AND ucp.effective_date <= CURDATE()
+  AND (ucp.expires_date IS NULL OR ucp.expires_date > CURDATE())
+ORDER BY ucp.effective_date DESC
+LIMIT 1
+"""
+
+
+async def _current_rep_plan(user_id: str) -> tuple[Optional[str], Optional[str]]:
+    """Active user_commission_plans row. (None, None) when the rep has none.
+
+    A missing assignment leaves legacy commission_rates in force. Do not
+    substitute the standard plan.
+    """
+    rows = await query(_REP_PLAN_SQL, [user_id])
+    if not rows:
+        return None, None
+    plan_key = rows[0].get("plan_key") or None
+    plan_name = rows[0].get("plan_name") or None
+    return plan_key, plan_name
 
 
 async def cancel_commission(commission_id: str) -> None:
@@ -121,6 +140,18 @@ def register(app, require_auth) -> None:
         end_date: Optional[str] = Query(default=None),
         user: dict = Depends(require_auth),
     ) -> dict:
+        """Closed-deal totals for the period, plus open checks as of today.
+
+        scheduled_ytd_cents and paid_ytd_cents follow start_date and end_date
+        (commission created_at). next_payout, upcoming_cents, and due_cents
+        are open dated checks as of today in America/New_York. They are not
+        filtered by start_date or end_date. balances_period_filtered is false
+        for that reason.
+
+        plan_key and plan_name are the requested rep's current
+        user_commission_plans row. Both are null when that rep has no
+        assignment, so a legacy commission_rates row stays visible.
+        """
         target_user_id = user_id or user["id"]
         _require_own_or_viewer(user, target_user_id)
 
@@ -163,12 +194,17 @@ def register(app, require_auth) -> None:
             for row in inst_rows
         ]
         open_money = summarize_open_installments(public)
+        plan_key, plan_name = await _current_rep_plan(target_user_id)
         return {
             "scheduled_ytd_cents": int(result.get("scheduled_ytd_cents") or 0),
             "paid_ytd_cents": int(result.get("paid_ytd_cents") or 0),
             "next_payout": open_money["next_payout"],
             "upcoming_cents": open_money["upcoming_cents"],
             "due_cents": open_money["due_cents"],
+            # next_payout, upcoming_cents, and due_cents ignore start_date/end_date.
+            "balances_period_filtered": False,
+            "plan_key": plan_key,
+            "plan_name": plan_name,
         }
 
     @app.get("/api/commissions/list")
@@ -180,6 +216,12 @@ def register(app, require_auth) -> None:
         end_date: Optional[str] = Query(default=None),
         user: dict = Depends(require_auth),
     ) -> list:
+        """Commissions for the signed-in rep, or the requested rep.
+
+        Each row's plan_key is the plan stored on that commission. plan_name
+        is the rep's current user_commission_plans name, null when the rep
+        has no assignment.
+        """
         target_user_id = user_id or user["id"]
         _require_own_or_viewer(user, target_user_id)
 
@@ -245,12 +287,17 @@ def register(app, require_auth) -> None:
                 inst_by[cid].append(
                     public_installment(inst, status_by_id.get(cid, "approved"), today)
                 )
+        rep_plan_key, rep_plan_name = await _current_rep_plan(target_user_id)
         out = []
         for row in rows:
             item = _coerce_row(row)
             created = row.get("created_at")
             item["close_quarter"] = close_quarter_label(created) if created else None
+            # Commission snapshot. The rep's current assignment is plan_name
+            # (and rep_plan_key) so a legacy row is not relabeled standard.
             item["plan_key"] = row.get("plan_key")
+            item["rep_plan_key"] = rep_plan_key
+            item["plan_name"] = rep_plan_name
             item["contract_start_date"] = item.get("contract_start_date")
             item["installments"] = inst_by.get(row.get("id"), []) if row.get("id") else []
             out.append(item)
@@ -262,7 +309,13 @@ def register(app, require_auth) -> None:
         year: Optional[int] = Query(default=None),
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Closed quarters and the checks they hit. `year` is the close year."""
+        """Closed quarters and the checks they hit. `year` is the close year.
+
+        amount_cents is null when every installment in the group has no
+        amount. amount_partial is true when the total omits unknown amounts.
+        Undated rows are split: bucket `unscheduled` (amount known) and
+        bucket `pending_billing_data` (amount unknown).
+        """
         target_user_id = user_id or user["id"]
         _require_own_or_viewer(user, target_user_id)
         close_year = year if year is not None else et_today().year
@@ -411,10 +464,10 @@ def register(app, require_auth) -> None:
         # Correlated subqueries return one rate per user (latest effective_date)
         # as a defensive tie-break; mig 055 adds the UNIQUE constraint that
         # makes multiple active rows structurally impossible.
-        # Plan display: an explicit assignment, otherwise the standard plan.
-        # A legacy commission_rates row still shows in commission_rate; it
-        # overrides the standard structure at calculation time only when the
-        # rep has no assignment row.
+        # plan_key and plan_name stay null when the rep has no
+        # user_commission_plans row. Do not fill the standard plan: a null
+        # plan leaves commission_rate (legacy commission_rates) visible.
+        # regional_sales_rep is not a role and is not in this list.
         role_placeholders = ", ".join(["%s"] * len(authz.SALES_REP_DB_ROLES))
         rows = await query(
             f"""
@@ -432,28 +485,21 @@ def register(app, require_auth) -> None:
                  WHERE v.user_id = u.id
                  ORDER BY v.effective_date DESC
                  LIMIT 1) AS effective_date,
-                COALESCE(
-                    (SELECT ucp.plan_key
-                     FROM user_commission_plans ucp
-                     WHERE ucp.user_id = u.id
-                       AND ucp.effective_date <= CURDATE()
-                       AND (ucp.expires_date IS NULL OR ucp.expires_date > CURDATE())
-                     ORDER BY ucp.effective_date DESC
-                     LIMIT 1),
-                    'standard'
-                ) AS plan_key,
-                COALESCE(
-                    (SELECT cp.name
-                     FROM user_commission_plans ucp
-                     JOIN commission_plans cp ON cp.plan_key = ucp.plan_key
-                     WHERE ucp.user_id = u.id
-                       AND ucp.effective_date <= CURDATE()
-                       AND (ucp.expires_date IS NULL OR ucp.expires_date > CURDATE())
-                     ORDER BY ucp.effective_date DESC
-                     LIMIT 1),
-                    (SELECT cp2.name FROM commission_plans cp2 WHERE cp2.plan_key = 'standard' LIMIT 1),
-                    'Standard Sales Commission'
-                ) AS plan_name
+                (SELECT ucp.plan_key
+                 FROM user_commission_plans ucp
+                 WHERE ucp.user_id = u.id
+                   AND ucp.effective_date <= CURDATE()
+                   AND (ucp.expires_date IS NULL OR ucp.expires_date > CURDATE())
+                 ORDER BY ucp.effective_date DESC
+                 LIMIT 1) AS plan_key,
+                (SELECT cp.name
+                 FROM user_commission_plans ucp
+                 JOIN commission_plans cp ON cp.plan_key = ucp.plan_key
+                 WHERE ucp.user_id = u.id
+                   AND ucp.effective_date <= CURDATE()
+                   AND (ucp.expires_date IS NULL OR ucp.expires_date > CURDATE())
+                 ORDER BY ucp.effective_date DESC
+                 LIMIT 1) AS plan_name
             FROM (
                 SELECT DISTINCT u2.id, u2.name, u2.email
                 FROM users u2
@@ -464,4 +510,4 @@ def register(app, require_auth) -> None:
             """,
             list(authz.SALES_REP_DB_ROLES),
         )
-        return [_with_plan(row) for row in rows]
+        return [_coerce_row(row) for row in rows]

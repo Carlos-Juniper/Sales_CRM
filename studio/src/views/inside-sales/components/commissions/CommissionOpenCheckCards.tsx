@@ -9,7 +9,7 @@ interface CommissionOpenCheckCardsProps {
   dueCents: number | null | undefined
   upcomingCents: number | null | undefined
   isLoading: boolean
-  /** From summary.balances_period_filtered. False means these totals ignore the period filter. */
+  /** From summary.balances_period_filtered. False shows the short unfiltered label. */
   balancesPeriodFiltered: boolean
 }
 
@@ -29,7 +29,7 @@ export function CommissionOpenCheckCards({
     <div className="space-y-2">
       <p className="text-xs text-[hsl(var(--muted-fg))]">
         Open checks with a payout date. Pending billing data is not included.
-        {balancesPeriodFiltered === false && ' These totals ignore the period filter.'}
+        {balancesPeriodFiltered === false && ' Not period-filtered.'}
       </p>
       {isLoading ? (
         <div className="flex gap-4 flex-wrap">

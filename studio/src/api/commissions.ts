@@ -36,10 +36,11 @@ export const commissionsApi = {
   markInstallmentPaid: (installmentId: string) =>
     apiClient.post<{ success: boolean }>(`/commissions/installments/${installmentId}/mark-paid`, {}),
 
-  getPayoutSchedule: (params?: { user_id?: string; year?: number }) => {
+  getPayoutSchedule: (params?: { user_id?: string; start_date?: string; end_date?: string }) => {
     const qs = new URLSearchParams()
     if (params?.user_id) qs.set('user_id', params.user_id)
-    if (params?.year != null) qs.set('year', String(params.year))
+    if (params?.start_date) qs.set('start_date', params.start_date)
+    if (params?.end_date) qs.set('end_date', params.end_date)
     const q = qs.toString()
     return apiClient.get<CommissionPayoutSchedule>(`/commissions/payout-schedule${q ? `?${q}` : ''}`)
   },

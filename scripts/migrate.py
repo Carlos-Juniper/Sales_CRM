@@ -791,6 +791,26 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
+
+def detect_068(conn) -> bool:
+    """068 applied ↔ admin and vp_sales have an unbounded approval tier.
+
+    Widens approval_tiers.role_key and inserts a NULL max_value_cents row
+    for each of those roles. Keyed on that effect: the enum contains both
+    role keys and at least one unbounded row exists for each. A re-run is
+    safe (MODIFY to the same enum, INSERT … ON DUPLICATE KEY UPDATE).
+    """
+    values = enum_values(conn, "approval_tiers", "role_key")
+    if not {"admin", "vp_sales"}.issubset(values):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(DISTINCT role_key) AS cnt FROM approval_tiers "
+        "WHERE role_key IN ('admin', 'vp_sales') AND max_value_cents IS NULL",
+    )
+    return bool(row and int(row["cnt"]) >= 2)
+
+
 def detect_064(conn) -> bool:
     """064 applied ↔ estimates.irrigation_occurrences column exists.
 
@@ -889,6 +909,7 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
+    "068_admin_equivalent_approval_tiers":        detect_068,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
@@ -992,7 +1013,7 @@ def _step(
                          apply_fn=lambda: apply_004(conn, path, verbose, branch=branch),
                          suffix=_BRANCH_LABEL.get(branch, ""))
 
-    # ── standard detection (005–012) ──────────────────────────────────────────
+    # ── standard detection ────────────────────────────────────────────────────
     detect_fn = _DETECT.get(migration_id)
     if detect_fn and detect_fn(conn):
         if not dry_run:

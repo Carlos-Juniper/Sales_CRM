@@ -332,8 +332,15 @@ class TestMigrationFiles:
             "003_drop_leads_hoa_property_id",
             "004_users_and_branches",
         }
+        # 067 is one idempotent UPDATE with no schema signal. A detector that
+        # treated "no sales rows" as applied would skip a database that never
+        # ran it. schema_migrations, checked before the detector, is the
+        # applied record.
+        idempotent_data = {"067_legacy_sales_roles"}
         for mid, _ in M.migration_files():
-            assert mid in M._DETECT or mid in inline, f"{mid} has no detection path"
+            assert mid in M._DETECT or mid in inline or mid in idempotent_data, (
+                f"{mid} has no detection path"
+            )
 
     def test_ids_match_stem_of_path(self):
         for mid, path in M.migration_files():
@@ -1415,3 +1422,72 @@ class TestMigration063:
             assert first in ("SET", "PREPARE", "EXECUTE", "DEALLOCATE"), (
                 f"063 must be all guarded dynamic SQL — found bare: {stmt[:80]}"
             )
+
+
+class TestMigration067:
+    """067 only rewrites legacy sales roles to maintenance_sales."""
+
+    PATH = REPO / "sql" / "migrations" / "067_legacy_sales_roles.sql"
+
+    def test_sql_does_not_grant_vp_sales(self):
+        text = self.PATH.read_text(encoding="utf-8")
+        stmts = M.split_statements(text)
+        assert len(stmts) == 1
+        stmt = stmts[0]
+        assert stmt.split()[0].upper() == "UPDATE"
+        assert "SET role = 'maintenance_sales'" in stmt
+        assert "role IN ('sales', 'outside_sales')" in stmt
+        upper = stmt.upper()
+        assert "VP_SALES" not in upper
+        assert "LIKE" not in upper
+        assert "REGEXP" not in upper
+        assert "067_legacy_sales_roles" not in M._DETECT
+        for name in (
+            "exact_first_last",
+            "matches_michelle_cady",
+            "michelle_match_error",
+            "plan_legacy_sales_migration",
+            "apply_067",
+            "detect_067",
+            "_select_legacy_sales_users",
+            "_VP_SALES_GRANT_SQL",
+        ):
+            assert not hasattr(M, name), name
+
+
+class TestMigration068:
+    """068 gives admin and vp_sales an unbounded approval ceiling."""
+
+    PATH = REPO / "sql" / "migrations" / "068_admin_equivalent_approval_tiers.sql"
+    MID = "068_admin_equivalent_approval_tiers"
+
+    def test_registered_and_seeds_unbounded_rows(self):
+        assert self.MID in M._DETECT
+        assert M._DETECT[self.MID] is M.detect_068
+        text = self.PATH.read_text(encoding="utf-8")
+        assert "'admin'" in text and "'vp_sales'" in text
+        assert "NULL" in text
+        stmts = M.split_statements(text)
+        assert [s.split()[0].upper() for s in stmts] == ["ALTER", "INSERT"]
+        assert "max_value_cents" in stmts[1]
+        assert "ON DUPLICATE KEY UPDATE" in stmts[1].upper()
+
+    def test_detect_false_until_both_roles_are_unbounded(self, monkeypatch):
+        monkeypatch.setattr(
+            M, "enum_values",
+            lambda conn, t, c: {"manager", "regional_director", "vice_president", "ceo"},
+        )
+        assert M.detect_068(None) is False
+        monkeypatch.setattr(
+            M, "enum_values",
+            lambda conn, t, c: {
+                "manager", "regional_director", "vice_president", "ceo",
+                "admin", "vp_sales",
+            },
+        )
+        monkeypatch.setattr(M, "_fetch_one", lambda conn, sql, params=(): {"cnt": 1})
+        assert M.detect_068(None) is False
+        monkeypatch.setattr(M, "_fetch_one", lambda conn, sql, params=(): {"cnt": 2})
+        assert M.detect_068(None) is True
+
+

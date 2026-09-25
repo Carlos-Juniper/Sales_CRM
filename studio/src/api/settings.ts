@@ -142,7 +142,8 @@ export interface AuthorizeUserBody {
 
 /** Partial user edit: role / branches (replace-set) / active toggle. */
 export interface UserAdminPatch {
-  role?: UserRole
+  /** `outside_sales` is only resent when the stored role is already that value. */
+  role?: UserRole | 'outside_sales'
   branches?: number[]
   active?: boolean
 }

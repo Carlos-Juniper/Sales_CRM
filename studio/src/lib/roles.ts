@@ -3,13 +3,63 @@
 // These mirror api/authz.py exactly. Import from here; do NOT redeclare inline.
 // ---------------------------------------------------------------------------
 
-import type { UserRole } from '@/types'
+import { CANONICAL_ROLES, type LegacyUserRole, type UserRole } from '@/types'
+
+/**
+ * Stored legacy alias. Mirrors api/authz.py LEGACY_ROLE_MAP.
+ * `outside_sales` is not assignable and is not written on a role change.
+ */
+export const LEGACY_ROLE_MAP: Record<string, UserRole> = {
+  outside_sales: 'sales',
+}
+
+/** Map a stored/JWT role onto the canonical vocabulary (legacy → sales). */
+export function normalizeRole(role: UserRole | LegacyUserRole | string): UserRole {
+  return LEGACY_ROLE_MAP[role] ?? (role as UserRole)
+}
+
+/**
+ * Roles an admin may assign. Mirrors api/authz.py ASSIGNABLE_ROLES
+ * (CANONICAL_ROLES minus retired sales). `outside_sales` is not a UserRole.
+ */
+export const ASSIGNABLE_ROLES: readonly UserRole[] = CANONICAL_ROLES.filter(
+  (role) => role !== 'sales',
+)
+
+/**
+ * users.role values matched by GET /api/users?role=sales. Mirrors
+ * api/authz.py SALES_REP_DB_ROLES.
+ */
+export const SALES_REP_ROLES: readonly string[] = [
+  'inside_sales',
+  'maintenance_sales',
+  'install_sales',
+  'vp_sales',
+  'sales',
+  'outside_sales',
+]
+
+/**
+ * Roles that can own a client-reference or team-roster row. Same members as
+ * the sales-rep picker. Mirrors api/authz.py ROSTER_REP_ROLES.
+ */
+export const ROSTER_REP_ROLES: readonly string[] = SALES_REP_ROLES
+
+/**
+ * Admin and VP of Sales share every admin grant. Mirrors api/authz.py
+ * ADMIN_EQUIVALENT_ROLES. regional_director and vice_president are not
+ * members.
+ */
+export const ADMIN_EQUIVALENT_ROLES: readonly UserRole[] = [
+  'admin',
+  'vp_sales',
+]
 
 /** Roles that may edit line items, sections, and takeoff. */
 export const ESTIMATOR_ROLES: readonly UserRole[] = [
   'maintenance_estimating',
   'install_estimating',
-  'admin',
+  ...ADMIN_EQUIVALENT_ROLES,
   'manager',
   'regional_director',
   'vice_president',
@@ -32,18 +82,22 @@ export const APPROVER_ROLES: readonly UserRole[] = [
   'regional_director',
   'vice_president',
   'ceo',
-  'admin',
+  ...ADMIN_EQUIVALENT_ROLES,
 ]
 
 /** Roles with cross-branch visibility (BRD I-9.5). */
-export const CROSS_BRANCH_ROLES: readonly UserRole[] = ['admin', 'vice_president', 'ceo']
+export const CROSS_BRANCH_ROLES: readonly UserRole[] = [
+  ...ADMIN_EQUIVALENT_ROLES,
+  'vice_president',
+  'ceo',
+]
 
 /** Roles that may view sales performance / commission data for any rep.
  *  Broader than CROSS_BRANCH_ROLES — adds manager and regional_director so
  *  branch-level leaders can pick a rep without gaining full cross-branch write
  *  privileges. Mirrors api/authz.py REP_VIEWER_ROLES. */
 export const REP_SELECTOR_ROLES: readonly UserRole[] = [
-  'admin',
+  ...ADMIN_EQUIVALENT_ROLES,
   'vice_president',
   'ceo',
   'manager',
@@ -53,11 +107,14 @@ export const REP_SELECTOR_ROLES: readonly UserRole[] = [
 /**
  * Roles that pick which sales rep's client references and team roster to edit.
  * A sales rep edits only their own rows and sees no picker. Marketing and
- * admin are listed here; `admin` is explicit (same pattern as
- * REP_SELECTOR_ROLES) because useRole checks membership, not the super-role
- * bypass.
+ * admin-equivalent roles are listed here (same pattern as
+ * REP_SELECTOR_ROLES) because useRole checks membership, not only the
+ * super-role bypass.
  */
-export const ROSTER_REP_PICKER_ROLES: readonly UserRole[] = ['marketing', 'admin']
+export const ROSTER_REP_PICKER_ROLES: readonly UserRole[] = [
+  'marketing',
+  ...ADMIN_EQUIVALENT_ROLES,
+]
 
 // ── Workspace navigation role-groups ───────────────────────────────────────
 //
@@ -65,34 +122,39 @@ export const ROSTER_REP_PICKER_ROLES: readonly UserRole[] = ['marketing', 'admin
 // inside-sales routes. The Sidebar, the router guards, and the Estimating tab
 // registry all import from here — do NOT redeclare inline.
 //
-// admin is the super-role: useRole().canAccess() bypasses any check for admin,
-// so listing admin explicitly in FULL_ACCESS_ROLES is belt-and-suspenders.
+// Admin-equivalent roles are the super-role: useRole().canAccess() bypasses
+// any check for them, so listing them in FULL_ACCESS_ROLES is belt-and-suspenders.
 
-/** manager / regional_director / vice_president / ceo / admin — see every tab, everywhere. */
+/** Management plus admin-equivalent roles — see every tab, everywhere. */
 export const FULL_ACCESS_ROLES: readonly UserRole[] = [
-  'manager', 'regional_director', 'vice_president', 'ceo', 'admin',
+  'manager',
+  'regional_director',
+  'vice_president',
+  'ceo',
+  ...ADMIN_EQUIVALENT_ROLES,
 ]
 
 /**
- * Field sales: legacy `sales` plus the maintenance/install split.
- * Same access as `sales` (own leads, proposals, self-scoped performance).
- * Not the rep-selector viewer list, and not Public Leads.
- * Mirrors api/authz.py FIELD_SALES_ROLES.
+ * Field sales: maintenance_sales and install_sales, plus legacy `sales`.
+ * Own leads, proposals, self-scoped performance. Not the rep-selector
+ * viewer list, and not Public Leads. outside_sales normalizes to sales
+ * before this check. Mirrors api/authz.py FIELD_SALES_ROLES.
  */
 export const FIELD_SALES_ROLES: readonly UserRole[] = [
-  'sales',
   'maintenance_sales',
   'install_sales',
+  'sales',
 ]
 
 /**
  * Analytics nav item and `/inside-sales` (GET /api/dashboard/inside-sales).
  *
- * Defined once as FULL_ACCESS_ROLES: admin, manager, regional_director,
- * vice_president, and ceo. Field sales, including maintenance_sales and
- * install_sales, are not on this list — they use the pipeline. REP_SELECTOR_ROLES
- * happens to list the same five people, but that constant is the
- * sales-performance / commission rep picker (api/authz.py REP_VIEWER_ROLES).
+ * Defined once as FULL_ACCESS_ROLES: admin-equivalent roles (admin,
+ * vp_sales), manager, regional_director, vice_president,
+ * and ceo. Field sales, including maintenance_sales and install_sales, are
+ * not on this list — they use the pipeline. REP_SELECTOR_ROLES lists the
+ * same people, but that constant is the sales-performance / commission rep
+ * picker (api/authz.py REP_VIEWER_ROLES).
  */
 export const ANALYTICS_NAV_ROLES: readonly UserRole[] = FULL_ACCESS_ROLES
 
@@ -113,7 +175,7 @@ export const ESTIMATING_NAV_ROLES: readonly UserRole[] = [
 
 /** Aspire ContactID is required for the same roles that stamp SalesRepID. */
 export function requiresAspireSalesRep(role: string): boolean {
-  return (FIELD_SALES_ROLES as readonly string[]).includes(role)
+  return (FIELD_SALES_ROLES as readonly string[]).includes(normalizeRole(role))
 }
 
 /**
@@ -124,15 +186,16 @@ export function defaultRouteForRole(role: UserRole | null): string {
   if (role === 'inside_sales') return '/inside-sales/leads'
   if (role === 'maintenance_estimating' || role === 'install_estimating' || role === 'procurement')
     return '/inside-sales/estimating'
-  // Field sales share the sales workspace but not Analytics. Pipeline is a
-  // page they can open, so a denied visit to /inside-sales does not bounce
-  // back onto itself.
-  if (role === 'sales' || role === 'maintenance_sales' || role === 'install_sales') {
+  // Field sales (maintenance_sales, install_sales, and legacy sales) share
+  // the sales workspace but not Analytics. Pipeline is a page they can open,
+  // so a denied visit to /inside-sales does not bounce back onto itself.
+  if (role !== null && (FIELD_SALES_ROLES as readonly string[]).includes(role)) {
     return '/inside-sales/pipeline'
   }
-  // Management and admin land on Analytics. Any other role (marketing, null,
-  // unknown) has no inside-sales access — redirect to /settings, which is
-  // open to every authenticated user, to avoid an infinite redirect loop.
+  // Management and admin-equivalent roles (admin, vp_sales) land on
+  // Analytics. Any other role (marketing, null, unknown)
+  // has no inside-sales access — redirect to /settings, which is open to
+  // every authenticated user, to avoid an infinite redirect loop.
   if (role !== null && ANALYTICS_NAV_ROLES.includes(role)) return '/inside-sales'
   return '/settings'
 }

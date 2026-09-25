@@ -1,8 +1,9 @@
 """Roles, Permissions & Branch Scoping (server-side RBAC).
 
 Acceptance criteria under test:
-  * The 9 canonical roles exist in backend validation; legacy
-    inside_sales/outside_sales map to sales.
+  * Canonical roles exist in backend validation. `outside_sales` is a
+    legacy alias of `sales` for access checks. `inside_sales` is its own
+    role and is not rewritten.
   * An estimator-role session cannot POST adjustments (require_approver guard)
     or call approve-handback; a manager cannot approve a >$100k estimate (403).
   * manager/RD/VP/CEO/admin CAN mutate sections/services/components
@@ -62,7 +63,7 @@ class TestRoleModel:
     def test_canonical_roles(self):
         assert authz.CANONICAL_ROLES == frozenset({
             "procurement", "sales", "maintenance_sales", "install_sales",
-            "inside_sales", "admin", "manager",
+            "inside_sales", "admin", "vp_sales", "manager",
             "regional_director", "maintenance_estimating", "install_estimating",
             "vice_president", "ceo",
             # Handoff 50 §3 (437c508): cross-branch owner of the company-wide
@@ -178,7 +179,8 @@ class TestSplitSalesRoles:
 
     def test_rep_viewer_roles_unchanged(self):
         assert authz.REP_VIEWER_ROLES == frozenset({
-            "admin", "vice_president", "ceo", "manager", "regional_director",
+            "admin", "vp_sales",
+            "vice_president", "ceo", "manager", "regional_director",
         })
         for role in ("sales", "maintenance_sales", "install_sales"):
             assert role not in authz.REP_VIEWER_ROLES
@@ -807,7 +809,7 @@ class TestBranchScope:
 
     @patch("api.authz.query", new_callable=AsyncMock)
     async def test_exec_roles_see_all(self, mock_authz_query):
-        for role in ("admin", "vice_president", "ceo"):
+        for role in ("admin", "vp_sales", "vice_president", "ceo"):
             scope = await authz.resolve_branch_scope(_user(role))
             assert scope.kind == "all", role
         # sees_all short-circuits before touching user_branches.
@@ -940,3 +942,50 @@ class TestConfigBranches:
         resp = client.get("/api/estimating/config/branches?kind=install")
         # No auth override set — should 403 (no JWT).
         assert resp.status_code in (401, 403)
+
+
+# ── vp_sales (admin-equivalent, still a commission earner)
+
+
+class TestAdminEquivalentSalesRoles:
+    """vp_sales shares admin's grants. Set membership lives in test_role_constants.
+
+    With no approval_tiers rows the ceiling is 0. Migration 068 seeds a NULL
+    max, which is unlimited, so require_approval_authority does not 403.
+    """
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_approval_ceiling_is_zero_when_the_role_has_no_tier_rows(self, mock_authz_query):
+        mock_authz_query.return_value = []
+        assert await authz.approval_ceiling_cents("admin") == 0
+        assert await authz.approval_ceiling_cents("vp_sales") == 0
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_unbounded_tier_row_clears_the_ceiling(self, mock_authz_query):
+        mock_authz_query.return_value = [{"max_value_cents": None}]
+        assert await authz.approval_ceiling_cents("admin") is None
+        assert await authz.approval_ceiling_cents("vp_sales") is None
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_vp_sales_approval_authority_allows_any_value(self, mock_authz_query):
+        mock_authz_query.side_effect = [
+            [{"role": "vp_sales", "active": 1}],
+            [{"max_value_cents": None}],
+        ]
+        await authz.require_approval_authority(_user("vp_sales"), 50_000_000_000)
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_admin_approval_authority_allows_any_value(self, mock_authz_query):
+        mock_authz_query.side_effect = [
+            [{"role": "admin", "active": 1}],
+            [{"max_value_cents": None}],
+        ]
+        await authz.require_approval_authority(_user("admin"), 50_000_000_000)
+
+    def test_require_estimator_allows_vp_sales(self):
+        authz.require_estimator(_user("vp_sales"))
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_require_approver_allows_vp_sales(self, mock_authz_query):
+        mock_authz_query.return_value = [{"role": "vp_sales", "active": 1}]
+        assert await authz.require_approver(_user("vp_sales")) == "vp_sales"

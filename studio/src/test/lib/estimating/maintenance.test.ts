@@ -167,16 +167,19 @@ describe('field ownership (estimator vs approver) — logic-level enforcement', 
 })
 
 describe('canonical auth role → estimating role mapping', () => {
-  it('estimators = maintenance/install estimating (+ admin)', () => {
+  it('estimators are the estimating disciplines only', () => {
     expect(estimatingRolesForUser('maintenance_estimating')).toContain('estimator')
     expect(estimatingRolesForUser('install_estimating')).toContain('estimator')
-    expect(estimatingRolesForUser('admin')).toContain('estimator')
+    expect(estimatingRolesForUser('admin')).not.toContain('estimator')
+    expect(estimatingRolesForUser('vp_sales')).not.toContain('estimator')
+    expect(estimatingRolesForUser('regional_director')).not.toContain('estimator')
+    expect(estimatingRolesForUser('vice_president')).not.toContain('estimator')
     expect(estimatingRolesForUser('manager')).not.toContain('estimator')
     expect(estimatingRolesForUser('sales')).not.toContain('estimator')
   })
 
   it('approvers = manager/RD/VP/CEO (+ admin)', () => {
-    for (const r of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin'] as const) {
+    for (const r of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin', 'vp_sales'] as const) {
       expect(estimatingRolesForUser(r)).toContain('approver')
     }
     expect(estimatingRolesForUser('maintenance_estimating')).not.toContain('approver')
@@ -193,8 +196,9 @@ describe('canonical auth role → estimating role mapping', () => {
     expect(canUserEditField('maintenance_estimating', 'margin')).toBe(false)
     expect(canUserEditField('manager', 'margin')).toBe(true)
     expect(canUserEditField('manager', 'qty')).toBe(false)
-    expect(canUserEditField('admin', 'qty')).toBe(true)
+    expect(canUserEditField('admin', 'qty')).toBe(false)
     expect(canUserEditField('admin', 'margin')).toBe(true)
+    expect(canUserEditField('vp_sales', 'margin')).toBe(true)
     expect(canUserEditField('sales', 'qty')).toBe(false)
   })
 })

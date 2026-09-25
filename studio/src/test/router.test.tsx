@@ -289,7 +289,7 @@ describe('Per-route workspace guards (role-scoped navigation)', () => {
 
   // ── Analytics is management only ─────────────────────────────────────────
 
-  it.each(['admin', 'manager', 'regional_director', 'vice_president', 'ceo'] as const)(
+  it.each(['admin', 'vp_sales', 'manager', 'regional_director', 'vice_president', 'ceo'] as const)(
     '%s can open Analytics',
     (role) => {
       renderRoute(['/inside-sales'], makeUser({ role }))

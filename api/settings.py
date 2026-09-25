@@ -6,15 +6,18 @@ place those rows are mutated, and every successful write is audited.
 
 Two authorization boundaries, deliberately different:
 
-  * Company writes (Slice 4) are ADMIN-ONLY, and admin is re-read LIVE from the
-    users table by JWT id (Amendment B.2) — a stale/forged `admin` claim on a
-    since-demoted user cannot widen scope. Company settings, margin bands and
-    approval tiers are company-scoped: editing an approval tier moves the REAL
-    403 boundary for approvals (§5.1), so its edit lives behind this guard.
+  * Company writes (Slice 4) are limited to admin-equivalent roles
+    (authz.ADMIN_EQUIVALENT_ROLES: admin, vp_sales),
+    re-read LIVE from the users table by JWT id (Amendment B.2) — a
+    stale/forged claim on a since-demoted user cannot widen scope.
+    regional_director and vice_president are not in that set. Company
+    settings, margin bands and approval tiers are company-scoped: editing an
+    approval tier moves the REAL 403 boundary for approvals (§5.1), so its
+    edit lives behind this guard.
 
   * Branch writes (Slice 5) are scoped by `resolve_branch_scope(user)` — the
     writable branch set comes from the caller's `user_branches` rows, NEVER the
-    path or body. admin (kind='all') may write any branch; a BM/RD may write
+    path or body. Admin-equivalent roles (kind='all') may write any branch; a BM/RD may write
     only a branch in its scope; anyone else 403. A branch id supplied in the
     path/body that is outside the caller's scope still 403s.
 
@@ -126,15 +129,17 @@ def _parse_factors(raw: Any) -> Any:
 # ── Live admin re-read (company writes) ──────────────────────────────────────
 
 async def _require_admin(user: dict) -> None:
-    """403 unless the LIVE users row says admin and active (Amendment B.2).
+    """403 unless the LIVE users row is admin-equivalent and active (B.2).
 
-    Never trusts the JWT `role` claim on the write path: a token that claims
-    admin for a user since demoted or deactivated must not widen scope. Reuses
-    authz._live_role, which reads role+active from users by JWT id and 403s on
-    a missing/inactive row.
+    Admin-equivalent roles are authz.ADMIN_EQUIVALENT_ROLES: admin and
+    vp_sales. regional_director and vice_president
+    are not included. Never trusts the JWT `role` claim on the write path:
+    a token that claims one of those roles for a user since demoted or
+    deactivated must not widen scope. Reuses authz._live_role, which reads
+    role+active from users by JWT id and 403s on a missing/inactive row.
     """
     live_role = await authz._live_role(user)
-    if live_role != "admin":
+    if live_role not in authz.ADMIN_EQUIVALENT_ROLES:
         raise HTTPException(
             status_code=403,
             detail="Admin role required: company settings are admin-owned.",
@@ -233,8 +238,8 @@ def _audit_scope_for_branch(aspire_branch_id: Optional[int]) -> tuple[str, Optio
 async def _require_active_sales_rep(rep_id: str) -> None:
     """404/400 unless rep_id is an active roster rep.
 
-    A roster rep is sales (stored outside_sales counts), inside_sales,
-    maintenance_sales, or install_sales. Other active users are not targets.
+    A roster rep is any role in ROSTER_REP_ROLES (the sales-rep picker,
+    including vp_sales). Other active users are not targets.
     """
     rows = await query(
         "SELECT id, role, active FROM users WHERE id = %s",
@@ -243,13 +248,7 @@ async def _require_active_sales_rep(rep_id: str) -> None:
     if not rows or not rows[0].get("active"):
         raise HTTPException(status_code=404, detail="Sales rep not found.")
     if not authz.is_roster_rep(rows[0].get("role")):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "rep_id must be an active user with a sales role "
-                "(sales, inside_sales, maintenance_sales, or install_sales)."
-            ),
-        )
+        raise HTTPException(status_code=400, detail=authz.ROSTER_REP_ROLE_DETAIL)
 
 
 async def _authorize_roster_create(
@@ -501,8 +500,9 @@ class UserAdminPatch(BaseModel):
     """Partial update of one users row (role / branches / active).
 
     Every field optional — the PATCH applies only the keys present. Setting role
-    to a field-sales role (sales, maintenance_sales, install_sales) re-runs the
-    aspire_rep_id hard-block; `active` toggles the
+    to maintenance_sales or install_sales re-runs the aspire_rep_id hard-block.
+    New assignments of sales or outside_sales are rejected; leaving an existing
+    legacy role unchanged is allowed. `active` toggles the
     deactivate flag (never a DELETE); `branches` is a replace-set on
     user_branches.
     """
@@ -1244,16 +1244,15 @@ def register(app, require_auth) -> None:
 
         Not "create from scratch": name/email come from the M365 pick, so the
         stored email is exact. Email is lowercased (Entra SSO matches lowercased
-        email). A field-sales role (sales, maintenance_sales, install_sales)
-        triggers the aspire_rep_id hard-block; other roles save with no Aspire
-        link and no warning. The authorize and any branch
+        email). Assignable roles are authz.ASSIGNABLE_ROLES. `sales` and
+        `outside_sales` are rejected (400). maintenance_sales and
+        install_sales trigger the aspire_rep_id hard-block; other roles save
+        with no Aspire link and no warning. The authorize and any branch
         set are audited.
         """
         await _require_admin(user)
 
-        role = body.role.strip()
-        if role not in authz.CANONICAL_ROLES:
-            raise HTTPException(status_code=422, detail=f"Unknown role {role!r}")
+        role = authz.ensure_assignable_role(body.role)
 
         email = body.email.strip().lower()
 
@@ -1315,33 +1314,37 @@ def register(app, require_auth) -> None:
         actor = _actor(user)
 
         # ── role ─────────────────────────────────────────────────────────────
+        # An unchanged role skips assignability and the Aspire re-resolve, so
+        # saving branches on a legacy row does not rewrite users.role.
+        # outside_sales is not writable when the role actually changes.
         if body.role is not None:
-            new_role = body.role.strip()
-            if new_role not in authz.CANONICAL_ROLES:
-                raise HTTPException(status_code=422, detail=f"Unknown role {new_role!r}")
+            submitted = (body.role or "").strip()
+            stored = (current.get("role") or "").strip()
+            if submitted != stored:
+                new_role = authz.ensure_assignable_role(submitted)
 
-            new_rep_id = current.get("aspire_rep_id")
-            if authz.requires_aspire_sales_rep(new_role):
-                # Block a field-sales role that cannot resolve an Aspire contact
-                # BEFORE writing anything (prevent-don't-repair). An existing
-                # aspire_rep_id is trusted, so reassigning sales → a split role
-                # does not drop the link.
-                new_rep_id = await _require_resolved_sales_rep(
-                    current.get("email") or "", current.get("aspire_rep_id")
+                new_rep_id = current.get("aspire_rep_id")
+                if authz.requires_aspire_sales_rep(new_role):
+                    # Block a field-sales role that cannot resolve an Aspire
+                    # contact BEFORE writing anything (prevent-don't-repair).
+                    # An existing aspire_rep_id is trusted, so reassigning
+                    # sales → a split role does not drop the link.
+                    new_rep_id = await _require_resolved_sales_rep(
+                        current.get("email") or "", current.get("aspire_rep_id")
+                    )
+
+                await execute(
+                    "UPDATE users SET role = %s, aspire_rep_id = %s WHERE id = %s",
+                    [new_role, new_rep_id, user_id],
                 )
-
-            await execute(
-                "UPDATE users SET role = %s, aspire_rep_id = %s WHERE id = %s",
-                [new_role, new_rep_id, user_id],
-            )
-            await _audit(
-                scope_type="company",
-                scope_id=None,
-                setting_key=f"user.{user_id}.role",
-                from_value=current.get("role"),
-                to_value=new_role,
-                actor=actor,
-            )
+                await _audit(
+                    scope_type="company",
+                    scope_id=None,
+                    setting_key=f"user.{user_id}.role",
+                    from_value=stored,
+                    to_value=new_role,
+                    actor=actor,
+                )
 
         # ── active (deactivate/reactivate) ───────────────────────────────────
         if body.active is not None:
@@ -2494,8 +2497,9 @@ async def _replace_user_branches(
 async def _require_resolved_sales_rep(email: str, current_rep_id: Any) -> int:
     """Return a resolved Aspire ContactID for a sales rep, or 422 with §2.8 copy.
 
-    The hard-block (§2.8, prevent-don't-repair): a field-sales role (sales,
-    maintenance_sales, install_sales) must map to an Aspire contact so
+    The hard-block (§2.8, prevent-don't-repair): maintenance_sales,
+    install_sales, and a legacy sales row that is being kept must map to an
+    Aspire contact so
     opportunity pushes stamp SalesRepID. If the row
     already carries an aspire_rep_id it is trusted; otherwise the email is
     resolved live against Aspire. An unresolved rep raises 422 with the EXACT

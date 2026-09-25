@@ -41,30 +41,32 @@ beforeEach(() => {
 describe('roles.ts — canonical role constants (mirrors api/authz.py)', () => {
   it('ESTIMATOR_ROLES: estimators + manager-tier (LINE_ITEM_EDIT_ROLES in authz.py)', () => {
     expect([...ESTIMATOR_ROLES].sort()).toEqual(
-      ['admin', 'ceo', 'install_estimating', 'maintenance_estimating', 'manager', 'regional_director', 'vice_president'].sort(),
+      ['admin', 'ceo', 'install_estimating', 'maintenance_estimating', 'manager', 'regional_director', 'vice_president', 'vp_sales'].sort(),
     )
   })
 
-  it('APPROVER_ROLES: approval-tier + admin (APPROVER_ROLES in authz.py)', () => {
+  it('APPROVER_ROLES: approval-tier + admin-equivalent (APPROVER_ROLES in authz.py)', () => {
     expect([...APPROVER_ROLES].sort()).toEqual(
-      ['admin', 'ceo', 'manager', 'regional_director', 'vice_president'].sort(),
+      ['admin', 'ceo', 'manager', 'regional_director', 'vice_president', 'vp_sales'].sort(),
     )
   })
 
   it('CROSS_BRANCH_ROLES: org-wide visibility (CROSS_BRANCH_ROLES in authz.py)', () => {
-    expect([...CROSS_BRANCH_ROLES].sort()).toEqual(['admin', 'ceo', 'vice_president'].sort())
+    expect([...CROSS_BRANCH_ROLES].sort()).toEqual(
+      ['admin', 'ceo', 'vice_president', 'vp_sales'].sort(),
+    )
   })
 
   it('REP_SELECTOR_ROLES mirrors api/authz.py REP_VIEWER_ROLES', () => {
     expect([...REP_SELECTOR_ROLES].sort()).toEqual(
-      ['admin', 'ceo', 'manager', 'regional_director', 'vice_president'].sort(),
+      ['admin', 'ceo', 'manager', 'regional_director', 'vice_president', 'vp_sales'].sort(),
     )
   })
 
-  it('ANALYTICS_NAV_ROLES is the five management roles, defined once as FULL_ACCESS_ROLES', () => {
+  it('ANALYTICS_NAV_ROLES is management plus admin-equivalent roles, defined once as FULL_ACCESS_ROLES', () => {
     expect(ANALYTICS_NAV_ROLES).toBe(FULL_ACCESS_ROLES)
     expect([...ANALYTICS_NAV_ROLES].sort()).toEqual(
-      ['admin', 'ceo', 'manager', 'regional_director', 'vice_president'].sort(),
+      ['admin', 'ceo', 'manager', 'regional_director', 'vice_president', 'vp_sales'].sort(),
     )
     // Same members as the rep picker today, but a different permission.
     expect([...ANALYTICS_NAV_ROLES].sort()).toEqual([...REP_SELECTOR_ROLES].sort())
@@ -81,6 +83,7 @@ describe('roles.ts — canonical role constants (mirrors api/authz.py)', () => {
 describe('defaultRouteForRole', () => {
   it('sends only management to Analytics, and everyone else to a page they can open', () => {
     expect(defaultRouteForRole('admin')).toBe('/inside-sales')
+    expect(defaultRouteForRole('vp_sales')).toBe('/inside-sales')
     expect(defaultRouteForRole('manager')).toBe('/inside-sales')
     expect(defaultRouteForRole('regional_director')).toBe('/inside-sales')
     expect(defaultRouteForRole('vice_president')).toBe('/inside-sales')
@@ -106,6 +109,7 @@ describe('canonical role set', () => {
         'admin',
         'ceo',
         'install_estimating',
+        'vp_sales',
         'install_sales',
         'inside_sales',
         'maintenance_estimating',
@@ -138,6 +142,26 @@ describe('useRole', () => {
     const { canAccess } = withRole('admin')
     expect(canAccess('sales')).toBe(true)
     expect(canAccess(['manager'])).toBe(true)
+  })
+
+  it('vp_sales shares the admin super-role bypass', () => {
+    const access = withRole('vp_sales')
+    expect(access.isAdmin).toBe(true)
+    expect(access.canAccess('sales')).toBe(true)
+    expect(access.canAccess(['manager'])).toBe(true)
+    expect(access.canManageMarketingAssets).toBe(true)
+    expect(access.isSales).toBe(false)
+    expect(access.isEstimatingOnly).toBe(false)
+    expect(access.seesAllBranches).toBe(true)
+    expect(access.canViewAnalytics).toBe(true)
+    expect(access.canViewRepSelector).toBe(true)
+    expect(access.canPickRosterRep).toBe(true)
+    expect(access.isEstimator).toBe(true)
+    expect(access.isApprover).toBe(true)
+    expect(withRole('regional_director').isAdmin).toBe(false)
+    expect(withRole('vice_president').isAdmin).toBe(false)
+    expect(withRole('regional_director').seesAllBranches).toBe(false)
+    expect(withRole('vice_president').seesAllBranches).toBe(true)
   })
 
   it('manager is NOT a super-role anymore (narrows to its tier)', () => {
@@ -189,7 +213,7 @@ describe('useRole', () => {
   })
 
   it('canViewAnalytics is management only', () => {
-    for (const role of ['admin', 'manager', 'regional_director', 'vice_president', 'ceo'] as const) {
+    for (const role of ['admin', 'vp_sales', 'manager', 'regional_director', 'vice_president', 'ceo'] as const) {
       expect(withRole(role).canViewAnalytics).toBe(true)
     }
     for (const role of ['sales', 'maintenance_sales', 'install_sales', 'inside_sales', 'maintenance_estimating', 'install_estimating', 'procurement', 'marketing'] as const) {
@@ -206,9 +230,12 @@ describe('useRole', () => {
   })
 
   it('roster rep picker is marketing and admin only', () => {
-    expect([...ROSTER_REP_PICKER_ROLES].sort()).toEqual(['admin', 'marketing'])
+    expect([...ROSTER_REP_PICKER_ROLES].sort()).toEqual(
+      ['admin', 'marketing', 'vp_sales'].sort(),
+    )
     expect(withRole('marketing').canPickRosterRep).toBe(true)
     expect(withRole('admin').canPickRosterRep).toBe(true)
+    expect(withRole('vp_sales').canPickRosterRep).toBe(true)
     expect(withRole('sales').canPickRosterRep).toBe(false)
     expect(withRole('manager').canPickRosterRep).toBe(false)
   })

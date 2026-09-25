@@ -78,7 +78,8 @@ def as_role():
 
 def test_rep_viewer_roles_unchanged():
     assert authz.REP_VIEWER_ROLES == frozenset({
-        "admin", "vice_president", "ceo", "manager", "regional_director",
+        "admin", "vp_sales",
+        "vice_president", "ceo", "manager", "regional_director",
     })
 
 
@@ -257,7 +258,10 @@ class TestSalesWorkspace:
 class TestPublicLeadsAndAnalytics:
     @pytest.mark.parametrize(
         "role",
-        ["inside_sales", "admin", "manager", "regional_director", "vice_president", "ceo"],
+        [
+            "inside_sales", "admin", "vp_sales",
+            "manager", "regional_director", "vice_president", "ceo",
+        ],
     )
     def test_qualifiers_can_open_the_public_queue(self, as_role, role):
         as_role(role)
@@ -282,7 +286,10 @@ class TestPublicLeadsAndAnalytics:
 
     @pytest.mark.parametrize(
         "role",
-        ["admin", "manager", "regional_director", "vice_president", "ceo"],
+        [
+            "admin", "vp_sales",
+            "manager", "regional_director", "vice_president", "ceo",
+        ],
     )
     def test_leadership_can_open_analytics(self, as_role, role):
         as_role(role)
@@ -331,3 +338,34 @@ class TestRepViewerScope:
         with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
             resp = client.get("/api/commissions/reps")
         assert resp.status_code == 200
+
+    def test_vp_sales_may_list_reps(self, as_role):
+        as_role("vp_sales", user_id="lead-1")
+        with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
+            reps = client.get("/api/commissions/reps")
+        assert reps.status_code == 200
+        with patch("api.sales_performance.query", new_callable=AsyncMock, return_value=[]):
+            summary = client.get("/api/sales-performance/summary?user_id=someone-else")
+        assert summary.status_code == 200
+
+
+class TestAdminEquivalentSalesRoleSets:
+    def test_vp_sales_is_a_viewer_and_not_field_sales(self):
+        assert "vp_sales" in authz.REP_VIEWER_ROLES
+        assert "vp_sales" in authz.CROSS_BRANCH_ROLES
+        assert "vp_sales" in authz.APPROVER_ROLES
+        assert "vp_sales" in authz.SALES_REP_DB_ROLES
+        assert "vp_sales" not in authz.FIELD_SALES_ROLES
+        assert not authz.requires_aspire_sales_rep("vp_sales")
+        assert not authz.is_sales_rep("vp_sales")
+        assert authz.own_lead_filter({"role": "vp_sales", "id": "lead-1"}) == ("", [])
+
+    def test_regional_director_and_vice_president_unchanged(self):
+        assert authz.normalize_role("regional_director") == "regional_director"
+        assert authz.normalize_role("vice_president") == "vice_president"
+        assert "regional_director" not in authz.ADMIN_EQUIVALENT_ROLES
+        assert "vice_president" not in authz.ADMIN_EQUIVALENT_ROLES
+        assert "regional_director" not in authz.CROSS_BRANCH_ROLES
+        assert "vice_president" in authz.CROSS_BRANCH_ROLES
+        assert "regional_director" not in authz.SALES_REP_DB_ROLES
+        assert "vice_president" not in authz.SALES_REP_DB_ROLES

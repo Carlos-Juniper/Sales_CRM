@@ -74,6 +74,8 @@ for at least one real deploy cycle.
 - **062** — adds `owner_user_id` to `team_members` and `client_references` (guarded). Not the same change as 058.
 - **063** — nullable `estimates.homes_budget` / `common_area_budget`. Renumbered from 059 so it does not share a number with the branch-manager migration on `integrate/staging-proposals`.
 - **064** — yearly maintenance occurrence counts on `estimates`. Renumbered from 061 for the same reason.
+- **067** — data-only: users on `sales` or `outside_sales` become `maintenance_sales`. Does not grant `vp_sales`. After deploy, an admin sets Michelle Cady to VP of Sales in Settings → Users. Numbered 067 because the commissions PR uses 065 and 066. No detector: the statement is idempotent, and guessing from "no sales rows left" would skip a database that never ran it. The `schema_migrations` row is what means applied.
+- **068** — widens `approval_tiers.role_key` and seeds an unbounded (`max_value_cents` NULL) row for `admin` and `vp_sales` on both estimate types, so `require_approval_authority` does not 403 them. Detector: the enum contains both roles and each has an unbounded row.
 
 ### Numbering history
 

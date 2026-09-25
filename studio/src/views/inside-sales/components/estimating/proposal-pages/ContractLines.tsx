@@ -10,7 +10,11 @@
 // A recurring row whose service has no unit price leaves the Price cell blank.
 // ---------------------------------------------------------------------------
 
-import { buildContractRows, buildContractTotals } from '@/lib/proposal/contract'
+import {
+  annualMaintenancePrice,
+  buildContractRows,
+  displayedServicePriceCents,
+} from '@/lib/proposal/contract'
 import type { Estimate } from '@/types/estimating'
 
 function formatCurrency(cents: number): string {
@@ -23,7 +27,9 @@ export function ContractLines({ estimate }: { estimate: Estimate }) {
 
   const recurringRows = rows.filter((r) => r.isRecurring)
   const oneTimeRows = rows.filter((r) => !r.isRecurring)
-  const { extPriceCents: annualMaintenancePriceCents } = buildContractTotals(recurringRows)
+  // Same extPriceCents partition the Price column uses. An estimate-level
+  // contract-value adjustment is not part of this total.
+  const { totalCents: annualMaintenancePriceCents } = annualMaintenancePrice(recurringRows)
 
   return (
     <div className="contract-lines">
@@ -40,15 +46,18 @@ export function ContractLines({ estimate }: { estimate: Estimate }) {
             <tr className="group-row">
               <td colSpan={3}>General Maintenance Services</td>
             </tr>
-            {recurringRows.map((row, i) => (
-              <tr key={i} data-testid="contract-line" data-label={row.label}>
-                <td>{row.label}</td>
-                <td className="num" data-testid="contract-line-frequency">{row.occurs ?? ''}</td>
-                <td className="num" data-testid="contract-line-price">
-                  {row.servicePriceCents == null ? '' : formatCurrency(row.servicePriceCents)}
-                </td>
-              </tr>
-            ))}
+            {recurringRows.map((row, i) => {
+              const priceCents = displayedServicePriceCents(row)
+              return (
+                <tr key={i} data-testid="contract-line" data-label={row.label}>
+                  <td>{row.label}</td>
+                  <td className="num" data-testid="contract-line-frequency">{row.occurs ?? ''}</td>
+                  <td className="num" data-testid="contract-line-price">
+                    {priceCents == null ? '' : formatCurrency(priceCents)}
+                  </td>
+                </tr>
+              )
+            })}
             <tr className="total-row" data-testid="contract-total">
               <td colSpan={2}>Annual Maintenance Price</td>
               <td className="num">{formatCurrency(annualMaintenancePriceCents)}</td>

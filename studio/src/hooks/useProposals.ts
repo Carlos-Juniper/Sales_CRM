@@ -12,8 +12,8 @@
 //     →  individual parameterized hooks so callers can scope by branch/region
 // ---------------------------------------------------------------------------
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { proposalConfigApi, proposalsApi } from '@/api/proposals'
+import { useQuery, useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { proposalConfigApi, proposalsApi, type RegionScopedList } from '@/api/proposals'
 import { settingsApi } from '@/api/settings'
 import type {
   TeamMemberCreateBody,
@@ -96,21 +96,37 @@ export function useProposalConfig(): ProposalStaticConfig {
 // Config — parameterized (individual hooks, scoped by branch / region)
 // ---------------------------------------------------------------------------
 
+function asRoster<T>(query: UseQueryResult<RegionScopedList<T>>) {
+  return {
+    ...query,
+    data: query.data?.items,
+    regionFilter: query.data?.regionFilter ?? null,
+  }
+}
+
 /**
- * Team members for a branch, optionally filtered by teamType.
+ * Team members for a branch, optionally filtered by teamType and region.
  * When aspireBranchId is provided, null-branch (company-wide/executive) rows
  * are included in addition to branch matches (Amendment A null-branch-inclusion rule).
- * Query key: ['proposals', 'config', 'team-members', aspireBranchId, teamType]
+ * Omit regionId for the caller's region. Pass 'all' for every region.
+ * Query key: ['proposals', 'config', 'team-members', aspireBranchId, teamType, regionId]
  */
 export function useTeamMembers(params?: {
   aspireBranchId?: number
   teamType?: TeamMemberType
+  regionId?: string
 }) {
-  return useQuery<TeamMember[]>({
-    queryKey: ['proposals', 'config', 'team-members', params?.aspireBranchId ?? null, params?.teamType ?? null],
+  const query = useQuery({
+    queryKey: [
+      'proposals', 'config', 'team-members',
+      params?.aspireBranchId ?? null,
+      params?.teamType ?? null,
+      params?.regionId ?? null,
+    ],
     queryFn: () => proposalConfigApi.teamMembers(params),
     staleTime: 5 * 60_000,
   })
+  return asRoster<TeamMember>(query)
 }
 
 /**
@@ -133,14 +149,20 @@ export function useProposalRepBranches(proposalId?: string) {
 /**
  * Client references for a branch.
  * null-branch (company-wide) rows always included when aspireBranchId is set.
- * Query key: ['proposals', 'config', 'client-references', aspireBranchId]
+ * Omit regionId for the caller's region. Pass 'all' for every region.
+ * Query key: ['proposals', 'config', 'client-references', aspireBranchId, regionId]
  */
-export function useClientReferences(params?: { aspireBranchId?: number }) {
-  return useQuery<ClientReference[]>({
-    queryKey: ['proposals', 'config', 'client-references', params?.aspireBranchId ?? null],
+export function useClientReferences(params?: { aspireBranchId?: number; regionId?: string }) {
+  const query = useQuery({
+    queryKey: [
+      'proposals', 'config', 'client-references',
+      params?.aspireBranchId ?? null,
+      params?.regionId ?? null,
+    ],
     queryFn: () => proposalConfigApi.clientReferences(params),
     staleTime: 5 * 60_000,
   })
+  return asRoster<ClientReference>(query)
 }
 
 /**

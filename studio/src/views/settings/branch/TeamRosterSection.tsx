@@ -9,6 +9,7 @@ import {
   useDeleteTeamMemberHeadshot,
 } from '@/hooks/useProposals'
 import { teamMemberTitleLabel, TEAM_MEMBER_TITLE_LABELS } from '@/lib/proposal/titleLabels'
+import { AllRegionsBadge } from '@/components/proposal/RegionSwitcher'
 import { ImageUploadField } from '@/components/settings/ImageUploadField'
 import type { TeamMember } from '@/types/proposal'
 import { TEAM_MEMBER_BIO_MAX_LENGTH } from '@/types/proposal'
@@ -46,8 +47,10 @@ export function TeamRosterSection({
   canEditCompanyWide?: boolean
 }) {
   const companyWide = aspireBranchId === null
+  // Roster management must keep seeing every region. An omitted region_id
+  // narrows to the caller once that default is live.
   const { data, isLoading, isError } = useTeamMembers(
-    companyWide ? undefined : { aspireBranchId },
+    companyWide ? { regionId: 'all' } : { aspireBranchId, regionId: 'all' },
   )
   const { isAdmin } = useRole()
   // In company-wide mode, marketing (or admin) may edit; the branch view keeps
@@ -164,6 +167,7 @@ function TeamMemberRow({
       <div className="flex items-start justify-between">
         <div>
           <span className="font-medium text-[var(--fg)]">{member.name}</span>
+          <AllRegionsBadge regionId={member.regionId} testId={`team-member-${member.id}-all-regions`} />
           <span className="ml-2 text-[var(--fg)] opacity-60">{teamMemberTitleLabel(member.title)}</span>
           {member.location && (
             <span className="ml-2 text-[var(--fg)] opacity-50">— {member.location}</span>

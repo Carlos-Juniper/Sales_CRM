@@ -3,6 +3,12 @@ import { useAuthStore } from '@/store/authStore'
 import { normalizeRole } from '@/hooks/useRole'
 import { ANALYTICS_NAV_ROLES } from '@/lib/roles'
 import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockConnections, mockProposalPackages } from './data'
+import {
+  MOCK_BRANCH_COVERAGE,
+  MOCK_CLIENT_REFERENCES,
+  MOCK_TEAM_MEMBERS,
+  rosterHttpResponse,
+} from './proposalRoster'
 import { CATALOG_ITEM_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid, UserRole } from '@/types'
@@ -469,8 +475,13 @@ const allHandlers = [
     return HttpResponse.json(created, { status: 201 })
   }),
 
-  http.get(`${API}/proposals/config/team-members`, async () => HttpResponse.json([])),
-  http.get(`${API}/proposals/config/client-references`, async () => HttpResponse.json([])),
+  http.get(`${API}/proposals/config/branch-coverage`, () => HttpResponse.json(MOCK_BRANCH_COVERAGE)),
+  http.get(`${API}/proposals/config/team-members`, ({ request }) =>
+    rosterHttpResponse(request, MOCK_TEAM_MEMBERS, { filterTeamType: true }),
+  ),
+  http.get(`${API}/proposals/config/client-references`, ({ request }) =>
+    rosterHttpResponse(request, MOCK_CLIENT_REFERENCES),
+  ),
   http.get(`${API}/proposals/config/portfolio`, async () => HttpResponse.json([])),
 
   // GET /api/users

@@ -4,16 +4,13 @@
 //
 // Matches the reference (business docs/Pointe Jupiter Yacht Club.pdf, p.42):
 // one row per month (Schedule / Price / Sales Tax / Total Price) starting
-// from the service start date, with a totals row. Uses buildPaymentSchedule
-// from lib/proposal/contract.ts.
+// from the service start date, with a totals row. The annual base is the
+// approved contract value (the same number as Annual Maintenance Price).
 // ---------------------------------------------------------------------------
 
-import { buildContractRows, buildPaymentSchedule } from '@/lib/proposal/contract'
+import { buildApprovedPaymentSchedule, buildContractRows } from '@/lib/proposal/contract'
+import { formatCents } from '@/lib/proposal/formatCents'
 import type { Estimate } from '@/types/estimating'
-
-function formatCurrency(cents: number): string {
-  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
 
 export function PaymentSchedule({ estimate }: { estimate: Estimate }) {
   const rows = buildContractRows(estimate)
@@ -23,7 +20,13 @@ export function PaymentSchedule({ estimate }: { estimate: Estimate }) {
     ? new Date(estimate.serviceStartDate)
     : null
 
-  const schedule = buildPaymentSchedule(rows, serviceStartDate)
+  // Same approved number as the Annual Maintenance Price, so the twelve
+  // months and their total agree with the contract value to the cent.
+  const schedule = buildApprovedPaymentSchedule(
+    rows,
+    estimate.contractValueCents ?? null,
+    serviceStartDate,
+  )
   const totalCents = schedule.reduce((sum, m) => sum + m.amountCents, 0)
 
   return (
@@ -42,16 +45,16 @@ export function PaymentSchedule({ estimate }: { estimate: Estimate }) {
           {schedule.map((month, i) => (
             <tr key={i}>
               <td>{month.month}</td>
-              <td className="num">{formatCurrency(month.amountCents)}</td>
-              <td className="num">{formatCurrency(0)}</td>
-              <td className="num">{formatCurrency(month.amountCents)}</td>
+              <td className="num">{formatCents(month.amountCents)}</td>
+              <td className="num">{formatCents(0)}</td>
+              <td className="num">{formatCents(month.amountCents)}</td>
             </tr>
           ))}
           <tr className="total-row">
             <td>Total</td>
-            <td className="num">{formatCurrency(totalCents)}</td>
-            <td className="num">{formatCurrency(0)}</td>
-            <td className="num">{formatCurrency(totalCents)}</td>
+            <td className="num">{formatCents(totalCents)}</td>
+            <td className="num">{formatCents(0)}</td>
+            <td className="num">{formatCents(totalCents)}</td>
           </tr>
         </tbody>
       </table>

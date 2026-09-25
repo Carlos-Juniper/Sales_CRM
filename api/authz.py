@@ -99,6 +99,53 @@ def is_marketing_manager(role: Optional[str]) -> bool:
     return normalize_role(role) in MARKETING_ROLES
 
 
+def is_sales_rep(role: Optional[str]) -> bool:
+    """True for the CRM sales role. Legacy `outside_sales` normalizes to it.
+
+    `inside_sales` stays distinct: that role works the shared public-lead
+    queue and must not be forced onto a personal book.
+    """
+    return normalize_role(role) == "sales"
+
+
+# Same predicate the Leads tab uses for ?mine=true. The id is always the
+# JWT subject, never a client-supplied user id (BRD I-9.5).
+OWN_LEAD_PREDICATE = "(assigned_to = %s OR created_by = %s)"
+
+
+def own_lead_filter(user: dict) -> tuple[str, list]:
+    """SQL predicate + params that limit a sales rep to their own leads.
+
+    Empty for every other role, including admin and manager-type roles
+    (manager, regional_director, vice_president, ceo) and inside_sales.
+    Those callers keep the visibility they already have: company-wide
+    unless they opt into ?mine=true.
+    """
+    if not is_sales_rep(user.get("role")):
+        return "", []
+    return OWN_LEAD_PREDICATE, [user.get("id"), user.get("id")]
+
+
+def require_own_lead(user: dict, lead: dict) -> None:
+    """403 when a sales rep reads or writes a lead they do not own.
+
+    Ownership matches the Leads tab: `assigned_to` or `created_by` is the
+    caller. No-op for every other role. A proposal-render token is already
+    pinned to one lead id by require_auth, so it is admitted here too.
+    """
+    if user.get("scope") == "proposal_render":
+        return
+    if not is_sales_rep(user.get("role")):
+        return
+    uid = user.get("id")
+    if uid and (lead.get("assigned_to") == uid or lead.get("created_by") == uid):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="You can only access your own leads.",
+    )
+
+
 async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
     """Max estimate value (cents) the role may approve; None = unlimited.
 

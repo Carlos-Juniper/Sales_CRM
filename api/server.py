@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 from contextlib import asynccontextmanager
 
+from api import authz
 from db import (
     query, execute, _in_clause,
     set_hoa_property_status,
@@ -487,11 +488,15 @@ async def list_leads(
             conditions.append(f"source IN ({placeholders})")
             params.extend(vals)
 
-    # User-scoped "Leads" tab. The identity comes from the JWT, never from a
+    # User-scoped book of leads. The identity comes from the JWT, never from a
     # client-supplied param (BRD I-9.5) — `mine` is a boolean switch, not an id.
-    if mine:
-        conditions.append("(assigned_to = %s OR created_by = %s)")
-        params.extend([_user["id"], _user["id"]])
+    # Sales reps are always scoped, even when the client omits ?mine=true.
+    # The pipeline board and the analytics cards call this list that way.
+    # Admin, manager-type, and inside_sales keep the wider list.
+    owner_sql, owner_params = authz.own_lead_filter(_user)
+    if mine or owner_sql:
+        conditions.append(authz.OWN_LEAD_PREDICATE)
+        params.extend(owner_params or [_user["id"], _user["id"]])
 
     # Public Leads review queue: once a rep assigns a lead to a CRM it moves to
     # that CRM's "My Leads" (mine=true) and should drop out of the shared queue.
@@ -532,7 +537,9 @@ async def list_leads(
 
 @app.get("/api/leads/{lead_id}")
 async def get_lead(lead_id: str, _user: dict = Depends(require_auth)) -> dict:
-    return await _fetch_lead(lead_id)
+    lead = await _fetch_lead(lead_id)
+    authz.require_own_lead(_user, lead)
+    return lead
 
 
 @app.post("/api/leads", status_code=201)
@@ -605,6 +612,7 @@ async def create_lead(body: CreateLeadBody, _user: dict = Depends(require_auth))
 @app.patch("/api/leads/{lead_id}")
 async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(require_auth)) -> dict:
     current = await _fetch_lead(lead_id)
+    authz.require_own_lead(_user, current)
 
     _PATCHABLE = frozenset({
         "status", "assigned_to", "notes", "priority",
@@ -682,7 +690,8 @@ async def patch_lead(lead_id: str, body: PatchLeadBody, _user: dict = Depends(re
 
 @app.delete("/api/leads/{lead_id}", status_code=204)
 async def delete_lead(lead_id: str, _user: dict = Depends(require_auth)) -> None:
-    await _fetch_lead(lead_id)
+    lead = await _fetch_lead(lead_id)
+    authz.require_own_lead(_user, lead)
     await execute(
         "UPDATE leads SET deleted_at = CURRENT_TIMESTAMP() WHERE id = %s AND deleted_at IS NULL",
         [lead_id],
@@ -731,6 +740,8 @@ _ACTION_TO_CHANNEL_FULL: dict[str, str] = {
 @app.get("/api/leads/{lead_id}/activity")
 async def get_lead_activity(lead_id: str, _user: dict = Depends(require_auth)) -> list:
     """Unified activity feed across all channels."""
+    if authz.is_sales_rep(_user.get("role")):
+        authz.require_own_lead(_user, await _fetch_lead(lead_id))
     rows = await query(
         """
         SELECT * FROM lead_actions
@@ -1663,12 +1674,23 @@ async def list_users(
 
 @app.get("/api/dashboard/inside-sales")
 async def dashboard_inside_sales(_user: dict = Depends(require_auth)) -> dict:
+    # Pipeline counts follow the same sales-rep book as GET /api/leads.
+    # Other roles keep the company-wide totals. The predicate is inserted
+    # into the WHERE clause — several of these statements also GROUP BY.
+    owner_sql, owner_params = authz.own_lead_filter(_user)
+    scope = f" AND {owner_sql}" if owner_sql else ""
+
+    def _dash(sql: str):
+        if scope:
+            sql = sql.replace("deleted_at IS NULL", f"deleted_at IS NULL{scope}", 1)
+        return query(sql, list(owner_params) if owner_params else None)
+
     total_rows, new_rows, status_rows, avg_rows, state_rows = await asyncio.gather(
-        query("SELECT COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL"),
-        query("SELECT COUNT(*) AS cnt FROM leads WHERE status = 'new' AND deleted_at IS NULL"),
-        query("SELECT status, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY status"),
-        query("SELECT AVG(score) AS avg_score FROM leads WHERE score IS NOT NULL AND deleted_at IS NULL"),
-        query("SELECT state, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY state ORDER BY cnt DESC"),
+        _dash("SELECT COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL"),
+        _dash("SELECT COUNT(*) AS cnt FROM leads WHERE status = 'new' AND deleted_at IS NULL"),
+        _dash("SELECT status, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY status"),
+        _dash("SELECT AVG(score) AS avg_score FROM leads WHERE score IS NOT NULL AND deleted_at IS NULL"),
+        _dash("SELECT state, COUNT(*) AS cnt FROM leads WHERE deleted_at IS NULL GROUP BY state ORDER BY cnt DESC"),
     )
     avg_val = avg_rows[0]["avg_score"] if avg_rows and avg_rows[0]["avg_score"] is not None else 0.0
     return {
@@ -1993,6 +2015,9 @@ async def schedule_lead_meeting(
 ) -> dict:
     """Create a calendar event and record a meeting_scheduled lead action."""
     from api import graph as _graph
+
+    if authz.is_sales_rep(user.get("role")):
+        authz.require_own_lead(user, await _fetch_lead(lead_id))
 
     event = await _graph_call(
         _graph.create_event(

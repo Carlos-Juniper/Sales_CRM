@@ -5,10 +5,12 @@ import { useAuthStore } from '@/store/authStore'
 import { useRole } from '@/hooks/useRole'
 import {
   ANALYTICS_NAV_ROLES,
+  ASSIGNABLE_ROLES,
   ESTIMATING_NAV_ROLES,
   PUBLIC_LEADS_NAV_ROLES,
   REP_SELECTOR_ROLES,
   SALES_NAV_ROLES,
+  SALES_TEAM_ROLES,
   defaultRouteForRole,
   requiresAspireSalesRep,
 } from '@/lib/roles'
@@ -83,7 +85,9 @@ describe('split field-sales role gates', () => {
   it('labels the new roles for menus and badges', () => {
     expect(roleLabel('maintenance_sales')).toBe('Maintenance Sales')
     expect(roleLabel('install_sales')).toBe('Install Sales')
-    expect(roleLabel('sales')).toBe('Sales')
+    expect(roleLabel('inside_sales')).toBe('Inside Sales')
+    expect(roleLabel('sales')).toBe('Legacy: Sales (reassign)')
+    expect(roleLabel('outside_sales')).toBe('Legacy: Sales (reassign)')
     expect(roleLabel('regional_sales_rep')).toBe('Regional Sales Rep')
     expect(roleLabel('vp_sales')).toBe('VP of Sales')
     expect(roleLabel('regional_director')).toBe('Regional Director')
@@ -124,5 +128,28 @@ describe('admin-equivalent sales roles', () => {
     expect(defaultRouteForRole('vice_president')).toBe('/inside-sales')
     expect(withRole('regional_director').isAdmin).toBe(false)
     expect(withRole('vice_president').isAdmin).toBe(false)
+  })
+
+  it('offers the five sales roles and keeps legacy sales working', () => {
+    expect([...SALES_TEAM_ROLES]).toEqual([
+      'inside_sales',
+      'maintenance_sales',
+      'install_sales',
+      'regional_sales_rep',
+      'vp_sales',
+    ])
+    for (const role of SALES_TEAM_ROLES) {
+      expect(ASSIGNABLE_ROLES).toContain(role)
+    }
+    expect(ASSIGNABLE_ROLES).not.toContain('sales')
+    expect(withRole('sales').isSales).toBe(true)
+    expect(withRole('outside_sales').isSales).toBe(true)
+    expect(withRole('sales').canAccess(SALES_NAV_ROLES)).toBe(true)
+    expect(defaultRouteForRole('sales')).toBe('/inside-sales/pipeline')
+    expect(requiresAspireSalesRep('sales')).toBe(true)
+    expect(requiresAspireSalesRep('outside_sales')).toBe(true)
+    expect(requiresAspireSalesRep('inside_sales')).toBe(false)
+    expect(requiresAspireSalesRep('regional_sales_rep')).toBe(false)
+    expect(requiresAspireSalesRep('vp_sales')).toBe(false)
   })
 })

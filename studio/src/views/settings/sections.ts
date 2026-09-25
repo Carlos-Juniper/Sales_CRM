@@ -67,7 +67,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   {
     id: 'marketing',
     label: 'Sales',
-    roles: ['sales', 'maintenance_sales', 'install_sales', 'marketing', 'manager', 'regional_director', 'vice_president', 'ceo'],
+    roles: ['sales', 'inside_sales', 'maintenance_sales', 'install_sales', 'marketing', 'manager', 'regional_director', 'vice_president', 'ceo'],
     adminOnly: false,
     branchScoped: false,
     sections: [

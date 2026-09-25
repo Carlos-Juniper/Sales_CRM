@@ -506,8 +506,9 @@ class UserAdminPatch(BaseModel):
     """Partial update of one users row (role / branches / active).
 
     Every field optional — the PATCH applies only the keys present. Setting role
-    to a field-sales role (sales, maintenance_sales, install_sales) re-runs the
-    aspire_rep_id hard-block; `active` toggles the
+    to maintenance_sales or install_sales re-runs the aspire_rep_id hard-block.
+    New assignments of sales or outside_sales are rejected; leaving an existing
+    legacy role unchanged is allowed. `active` toggles the
     deactivate flag (never a DELETE); `branches` is a replace-set on
     user_branches.
     """
@@ -1249,16 +1250,15 @@ def register(app, require_auth) -> None:
 
         Not "create from scratch": name/email come from the M365 pick, so the
         stored email is exact. Email is lowercased (Entra SSO matches lowercased
-        email). A field-sales role (sales, maintenance_sales, install_sales)
-        triggers the aspire_rep_id hard-block; other roles save with no Aspire
-        link and no warning. The authorize and any branch
+        email). Assignable sales roles are the five in authz.SALES_TEAM_ROLES.
+        `sales` and `outside_sales` are rejected (400). maintenance_sales and
+        install_sales trigger the aspire_rep_id hard-block; other roles save
+        with no Aspire link and no warning. The authorize and any branch
         set are audited.
         """
         await _require_admin(user)
 
-        role = body.role.strip()
-        if role not in authz.CANONICAL_ROLES:
-            raise HTTPException(status_code=422, detail=f"Unknown role {role!r}")
+        role = authz.ensure_assignable_role(body.role)
 
         email = body.email.strip().lower()
 
@@ -1321,9 +1321,9 @@ def register(app, require_auth) -> None:
 
         # ── role ─────────────────────────────────────────────────────────────
         if body.role is not None:
-            new_role = body.role.strip()
-            if new_role not in authz.CANONICAL_ROLES:
-                raise HTTPException(status_code=422, detail=f"Unknown role {new_role!r}")
+            new_role = authz.ensure_assignable_role(
+                body.role, current=current.get("role")
+            )
 
             new_rep_id = current.get("aspire_rep_id")
             if authz.requires_aspire_sales_rep(new_role):
@@ -2499,8 +2499,9 @@ async def _replace_user_branches(
 async def _require_resolved_sales_rep(email: str, current_rep_id: Any) -> int:
     """Return a resolved Aspire ContactID for a sales rep, or 422 with §2.8 copy.
 
-    The hard-block (§2.8, prevent-don't-repair): a field-sales role (sales,
-    maintenance_sales, install_sales) must map to an Aspire contact so
+    The hard-block (§2.8, prevent-don't-repair): maintenance_sales,
+    install_sales, and a legacy sales row that is being kept must map to an
+    Aspire contact so
     opportunity pushes stamp SalesRepID. If the row
     already carries an aspire_rep_id it is trusted; otherwise the email is
     resolved live against Aspire. An unresolved rep raises 422 with the EXACT

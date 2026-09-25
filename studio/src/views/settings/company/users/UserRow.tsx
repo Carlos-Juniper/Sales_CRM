@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import type { AdminUser, ManageableBranch } from '@/api/settings'
 import type { UserRole } from '@/types'
-import { CANONICAL_ROLES } from '@/types'
 import { useLinkAspireRep, useUpdateUser } from '@/hooks/useUserAdmin'
-import { requiresAspireSalesRep } from '@/lib/roles'
+import { ASSIGNABLE_ROLES, requiresAspireSalesRep } from '@/lib/roles'
 import { roleLabel } from '@/lib/roleLabels'
-import { RoleSelect } from './RoleSelect'
+import { RoleSelect, type RoleSelectValue } from './RoleSelect'
 import { BranchMultiSelect } from './BranchMultiSelect'
 import { isUserActive } from './userDisplay'
 
@@ -90,17 +89,21 @@ function UserRowEditor({
 }: {
   user: AdminUser
   branches: ManageableBranch[]
-  onSave: (body: { role: UserRole; branches: number[] }) => void
+  onSave: (body: { role?: UserRole; branches: number[] }) => void
   pending: boolean
   onLinkAspire: () => void
   linkPending: boolean
 }) {
-  // Seed the role from the row if it is a canonical value, else default to sales
-  // (legacy rows normalize there — mirrors useRole.normalizeRole).
-  const initialRole = (CANONICAL_ROLES as readonly string[]).includes(user.role)
-    ? (user.role as UserRole)
-    : 'sales'
-  const [role, setRole] = useState<UserRole>(initialRole)
+  // Legacy sales stays selected so a branch edit does not assign a new role.
+  // Any other unknown value starts on maintenance_sales, an assignable
+  // field-sales role — never on retired `sales`.
+  const initialRole: RoleSelectValue =
+    user.role === 'sales' || user.role === 'outside_sales'
+      ? user.role
+      : (ASSIGNABLE_ROLES as readonly string[]).includes(user.role)
+        ? (user.role as UserRole)
+        : 'maintenance_sales'
+  const [role, setRole] = useState<RoleSelectValue>(initialRole)
   const [selected, setSelected] = useState<number[]>(user.branches ?? [])
 
   function toggleBranch(id: number) {
@@ -122,6 +125,7 @@ function UserRowEditor({
           id={`edit-role-${user.id}`}
           testId={`edit-role-${user.id}`}
           value={role}
+          currentRole={user.role}
           onChange={setRole}
         />
       </div>
@@ -150,7 +154,12 @@ function UserRowEditor({
       <div className="flex gap-2">
         <button
           type="button"
-          onClick={() => onSave({ role, branches: selected })}
+          onClick={() => {
+            // Resubmitting a stored legacy role is not a new assignment.
+            const body: { role?: UserRole; branches: number[] } = { branches: selected }
+            if (role !== user.role && role !== 'outside_sales') body.role = role
+            onSave(body)
+          }}
           disabled={pending}
           aria-label={`Save ${user.name}`}
           className="rounded-md bg-[var(--sidebar-active-bg)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50"

@@ -137,6 +137,7 @@ export function AuthorizeUserForm({ branches }: { branches: ManageableBranch[] }
               testId="authorize-role"
               value={role}
               onChange={(r) => {
+                if (r === 'outside_sales') return
                 setRole(r)
                 setBlockCopy(null)
               }}

@@ -37,9 +37,10 @@ from typing import Optional
 from db import execute, query
 from api.authz import CANONICAL_ROLES, normalize_role
 
-# The canonical business roles (single role vocabulary, including the
-# maintenance_sales / install_sales split). Legacy `sales` stays valid.
-# The legacy input `outside_sales` is accepted and stored as `sales`.
+# The canonical business roles. The settings API rejects new assignments of
+# `sales` / `outside_sales` (admins must pick maintenance or install sales).
+# This script still accepts those legacy values and stores outside_sales as
+# `sales`, so an existing row can be touched without guessing a split.
 VALID_ROLES = CANONICAL_ROLES
 
 # Roles that require a branch_id. Managers are scoped to a branch; other roles
@@ -61,7 +62,7 @@ async def provision(
     branch_id: Optional[str] = None,
     avatar_initials: Optional[str] = None,
 ) -> None:
-    role = normalize_role(role)  # legacy inside_sales/outside_sales → sales
+    role = normalize_role(role)  # legacy outside_sales → sales
     if role not in VALID_ROLES:
         raise ValueError(
             f"Unknown role {role!r}. Valid roles: {', '.join(sorted(VALID_ROLES))}."

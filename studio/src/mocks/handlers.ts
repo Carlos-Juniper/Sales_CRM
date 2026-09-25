@@ -105,15 +105,15 @@ function denyDisallowedIntake(estimateType: string) {
   return HttpResponse.json({ detail }, { status: 403 })
 }
 
-/** `?role=sales` (and legacy `outside_sales`) is the whole sales-rep group. */
+/** `?role=sales` is the five sales roles plus legacy sales / outside_sales. */
 const SALES_GROUP_ROLES = new Set([
-  'sales',
-  'outside_sales',
   'inside_sales',
   'maintenance_sales',
   'install_sales',
   'regional_sales_rep',
   'vp_sales',
+  'sales',
+  'outside_sales',
 ])
 const leads = [...mockLeads]
 const bids = [...mockBids]

@@ -45,41 +45,64 @@ CANONICAL_ROLES = frozenset({
     "marketing",
 })
 
+# Stored values that still authorize. They are not assignable: create/PATCH
+# of a *new* sales or outside_sales role is rejected. Nothing rewrites
+# existing users.role rows, because maintenance vs install is not knowable.
+RETIRED_SALES_ROLES = frozenset({"sales", "outside_sales"})
+
+RETIRED_SALES_ASSIGNMENT_DETAIL = (
+    "The sales role is no longer assignable. "
+    "Choose Maintenance Sales or Install Sales."
+)
+
+# The five assignable sales roles. Each has its own commission structure
+# and workflow. Legacy sales is not in this set.
+SALES_TEAM_ROLES = frozenset({
+    "inside_sales",
+    "maintenance_sales",
+    "install_sales",
+    "regional_sales_rep",
+    "vp_sales",
+})
+
+# Roles an admin may write onto a users row. `sales` stays in CANONICAL_ROLES
+# so existing sessions keep working, and is absent here.
+ASSIGNABLE_ROLES = CANONICAL_ROLES - frozenset({"sales"})
+
 # Admin and the two sales roles that share every admin grant. Checked instead
 # of `role == "admin"`. regional_director and vice_president are not members.
 ADMIN_EQUIVALENT_ROLES = frozenset({"admin", "regional_sales_rep", "vp_sales"})
 
-# `inside_sales` qualifies raw public/government leads and assigns them on to a
-# field-sales CRM, so it stays a distinct persona and only inside sales reaches
-# the public lead feed. `outside_sales` remains retired and collapses into
-# `sales`. `maintenance_sales` and `install_sales` split field sales by the
-# intake they submit; legacy `sales` stays valid until an admin reassigns
-# people — nothing here rewrites existing users.role rows.
+# `inside_sales` qualifies raw public/government leads and assigns them on to
+# field sales. `outside_sales` is a legacy alias of `sales` for access checks
+# only — it is not assignable. `maintenance_sales` and `install_sales` are the
+# field-sales roles and differ by intake type. Legacy `sales` keeps that same
+# access until an admin reassigns the person. Nothing here rewrites rows.
 LEGACY_ROLE_MAP = {
     "outside_sales": "sales",
 }
 
-# Field-sales personas. The two split roles inherit every access grant `sales`
-# has (they are members of the same sets, and absent from the same privileged
-# sets). They differ only in which intake type they may submit.
+# Field-sales personas. maintenance_sales and install_sales are the assignable
+# ones. Legacy `sales` stays in the set so existing users keep own-lead
+# scoping, both-intake access, and the Aspire rep requirement. outside_sales
+# normalizes to sales before this check.
 FIELD_SALES_ROLES = frozenset({"sales", "maintenance_sales", "install_sales"})
 
 # users.role values that identify a sales rep in selector queries (sales
-# performance, commissions) and in GET /api/users?role=sales. Wider than
-# FIELD_SALES_ROLES: inside_sales is included, outside_sales still sits
-# on un-migrated rows, and regional_sales_rep / vp_sales earn commission
-# without being field-sales (no Aspire requirement, not own-lead scoped).
-# `?role=sales` matches this whole tuple so the Settings
-# rep dropdown does not need a new query parameter. Any other role value,
+# performance, commissions) and in GET /api/users?role=sales. The five
+# assignable sales roles come first. Legacy sales and outside_sales stay so
+# un-migrated rows still appear. regional_sales_rep and vp_sales earn
+# commission without being field-sales (no Aspire requirement, not own-lead
+# scoped). `?role=sales` matches this whole tuple. Any other role value,
 # including inside_sales or maintenance_sales alone, stays an exact match.
 SALES_REP_DB_ROLES = (
-    "sales",
+    "inside_sales",
     "maintenance_sales",
     "install_sales",
-    "inside_sales",
-    "outside_sales",
     "regional_sales_rep",
     "vp_sales",
+    "sales",
+    "outside_sales",
 )
 
 # Normalized roles that own client-reference and team-roster rows and may
@@ -88,8 +111,9 @@ SALES_REP_DB_ROLES = (
 # listed: normalize_role maps it to sales before the check.
 ROSTER_REP_ROLES = FIELD_SALES_ROLES | frozenset({"inside_sales"})
 
-# Intake types a role may submit. Only the split field-sales roles are locked;
-# legacy sales, inside sales, admin, and the manager tier may submit both.
+# Intake types a role may submit. Only maintenance_sales and install_sales
+# are locked. Legacy sales, inside sales, the admin-equivalent sales roles,
+# and the manager tier may submit both.
 _INTAKE_TYPES = ("maintenance", "install")
 _INTAKE_TYPE_LOCK = {
     "maintenance_sales": "maintenance",
@@ -174,6 +198,26 @@ def normalize_role(role: Optional[str]) -> str:
     """Map a stored/JWT role onto the canonical vocabulary (legacy → sales)."""
     role = (role or "").strip()
     return LEGACY_ROLE_MAP.get(role, role)
+
+
+def ensure_assignable_role(role: str, current: Optional[str] = None) -> str:
+    """Return a role that may be written onto a users row.
+
+    Keeping the row's current `sales` or `outside_sales` value is allowed so
+    an edit of branches or active does not force a reassignment. Assigning
+    either retired role to someone else is 400. Any other unknown role is 422.
+    """
+    role = (role or "").strip()
+    if current is not None and role == (current or "").strip():
+        return role
+    if role in RETIRED_SALES_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=RETIRED_SALES_ASSIGNMENT_DETAIL,
+        )
+    if role not in CANONICAL_ROLES:
+        raise HTTPException(status_code=422, detail=f"Unknown role {role!r}")
+    return role
 
 
 def is_estimator(role: Optional[str]) -> bool:

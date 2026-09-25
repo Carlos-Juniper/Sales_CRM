@@ -3,7 +3,38 @@
 // These mirror api/authz.py exactly. Import from here; do NOT redeclare inline.
 // ---------------------------------------------------------------------------
 
-import type { UserRole } from '@/types'
+import { CANONICAL_ROLES, type UserRole } from '@/types'
+
+/**
+ * The five assignable sales roles. Each has its own commission structure
+ * and workflow. Mirrors api/authz.py SALES_TEAM_ROLES.
+ */
+export const SALES_TEAM_ROLES: readonly UserRole[] = [
+  'inside_sales',
+  'maintenance_sales',
+  'install_sales',
+  'regional_sales_rep',
+  'vp_sales',
+]
+
+/**
+ * Roles an admin may assign. Legacy `sales` stays on UserRole for existing
+ * sessions and is omitted here. Mirrors api/authz.py ASSIGNABLE_ROLES.
+ */
+export const ASSIGNABLE_ROLES: readonly UserRole[] = CANONICAL_ROLES.filter(
+  (role) => role !== 'sales',
+)
+
+/**
+ * users.role values matched by GET /api/users?role=sales. The five sales
+ * roles, then legacy sales / outside_sales. Mirrors api/authz.py
+ * SALES_REP_DB_ROLES.
+ */
+export const SALES_REP_ROLES: readonly string[] = [
+  ...SALES_TEAM_ROLES,
+  'sales',
+  'outside_sales',
+]
 
 /**
  * Admin and the two sales roles that share every admin grant.
@@ -96,15 +127,15 @@ export const FULL_ACCESS_ROLES: readonly UserRole[] = [
 ]
 
 /**
- * Field sales: legacy `sales` plus the maintenance/install split.
- * Same access as `sales` (own leads, proposals, self-scoped performance).
- * Not the rep-selector viewer list, and not Public Leads.
- * Mirrors api/authz.py FIELD_SALES_ROLES.
+ * Field sales: maintenance_sales and install_sales, plus legacy `sales`.
+ * Own leads, proposals, self-scoped performance. Not the rep-selector
+ * viewer list, and not Public Leads. outside_sales normalizes to sales
+ * before this check. Mirrors api/authz.py FIELD_SALES_ROLES.
  */
 export const FIELD_SALES_ROLES: readonly UserRole[] = [
-  'sales',
   'maintenance_sales',
   'install_sales',
+  'sales',
 ]
 
 /**
@@ -136,7 +167,8 @@ export const ESTIMATING_NAV_ROLES: readonly UserRole[] = [
 
 /** Aspire ContactID is required for the same roles that stamp SalesRepID. */
 export function requiresAspireSalesRep(role: string): boolean {
-  return (FIELD_SALES_ROLES as readonly string[]).includes(role)
+  const normalized = role === 'outside_sales' ? 'sales' : role
+  return (FIELD_SALES_ROLES as readonly string[]).includes(normalized)
 }
 
 /**
@@ -147,10 +179,10 @@ export function defaultRouteForRole(role: UserRole | null): string {
   if (role === 'inside_sales') return '/inside-sales/leads'
   if (role === 'maintenance_estimating' || role === 'install_estimating' || role === 'procurement')
     return '/inside-sales/estimating'
-  // Field sales share the sales workspace but not Analytics. Pipeline is a
-  // page they can open, so a denied visit to /inside-sales does not bounce
-  // back onto itself.
-  if (role === 'sales' || role === 'maintenance_sales' || role === 'install_sales') {
+  // Field sales (maintenance_sales, install_sales, and legacy sales) share
+  // the sales workspace but not Analytics. Pipeline is a page they can open,
+  // so a denied visit to /inside-sales does not bounce back onto itself.
+  if (role !== null && (FIELD_SALES_ROLES as readonly string[]).includes(role)) {
     return '/inside-sales/pipeline'
   }
   // Management and admin-equivalent roles (admin, regional_sales_rep,

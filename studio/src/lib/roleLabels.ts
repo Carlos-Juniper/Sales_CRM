@@ -1,9 +1,12 @@
 import type { UserRole } from '@/types'
 
+/** Shown for stored `sales` and `outside_sales` rows. Not an assignable option. */
+export const LEGACY_SALES_LABEL = 'Legacy: Sales (reassign)'
+
 /** Human labels for the canonical roles. */
 export const ROLE_LABELS: Record<UserRole, string> = {
   procurement: 'Procurement',
-  sales: 'Sales',
+  sales: LEGACY_SALES_LABEL,
   maintenance_sales: 'Maintenance Sales',
   install_sales: 'Install Sales',
   inside_sales: 'Inside Sales',
@@ -19,8 +22,9 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   marketing: 'Marketing',
 }
 
-/** Human label for a stored role. Unknown / legacy values title-case the slug. */
+/** Human label for a stored role. Unknown values title-case the slug. */
 export function roleLabel(role: string): string {
+  if (role === 'sales' || role === 'outside_sales') return LEGACY_SALES_LABEL
   if (role in ROLE_LABELS) return ROLE_LABELS[role as UserRole]
   return role.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }

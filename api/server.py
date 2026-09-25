@@ -1651,9 +1651,10 @@ async def list_users(
       - ?role=<r>: restrict to that role AND active=1 (assignee pickers must
         exclude deactivated reps; Slice 6 deactivates, never deletes).
         `GET /api/users?role=sales` (and `?role=outside_sales`, the same
-        alias) is the sales-role group: stored roles sales, outside_sales,
-        inside_sales, maintenance_sales, install_sales, regional_sales_rep,
-        and vp_sales. That is the Settings rep dropdown, the commission /
+        alias) is the sales-role group: the five assignable sales roles
+        (inside_sales, maintenance_sales, install_sales, regional_sales_rep,
+        vp_sales) plus legacy sales and outside_sales rows. That is the
+        Settings rep dropdown, the commission /
         sales-performance rep selectors, and the lead-assignee picker. Each item's
         `id` is the `rep_id` (alias `user_id`) to pass when marketing or
         admin reads or writes that rep's client references and team roster.

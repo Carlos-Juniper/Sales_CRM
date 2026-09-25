@@ -1,8 +1,9 @@
 """Roles, Permissions & Branch Scoping (server-side RBAC).
 
 Acceptance criteria under test:
-  * The 9 canonical roles exist in backend validation; legacy
-    inside_sales/outside_sales map to sales.
+  * Canonical roles exist in backend validation. `outside_sales` is a
+    legacy alias of `sales` for access checks. `inside_sales` is its own
+    role and is not rewritten.
   * An estimator-role session cannot POST adjustments (require_approver guard)
     or call approve-handback; a manager cannot approve a >$100k estimate (403).
   * manager/RD/VP/CEO/admin CAN mutate sections/services/components
@@ -1007,6 +1008,15 @@ class TestAdminEquivalentSalesRoles:
         assert "regional_director" not in authz.CROSS_BRANCH_ROLES
         assert "vice_president" in authz.CROSS_BRANCH_ROLES
         assert "admin" in authz.ADMIN_EQUIVALENT_ROLES
+        assert "sales" in authz.CANONICAL_ROLES
+        assert "sales" in authz.FIELD_SALES_ROLES
+        assert "sales" not in authz.ASSIGNABLE_ROLES
+        assert authz.is_sales_rep("sales")
+        assert authz.is_sales_rep("outside_sales")
+        assert authz.requires_aspire_sales_rep("sales")
+        assert authz.normalize_role("outside_sales") == "sales"
+        for role in authz.SALES_TEAM_ROLES:
+            assert role in authz.ASSIGNABLE_ROLES
 
     @patch("api.authz.query", new_callable=AsyncMock)
     async def test_approval_ceiling_matches_admin_with_no_tier_rows(self, mock_authz_query):

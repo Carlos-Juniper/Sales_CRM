@@ -206,7 +206,7 @@ describe('UsersSection — authorize from M365 directory', () => {
     })
     fireEvent.click(await screen.findByText('nina.park@juniper.com'))
     fireEvent.change(screen.getByTestId('authorize-role'), {
-      target: { value: 'sales' },
+      target: { value: 'maintenance_sales' },
     })
     fireEvent.click(screen.getByRole('button', { name: /authorize/i }))
 
@@ -229,6 +229,7 @@ describe('UsersSection — enriched backend fields', () => {
     expect(omarRow).toHaveTextContent(/inactive/i)
     // Carla has active: 1 — no Inactive badge.
     expect(screen.getByTestId('user-row-u-carla')).not.toHaveTextContent(/inactive/i)
+    expect(screen.getByTestId('user-row-u-carla')).toHaveTextContent('Legacy: Sales (reassign)')
   })
 
   it('seeds the branch editor from the user real `branches` array', async () => {
@@ -238,6 +239,10 @@ describe('UsersSection — enriched backend fields', () => {
     await screen.findByText('Carla Reyes')
     fireEvent.click(screen.getByRole('button', { name: /edit carla reyes/i }))
     // Branch 101 checkbox must be checked (seeded from real branches).
+    const editRole = screen.getByTestId('edit-role-u-carla') as HTMLSelectElement
+    expect(editRole.value).toBe('sales')
+    expect(Array.from(editRole.options).map((option) => option.value)).toContain('sales')
+    expect(Array.from(editRole.options).some((option) => option.text === 'Legacy: Sales (reassign)')).toBe(true)
     const naplesCheck = screen.getByTestId('edit-branch-u-carla-101') as HTMLInputElement
     expect(naplesCheck.checked).toBe(true)
     // Branch 202 must not be checked.
@@ -303,7 +308,9 @@ describe('UsersSection — enriched backend fields', () => {
     fireEvent.click(await screen.findByText('nina.park@juniper.com'))
     const select = screen.getByTestId('authorize-role') as HTMLSelectElement
     const labels = Array.from(select.options).map((option) => option.text)
+    const values = Array.from(select.options).map((option) => option.value)
     expect(labels).toEqual(expect.arrayContaining([
+      'Inside Sales',
       'Maintenance Sales',
       'Install Sales',
       'Regional Sales Rep',
@@ -311,16 +318,18 @@ describe('UsersSection — enriched backend fields', () => {
       'Regional Director',
       'Vice President',
     ]))
-    expect(Array.from(select.options).map((option) => option.value)).toEqual(
-      expect.arrayContaining([
-        'maintenance_sales',
-        'install_sales',
-        'regional_sales_rep',
-        'vp_sales',
-        'regional_director',
-        'vice_president',
-      ]),
-    )
+    expect(values).toEqual(expect.arrayContaining([
+      'inside_sales',
+      'maintenance_sales',
+      'install_sales',
+      'regional_sales_rep',
+      'vp_sales',
+      'regional_director',
+      'vice_president',
+    ]))
+    expect(values).not.toContain('sales')
+    expect(values).not.toContain('outside_sales')
+    expect(labels).not.toContain('Legacy: Sales (reassign)')
   })
 
   it('does NOT show the Aspire rep hint for a sales user with a resolved aspireRepId', async () => {

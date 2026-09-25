@@ -93,6 +93,19 @@ class TestBuildOpportunityInput:
         assert "FROM users" in rep_sql
         assert "crm_users" not in rep_sql
 
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    async def test_branch_city_falls_back_to_aspire_branch_id_not_dropped_column(self, mock_query):
+        """When the property has no branch_city, do not read estimates.branch
+        (dropped by 022). Reverse aspire_branch_id through the city map."""
+        mock_query.side_effect = [
+            [{"aspire_property_id": 1, "branch_city": None, "property_type": None}],
+            [{"aspire_rep_id": None}],
+        ]
+        inp = await est._build_opportunity_input(
+            _est_row(branch="Florida", aspire_branch_id=3668)
+        )
+        assert inp.branch_city == "Orlando, FL"
+
 
 # ── persistence of a SyncResult back onto the estimate ───────────────────────
 
@@ -162,10 +175,16 @@ class TestCreateSchedulesSync:
 
 # ── Slice 8: intake submits aspire_branch_id; estimate carries it ────────────
 
+def _estimates_insert_columns(sql: str) -> list[str]:
+    import re
+    match = re.search(r"INSERT INTO estimates\s*\((.*?)\)\s*VALUES", sql, re.S | re.I)
+    assert match, sql
+    return [col.strip() for col in match.group(1).split(",")]
+
+
 class TestCreateBranchIdentityContract:
-    """Branch identity rides on the Aspire BranchID (int). The legacy `branch`
-    city column stays NOT NULL, so create resolves a display city from the id
-    (or accepts branchCity) and persists both."""
+    """Branch identity rides on estimates.aspire_branch_id. Migration 022 dropped
+    estimates.branch, so create must not write that column."""
 
     @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
@@ -182,11 +201,10 @@ class TestCreateBranchIdentityContract:
         assert resp.status_code == 201, resp.text
         # The estimates INSERT is the first execute() call.
         insert_sql, insert_params = mock_exec.call_args_list[0].args
-        assert "aspire_branch_id" in insert_sql
-        # aspire_branch_id (int identity) is persisted …
+        assert "branch" not in _estimates_insert_columns(insert_sql)
+        assert "aspire_branch_id" in _estimates_insert_columns(insert_sql)
         assert 3668 in insert_params
-        # … and the legacy branch city column is populated, never NULL/empty.
-        assert "Orlando, FL" in insert_params
+        assert "Orlando, FL" not in insert_params
 
     @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
@@ -197,15 +215,15 @@ class TestCreateBranchIdentityContract:
     ):
         mock_query.return_value = []
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
-        # Client sends only the id — the backend reverse-resolves the city so
-        # the NOT NULL branch column is still populated. Install Bradenton = 1374.
+        # Client sends only the id. Post-022 there is no city column to fill.
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "GF", "clientName": "LLC",
             "aspireBranchId": 1374})
         assert resp.status_code == 201, resp.text
-        insert_params = mock_exec.call_args_list[0].args[1]
+        insert_sql, insert_params = mock_exec.call_args_list[0].args
+        assert "branch" not in _estimates_insert_columns(insert_sql)
         assert 1374 in insert_params
-        assert "Bradenton, FL" in insert_params
+        assert "Bradenton, FL" not in insert_params
 
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
@@ -217,15 +235,24 @@ class TestCreateBranchIdentityContract:
         # Reject persists nothing.
         mock_exec.assert_not_awaited()
 
+    @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
+    @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_rejects_unresolvable_aspire_branch_id(self, mock_query, mock_exec, authed):
-        # A syntactically valid int that maps to no branch and carries no city.
+    def test_unknown_aspire_branch_id_is_stored_without_a_city_column(
+        self, mock_query, mock_exec, mock_load, mock_bg, authed
+    ):
+        """A branch id that is not in the vendored city map is still stored.
+        The old 400 existed only to satisfy estimates.branch NOT NULL."""
+        mock_query.return_value = []
+        mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "maintenance", "name": "Sunny", "clientName": "HOA",
             "aspireBranchId": 999999})
-        assert resp.status_code == 400
-        mock_exec.assert_not_awaited()
+        assert resp.status_code == 201, resp.text
+        insert_sql, insert_params = mock_exec.call_args_list[0].args
+        assert "branch" not in _estimates_insert_columns(insert_sql)
+        assert 999999 in insert_params
 
     def test_estimate_out_exposes_aspire_branch_id_and_branch_city(self):
         # Slice 14: branchCity now sourced from the branches JOIN alias `branch_city`,
@@ -559,11 +586,11 @@ class TestSlice14BranchCutover:
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
-    def test_create_estimate_still_writes_branch_column(
+    def test_create_estimate_does_not_reference_dropped_branch_column(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        """create_estimate must keep writing estimates.branch until Carlos applies 022
-        (the column is still NOT NULL on live). The write should be present in the INSERT."""
+        """Migration 022 dropped estimates.branch. The INSERT must not name it,
+        or staging raises Unknown column 'branch' in 'field list'."""
         mock_query.return_value = []  # itb_scopes
         mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
         resp = client.post("/api/estimating/estimates", json={
@@ -572,8 +599,13 @@ class TestSlice14BranchCutover:
         })
         assert resp.status_code == 201, resp.text
         insert_sql, insert_params = mock_exec.call_args_list[0].args
-        # `branch` column still in INSERT to satisfy the live NOT NULL constraint
-        assert "branch" in insert_sql
-        # and the resolved city value is non-empty
-        city_val = next((p for p in insert_params if p == "Orlando, FL"), None)
-        assert city_val is not None, "branch city must be written to the INSERT params"
+        columns = _estimates_insert_columns(insert_sql)
+        assert "branch" not in columns
+        assert "aspire_branch_id" in columns
+        assert insert_sql.count("%s") == len(columns) == len(insert_params)
+        assert "Orlando, FL" not in insert_params
+        # itb_projects.branch is a different, still-present column.
+        itb_insert = next(
+            c for c in mock_exec.call_args_list if "INSERT INTO itb_projects" in c.args[0]
+        )
+        assert "Orlando, FL" in itb_insert.args[1]

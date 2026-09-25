@@ -117,6 +117,28 @@ class TestIdempotency:
         # re-running the generator produces byte-identical, reviewable SQL
         assert sql == loader.generate_seed_sql(loader.extract_all(WORKBOOK))
 
+    def test_seed_sql_does_not_write_dropped_branch_column(self):
+        """Migration 022 dropped catalog_items.branch. Regenerated seed SQL
+        must not name that column (aspire_branch_id is left untouched)."""
+        row = loader.CatalogRow(
+            id="kit-inst-abc",
+            description="Shrub 50'",
+            uom="EA",
+            unit_cost_cents=100,
+            unit_sell_cents=200,
+            target_gm=0.45,
+            kit_type="install_quantity",
+            production_rate=None,
+            branch="All Branches",
+            active=True,
+            service_type="Irrigation",
+        )
+        sql = loader.generate_seed_sql([row])
+        assert "branch" not in sql.split("VALUES", 1)[0]
+        assert "VALUES(branch)" not in sql
+        assert "All Branches" not in sql
+        assert "Shrub 50''" in sql
+
     def test_seed_sql_escapes_quotes_in_item_names(self):
         rows = loader.extract_all(WORKBOOK)
         sql = loader.generate_seed_sql(rows)

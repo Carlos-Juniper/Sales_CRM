@@ -206,10 +206,14 @@ def _sql_str(s: str) -> str:
 
 def _row_values(r: CatalogRow) -> str:
     production = "NULL" if r.production_rate is None else f"{r.production_rate:g}"
+    # catalog_items.branch was dropped by migration 022. The workbook branch
+    # name stays on CatalogRow for review, but the seed must not write it.
+    # aspire_branch_id (019's replacement; NULL = company-wide) is left alone
+    # on upsert so a refresh does not wipe the backfill.
     return (
         f"({_sql_str(r.id)}, {_sql_str(r.description)}, {_sql_str(r.uom)}, "
         f"{r.unit_cost_cents}, {r.unit_sell_cents}, {r.target_gm:g}, "
-        f"{_sql_str(r.kit_type)}, {production}, {_sql_str(r.branch)}, "
+        f"{_sql_str(r.kit_type)}, {production}, "
         f"{1 if r.active else 0}, {_sql_str(r.service_type)})"
     )
 
@@ -229,7 +233,7 @@ def generate_seed_sql(rows: list[CatalogRow]) -> str:
 
 INSERT INTO catalog_items
     (id, description, uom, unit_cost_cents, unit_sell_cents, target_gm,
-     kit_type, production_rate, branch, active, service_type)
+     kit_type, production_rate, active, service_type)
 VALUES
 {values}
 ON DUPLICATE KEY UPDATE
@@ -240,7 +244,6 @@ ON DUPLICATE KEY UPDATE
     target_gm       = VALUES(target_gm),
     kit_type        = VALUES(kit_type),
     production_rate = VALUES(production_rate),
-    branch          = VALUES(branch),
     active          = VALUES(active),
     service_type    = VALUES(service_type);
 """

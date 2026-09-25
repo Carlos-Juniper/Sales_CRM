@@ -177,13 +177,42 @@ class TestBranches:
         assert b["lng"] == pytest.approx(-81.7718)
 
     def test_operating_roster_filter_in_sql(self, authed):
-        """SQL must exclude inactive and 'DO NOT USE' branches."""
+        """SQL must exclude inactive and 'DO NOT USE' branches.
+
+        The pattern is bound. db.query %-formats whenever params is non-empty,
+        so an inlined '%DO NOT USE%' raises ValueError on the signer-scoped path.
+        """
         with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
             mock_q.return_value = []
             client.get("/api/proposals/config/branches")
-        sql = mock_q.call_args.args[0]
+        sql, params = mock_q.call_args.args
         assert "active = 1" in sql
-        assert "DO NOT USE" in sql
+        assert "NOT LIKE %s" in sql
+        assert "%DO NOT USE%" not in sql
+        assert params == ["%DO NOT USE%"]
+        formatted = sql % tuple(params)
+        assert "DO NOT USE" in formatted
+
+    def test_signer_scoped_roster_binds_like_pattern(self, authed):
+        """The proposalId path also binds branch ids, so the LIKE pattern must
+        be a parameter or aiomysql raises unsupported format character 'D'."""
+        with patch("api.proposals.query", new_callable=AsyncMock) as mock_q:
+            mock_q.side_effect = [
+                [{"signer_user_id": "user-1"}],
+                [{"aspire_branch_id": 1403}],
+                [],
+            ]
+            res = client.get("/api/proposals/config/branches?proposal_id=pr-1")
+        assert res.status_code == 200
+        sql, params = mock_q.call_args_list[-1].args
+        assert "NOT LIKE %s" in sql
+        assert "aspire_branch_id IN (%s)" in sql
+        assert "%DO NOT USE%" not in sql
+        assert params[0] == "%DO NOT USE%"
+        assert 1403 in params
+        formatted = sql % tuple(params)
+        assert "DO NOT USE" in formatted
+        assert "1403" in formatted
 
     def test_only_rows_with_lat_lng_are_returned(self, authed):
         """Rows without lat/lng are excluded (proximity footer requires coords)."""

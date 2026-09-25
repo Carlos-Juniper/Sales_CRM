@@ -835,8 +835,12 @@ def register(app, require_auth) -> None:
         if scope.kind == "none":
             return []
 
-        where = ["active = 1", "branch_name NOT LIKE '%DO NOT USE%'"]
-        params: list[Any] = []
+        # Bind the LIKE pattern. db.query() hands SQL to aiomysql cursor.execute(),
+        # which always %-formats when params is non-empty. An inlined '%DO NOT USE%'
+        # is read as a format specifier ('%D') and raises ValueError for any caller
+        # whose scope adds parameters (branch-scoped users).
+        where = ["active = 1", "branch_name NOT LIKE %s"]
+        params: list[Any] = ["%DO NOT USE%"]
         if scope.kind == "branch":
             # Parameterized placeholders only — ids are never interpolated.
             placeholders = ", ".join(["%s"] * len(scope.ids))

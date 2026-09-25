@@ -290,8 +290,9 @@ class TestManageableBranchesList:
       * BM/RD (scope kind='branch') → only their user_branches operating
         branches,
       * a user with zero branches (kind='none') → [].
-    The operating-roster filter (active=1 AND branch_name NOT LIKE '%DO NOT
-    USE%') lives in the SQL so the 21-of-56 non-office rows never reach the UI.
+    The operating-roster filter (active=1 AND branch_name NOT LIKE a bound
+    '%DO NOT USE%' parameter) lives in the SQL so the 21-of-56 non-office
+    rows never reach the UI.
     """
 
     @patch("api.authz.query", new_callable=AsyncMock)
@@ -312,9 +313,14 @@ class TestManageableBranchesList:
         assert body[0]["branchName"] == "Bonita Springs"
 
         # The operating-roster filter is in the WHERE clause (server-side).
-        sql = mock_query.await_args_list[0].args[0]
+        # The LIKE pattern is a bound parameter: an inlined '%DO NOT USE%' is a
+        # Python format specifier once any other param is present.
+        sql, params = mock_query.await_args_list[0].args
         assert "active = 1" in sql
-        assert "NOT LIKE" in sql and "DO NOT USE" in sql
+        assert "NOT LIKE %s" in sql
+        assert "%DO NOT USE%" not in sql
+        assert params == ["%DO NOT USE%"]
+        sql % tuple(params)
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
@@ -332,10 +338,18 @@ class TestManageableBranchesList:
         assert [b["aspireBranchId"] for b in r.json()] == [1403]
 
         # The scoped branch id is a parameterized filter, not interpolated.
+        # This is the path that 500'd: non-empty params make aiomysql %-format
+        # the SQL, and an inlined '%DO NOT USE%' raises
+        # ValueError: unsupported format character 'D'.
         call = mock_query.await_args_list[0]
         sql, params = call.args[0], call.args[1]
         assert "aspire_branch_id IN" in sql
+        assert "%DO NOT USE%" not in sql
+        assert params[0] == "%DO NOT USE%"
         assert 1403 in params
+        formatted = sql % tuple(params)
+        assert "DO NOT USE" in formatted
+        assert "1403" in formatted
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)

@@ -25,6 +25,7 @@ import type {
   TakeoffLine,
 } from '@/types/estimating'
 import type { EstimateLifecycle } from '@/types/estimating'
+import type { OccurrenceCountKey } from '@/lib/estimating/occurrences'
 import type { StatusTransitionRecord } from '@/lib/estimating/transitions'
 
 // Omit that distributes over the Estimate discriminated union so the
@@ -46,7 +47,10 @@ export type CreateEstimatePayload = DistributiveOmit<
   // Optional on create: omit stores null. A sent 0 stays 0.
   | 'homesBudget'
   | 'commonAreaBudget'
-> & {
+  // Optional on create: omit or null stores NULL. Install intake omits them.
+  | OccurrenceCountKey
+> &
+  Partial<Pick<Estimate, OccurrenceCountKey>> & {
   /** Homes budget in dollars. Omit or null → unknown. 0 stays 0. */
   homesBudget?: number | null
   /** Common-area budget in dollars. Omit or null → unknown. 0 stays 0. */
@@ -85,6 +89,13 @@ export type UpdateEstimatePayload = Partial<{
   branchCity: string | null
   customerType: Estimate['customerType']
   acreage: number | null
+  /** Yearly visit counts. Omit to leave unchanged; null clears; 0 stores 0. */
+  mowingOccurrences: number | null
+  pruningOccurrences: number | null
+  turfFertOccurrences: number | null
+  shrubFertOccurrences: number | null
+  ipmOccurrences: number | null
+  irrigationOccurrences: number | null
   contractValueCents: number
   targetMargin: number
   status: EstimateStatus

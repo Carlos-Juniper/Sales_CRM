@@ -430,6 +430,7 @@ export const mockBidOutcomes: BidOutcomeLog[] = [
 
 import { contractTotal } from '@/lib/estimating/calc'
 import { INSTALL_KIT_CATALOG } from '@/lib/estimating/install'
+import { emptyOccurrenceCounts } from '@/lib/estimating/occurrences'
 import type { CreateEstimatePayload } from '@/api/estimating'
 
 let fixtureSeq = 0
@@ -516,6 +517,7 @@ export function buildMaintenanceEstimate(
     branchCity: 'Phoenix-Desert',
     customerType: 'hoa',
     acreage: null,
+    ...emptyOccurrenceCounts(),
     contractValueCents: 0,
     homesBudget: null,
     commonAreaBudget: null,
@@ -623,6 +625,7 @@ export function buildInstallEstimate(
     branchCity: 'Phoenix-Desert',
     customerType: 'commercial',
     acreage: 2.1,
+    ...emptyOccurrenceCounts(),
     contractValueCents: 0,
     homesBudget: null,
     commonAreaBudget: null,

@@ -191,6 +191,17 @@ export interface EstimateBase {
    */
   priorCrewRateCentsPerHour?: number | null
   acreage: number | null
+  /**
+   * Yearly maintenance visit counts. Null when unanswered, on install
+   * estimates, and on rows created before the columns existed. `0` means the
+   * service is not in the contract. Integers from 0 through 366 inclusive.
+   */
+  mowingOccurrences: number | null
+  pruningOccurrences: number | null
+  turfFertOccurrences: number | null
+  shrubFertOccurrences: number | null
+  ipmOccurrences: number | null
+  irrigationOccurrences: number | null
   /** Derived roll-up, persisted for queue/reporting. Integer cents. */
   contractValueCents: number
   /**

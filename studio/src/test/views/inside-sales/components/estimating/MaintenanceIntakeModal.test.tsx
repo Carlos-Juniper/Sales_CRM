@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { render, makeUser } from '@/test/utils'
@@ -21,6 +21,7 @@ import {
 } from '@/views/inside-sales/components/estimating/useEstimatingShell'
 import { EstimatingToastProvider } from '@/views/inside-sales/components/estimating/EstimatingToast'
 import { MaintenanceIntakeModal } from '@/views/inside-sales/components/estimating/MaintenanceIntakeModal'
+import { InstallIntakeModal } from '@/views/inside-sales/components/estimating/InstallIntakeModal'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 import type { CreateEstimatePayload } from '@/api/estimating'
 
@@ -90,7 +91,6 @@ async function fillMinimumFields(
   await user.type(q(/company/i), 'Dobson Ranch HOA')
   await user.type(q(/phone/i), '602-555-1234')
   await user.type(q(/email/i), 'jane@example.com')
-  await user.type(q(/scope of work/i), 'Full grounds maintenance')
   // Branch is now required; wait for async options then select one.
   await scope.findByRole('option', { name: 'Bradenton, FL' })
   await user.selectOptions(q(/^branch/i) as HTMLSelectElement, 'Bradenton, FL')
@@ -145,7 +145,9 @@ describe('MaintenanceIntakeModal — field rendering (AC §3 bullet 1)', () => {
 
   it('renders all scope & date fields', () => {
     renderModal()
-    expect(screen.getByLabelText(/scope of work/i)).toBeInTheDocument()
+    const notes = screen.getByLabelText(/additional scope notes/i)
+    expect(notes).toBeInTheDocument()
+    expect(notes).not.toBeRequired()
     expect(screen.getByLabelText(/needed back/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/anticipated close/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/service start/i)).toBeInTheDocument()
@@ -482,6 +484,152 @@ describe('MaintenanceIntakeModal — home count', () => {
   })
 })
 
+const OCCURRENCE_LABELS = [
+  'Mowing occurrences per year',
+  'Pruning occurrences per year',
+  'Turf Fert occurrences per year',
+  'Shrub Fert occurrences per year',
+  'IPM occurrences per year',
+  'Irrigation occurrences per year',
+] as const
+
+describe('MaintenanceIntakeModal — yearly occurrence counts', () => {
+  it('renders the six occurrence inputs for maintenance, above the optional notes', () => {
+    renderModal()
+    const group = screen.getByRole('group', { name: /occurrences per year/i })
+    for (const label of OCCURRENCE_LABELS) {
+      const input = within(group).getByLabelText(label)
+      expect(input).toHaveAttribute('type', 'number')
+      expect(input).toHaveAttribute('min', '0')
+      expect(input).toHaveAttribute('max', '366')
+      expect(input).toHaveAttribute('step', '1')
+      expect(input).not.toBeRequired()
+    }
+    const notes = screen.getByLabelText(/additional scope notes/i)
+    expect(group.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('does not render the occurrence inputs on install intake', () => {
+    render(
+      <EstimatingToastProvider>
+        <EstimatingShellContext.Provider value={makeShell()}>
+          <InstallIntakeModal open onClose={vi.fn()} onCreated={vi.fn()} />
+        </EstimatingShellContext.Provider>
+      </EstimatingToastProvider>,
+    )
+    expect(screen.queryByRole('group', { name: /occurrences per year/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/mowing occurrences per year/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/additional scope notes/i)).not.toBeInTheDocument()
+  })
+
+  it('sends null for a blank count, 0 for zero, and JSON integers otherwise', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'occ-1', status: 'new_from_sales' })
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    fireEvent.input(screen.getByLabelText('Mowing occurrences per year'), { target: { value: '0' } })
+    fireEvent.input(screen.getByLabelText('Turf Fert occurrences per year'), { target: { value: '6' } })
+    fireEvent.input(screen.getByLabelText('Shrub Fert occurrences per year'), { target: { value: '366' } })
+    fireEvent.input(screen.getByLabelText('Irrigation occurrences per year'), { target: { value: '52' } })
+    fireEvent.input(screen.getByLabelText(/additional scope notes/i), {
+      target: { value: 'Seasonal color at the entry' },
+    })
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0].mowingOccurrences).toBe(0)
+    expect(created[0].pruningOccurrences).toBeNull()
+    expect(created[0].turfFertOccurrences).toBe(6)
+    expect(created[0].shrubFertOccurrences).toBe(366)
+    expect(created[0].ipmOccurrences).toBeNull()
+    expect(created[0].irrigationOccurrences).toBe(52)
+    expect((created[0].intake!.payload as Record<string, unknown>).scopeOfWork).toBe(
+      'Seasonal color at the entry',
+    )
+    for (const value of [
+      created[0].mowingOccurrences,
+      created[0].pruningOccurrences,
+      created[0].turfFertOccurrences,
+      created[0].shrubFertOccurrences,
+      created[0].ipmOccurrences,
+      created[0].irrigationOccurrences,
+    ]) {
+      expect(value === null || typeof value === 'number').toBe(true)
+    }
+  })
+
+  it.each(['1.5', '367', '-1'])('blocks %s and does not POST', async (value) => {
+    const user = userEvent.setup()
+    const postCalls: unknown[] = []
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        postCalls.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    const input = screen.getByLabelText('Mowing occurrences per year') as HTMLInputElement
+    fireEvent.input(input, { target: { value } })
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    expect(postCalls).toHaveLength(0)
+    expect(input.validity.valid).toBe(false)
+    expect(
+      await screen.findAllByText('mowingOccurrences must be an integer from 0 to 366, or null'),
+    ).not.toHaveLength(0)
+  })
+
+  it('submits without scope notes and keeps the notes field optional', async () => {
+    const user = userEvent.setup()
+    const created: CreateEstimatePayload[] = []
+    const fakeEstimate = buildMaintenanceEstimate({ id: 'occ-notes', status: 'new_from_sales' })
+    server.use(
+      http.post('/api/estimating/estimates', async ({ request }) => {
+        created.push((await request.json()) as CreateEstimatePayload)
+        return HttpResponse.json({ ...fakeEstimate }, { status: 201 })
+      }),
+    )
+
+    renderModal()
+    const notes = screen.getByLabelText(/additional scope notes/i)
+    expect(notes).not.toBeRequired()
+    expect(notes).toHaveValue('')
+    await fillMinimumFields(user)
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() => expect(created).toHaveLength(1))
+    const payload = created[0].intake!.payload as Record<string, unknown>
+    expect(payload.scopeOfWork).toBe('')
+  })
+
+  it('shows a 422 detail in the toast and on the named field', async () => {
+    const user = userEvent.setup()
+    const detail = 'ipmOccurrences must be an integer from 0 to 366, or null'
+    server.use(
+      http.post('/api/estimating/estimates', () => HttpResponse.json({ detail }, { status: 422 })),
+    )
+
+    renderModal()
+    await fillMinimumFields(user)
+    fireEvent.input(screen.getByLabelText('IPM occurrences per year'), { target: { value: '4' } })
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    // The toast sits outside the dialog, which Radix marks aria-hidden.
+    await waitFor(() => expect(document.body).toHaveTextContent(detail))
+    expect(screen.getByRole('alert')).toHaveTextContent(detail)
+  })
+})
+
 describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
   it('POSTs an estimate with estimateType="maintenance" on submit', async () => {
     const user = userEvent.setup()
@@ -560,7 +708,6 @@ describe('MaintenanceIntakeModal — submit (AC §3 bullet 3)', () => {
     await user.type(screen.getByLabelText(/company/i), 'Dobson Ranch HOA')
     await user.type(screen.getByLabelText(/phone/i), '602-555-1234')
     await user.type(screen.getByLabelText(/email/i), 'jane@example.com')
-    await user.type(screen.getByLabelText(/scope of work/i), 'Full grounds maintenance')
     await screen.findByRole('option', { name: 'Bradenton, FL' })
     await user.selectOptions(screen.getByLabelText(/^branch/i), 'Bradenton, FL')
     await user.click(screen.getByRole('button', { name: /submit/i }))

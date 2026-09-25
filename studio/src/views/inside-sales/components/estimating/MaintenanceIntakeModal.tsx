@@ -47,6 +47,14 @@ import type { BranchOption, Estimate, MaintenanceCustomerType } from '@/types/es
 import { FileAttachRow, type AttachedFile } from './IntakeFileAttachRow'
 import { useAttachmentUpload } from '@/lib/estimating/useAttachmentUpload'
 import { RFP_FILE_ACCEPT } from '@/lib/estimating/rfpContentTypes'
+import {
+  OCCURRENCE_COUNT_FIELDS,
+  emptyOccurrenceInputs,
+  isOccurrenceCountKey,
+  occurrenceCountDetail,
+  parseOccurrenceInput,
+  type OccurrenceCountKey,
+} from '@/lib/estimating/occurrences'
 
 // ----- Types -----------------------------------------------------------------
 
@@ -75,7 +83,7 @@ export interface MaintenanceIntakeModalProps {
 
 type ContractStructure = 'single' | 'split'
 
-interface FormState {
+interface FormState extends Record<OccurrenceCountKey, string> {
   // Lead & contact (I-6.1)
   contactName: string
   company: string
@@ -92,7 +100,8 @@ interface FormState {
   commonAreaBudget: string
   /** Unit/home COUNT (I-6.4), distinct from budget dollars. */
   homeCount: string
-  // Scope & dates
+  // Scope & dates. The six occurrence strings are the structured scope;
+  // scopeOfWork is optional free-text notes stored in the intake payload.
   scopeOfWork: string
   neededBack: string
   anticipatedClose: string
@@ -126,6 +135,7 @@ export function MaintenanceIntakeModal({
     homesBudget: '',
     commonAreaBudget: '',
     homeCount: '',
+    ...emptyOccurrenceInputs(),
     scopeOfWork: '',
     neededBack: '',
     anticipatedClose: '',
@@ -139,6 +149,9 @@ export function MaintenanceIntakeModal({
   const [rfpFile, setRfpFile] = useState<AttachedFile | null>(null)
   const [otherFiles, setOtherFiles] = useState<AttachedFile[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [occurrenceErrors, setOccurrenceErrors] = useState<
+    Partial<Record<OccurrenceCountKey, string>>
+  >({})
   // Aspire opportunity linkage: the property (→ PropertyID) and the service line
   // (→ DivisionID). Optional at intake; the backend defaults/pends what's missing.
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(initialProperty)
@@ -220,6 +233,14 @@ export function MaintenanceIntakeModal({
 
   function set(field: keyof FormState, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }))
+    if (isOccurrenceCountKey(field)) {
+      setOccurrenceErrors((prev) => {
+        if (!prev[field]) return prev
+        const next = { ...prev }
+        delete next[field]
+        return next
+      })
+    }
   }
 
   function handlePropertyMapChange(e: ChangeEvent<HTMLInputElement>) {
@@ -271,6 +292,22 @@ export function MaintenanceIntakeModal({
       homesBudget = homes.value
       commonAreaBudget = common.value
     }
+
+    const occurrenceValues = {} as Record<OccurrenceCountKey, number | null>
+    const nextOccurrenceErrors: Partial<Record<OccurrenceCountKey, string>> = {}
+    for (const { key } of OCCURRENCE_COUNT_FIELDS) {
+      const parsed = parseOccurrenceInput(form[key])
+      if (parsed === 'invalid') nextOccurrenceErrors[key] = occurrenceCountDetail(key)
+      else occurrenceValues[key] = parsed
+    }
+    if (Object.keys(nextOccurrenceErrors).length > 0) {
+      setOccurrenceErrors(nextOccurrenceErrors)
+      const first = OCCURRENCE_COUNT_FIELDS.find((field) => nextOccurrenceErrors[field.key])
+      if (first?.key) show(nextOccurrenceErrors[first.key] ?? '')
+      return
+    }
+    setOccurrenceErrors({})
+
     setSubmitting(true)
 
     try {
@@ -351,7 +388,11 @@ export function MaintenanceIntakeModal({
           homesBudget,
           commonAreaBudget,
         }),
+        // Yearly visit counts are top-level estimate columns. Blank → null,
+        // 0 → 0, and the values are JSON integers (never strings).
+        ...occurrenceValues,
         // Structured intake goes to its own table (intake_submissions), never notes.
+        // scopeOfWork inside the payload is optional notes; counts are the scope.
         intake: { payload: intakePayload },
         sections: [],
       })
@@ -384,6 +425,10 @@ export function MaintenanceIntakeModal({
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
         show(err.message || 'Homes and common area budgets must be blank or a non-negative number.')
+      } else if (err instanceof ApiError && err.status === 422) {
+        show(err.message)
+        const named = OCCURRENCE_COUNT_FIELDS.find((field) => err.message.startsWith(field.key))
+        if (named) setOccurrenceErrors({ [named.key]: err.message })
       } else {
         show('Failed to create estimate — please try again.')
       }
@@ -634,16 +679,61 @@ export function MaintenanceIntakeModal({
               Scope &amp; Dates
             </p>
             <div className="space-y-3">
+              <fieldset aria-label="Occurrences per year" className="m-0 min-w-0 space-y-2 border-0 p-0">
+                <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))]">
+                  Occurrences per year
+                </legend>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {OCCURRENCE_COUNT_FIELDS.map(({ key, label }) => (
+                    <div key={key} className="space-y-1">
+                      <Label htmlFor={`mi-occ-${key}`} className="text-xs">
+                        {label} occurrences per year
+                      </Label>
+                      <Input
+                        id={`mi-occ-${key}`}
+                        type="number"
+                        min={0}
+                        max={366}
+                        step={1}
+                        inputMode="numeric"
+                        value={form[key]}
+                        onChange={(e) => set(key, e.target.value)}
+                        onInvalid={(e) => {
+                          e.preventDefault()
+                          const message = occurrenceCountDetail(key)
+                          setOccurrenceErrors((prev) => ({ ...prev, [key]: message }))
+                          show(message)
+                        }}
+                        aria-invalid={occurrenceErrors[key] ? true : undefined}
+                        aria-describedby={occurrenceErrors[key] ? `mi-occ-${key}-error` : undefined}
+                        className="h-8 text-xs"
+                      />
+                      {occurrenceErrors[key] && (
+                        <p
+                          id={`mi-occ-${key}-error`}
+                          role="alert"
+                          className="text-[10px] text-red-600 dark:text-red-400"
+                        >
+                          {occurrenceErrors[key]}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-[hsl(var(--muted-fg))]">
+                  Occurrences per year. Leave a field blank if it is unknown; enter 0 if that
+                  service is not in the contract.
+                </p>
+              </fieldset>
               <div className="space-y-1">
                 <Label htmlFor="mi-scope" className="text-xs">
-                  Scope of work *
+                  Additional scope notes (optional)
                 </Label>
                 <Textarea
                   id="mi-scope"
                   value={form.scopeOfWork}
                   onChange={(e) => set('scopeOfWork', e.target.value)}
-                  placeholder="Full grounds maintenance including mowing, irrigation, seasonal color…"
-                  required
+                  placeholder="Anything the counts do not capture — seasonal color, special requests…"
                   rows={3}
                   className="text-xs"
                 />

@@ -77,6 +77,62 @@ describe('estimating data-access layer (MSW round-trip)', () => {
     expect(installs.every((e: Estimate) => e.estimateType === 'install')).toBe(true)
   })
 
+  it('stores occurrence counts as integers or null and returns them on get and list', async () => {
+    const payload = toCreatePayload(buildMaintenanceEstimate({ name: 'Counts' }))
+    const created = await estimatingApi.create({
+      ...payload,
+      mowingOccurrences: 0,
+      pruningOccurrences: null,
+      turfFertOccurrences: 6,
+    })
+    expect(created.mowingOccurrences).toBe(0)
+    expect(created.pruningOccurrences).toBeNull()
+    expect(created.turfFertOccurrences).toBe(6)
+    expect(created.shrubFertOccurrences).toBeNull()
+    expect(created.ipmOccurrences).toBeNull()
+    expect(created.irrigationOccurrences).toBeNull()
+
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.mowingOccurrences).toBe(0)
+    const listed = (await estimatingApi.list()).find((row) => row.id === created.id)
+    expect(listed?.irrigationOccurrences).toBeNull()
+
+    const patched = await estimatingApi.update(created.id, { pruningOccurrences: 12 })
+    expect(patched.pruningOccurrences).toBe(12)
+    expect(patched.mowingOccurrences).toBe(0)
+
+    const cleared = await estimatingApi.update(created.id, { mowingOccurrences: null })
+    expect(cleared.mowingOccurrences).toBeNull()
+    expect(cleared.pruningOccurrences).toBe(12)
+  })
+
+  it('rejects a non-integer occurrence count with the 422 detail and writes nothing', async () => {
+    const payload = toCreatePayload(buildMaintenanceEstimate({ name: 'Bad count' }))
+    await expect(
+      estimatingApi.create({ ...payload, mowingOccurrences: 1.5 }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: 'mowingOccurrences must be an integer from 0 to 366, or null',
+    })
+    await expect(
+      estimatingApi.create({ ...payload, ipmOccurrences: '4' as unknown as number }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: 'ipmOccurrences must be an integer from 0 to 366, or null',
+    })
+
+    const created = await estimatingApi.create({ ...payload, mowingOccurrences: 10 })
+    await expect(
+      estimatingApi.update(created.id, { turfFertOccurrences: 367 }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: 'turfFertOccurrences must be an integer from 0 to 366, or null',
+    })
+    const unchanged = await estimatingApi.get(created.id)
+    expect(unchanged.mowingOccurrences).toBe(10)
+    expect(unchanged.turfFertOccurrences).toBeNull()
+  })
+
   it('patches mutable estimate fields', async () => {
     const created = await estimatingApi.create(toCreatePayload(buildMaintenanceEstimate()))
     const updated = await estimatingApi.update(created.id, { status: 'in_progress', name: 'Renamed' })

@@ -1,4 +1,4 @@
-"""Yearly maintenance service occurrence counts (migration 061).
+"""Yearly maintenance service occurrence counts (migration 064).
 
 Six nullable integers on the estimate — mowing, pruning, turf fert, shrub fert,
 IPM, and irrigation — accepted on maintenance create and on PATCH, returned by
@@ -356,22 +356,22 @@ class TestSerializeOccurrenceCounts:
         assert "return est" in list_src
 
 
-# ── migration 061 ─────────────────────────────────────────────────────────────
+# ── migration 064 ─────────────────────────────────────────────────────────────
 
-class TestMigration061:
+class TestMigration064:
     def test_detector_keys_on_last_column(self, monkeypatch):
         monkeypatch.setattr(
             migrate, "column_exists",
             lambda conn, table, column: table == "estimates" and column == "irrigation_occurrences",
         )
-        assert migrate.detect_061(None) is True
+        assert migrate.detect_064(None) is True
         monkeypatch.setattr(migrate, "column_exists", lambda conn, table, column: False)
-        assert migrate.detect_061(None) is False
-        assert migrate._DETECT["061_estimate_maintenance_occurrence_counts"] is migrate.detect_061
+        assert migrate.detect_064(None) is False
+        assert migrate._DETECT["064_estimate_maintenance_occurrence_counts"] is migrate.detect_064
 
     def test_sql_adds_each_count_with_a_guard(self):
         sql = (
-            migrate.MIGRATIONS_DIR / "061_estimate_maintenance_occurrence_counts.sql"
+            migrate.MIGRATIONS_DIR / "064_estimate_maintenance_occurrence_counts.sql"
         ).read_text()
         for column in est._OCCURRENCE_COUNT_FIELDS.values():
             assert column in sql

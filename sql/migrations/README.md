@@ -71,6 +71,9 @@ for at least one real deploy cycle.
 - **027** — adds `estimates.latest_proposal_render_id` + `estimates.latest_proposal_object_key`, a denormalized pointer to the most recent successful proposal PDF render. Written by `api/proposal_render.py` after each render; `proposal_renders` remains the source of truth for full version history.
 - **028** — merges `insurance_certificates` into `licenses_certifications` (Handoff 42), widening the `kind` ENUM to include `'insurance'` and dropping the source table as its final step. Originally numbered 027; renumbered to avoid colliding with `027_estimate_proposal_pdf_link.sql`, which merged to staging first.
 - **058** — backfills `user_branches` with both twin branch ids for the 11 managers inserted by 057; fixes the proposal team picker omitting managers on maintenance-twin branches (Handoff 43 A.6).
+- **062** — adds `owner_user_id` to `team_members` and `client_references` (guarded). Not the same change as 058.
+- **063** — nullable `estimates.homes_budget` / `common_area_budget`. Renumbered from 059 so it does not share a number with the branch-manager migration on `integrate/staging-proposals`.
+- **064** — yearly maintenance occurrence counts on `estimates`. Renumbered from 061 for the same reason.
 
 ### Numbering history
 

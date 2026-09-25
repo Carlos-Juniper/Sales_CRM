@@ -791,14 +791,14 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
-def detect_061(conn) -> bool:
-    """061 applied ↔ estimates.irrigation_occurrences column exists.
+def detect_064(conn) -> bool:
+    """064 applied ↔ estimates.irrigation_occurrences column exists.
 
-    061 adds six guarded INT columns to estimates (mowing, pruning, turf fert,
-    shrub fert, IPM, irrigation yearly visit counts). Keyed on
-    irrigation_occurrences, the last ADD: each statement is individually
-    information_schema-guarded, so a True here means all six landed, and a
-    re-run after a partial apply completes the remainder safely.
+    064 (formerly 061) adds six guarded INT columns to estimates (mowing,
+    pruning, turf fert, shrub fert, IPM, irrigation yearly visit counts).
+    Keyed on irrigation_occurrences, the last ADD: each statement is
+    individually information_schema-guarded, so a True here means all six
+    landed, and a re-run after a partial apply completes the remainder safely.
     """
     return column_exists(conn, "estimates", "irrigation_occurrences")
 
@@ -815,13 +815,14 @@ def detect_042(conn) -> bool:
     return column_exists(conn, "proposal_renders", "overflowing_pages")
 
 
-def detect_059(conn) -> bool:
-    """059 applied ↔ both contract-structure budget columns exist and are nullable.
+def detect_063(conn) -> bool:
+    """063 applied ↔ both contract-structure budget columns exist and are nullable.
 
-    Keyed on estimates.homes_budget AND estimates.common_area_budget being
-    nullable — the file's own effect. A missing column or a NOT NULL column
-    reports not-applied so the guarded ADD/MODIFY still runs. Existence alone
-    is not enough: the point of the migration is that NULL (unknown) is legal.
+    Formerly detect_059. Keyed on estimates.homes_budget AND
+    estimates.common_area_budget being nullable — the file's own effect. A
+    missing column or a NOT NULL column reports not-applied so the guarded
+    ADD/MODIFY still runs. Existence alone is not enough: the point of the
+    migration is that NULL (unknown) is legal.
     """
     return (
         column_nullable(conn, "estimates", "homes_budget")
@@ -836,9 +837,11 @@ def detect_062(conn) -> bool:
     an index. Every statement is information_schema-guarded, so a re-run
     after a partial apply finishes the remainder. True only when all four
     effects are present — keying on a single column would record a partial
-    apply as detected and skip the rest. Numbered 062 because 058 is PR
-    #25's and 059–061 are reserved. If those columns already exist, this
-    detects as applied and the guarded statements no-op.
+    apply as detected and skip the rest. 058 on main is the branch-manager
+    user_branches backfill. 059–061 on integrate/staging-proposals are the
+    branch-manager tables, so the estimate migrations are 063 and 064; this
+    file stays 062. If the owner columns already exist, this detects as
+    applied and the guarded statements no-op.
     """
     return (
         column_exists(conn, "team_members", "owner_user_id")
@@ -885,12 +888,12 @@ _DETECT: dict = {
     "040_proposal_chapter_order":                 detect_040,
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
-    "061_estimate_maintenance_occurrence_counts": detect_061,
+    "064_estimate_maintenance_occurrence_counts": detect_064,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
     "046_section_services_billing_type":          detect_046,
-    "059_estimate_optional_contract_budgets":     detect_059,
+    "063_estimate_optional_contract_budgets":     detect_063,
     "062_rep_owned_proposal_roster":              detect_062,
 }
 

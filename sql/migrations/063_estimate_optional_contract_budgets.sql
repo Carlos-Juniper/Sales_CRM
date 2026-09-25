@@ -1,5 +1,10 @@
 -- ---------------------------------------------------------------------------
--- Migration 059 — nullable contract-structure budgets.
+-- Migration 063 — nullable contract-structure budgets.
+--
+-- Renumbered from 059. integrate/staging-proposals owns 059/060/061 for the
+-- branch-manager tables, and main already has 058_bm_user_branches_backfill.
+-- The runner keys on the filename stem, so this file must not reuse those
+-- numbers. 062 is the rep-owned roster migration.
 --
 -- Maintenance intake's split contract structure captures a Homes budget and a
 -- Common area budget (dollars). Reps usually do not know these numbers, so

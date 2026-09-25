@@ -1,5 +1,10 @@
 -- ---------------------------------------------------------------------------
--- Migration 061 — yearly maintenance service occurrence counts.
+-- Migration 064 — yearly maintenance service occurrence counts.
+--
+-- Renumbered from 061 so it does not share a number with
+-- branch_manager_user_branches on integrate/staging-proposals. Kept after
+-- 063 (the old 059 contract-budget migration). 062 is the roster owner
+-- migration and does not collide.
 --
 -- The maintenance intake form replaces the free-text scope-of-work box with
 -- six structured visit counts (occurrences per year). Each is a nullable

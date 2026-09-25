@@ -1,11 +1,14 @@
 -- ---------------------------------------------------------------------------
 -- Migration 062 — Per-rep ownership of client references and the team roster.
 --
--- Numbered 062. 058 is PR #25's number, and 059, 060, and 061 are reserved
--- by the S2, S4, and S1 PRs. The role split itself adds no DDL (users.role
--- is VARCHAR). This file is the roster owner-column change integrated from
--- #25. Every statement is information_schema-guarded, so if #25's 058
--- already added these columns this file is a no-op.
+-- Numbered 062. main's 058 is the branch-manager user_branches backfill
+-- (a different file; this branch does not also carry 058_rep_owned).
+-- 059–061 on integrate/staging-proposals are the branch-manager tables, so
+-- the estimate migrations that used to share 059 and 061 are 063 and 064.
+-- This file stays 062 because that number is not used by a different
+-- migration on main or that branch. The role split itself adds no DDL
+-- (users.role is VARCHAR). Every statement is information_schema-guarded,
+-- so a re-run after the columns already exist is a no-op.
 --
 -- The shared portfolio stays one company-wide set (no owner column).
 -- client_references and team_members gain owner_user_id (users.id of the

@@ -801,4 +801,69 @@ describe('MaintenanceEditor — branch crew rate', () => {
       '/settings/branch/2224/crew-rate',
     )
   })
+
+  it('an empty blockedLines list marks only unsaved crew-rate-derived lines', async () => {
+    const user = userEvent.setup()
+    const derivedKit: CatalogItem = {
+      ...RATED_KIT,
+      id: 'kit-derived',
+      description: 'Derived Mowing',
+      unitSellCents: 0,
+      productionRate: 67650,
+      targetGm: 0.22,
+    }
+    const catalogKit: CatalogItem = {
+      ...RATED_KIT,
+      id: 'kit-catalog',
+      description: 'Catalog Fertilizer',
+      unitSellCents: 450,
+      productionRate: 5000,
+    }
+    const estimate = buildMaintenanceEstimate({
+      crewRateCentsPerHour: null,
+      aspireBranchId: 2224,
+      branchCity: '*** PICK A BRANCH ***',
+    })
+    // Already saved, sell 0 on a deriving kit. The create 422 must not mark it.
+    estimate.sections[0].services[0] = {
+      ...estimate.sections[0].services[0],
+      catalogItemId: derivedKit.id,
+      unitSellCents: 0,
+      hours: 1.6,
+    }
+    server.use(
+      http.get('/api/settings/branch/2224', () =>
+        HttpResponse.json({ aspireBranchId: 2224, crewRateCentsPerHour: 22_500 }),
+      ),
+      http.get('/api/estimating/catalog-items', () =>
+        HttpResponse.json([derivedKit, catalogKit]),
+      ),
+      http.post('/api/estimating/estimates/:id/sections/:sectionId/services', () =>
+        HttpResponse.json(
+          { detail: { code: 'crew_rate_required', blockedLines: [] } },
+          { status: 422 },
+        ),
+      ),
+    )
+
+    renderMaint(estimate)
+    const s1 = sectionCard('Common Area')
+    const add = () => within(s1).getByLabelText(/add line item/i)
+    await waitFor(() => expect(within(add()).getByRole('option', { name: 'Derived Mowing' })).toBeInTheDocument())
+    await user.selectOptions(add(), derivedKit.id)
+    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
+    await user.selectOptions(add(), catalogKit.id)
+    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(await screen.findByTestId('save-error')).toHaveTextContent(/set a crew rate/i)
+    const addedDerived = within(s1).getByTestId('service-row-Derived Mowing')
+    expect(addedDerived).toHaveAttribute('data-crew-rate-blocked', 'true')
+    expect(within(s1).getByTestId('service-row-Catalog Fertilizer')).toHaveAttribute(
+      'data-crew-rate-blocked',
+      'false',
+    )
+    expect(within(s1).getByTestId('service-row-Mowing')).toHaveAttribute('data-crew-rate-blocked', 'false')
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled()
+  })
 })

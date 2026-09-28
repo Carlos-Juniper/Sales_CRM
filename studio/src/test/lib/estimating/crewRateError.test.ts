@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '@/api/client'
+import { sellRateCentsPer1000Sf } from '@/lib/estimating/maintenance'
 import {
   CREW_RATE_ERROR_MESSAGES,
   CREW_RATE_REQUIRED_CODE,
   isCrewRateBlockedLine,
+  isCrewRateDerivedLine,
   messageForErrorCode,
   parseCrewRateRequiredError,
+  unsavedCrewRateDerivedLines,
+  type CrewRateKitPrice,
 } from '@/lib/estimating/crewRateError'
 
 const PYTHON_SENTENCE =
@@ -53,10 +57,83 @@ describe('parseCrewRateRequiredError', () => {
     expect(parseCrewRateRequiredError(err)).toBeNull()
   })
 
+  it('accepts an empty blockedLines list from a create', () => {
+    const err = new ApiError(422, 'Unprocessable Entity', [], {
+      code: 'crew_rate_required',
+      blockedLines: [],
+    })
+    expect(parseCrewRateRequiredError(err)?.blockedLines).toEqual([])
+  })
+
   it('matches only the listed line, and only in the named section', () => {
     const lines = [{ serviceId: 'svc-mow', sectionId: 'sec-1' }]
     expect(isCrewRateBlockedLine('sec-1', 'svc-mow', lines)).toBe(true)
     expect(isCrewRateBlockedLine('sec-2', 'svc-mow', lines)).toBe(false)
     expect(isCrewRateBlockedLine('sec-1', 'svc-hand', lines)).toBe(false)
+  })
+})
+
+const derivedKit: CrewRateKitPrice = {
+  productionRate: 60_000,
+  unitSellCents: 0,
+  targetGm: 0.22,
+}
+const LIVE = 18_000
+const formula = sellRateCentsPer1000Sf(60_000, 0.22, LIVE)
+
+describe('isCrewRateDerivedLine', () => {
+  it('treats a null or zero sell on a deriving kit as derived, with or without a live rate', () => {
+    expect(isCrewRateDerivedLine({ unitSellCents: null, catalogItemId: 'k' }, derivedKit, null)).toBe(true)
+    expect(isCrewRateDerivedLine({ unitSellCents: 0, catalogItemId: 'k' }, derivedKit, LIVE)).toBe(true)
+  })
+
+  it('treats a sell equal to the live-rate formula as derived', () => {
+    expect(
+      isCrewRateDerivedLine({ unitSellCents: formula, catalogItemId: 'k' }, derivedKit, LIVE),
+    ).toBe(true)
+  })
+
+  it('does not treat a positive non-formula sell as derived', () => {
+    expect(isCrewRateDerivedLine({ unitSellCents: 999, catalogItemId: 'k' }, derivedKit, LIVE)).toBe(false)
+    expect(isCrewRateDerivedLine({ unitSellCents: formula, catalogItemId: 'k' }, derivedKit, null)).toBe(false)
+  })
+
+  it('never treats a catalog-priced kit as derived', () => {
+    const catalog = { ...derivedKit, unitSellCents: 450 }
+    expect(isCrewRateDerivedLine({ unitSellCents: 0, catalogItemId: 'k' }, catalog, null)).toBe(false)
+    expect(isCrewRateDerivedLine({ unitSellCents: formula, catalogItemId: 'k' }, catalog, LIVE)).toBe(false)
+  })
+
+  it('ignores a kit with no production rate', () => {
+    expect(
+      isCrewRateDerivedLine(
+        { unitSellCents: 0, catalogItemId: 'k' },
+        { ...derivedKit, productionRate: null },
+        null,
+      ),
+    ).toBe(false)
+    expect(isCrewRateDerivedLine({ unitSellCents: 0, catalogItemId: null }, null, null)).toBe(false)
+  })
+})
+
+describe('unsavedCrewRateDerivedLines', () => {
+  const kits = [{ id: 'kit-derived', ...derivedKit }, { id: 'kit-catalog', ...derivedKit, unitSellCents: 450 }]
+
+  it('marks only unsaved derived lines when the server list is empty', () => {
+    const saved = [{ services: [{ id: 'svc-saved' }] }]
+    const draft = [
+      {
+        id: 'sec-1',
+        services: [
+          { id: 'svc-saved', catalogItemId: 'kit-derived', unitSellCents: 0 },
+          { id: 'svc-new-derived', catalogItemId: 'kit-derived', unitSellCents: formula },
+          { id: 'svc-new-hand', catalogItemId: 'kit-derived', unitSellCents: 999 },
+          { id: 'svc-new-catalog', catalogItemId: 'kit-catalog', unitSellCents: 0 },
+        ],
+      },
+    ]
+    expect(unsavedCrewRateDerivedLines(saved, draft, kits, LIVE)).toEqual([
+      { serviceId: 'svc-new-derived', sectionId: 'sec-1' },
+    ])
   })
 })

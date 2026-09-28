@@ -47,6 +47,7 @@ import {
   isCrewRateBlockedLine,
   messageForErrorCode,
   parseCrewRateRequiredError,
+  unsavedCrewRateDerivedLines,
 } from '@/lib/estimating/crewRateError'
 import { useToast } from './useToast'
 import { useEstimatingShell } from './useEstimatingShell'
@@ -257,9 +258,18 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     } catch (err) {
       const crewRateError = parseCrewRateRequiredError(err)
       if (crewRateError) {
-        // The server names the crew-rate-derived lines. Catalog prices and
-        // hand-entered prices are not in that list, so they stay editable.
-        setBlockedLines(crewRateError.blockedLines)
+        // PATCH names saved rows. A create has no row yet, so blockedLines is
+        // empty and the derived-price rule picks the unsaved lines in this save.
+        const lines =
+          crewRateError.blockedLines.length > 0
+            ? crewRateError.blockedLines
+            : unsavedCrewRateDerivedLines(
+                savedRef.current.sections,
+                toSave.sections,
+                catalogItems,
+                crew.liveRateCents,
+              )
+        setBlockedLines(lines)
         setSaveError(messageForErrorCode(crewRateError.code))
       } else if (err instanceof ApiError && err.status === 422) {
         // A 422 is the server-side production-rate guard — surface its message

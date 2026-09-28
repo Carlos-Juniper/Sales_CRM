@@ -3,7 +3,7 @@ import type {
   ApprovalTier,
   AspireOpportunitySummary,
   BranchOption,
-  CatalogItem,
+  ServiceKit,
   CreatePropertyPayload,
   Estimate,
   EstimateApprovalSettings,
@@ -486,8 +486,8 @@ export const estimatingApi = {
     apiClient.post<LifecycleTransitionResult>(`/estimating/estimates/${id}/lifecycle`, { to }),
 }
 
-/** Filters for GET /api/estimating/service-kits (alias: /catalog-items). */
-export interface ListCatalogItemsParams {
+/** Filters for GET /api/estimating/service-kits. */
+export interface ListServiceKitsParams {
   branch?: string
   kitType?: KitType
   active?: boolean
@@ -510,13 +510,13 @@ export const estimatingConfigApi = {
   /** Aspire-derived branch list for the intake dropdowns. */
   branches: (kind: 'install' | 'maintenance') =>
     apiClient.get<BranchOption[]>(`/estimating/config/branches?kind=${kind}`),
-  catalogItems: (params?: ListCatalogItemsParams) => {
+  serviceKits: (params?: ListServiceKitsParams) => {
     const qs = new URLSearchParams()
     if (params?.branch) qs.set('branch', params.branch)
     if (params?.kitType) qs.set('kit_type', params.kitType)
     if (params?.active !== undefined) qs.set('active', String(params.active))
     const q = qs.toString()
-    return apiClient.get<CatalogItem[]>(`/estimating/service-kits${q ? `?${q}` : ''}`)
+    return apiClient.get<ServiceKit[]>(`/estimating/service-kits${q ? `?${q}` : ''}`)
   },
 }
 

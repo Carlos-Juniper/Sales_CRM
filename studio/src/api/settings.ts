@@ -26,7 +26,7 @@ export interface ManageableBranch {
  * this endpoint's PATCH.
  */
 export interface BranchProductionRate {
-  catalogItemId: string
+  serviceKitId: string
   description: string
   productionRate: number | null
   source: 'override' | 'inherited'
@@ -48,7 +48,7 @@ export interface BranchSettings {
 export interface BranchSettingsPatch {
   /** Crew rate in cents-per-hour (dollars converted client-side). */
   crewRateCentsPerHour?: number
-  /** {catalogItemId: productionRate} — one row per changed kit. */
+  /** {serviceKitId: productionRate} — one row per changed kit. */
   productionRates?: Record<string, number>
   /** {materialKey: {factorName: value}} — FACTOR columns only, never unit_cost/sell. */
   materialFactors?: Record<string, Record<string, number | Record<string, number>>>

@@ -1,5 +1,5 @@
 import type {
-  CatalogItem,
+  ServiceKit,
   EstimateQueueItem,
   LegacyEstimate,
   LineItem,
@@ -429,7 +429,7 @@ export const mockBidOutcomes: BidOutcomeLog[] = [
 // ---------------------------------------------------------------------------
 
 import { contractTotal } from '@/lib/estimating/calc'
-import { INSTALL_KIT_CATALOG } from '@/lib/estimating/install'
+import { INSTALL_SERVICE_KITS } from '@/lib/estimating/install'
 import { emptyOccurrenceCounts } from '@/lib/estimating/occurrences'
 import type { CreateEstimatePayload } from '@/api/estimating'
 import { SLA_CONFIG, isRushWindowDate } from '@/lib/estimating/sla'
@@ -447,7 +447,7 @@ function svc(
   return {
     id: fid('svc'),
     sectionId,
-    catalogItemId: null,
+    serviceKitId: null,
     complexityPct: 0,
     unitSellCents: null,
     embeddedCostCents: null,
@@ -691,7 +691,7 @@ export const mockTakeoffLines: TakeoffLine[] = buildTakeoffLines(mockEstimatesV2
 // editor fixtures resolve whether the config API has loaded or not).
 // ---------------------------------------------------------------------------
 
-const maintKit = (over: Partial<CatalogItem> & Pick<CatalogItem, 'id' | 'description'>): CatalogItem => ({
+const maintKit = (over: Partial<ServiceKit> & Pick<ServiceKit, 'id' | 'description'>): ServiceKit => ({
   uom: 'Sq. Ft.',
   unitCostCents: 0,
   unitSellCents: 0,
@@ -704,7 +704,7 @@ const maintKit = (over: Partial<CatalogItem> & Pick<CatalogItem, 'id' | 'descrip
   ...over,
 })
 
-export const CATALOG_ITEM_SEED: CatalogItem[] = [
+export const SERVICE_KIT_SEED: ServiceKit[] = [
   // maintenance_hours (production-rated — units per labor hour)
   maintKit({ id: 'kit-maint-3422', description: 'Standard Production Mowing', unitCostCents: 1750, productionRate: 67650, serviceType: 'Turf Area' }),
   maintKit({ id: 'kit-maint-3431', description: 'Bed Area Maintenance', unitCostCents: 1750, productionRate: 3000, serviceType: 'Bed Area' }),
@@ -713,11 +713,11 @@ export const CATALOG_ITEM_SEED: CatalogItem[] = [
   // blocked by the guard until an estimator enters hours)
   maintKit({ id: 'kit-maint-3435', description: 'Prune Easy', serviceType: 'Bed Area' }),
   maintKit({ id: 'kit-maint-3440', description: 'Turf Area Fertilization', serviceType: 'Fertilization & Pest Control' }),
-  // install_quantity — the literal rows ARE CatalogItems (plus vendor quotes)
-  ...INSTALL_KIT_CATALOG.map((kit) => {
-    const item: CatalogItem & { vendorPricesCents?: number[] } = { ...kit }
+  // install_quantity — the literal rows are service kits (plus vendor quotes)
+  ...INSTALL_SERVICE_KITS.map((kit) => {
+    const item: ServiceKit & { vendorPricesCents?: number[] } = { ...kit }
     delete item.vendorPricesCents
-    return item as CatalogItem
+    return item as ServiceKit
   }),
 ]
 

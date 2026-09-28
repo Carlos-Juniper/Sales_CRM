@@ -302,11 +302,8 @@ export interface EstimateSection {
 export interface SectionService {
   id: string
   sectionId: string
-  /**
-   * Wire name for section_services.service_kit_id (service_kits.id).
-   * Kept as catalogItemId so existing clients do not change payload shape.
-   */
-  catalogItemId: string | null
+  /** section_services.service_kit_id (service_kits.id). */
+  serviceKitId: string | null
   /**
    * Per-line LS/IR override for the ITB EST LS $ / EST IR $ split. `null`
    * derives the discipline from the kit's `serviceType` (irrigation
@@ -371,7 +368,7 @@ export type KitType = 'maintenance_hours' | 'install_quantity'
  * Priced service kit (`service_kits`, renamed from catalog_items in migration 065).
  * Not a material SKU. Materials will live in the new catalog_items table.
  */
-export interface CatalogItem {
+export interface ServiceKit {
   id: string
   description: string
   uom: string
@@ -454,11 +451,11 @@ export interface TakeoffLine {
    * LOCALLY-set, manually-editable opportunity qty (drives Δ vs Opp). Never
    * read from Aspire (locked decision); on estimate Save the
    * backend pushes it one-way to OpportunityServiceItem.ItemQuantity for
-   * lines that carry a catalogItemId.
+   * lines that carry a serviceKitId.
    */
   opportunityQty: number
   /** Nullable service_kits.id (column takeoff_lines.service_kit_id). */
-  catalogItemId?: string | null
+  serviceKitId?: string | null
 }
 
 // ----- Approval tiers (config-driven) ----------------------------------------

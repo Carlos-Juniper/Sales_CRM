@@ -57,7 +57,7 @@ for at least one real deploy cycle.
 - **006** — adds `itb_projects.estimate_id` (Handoff 21).
 - **007** — renames `approval_tiers.role_key` to canonical auth roles, adds the install approval ladder (Handoff 19).
 - **008** — adds `takeoff_lines.catalog_item_id` and `takeoff_lines.created_at` (Handoff 20).
-- **009** — seeds `catalog_items` from the Aspire kit workbook (Handoff 22). Idempotent (`INSERT … ON DUPLICATE KEY UPDATE`). Refreshing from a newer workbook is a separate manual operation via `scripts/load_catalog_items.py`.
+- **009** — seeds `catalog_items` from the Aspire kit workbook (Handoff 22). Idempotent (`INSERT … ON DUPLICATE KEY UPDATE`). Refreshing from a newer workbook is a separate manual operation via `scripts/load_service_kits.py`.
 - **010** — adds `estimates.lead_id` (pipeline kanban redesign).
 - **011** — renames `leads.status = 'handed_off'` → `'estimating'` (data-only; idempotent `UPDATE WHERE`). Run before deploying the renamed frontend/backend code.
 - **012** — adds `estimates.turf_area_acres`, `estimates.curb_miles`, and wires takeoff-scan attachments (Handoff 27).

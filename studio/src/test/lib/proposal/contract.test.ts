@@ -64,7 +64,7 @@ function makeEstimate(
       services: sec.services.map((svc, svIdx) => ({
         id: `svc-${sIdx}-${svIdx}`,
         sectionId: `sec-${sIdx}`,
-        catalogItemId: null,
+        serviceKitId: null,
         label: svc.label,
         qty: svc.qty,
         uom: '/yr',

@@ -134,7 +134,7 @@ CREATE TABLE IF NOT EXISTS crm.estimate_sections (
 -- Recreates Aspire kits natively. Editable by authorized non-developer users
 -- (BRD II-9.5). POPULATED by sql/migrations/009_seed_catalog_items.sql
 -- (Handoff 22 — generated from business docs/Juniper_Aspire_Kit_Review.xlsx
--- by scripts/load_catalog_items.py: 80 install kits + 48 maintenance
+-- by scripts/load_service_kits.py: 80 install kits + 48 maintenance
 -- takeoff-item kits with observed production rates).
 CREATE TABLE IF NOT EXISTS crm.catalog_items (
     id               VARCHAR(36)   NOT NULL,

@@ -35,7 +35,7 @@ import {
   catalogToService,
   duplicateSection,
   formatCents,
-  maintenanceCatalogFromItems,
+  maintenanceRowsFromServiceKits,
   removeSection,
   unresolvedProductionRateLabels,
 } from '@/lib/estimating/maintenance'
@@ -127,7 +127,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   // the client no longer sends or records it.
   // approval_tiers + service_kits come from the API-fetched config;
   // the config.ts / maintenance.ts literals are only the offline fallback.
-  const { approvalTiers, catalogItems } = useEstimatingConfig()
+  const { approvalTiers, serviceKits } = useEstimatingConfig()
 
   const [draft, setDraft] = useState<MaintenanceEstimate>(estimate)
   /** Snapshot Reset restores to (last saved state). */
@@ -145,7 +145,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     [approvalTiers],
   )
   // Kits come from GET /service-kits; literal = offline fallback.
-  const maintCatalog = useMemo(() => maintenanceCatalogFromItems(catalogItems), [catalogItems])
+  const maintCatalog = useMemo(() => maintenanceRowsFromServiceKits(serviceKits), [serviceKits])
   const tier = tierForValue(contractCents, maintenanceTiers)
   const removeTarget = draft.sections.find((s) => s.id === confirmRemoveId) ?? null
 
@@ -199,7 +199,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   async function handleSave() {
     // Save guard (client half — the server enforces it with a 422):
     // every maintenance line must resolve a production rate (kit) or hours.
-    const unresolved = unresolvedProductionRateLabels(draft.sections, catalogItems)
+    const unresolved = unresolvedProductionRateLabels(draft.sections, serviceKits)
     if (unresolved.length > 0) {
       setSaveError(
         `No production rate resolves for ${unresolved.map((l) => `“${l}”`).join(', ')}. ` +

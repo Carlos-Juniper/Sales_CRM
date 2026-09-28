@@ -5,7 +5,7 @@ import {
   type BranchSettingsPatch,
 } from '@/api/settings'
 import { estimatingConfigApi } from '@/api/estimating'
-import type { CatalogItem, MaterialCalcRow } from '@/types/estimating'
+import type { ServiceKit, MaterialCalcRow } from '@/types/estimating'
 import { useUIStore } from '@/store/uiStore'
 
 // Query keys — the crew-rate read is per-branch (the branch endpoint), while the
@@ -13,7 +13,7 @@ import { useUIStore } from '@/store/uiStore'
 // config endpoints (the branch GET does not carry them — a Slice 5 shape gap).
 export const BRANCH_SETTINGS_KEY = 'branch-settings'
 export const MATERIAL_CALCS_KEY = 'branch-material-calcs'
-export const CATALOG_ITEMS_KEY = 'branch-catalog-items'
+export const SERVICE_KITS_KEY = 'branch-service-kits'
 
 /**
  * One branch's settings (crew rate). Keyed by branch so switching the picker
@@ -44,10 +44,10 @@ export function useMaterialCalcs() {
 }
 
 /** Maintenance kits (production rates). Only production-rate is editable here. */
-export function useCatalogItems() {
-  return useQuery<CatalogItem[]>({
-    queryKey: [CATALOG_ITEMS_KEY],
-    queryFn: () => estimatingConfigApi.catalogItems({ kitType: 'maintenance_hours' }),
+export function useServiceKits() {
+  return useQuery<ServiceKit[]>({
+    queryKey: [SERVICE_KITS_KEY],
+    queryFn: () => estimatingConfigApi.serviceKits({ kitType: 'maintenance_hours' }),
     staleTime: 30_000,
   })
 }
@@ -85,7 +85,7 @@ export function useUpdateBranchSettings(aspireBranchId: number | undefined) {
     onSettled: (_data, _err, body) => {
       qc.invalidateQueries({ queryKey: key })
       if (body.productionRates !== undefined)
-        qc.invalidateQueries({ queryKey: [CATALOG_ITEMS_KEY] })
+        qc.invalidateQueries({ queryKey: [SERVICE_KITS_KEY] })
       if (body.materialFactors !== undefined)
         qc.invalidateQueries({ queryKey: [MATERIAL_CALCS_KEY] })
     },

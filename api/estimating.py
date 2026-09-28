@@ -567,17 +567,6 @@ def _component_out(r: dict) -> dict:
     }
 
 
-def _accept_service_kit_alias(body: dict) -> dict:
-    """Accept serviceKitId as a write alias of catalogItemId.
-
-    The wire field stays catalogItemId so a cached frontend keeps working.
-    A client that sends only serviceKitId is mapped onto that field.
-    """
-    if "serviceKitId" in body and "catalogItemId" not in body:
-        return {**body, "catalogItemId": body.get("serviceKitId")}
-    return body
-
-
 def _service_out(
     r: dict, components: list[dict], catalog_data: Optional[dict] = None
 ) -> dict:
@@ -595,12 +584,12 @@ def _service_out(
     without the override it would resolve to None and drop out of the
     contract's payment-schedule base. Mirrors the `discipline` override.
 
-    catalogItemId is the wire name of section_services.service_kit_id.
+    serviceKitId is the wire name of section_services.service_kit_id.
     """
     return {
         "id": r["id"],
         "sectionId": r["section_id"],
-        "catalogItemId": r["service_kit_id"],
+        "serviceKitId": r["service_kit_id"],
         "discipline": r.get("discipline"),
         "label": r["label"],
         "qty": _num(r["qty"]),
@@ -994,7 +983,7 @@ _TAKEOFF_COLS = {
     "addPct": "add_pct",
     "measuredQty": "measured_qty",
     "opportunityQty": "opportunity_qty",
-    "catalogItemId": "service_kit_id",
+    "serviceKitId": "service_kit_id",
 }
 
 
@@ -1026,7 +1015,7 @@ def _takeoff_line_out(r: dict, threshold: float = DISCREPANCY_DEFAULT_THRESHOLD)
         "addPct": add,
         "measuredQty": measured,
         "opportunityQty": opp,
-        "catalogItemId": r.get("service_kit_id"),
+        "serviceKitId": r.get("service_kit_id"),
         # Derived server-side at the config threshold (company_settings, §5.4) —
         # the UI's live slider re-derives client-side; these are never stored.
         "bidQty": _bid_qty(plan, add),
@@ -1554,7 +1543,7 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
     return project_id
 
 
-def _catalog_item_out(r: dict) -> dict:
+def _service_kit_out(r: dict) -> dict:
     # Slice 14: `branch` city string removed; identity carried by aspire_branch_id
     # (NULL = company-wide per §2.3 convention). The legacy `branch` key is NOT
     # passed through — once 022 is applied the column will not exist in the row.
@@ -1595,7 +1584,6 @@ async def _insert_component(service_id: str, comp: dict, idx: int) -> str:
 
 async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
     service_id = _new_id("svc")
-    svc = _accept_service_kit_alias(svc)
     await execute(
         """INSERT INTO section_services
              (id, section_id, service_kit_id, discipline, billing_type, label, qty, uom,
@@ -1604,7 +1592,7 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
         [
             service_id,
             section_id,
-            svc.get("catalogItemId"),
+            svc.get("serviceKitId"),
             svc.get("discipline"),
             svc.get("billingType"),
             svc["label"],
@@ -1653,15 +1641,14 @@ async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
 async def _require_resolvable_maintenance_lines(services: list[dict]) -> None:
     """Reject (422) any maintenance line whose hours cannot be resolved.
 
-    `services` are camelCase line dicts carrying label / hours / catalogItemId.
+    `services` are camelCase line dicts carrying label / hours / serviceKitId.
     Kits are fetched in one batched query; a missing kit id counts as
     unresolvable (a dangling service_kit_id can never produce hours).
     """
-    services = [_accept_service_kit_alias(svc) for svc in services]
     pending = [svc for svc in services if svc.get("hours") is None]
     if not pending:
         return
-    kit_ids = {svc.get("catalogItemId") for svc in pending if svc.get("catalogItemId")}
+    kit_ids = {svc.get("serviceKitId") for svc in pending if svc.get("serviceKitId")}
     rates: dict[str, Any] = {}
     if kit_ids:
         placeholders = ", ".join(["%s"] * len(kit_ids))
@@ -1671,7 +1658,7 @@ async def _require_resolvable_maintenance_lines(services: list[dict]) -> None:
         )
         rates = {r["id"]: r.get("production_rate") for r in rows}
     for svc in pending:
-        kit_id = svc.get("catalogItemId")
+        kit_id = svc.get("serviceKitId")
         if kit_id is None or rates.get(kit_id) is None:
             label = svc.get("label") or "(unnamed line)"
             raise HTTPException(
@@ -2552,7 +2539,6 @@ def register(app, require_auth) -> None:
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
         current = rows[0]
-        body = _accept_service_kit_alias(body)
         # Guard the MERGED line (row + patch): an edit may not null-out hours
         # or repoint at an unrated kit and leave the line unresolvable.
         est_rows = await query(
@@ -2562,13 +2548,13 @@ def register(app, require_auth) -> None:
             merged = {
                 "label": body.get("label", current.get("label")),
                 "hours": body["hours"] if "hours" in body else current.get("hours"),
-                "catalogItemId": body["catalogItemId"]
-                if "catalogItemId" in body
+                "serviceKitId": body["serviceKitId"]
+                if "serviceKitId" in body
                 else current.get("service_kit_id"),
             }
             await _require_resolvable_maintenance_lines([merged])
         cols = {
-            "catalogItemId": "service_kit_id",
+            "serviceKitId": "service_kit_id",
             "discipline": "discipline",
             "billingType": "billing_type",
             "label": "label",
@@ -2796,7 +2782,6 @@ def register(app, require_auth) -> None:
         if not await query("SELECT id FROM estimates WHERE id = %s", [estimate_id]):
             raise HTTPException(status_code=404, detail="Not found")
         line_id = _new_id("tk")
-        body = _accept_service_kit_alias(body)
         await execute(
             """INSERT INTO takeoff_lines
                  (id, estimate_id, description, uom, plan_qty, add_pct,
@@ -2811,7 +2796,7 @@ def register(app, require_auth) -> None:
                 body.get("addPct", 0),
                 body.get("measuredQty", 0),
                 body.get("opportunityQty", 0),
-                body.get("catalogItemId"),
+                body.get("serviceKitId"),
             ],
         )
         await execute(
@@ -2826,7 +2811,6 @@ def register(app, require_auth) -> None:
     ) -> dict:
         authz.require_estimator(_user)
         await _get_takeoff_line(estimate_id, line_id)  # 404 outside the chain
-        body = _accept_service_kit_alias(body)
         await _apply_updates("takeoff_lines", _TAKEOFF_COLS, body, line_id)
         await execute(
             "UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id]
@@ -3508,7 +3492,6 @@ def register(app, require_auth) -> None:
         return {"projectId": project_id, "scopeId": scope_id, "statusCode": code}
 
     @app.get("/api/estimating/service-kits")
-    @app.get("/api/estimating/catalog-items")
     async def list_service_kits(
         # Slice 14: the `branch` city-string filter is removed; callers should
         # filter by aspireBranchId (int) once that param is wired (follow-up).
@@ -3536,4 +3519,4 @@ def register(app, require_auth) -> None:
         rows = await query(
             f"SELECT * FROM service_kits {where} ORDER BY description", params
         )
-        return [_catalog_item_out(r) for r in rows]
+        return [_service_kit_out(r) for r in rows]

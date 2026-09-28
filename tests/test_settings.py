@@ -207,13 +207,13 @@ class TestBranchSettingsScope:
         mock_authz_query.return_value = [{"aspire_branch_id": 1403}]
         # PATCH /branch/{id} makes these queries in order:
         #   (1) read current crew rate (from_value), (2-5) get_branch_settings_payload
-        #   payload queries: branch_settings, material_calcs branch, material_calcs company, catalog_items
+        #   payload queries: branch_settings, material_calcs branch, material_calcs company, service_kits
         mock_query.side_effect = [
             [{"crew_rate_cents_per_hour": 18000}],  # (1) from_value read in PATCH
             [{"crew_rate_cents_per_hour": 20000}],  # (2) payload: branch_settings
             [],                                      # (3) payload: material_calcs branch
             [],                                      # (4) payload: material_calcs company
-            [],                                      # (5) payload: catalog_items
+            [],                                      # (5) payload: service_kits
         ]
         r = client.patch(
             "/api/settings/branch/1403",
@@ -266,7 +266,7 @@ class TestBranchSettingsScope:
             [{"crew_rate_cents_per_hour": 21000}],  # (2) payload: branch_settings
             [],                                      # (3) payload: material_calcs branch
             [],                                      # (4) payload: material_calcs company
-            [],                                      # (5) payload: catalog_items
+            [],                                      # (5) payload: service_kits
         ]
         r = client.patch(
             "/api/settings/branch/3696",
@@ -731,7 +731,7 @@ class TestBranchSettingsEnriched:
       - A branch with a material_calcs row where aspire_branch_id = X → source='override'.
       - A branch with no override row → returns the company-wide (NULL branch) row
         flagged source='inherited'.
-      - productionRates: returns catalog_items.production_rate for items with a
+      - productionRates: returns service_kits.production_rate for items with a
         branch-level override or (if none) the base company value.
       - crewRateCentsPerHour is unchanged.
     """
@@ -747,7 +747,7 @@ class TestBranchSettingsEnriched:
 
         # 4 sequential query calls in get_branch_settings:
         #   (1) branch_settings, (2) material_calcs branch overrides,
-        #   (3) material_calcs company-wide, (4) catalog_items
+        #   (3) material_calcs company-wide, (4) service_kits
         branch_row = {"crew_rate_cents_per_hour": 20000}
         override_factor_row = {
             "material_key": "mulch", "factors": '{"depth_in": 3}',
@@ -760,7 +760,7 @@ class TestBranchSettingsEnriched:
             [branch_row],           # (1) branch_settings
             [override_factor_row],  # (2) material_calcs branch overrides
             [],                     # (3) material_calcs company-wide (mulch overridden, nothing extra)
-            [catalog_row],          # (4) catalog_items
+            [catalog_row],          # (4) service_kits
         ]
         r = client.get("/api/settings/branch/1403")
         assert r.status_code == 200
@@ -799,7 +799,7 @@ class TestBranchSettingsEnriched:
             [branch_row],           # (1) branch_settings
             [],                     # (2) material_calcs branch overrides — none
             [company_wide_row],     # (3) material_calcs company-wide row
-            [catalog_row],          # (4) catalog_items
+            [catalog_row],          # (4) service_kits
         ]
         r = client.get("/api/settings/branch/3696")
         assert r.status_code == 200
@@ -823,7 +823,7 @@ class TestBranchSettingsEnriched:
             [{"crew_rate_cents_per_hour": 22500}],  # (1) branch_settings
             [],   # (2) material_calcs branch overrides
             [],   # (3) material_calcs company-wide
-            [],   # (4) catalog_items
+            [],   # (4) service_kits
         ]
         r = client.get("/api/settings/branch/1403")
         assert r.status_code == 200

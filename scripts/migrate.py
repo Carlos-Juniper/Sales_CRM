@@ -421,7 +421,7 @@ def detect_009(conn) -> bool:
 
     The row lives in service_kits after 065 and in catalog_items before it.
     Refreshing kits from a newer workbook is an explicit, separate operation
-    (scripts/load_catalog_items.py); never triggered here.
+    (scripts/load_service_kits.py); never triggered here.
     """
     table = _service_kit_table(conn)
     if table is None:

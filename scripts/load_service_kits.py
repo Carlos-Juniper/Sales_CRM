@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kit Catalog loader: Aspire kit workbook → service_kits seed.
+"""Service kit loader: Aspire kit workbook → service_kits seed.
 
 Source of truth: `business docs/Juniper_Aspire_Kit_Review.xlsx`, pulled live
 from Aspire (2026-07-14) by the GCP MySQL data workstream — the workbook Carlos
@@ -8,7 +8,7 @@ circulated for team review (Kit_Review_Email_Draft.md). Two pricing engines:
   * Install Kits (quantity-driven) — the full active + bid-available catalog
     (80 items, `ItemType='Kit' AND name LIKE '%Installed%'`). ItemCost is the
     embedded catalog/sub cost. Aspire does NOT store sell price or target GM on
-    the catalog item (they are applied per estimate); we seed target_gm at the
+    the kit (they are applied per estimate); we seed target_gm at the
     documented ~45% install GM and DERIVE a default unit_sell from
     cost ÷ (1 − target_gm) so a freshly added kit line prices sanely — the
     estimator overrides per estimate (blue-cell convention).
@@ -28,9 +28,9 @@ The loader is IDEMPOTENT and reviewable:
     (SQL uses bare table names — no `juniper.` prefix)
 
 Usage (from repo root):
-  venv/bin/python scripts/load_catalog_items.py                  # print SQL
-  venv/bin/python scripts/load_catalog_items.py --out sql/migrations/007_seed_catalog_items.sql
-  venv/bin/python scripts/load_catalog_items.py --verify         # counts vs DB
+  venv/bin/python scripts/load_service_kits.py                  # print SQL
+  venv/bin/python scripts/load_service_kits.py --out sql/migrations/007_seed_catalog_items.sql
+  venv/bin/python scripts/load_service_kits.py --verify         # counts vs DB
 
 Stdlib-only on purpose (xlsx = zip of XML) — no openpyxl in requirements.
 """
@@ -60,7 +60,7 @@ MAINTENANCE_TARGET_GM = 0.22  # app-wide maintenance target margin default
 
 
 @dataclass(frozen=True)
-class CatalogRow:
+class ServiceKitRow:
     id: str
     description: str
     uom: str
@@ -116,14 +116,14 @@ def _num(raw: str | None) -> float | None:
 
 # ── extraction ────────────────────────────────────────────────────────────────
 
-def extract_install_kits(workbook: Path = DEFAULT_WORKBOOK) -> list[CatalogRow]:
+def extract_install_kits(workbook: Path = DEFAULT_WORKBOOK) -> list[ServiceKitRow]:
     """Install Kits tab: Item Name / Category / Item Cost / Unit / branches."""
     rows = _read_sheet(workbook, "Install Kits")
     # data starts after the header row ('Item Name', 'Category', …)
     start = next(
         i for i, r in enumerate(rows) if r.get("A") == "Item Name" and r.get("B") == "Category"
     ) + 1
-    out: list[CatalogRow] = []
+    out: list[ServiceKitRow] = []
     for r in rows[start:]:
         name = r.get("A")
         cost = _num(r.get("C"))
@@ -133,7 +133,7 @@ def extract_install_kits(workbook: Path = DEFAULT_WORKBOOK) -> list[CatalogRow]:
         digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:12]
         branch = (r.get("F") or "All Branches").strip()[:100]
         out.append(
-            CatalogRow(
+            ServiceKitRow(
                 id=f"kit-inst-{digest}",
                 description=name.strip(),
                 uom=(r.get("D") or "EA").strip(),
@@ -152,7 +152,7 @@ def extract_install_kits(workbook: Path = DEFAULT_WORKBOOK) -> list[CatalogRow]:
     return out
 
 
-def extract_maintenance_kits(workbook: Path = DEFAULT_WORKBOOK) -> list[CatalogRow]:
+def extract_maintenance_kits(workbook: Path = DEFAULT_WORKBOOK) -> list[ServiceKitRow]:
     """Maintenance Kits tab: active takeoff items + observed standard rates.
 
     The takeoff table ends where the 'Legacy / Unmapped Item Names' review
@@ -163,7 +163,7 @@ def extract_maintenance_kits(workbook: Path = DEFAULT_WORKBOOK) -> list[CatalogR
         i for i, r in enumerate(rows)
         if r.get("A") == "Takeoff Group" and r.get("C") == "Takeoff Item"
     ) + 1
-    out: list[CatalogRow] = []
+    out: list[ServiceKitRow] = []
     for r in rows[start:]:
         group = r.get("A")
         if group is None or str(group).startswith("Legacy"):
@@ -175,7 +175,7 @@ def extract_maintenance_kits(workbook: Path = DEFAULT_WORKBOOK) -> list[CatalogR
         labor_rate = _num(r.get("E"))       # crew $/hr (may be unsampled)
         production = _num(r.get("F"))       # units per labor-hour (may be NULL)
         out.append(
-            CatalogRow(
+            ServiceKitRow(
                 id=f"kit-maint-{item_id}",
                 description=item.strip(),
                 uom=(r.get("D") or "EA").strip(),
@@ -193,7 +193,7 @@ def extract_maintenance_kits(workbook: Path = DEFAULT_WORKBOOK) -> list[CatalogR
     return out
 
 
-def extract_all(workbook: Path = DEFAULT_WORKBOOK) -> list[CatalogRow]:
+def extract_all(workbook: Path = DEFAULT_WORKBOOK) -> list[ServiceKitRow]:
     """The full catalog, maintenance first, in stable workbook order."""
     return extract_maintenance_kits(workbook) + extract_install_kits(workbook)
 
@@ -204,11 +204,11 @@ def _sql_str(s: str) -> str:
     return "'" + s.replace("\\", "\\\\").replace("'", "''") + "'"
 
 
-def _row_values(r: CatalogRow) -> str:
+def _row_values(r: ServiceKitRow) -> str:
     production = "NULL" if r.production_rate is None else f"{r.production_rate:g}"
     # Migration 022 dropped the kit table's branch column (then named
     # catalog_items.branch). The workbook branch
-    # name stays on CatalogRow for review, but the seed must not write it.
+    # name stays on ServiceKitRow for review, but the seed must not write it.
     # aspire_branch_id (019's replacement; NULL = company-wide) is left alone
     # on upsert so a refresh does not wipe the backfill.
     return (
@@ -219,12 +219,12 @@ def _row_values(r: CatalogRow) -> str:
     )
 
 
-def generate_seed_sql(rows: list[CatalogRow]) -> str:
+def generate_seed_sql(rows: list[ServiceKitRow]) -> str:
     counts = expected_counts(rows)
     values = ",\n".join(_row_values(r) for r in rows)
     return f"""-- Seed service_kits from the Aspire kit workbook
 -- (business docs/Juniper_Aspire_Kit_Review.xlsx, pulled live 2026-07-14).
--- Generated by scripts/load_catalog_items.py — REGENERATE, don't hand-edit.
+-- Generated by scripts/load_service_kits.py — REGENERATE, don't hand-edit.
 -- Idempotent: INSERT … ON DUPLICATE KEY UPDATE (deterministic ids).
 -- Migration 065 renamed catalog_items (kits) to service_kits.
 --
@@ -253,7 +253,7 @@ ON DUPLICATE KEY UPDATE
 
 # ── count validation (SQL-investigation pattern) ──────────────────────────────
 
-def expected_counts(rows: list[CatalogRow]) -> dict[str, int]:
+def expected_counts(rows: list[ServiceKitRow]) -> dict[str, int]:
     return {
         "install_quantity": sum(1 for r in rows if r.kit_type == "install_quantity"),
         "maintenance_hours": sum(1 for r in rows if r.kit_type == "maintenance_hours"),
@@ -261,7 +261,7 @@ def expected_counts(rows: list[CatalogRow]) -> dict[str, int]:
     }
 
 
-async def verify_counts(rows: list[CatalogRow], query=None) -> tuple[bool, str]:
+async def verify_counts(rows: list[ServiceKitRow], query=None) -> tuple[bool, str]:
     """Compare extracted counts against the live `crm` DB (bare table names).
 
     `query` defaults to db.query (the app's pool); injectable for tests.

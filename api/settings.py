@@ -1064,7 +1064,7 @@ def register(app, require_auth) -> None:
         )
         production_rates: list[dict] = [
             {
-                "catalogItemId": r["id"],
+                "serviceKitId": r["id"],
                 "description": r.get("description"),
                 "productionRate": float(r["production_rate"]),
                 "source": "inherited",
@@ -1448,7 +1448,7 @@ def register(app, require_auth) -> None:
         )
         production_rates: list[dict] = [
             {
-                "catalogItemId": r["id"],
+                "serviceKitId": r["id"],
                 "description": r.get("description"),
                 "productionRate": float(r["production_rate"]),
                 "source": "inherited",

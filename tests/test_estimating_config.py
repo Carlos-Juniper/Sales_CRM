@@ -7,7 +7,7 @@ Contract under test (all authenticated, all read-only):
   GET /api/estimating/config/margin-bands                   → margin_bands rows
   GET /api/estimating/config/material-calcs                 → material_calcs rows (factors jsonb parsed)
   GET /api/estimating/config/itb-scopes                     → itb_scopes rows, ordered group then order
-  GET /api/estimating/catalog-items?branch=&kit_type=&active= → catalog_items rows w/ filters
+  GET /api/estimating/service-kits?branch=&kit_type=&active= → service_kits rows w/ filters
 
 JSON is shaped to the existing TS types (camelCase) so the frontend swap is a
 drop-in. NO write/admin endpoints exist for these tables (locked decision).
@@ -121,7 +121,6 @@ class TestAuthRequired:
         "/api/estimating/config/margin-bands",
         "/api/estimating/config/material-calcs",
         "/api/estimating/config/itb-scopes",
-        "/api/estimating/catalog-items",
         "/api/estimating/service-kits",
     ])
     def test_unauthenticated_is_rejected(self, path):
@@ -286,13 +285,13 @@ class TestItbScopes:
         assert "ORDER BY scope_group, sort_order" in sql
 
 
-# ── GET /api/estimating/catalog-items ────────────────────────────────────────
+# ── GET /api/estimating/service-kits ─────────────────────────────────────────
 
-class TestCatalogItems:
+class TestServiceKits:
     def test_returns_rows_shaped_to_ts_type(self, authed):
         with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = [_kit_row()]
-            res = client.get("/api/estimating/catalog-items")
+            res = client.get("/api/estimating/service-kits")
         assert res.status_code == 200
         assert res.json() == [{
             "id": "kit-1",
@@ -311,7 +310,7 @@ class TestCatalogItems:
     def test_empty_until_handoff_22_populates(self, authed):
         with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = []
-            res = client.get("/api/estimating/catalog-items")
+            res = client.get("/api/estimating/service-kits")
         assert res.status_code == 200
         assert res.json() == []
 
@@ -322,7 +321,7 @@ class TestCatalogItems:
         with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = []
             res = client.get(
-                "/api/estimating/catalog-items?kit_type=install_quantity&active=true"
+                "/api/estimating/service-kits?kit_type=install_quantity&active=true"
             )
         assert res.status_code == 200
         sql, params = mock_query.call_args.args[0], mock_query.call_args.args[1]
@@ -335,30 +334,35 @@ class TestCatalogItems:
     def test_active_false_filter(self, authed):
         with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = []
-            res = client.get("/api/estimating/catalog-items?active=false")
+            res = client.get("/api/estimating/service-kits?active=false")
         assert res.status_code == 200
         assert mock_query.call_args.args[1] == [0]
 
     def test_rejects_bogus_active_value(self, authed):
         with patch("api.estimating.query", new_callable=AsyncMock):
-            res = client.get("/api/estimating/catalog-items?active=maybe")
+            res = client.get("/api/estimating/service-kits?active=maybe")
         assert res.status_code == 400
 
     def test_rejects_bogus_kit_type(self, authed):
         with patch("api.estimating.query", new_callable=AsyncMock):
-            res = client.get("/api/estimating/catalog-items?kit_type=bogus")
+            res = client.get("/api/estimating/service-kits?kit_type=bogus")
         assert res.status_code == 400
 
-    def test_service_kits_route_matches_catalog_items_alias(self, authed):
-        """Staggered deploys keep GET /catalog-items. Both routes read service_kits."""
+    def test_service_kits_route_lists_kits(self, authed):
         with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = [_kit_row()]
-            alias = client.get("/api/estimating/catalog-items")
-            canonical = client.get("/api/estimating/service-kits")
-        assert alias.status_code == 200
-        assert canonical.json() == alias.json()
-        assert "FROM service_kits" in mock_query.call_args_list[0].args[0]
-        assert "FROM service_kits" in mock_query.call_args_list[1].args[0]
+            res = client.get("/api/estimating/service-kits")
+        assert res.status_code == 200
+        assert res.json()[0]["id"] == "kit-1"
+        assert "FROM service_kits" in mock_query.call_args.args[0]
+
+    def test_catalog_items_route_no_longer_serves_kits(self, authed):
+        """Materials will own catalog_items later. This path must not list kits."""
+        res = client.get("/api/estimating/catalog-items")
+        assert res.status_code == 404
+        paths = {getattr(route, "path", "") for route in app.routes}
+        assert "/api/estimating/catalog-items" not in paths
+        assert "/api/estimating/service-kits" in paths
 
 
 # ── Locked decision: read-only — no write/admin endpoints ────────────────────
@@ -370,7 +374,6 @@ class TestReadOnly:
             "/api/estimating/config/margin-bands",
             "/api/estimating/config/material-calcs",
             "/api/estimating/config/itb-scopes",
-            "/api/estimating/catalog-items",
             "/api/estimating/service-kits",
         ]
         for route in app.routes:

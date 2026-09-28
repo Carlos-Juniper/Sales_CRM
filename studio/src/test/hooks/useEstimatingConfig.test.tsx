@@ -40,7 +40,7 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
     expect(result.current.marginBands).toEqual(DEFAULT_MARGIN_BANDS)
     expect(result.current.materialCalcs).toEqual(MATERIAL_FORMULA_ROWS)
     expect(result.current.itbScopes).toEqual(ITB_SCOPE_SEED)
-    expect(result.current.catalogItems).toEqual([])
+    expect(result.current.serviceKits).toEqual([])
   })
 
   it('loads all five config sets from the API', async () => {
@@ -102,7 +102,7 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
     expect(result.current.marginBands).toEqual(DEFAULT_MARGIN_BANDS)
     expect(result.current.materialCalcs).toEqual(MATERIAL_FORMULA_ROWS)
     expect(result.current.itbScopes).toEqual(ITB_SCOPE_SEED)
-    expect(result.current.catalogItems).toEqual([])
+    expect(result.current.serviceKits).toEqual([])
   })
 
   it('caches per query client — a second hook mount does not refetch', async () => {

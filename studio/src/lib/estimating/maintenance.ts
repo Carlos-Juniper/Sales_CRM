@@ -14,7 +14,7 @@
 
 import type {
   AspireOwner,
-  CatalogItem,
+  ServiceKit,
   EstimateLifecycle,
   EstimateSection,
   SectionService,
@@ -125,14 +125,14 @@ export function sellRateCentsPer1000Sf(
 
 /**
  * The editors read kits from GET /service-kits.
- * Adapts maintenance_hours CatalogItems to the editor's catalog-row shape,
+ * Adapts maintenance_hours service kits to the editor's row shape,
  * keeping the sq-ft-only basis rule: only ACTIVE, sq-ft, production-rated
  * kits are addable (a line seeded from one always passes the save guard).
  * The MAINTENANCE_SERVICE_CATALOG literal survives ONLY as the offline
  * fallback (API unreachable / not yet loaded ⇒ empty list).
  */
-export function maintenanceCatalogFromItems(
-  items: CatalogItem[],
+export function maintenanceRowsFromServiceKits(
+  items: ServiceKit[],
   crewRateCents: number = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
 ): MaintenanceCatalogService[] {
   const kits = items.filter(
@@ -166,18 +166,18 @@ export function maintenanceCatalogFromItems(
  */
 export function unresolvedProductionRateLabels(
   sections: EstimateSection[],
-  catalogItems: CatalogItem[],
+  serviceKits: ServiceKit[],
 ): string[] {
   const labels: string[] = []
   for (const section of sections) {
     for (const svc of section.services) {
       if (svc.hours !== null) continue
-      if (!svc.catalogItemId) {
+      if (!svc.serviceKitId) {
         labels.push(svc.label)
         continue
       }
-      if (catalogItems.length === 0) continue // catalog unknown — defer to the server
-      const kit = catalogItems.find((k) => k.id === svc.catalogItemId)
+      if (serviceKits.length === 0) continue // catalog unknown — defer to the server
+      const kit = serviceKits.find((k) => k.id === svc.serviceKitId)
       if (!kit || kit.productionRate === null) labels.push(svc.label)
     }
   }
@@ -229,7 +229,7 @@ export function catalogToService(
   return {
     id: newId('svc'),
     sectionId,
-    catalogItemId: row.key,
+    serviceKitId: row.key,
     label: row.label,
     qty: row.defaultQty,
     uom: row.uom,

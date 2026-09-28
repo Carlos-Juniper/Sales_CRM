@@ -3,7 +3,7 @@
 // Config-Table Read APIs (frontend fetch layer).
 //
 // The five config sets (approval tiers, margin bands, material calcs, ITB
-// scopes, catalog items) are fetched from the API and cached via TanStack
+// scopes, service kits) are fetched from the API and cached via TanStack
 // Query — the DB is the source of truth, so editing a row changes the UI
 // without a frontend deploy, and `invalidateQueries([ESTIMATING_CONFIG_KEY])`
 // after an admin edit picks it up immediately (no page reload needed). The
@@ -25,7 +25,7 @@ import {
 } from '@/lib/estimating/config'
 import type {
   ApprovalTier,
-  CatalogItem,
+  ServiceKit,
   ItbScope,
   MarginBandRow,
   MarginBands,
@@ -38,8 +38,8 @@ export interface EstimatingConfig {
   marginBands: MarginBands
   materialCalcs: MaterialCalcRow[]
   itbScopes: ItbScope[]
-  /** Kits. Empty until catalog_items is populated. */
-  catalogItems: CatalogItem[]
+  /** Kits from GET /api/estimating/service-kits. Empty until service_kits is populated. */
+  serviceKits: ServiceKit[]
   /** True once the API responded; false ⇒ the typed fallback literals. */
   loaded: boolean
 }
@@ -50,7 +50,7 @@ export const FALLBACK_ESTIMATING_CONFIG: EstimatingConfig = {
   marginBands: DEFAULT_MARGIN_BANDS,
   materialCalcs: MATERIAL_FORMULA_ROWS,
   itbScopes: ITB_SCOPE_SEED,
-  catalogItems: [],
+  serviceKits: [],
   loaded: false,
 }
 
@@ -70,7 +70,7 @@ async function fetchConfig(): Promise<EstimatingConfig> {
     estimatingConfigApi.marginBands().catch(() => null),
     estimatingConfigApi.materialCalcs().catch(() => null),
     estimatingConfigApi.itbScopes().catch(() => null),
-    estimatingConfigApi.catalogItems().catch(() => null),
+    estimatingConfigApi.serviceKits().catch(() => null),
   ])
   const anyLoaded =
     tiers !== null || bands !== null || calcs !== null || scopes !== null || kits !== null
@@ -79,7 +79,7 @@ async function fetchConfig(): Promise<EstimatingConfig> {
     marginBands: bands ? canonicalBands(bands) : DEFAULT_MARGIN_BANDS,
     materialCalcs: calcs ?? MATERIAL_FORMULA_ROWS,
     itbScopes: scopes ?? ITB_SCOPE_SEED,
-    catalogItems: kits ?? [],
+    serviceKits: kits ?? [],
     loaded: anyLoaded,
   }
 }

@@ -53,7 +53,7 @@ const ENRICHED_BRANCH = {
   ],
   productionRates: [
     {
-      catalogItemId: 'ci-mow',
+      serviceKitId: 'ci-mow',
       description: 'Weekly Mow',
       productionRate: 12000,
       source: 'inherited',

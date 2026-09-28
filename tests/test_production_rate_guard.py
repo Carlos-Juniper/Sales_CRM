@@ -4,7 +4,7 @@ Locked decision: production rates are REQUIRED — a maintenance line cannot be
 saved with a null production rate / unresolvable hours. A line resolves when:
 
   * the line itself carries non-null hours (hours trivially computable), OR
-  * its catalog_item has a non-null production_rate.
+  * its service kit has a non-null production_rate.
 
 Otherwise the write is rejected 422 with a clear message (frontend shows its
 own guard, but the server never trusts the client). Install estimates are
@@ -13,7 +13,7 @@ untouched — install kits are quantity-driven and carry no production rate.
 Enforced on every path that persists maintenance service lines:
   POST /estimates (nested tree) · POST sections (nested services)
   POST services · PATCH services (including edits that null-out hours or
-  repoint catalog_item_id at an unrated kit).
+  repoint service_kit_id at an unrated kit).
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def _maint_with_service(svc: dict) -> dict:
 
 
 def _create_maint(services_ok=True) -> dict:
-    svc = _svc(catalogItemId=RATED_KIT["id"]) if services_ok else _svc()
+    svc = _svc(serviceKitId=RATED_KIT["id"]) if services_ok else _svc()
     resp = client.post("/api/estimating/estimates", json=_maint_with_service(svc))
     assert resp.status_code == 201, resp.text
     return resp.json()
@@ -97,7 +97,7 @@ class TestCreateEstimateGuard:
     def test_rejects_line_whose_kit_has_null_production_rate(self, estimator):
         resp = client.post(
             "/api/estimating/estimates",
-            json=_maint_with_service(_svc(catalogItemId=UNRATED_KIT["id"])),
+            json=_maint_with_service(_svc(serviceKitId=UNRATED_KIT["id"])),
         )
         assert resp.status_code == 422
         assert "production rate" in resp.json()["detail"].lower()
@@ -105,14 +105,14 @@ class TestCreateEstimateGuard:
     def test_rejects_line_pointing_at_unknown_kit(self, estimator):
         resp = client.post(
             "/api/estimating/estimates",
-            json=_maint_with_service(_svc(catalogItemId="kit-nope")),
+            json=_maint_with_service(_svc(serviceKitId="kit-nope")),
         )
         assert resp.status_code == 422
 
     def test_accepts_line_with_rated_kit(self, estimator, db):
         resp = client.post(
             "/api/estimating/estimates",
-            json=_maint_with_service(_svc(catalogItemId=RATED_KIT["id"])),
+            json=_maint_with_service(_svc(serviceKitId=RATED_KIT["id"])),
         )
         assert resp.status_code == 201, resp.text
         # nothing partial persisted on the earlier rejects
@@ -155,7 +155,7 @@ class TestSectionAndServiceGuard:
         section_id = est["sections"][0]["id"]
         resp = client.post(
             f"/api/estimating/estimates/{est['id']}/sections/{section_id}/services",
-            json=_svc(catalogItemId=UNRATED_KIT["id"]),
+            json=_svc(serviceKitId=UNRATED_KIT["id"]),
         )
         assert resp.status_code == 422
         assert "production rate" in resp.json()["detail"].lower()
@@ -165,7 +165,7 @@ class TestSectionAndServiceGuard:
         section_id = est["sections"][0]["id"]
         resp = client.post(
             f"/api/estimating/estimates/{est['id']}/sections/{section_id}/services",
-            json=_svc(label="Bed detail", catalogItemId=RATED_KIT["id"]),
+            json=_svc(label="Bed detail", serviceKitId=RATED_KIT["id"]),
         )
         assert resp.status_code == 201, resp.text
 
@@ -189,7 +189,7 @@ class TestSectionAndServiceGuard:
         resp = client.patch(
             f"/api/estimating/estimates/{est['id']}/sections/{section['id']}"
             f"/services/{svc['id']}",
-            json={"catalogItemId": UNRATED_KIT["id"]},
+            json={"serviceKitId": UNRATED_KIT["id"]},
         )
         assert resp.status_code == 422
 

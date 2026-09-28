@@ -1,13 +1,13 @@
-"""Kit Catalog loader (scripts/load_catalog_items.py).
+"""Service kit loader (scripts/load_service_kits.py).
 
 The loader parses the real Aspire kit workbook Carlos provided
 (`business docs/Juniper_Aspire_Kit_Review.xlsx` — pulled live from Aspire,
 80 active + bid-available install kits, plus the maintenance takeoff-item
 catalog with observed production rates) and emits a reviewable, IDEMPOTENT
-seed SQL for `catalog_items` (INSERT … ON DUPLICATE KEY UPDATE).
+seed SQL for `service_kits` (INSERT … ON DUPLICATE KEY UPDATE).
 
 Acceptance criteria under test:
-  * `catalog_items` is populated from real source data via a reviewable loader.
+  * `service_kits` is populated from real source data via a reviewable loader.
   * Loader is idempotent and count-validated (deterministic ids, stable output,
     expected_counts() drives the live-DB verification in --verify mode).
 """
@@ -25,10 +25,10 @@ WORKBOOK = REPO / "business docs" / "Juniper_Aspire_Kit_Review.xlsx"
 
 def _load_module():
     spec = importlib.util.spec_from_file_location(
-        "load_catalog_items", REPO / "scripts" / "load_catalog_items.py"
+        "load_service_kits", REPO / "scripts" / "load_service_kits.py"
     )
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["load_catalog_items"] = mod  # dataclass introspection needs this
+    sys.modules["load_service_kits"] = mod  # dataclass introspection needs this
     spec.loader.exec_module(mod)
     return mod
 
@@ -120,7 +120,7 @@ class TestIdempotency:
     def test_seed_sql_does_not_write_dropped_branch_column(self):
         """Migration 022 dropped catalog_items.branch. Regenerated seed SQL
         must not name that column (aspire_branch_id is left untouched)."""
-        row = loader.CatalogRow(
+        row = loader.ServiceKitRow(
             id="kit-inst-abc",
             description="Shrub 50'",
             uom="EA",

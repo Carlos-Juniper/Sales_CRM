@@ -84,12 +84,12 @@ describe('sectionTotal', () => {
       squareFeet: 10000,
       services: [
         {
-          id: 'sv1', sectionId: 's1', catalogItemId: null, label: 'Mowing',
+          id: 'sv1', sectionId: 's1', serviceKitId: null, label: 'Mowing',
           qty: 42, uom: '/yr', complexityPct: 0.1, unitSellCents: 450,
           embeddedCostCents: null, targetGm: null, hours: null, sortOrder: 0, components: [],
         },
         {
-          id: 'sv2', sectionId: 's1', catalogItemId: null, label: 'Detail',
+          id: 'sv2', sectionId: 's1', serviceKitId: null, label: 'Detail',
           qty: 12, uom: '/yr', complexityPct: 0, unitSellCents: 300,
           embeddedCostCents: null, targetGm: null, hours: null, sortOrder: 1, components: [],
         },
@@ -103,12 +103,12 @@ describe('sectionTotal', () => {
     const s = section({
       services: [
         {
-          id: 'sv1', sectionId: 's1', catalogItemId: null, label: 'Mahogany 10-12 — Installed',
+          id: 'sv1', sectionId: 's1', serviceKitId: null, label: 'Mahogany 10-12 — Installed',
           qty: 3, uom: 'ea', complexityPct: 0, unitSellCents: 125050,
           embeddedCostCents: 68750, targetGm: 0.45, hours: null, sortOrder: 0, components: [],
         },
         {
-          id: 'sv2', sectionId: 's1', catalogItemId: null, label: 'Irrigation lateral',
+          id: 'sv2', sectionId: 's1', serviceKitId: null, label: 'Irrigation lateral',
           qty: 100, uom: 'FT', complexityPct: 0, unitSellCents: 250,
           embeddedCostCents: 138, targetGm: 0.45, hours: null, sortOrder: 1, components: [],
         },
@@ -125,7 +125,7 @@ describe('sectionTotal', () => {
   it('treats a null unit sell as 0', () => {
     const s = section({
       services: [{
-        id: 'sv1', sectionId: 's1', catalogItemId: null, label: 'TBD',
+        id: 'sv1', sectionId: 's1', serviceKitId: null, label: 'TBD',
         qty: 5, uom: 'ea', complexityPct: 0, unitSellCents: null,
         embeddedCostCents: null, targetGm: null, hours: null, sortOrder: 0, components: [],
       }],

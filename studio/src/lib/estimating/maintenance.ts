@@ -368,14 +368,6 @@ export function canUserEditField(
 
 // ----- Display reads --------------------------------------------------------------
 
-/** Exact dollars from integer cents: 2_494_800 → "$24,948.00". */
-export function formatCents(cents: number): string {
-  return `$${(cents / 100).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`
-}
-
 /**
  * Per-line ¢/SF read (recomputed as complexity changes, I-9.7). Derived from
  * the shared per-1,000-SF read in calc.ts — no local pricing math.

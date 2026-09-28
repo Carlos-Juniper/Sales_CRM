@@ -10,6 +10,7 @@ import { useState } from 'react'
 import { Copy, Plus, TriangleAlert, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { formatCents } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { DisciplineSelect } from './DisciplineSelect'
 import { BillingTypeSelect } from './BillingTypeSelect'
@@ -25,7 +26,6 @@ import {
   MAINTENANCE_SERVICE_CATALOG,
   type MaintenanceCatalogService,
   coerceQty,
-  formatCents,
   granularityFor,
   isComplexityOverridden,
   lineCentsPerSqft,

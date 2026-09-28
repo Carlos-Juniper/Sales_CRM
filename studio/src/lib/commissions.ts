@@ -1,7 +1,7 @@
 /**
  * Commission display helpers.
  *
- * For currency formatting, import formatCents from @/lib/estimating/maintenance directly.
+ * For currency formatting, import formatCents from @/lib/money.
  */
 
 export type Period = 'this_year' | 'this_quarter' | 'last_quarter' | 'this_month' | 'last_month' | 'all_time'

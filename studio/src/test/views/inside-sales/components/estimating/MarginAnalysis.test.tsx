@@ -32,7 +32,7 @@ import {
   perAcreCents,
   serviceGroupMargins,
 } from '@/lib/estimating/margins'
-import { formatCents } from '@/lib/estimating/maintenance'
+import { formatCents } from '@/lib/money'
 import { EstimatingToastProvider } from '@/views/inside-sales/components/estimating/EstimatingToast'
 import {
   EstimatingShellContext,

@@ -30,7 +30,7 @@ import type { CatalogItem, Estimate, MarginBandLabel, MarginBands } from '@/type
 import { contractTotal, groupMargin, marginBand } from '@/lib/estimating/calc'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import { useResolvedCrewRate } from '@/hooks/useResolvedCrewRate'
-import { formatCents } from '@/lib/estimating/maintenance'
+import { formatCents } from '@/lib/money'
 import {
   MARGIN_BENCHMARKS,
   type BenchmarkStatus,

@@ -23,7 +23,6 @@ import {
   estimatingRolesForUser,
   canUserEditField,
   MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
-  formatCents,
   lineCentsPerSqft,
   maintenanceCatalogFromItems,
   sellRateCentsPer1000Sf,
@@ -200,11 +199,6 @@ describe('canonical auth role → estimating role mapping', () => {
 })
 
 describe('display reads', () => {
-  it('formatCents renders exact dollars', () => {
-    expect(formatCents(2_494_800)).toBe('$24,948.00')
-    expect(formatCents(0)).toBe('$0.00')
-  })
-
   it('lineCentsPerSqft derives from the shared per-1,000-SF read', () => {
     // 259,200¢ over 120,000 SF = 2.16¢/SF
     expect(lineCentsPerSqft(259_200, 120_000)).toBeCloseTo(2.16, 5)

@@ -35,6 +35,7 @@ import type {
   SectionServiceComponent,
 } from '@/types/estimating'
 import { componentCost, marginBand } from '@/lib/estimating/calc'
+import { formatCents } from '@/lib/money'
 import { persistEstimateTree } from '@/lib/estimating/persistTree'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import {
@@ -44,7 +45,6 @@ import {
   estimateGm,
   estimateHours,
   estimateSubCostCents,
-  formatCents,
   formatGmPct,
   groupSameRateLabor,
   installKitCatalogFromItems,

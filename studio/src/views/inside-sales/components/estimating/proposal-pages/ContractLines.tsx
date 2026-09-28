@@ -15,7 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import { buildContractRows, buildContractTotals } from '@/lib/proposal/contract'
-import { formatCents } from '@/lib/proposal/formatCents'
+import { formatCents } from '@/lib/money'
 import type { Estimate } from '@/types/estimating'
 
 export function ContractLines({ estimate }: { estimate: Estimate }) {

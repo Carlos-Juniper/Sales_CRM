@@ -225,11 +225,11 @@ class TestCommissionEndpoints:
         assert allowed.json()["quarters"] == []
 
     def test_payout_schedule_period_uses_close_date_like_list(self, as_role, monkeypatch):
-        """year is always a SQL range. start_date and end_date narrow it.
+        """Both start_date and end_date without year filter that range alone.
 
-        A 2025 period without year=2025 does not return, because year
-        defaults to the current Eastern year. Sending year=2025 keeps both
-        the year window and the start/end bounds. Rep scoping is unchanged.
+        Sending year as well keeps the Eastern-year window and lets the
+        dates narrow it. One bound, or neither, still defaults the year.
+        Rep scoping is unchanged.
         """
         monkeypatch.setattr("api.commissions.et_today", lambda: date(2026, 9, 25))
         in_period = datetime(2025, 11, 2, 16, 0, tzinfo=timezone.utc)
@@ -268,15 +268,11 @@ class TestCommissionEndpoints:
             )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["year"] == 2026
+        assert body["year"] is None
         assert body["quarters"] == []
-        assert captured["params"][0] == "rep-1"
-        assert captured["params"][1] == datetime(2026, 1, 1, 5, 0)
-        assert captured["params"][2] == datetime(2027, 1, 1, 5, 0)
-        assert captured["params"][3] == "2025-01-01"
-        assert captured["params"][4] == "2025-12-31"
-        assert captured["sql"].count("c.created_at >= %s") == 2
-        assert "c.created_at < %s" in captured["sql"]
+        assert captured["params"] == ["rep-1", "2025-01-01", "2025-12-31"]
+        assert captured["sql"].count("c.created_at >= %s") == 1
+        assert "c.created_at < %s" not in captured["sql"]
         assert "c.created_at <= %s" in captured["sql"]
 
         async def explicit_year(sql, params=None):
@@ -315,7 +311,63 @@ class TestCommissionEndpoints:
         with patch("api.commissions.query", new=start_only):
             open_ended = client.get("/api/commissions/payout-schedule?start_date=2026-06-01")
         assert open_ended.status_code == 200
+        assert open_ended.json()["year"] == 2026
         assert open_ended.json()["quarters"] == []
+
+    def test_payout_schedule_dec_to_jan_does_not_clip_to_a_year(self, as_role, monkeypatch):
+        """A December-January range with no year is not clipped to one year."""
+        monkeypatch.setattr("api.commissions.et_today", lambda: date(2026, 9, 28))
+        rows = [
+            {
+                "commission_id": "c-dec",
+                "commission_amount_cents": 40,
+                "commission_status": "approved",
+                "created_at": datetime(2025, 12, 15, 16, 0, tzinfo=timezone.utc),
+                "id": "i-dec",
+                "installment_number": 1,
+                "payout_period_label": "December 2025",
+                "payout_date": date(2025, 12, 31),
+                "amount_cents": 40,
+                "status": "scheduled",
+            },
+            {
+                "commission_id": "c-jan",
+                "commission_amount_cents": 60,
+                "commission_status": "approved",
+                "created_at": datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc),
+                "id": "i-jan",
+                "installment_number": 1,
+                "payout_period_label": "March 2026",
+                "payout_date": date(2026, 3, 31),
+                "amount_cents": 60,
+                "status": "scheduled",
+            },
+        ]
+        captured = {}
+
+        async def fake_query(sql, params=None):
+            captured["sql"] = sql
+            captured["params"] = list(params or [])
+            return rows
+
+        as_role("sales", user_id="rep-1")
+        with patch("api.commissions.query", new=fake_query):
+            resp = client.get(
+                "/api/commissions/payout-schedule"
+                "?start_date=2025-12-01&end_date=2026-01-31"
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "year" in body
+        assert body["year"] is None
+        assert captured["params"] == ["rep-1", "2025-12-01", "2026-01-31"]
+        assert "c.created_at < %s" not in captured["sql"]
+        assert captured["sql"].count("c.created_at >= %s") == 1
+        assert "c.created_at <= %s" in captured["sql"]
+        assert [quarter["close_quarter"] for quarter in body["quarters"]] == [
+            "2025-Q4",
+            "2026-Q1",
+        ]
 
     def test_reps_include_plan_fields(self, as_role):
         as_role("admin")

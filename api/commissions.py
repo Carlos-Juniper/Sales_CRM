@@ -289,12 +289,16 @@ def register(app, require_auth) -> None:
     ) -> dict:
         """Closed quarters and the checks they hit.
 
-        `year` is the Eastern close year, defaulting to this year. It is always
-        a half-open UTC range on commissions.created_at: Jan 1 00:00 Eastern
-        through Jan 1 00:00 Eastern of the next year. start_date and end_date
-        are extra close-date bounds and do not replace that year. A deal must
-        fall inside the year and inside any bound that was sent. Pass `year`
-        to load a different calendar year.
+        `year`, when sent, is a half-open UTC range on commissions.created_at:
+        Jan 1 00:00 Eastern through Jan 1 00:00 Eastern of the next year.
+        start_date and end_date narrow that window. They do not replace it.
+
+        When start_date and end_date are both sent and `year` is omitted, the
+        filter is only that close-date range. There is no default year, so a
+        December-to-January period is not clipped. The response `year` is null.
+
+        With no year and fewer than both bounds, year defaults to this Eastern
+        year. A single bound still narrows that default year.
 
         amount_cents is null when every installment in the group has no
         amount. amount_partial is true when the total omits unknown amounts.
@@ -304,16 +308,23 @@ def register(app, require_auth) -> None:
         """
         target_user_id = user_id or user["id"]
         _require_own_or_viewer(user, target_user_id)
-        close_year = year if year is not None else et_today().year
-        year_start, year_end = eastern_year_utc_bounds(close_year)
         today = et_today()
+        # Both bounds and no year: the client's range is the whole filter.
+        range_only = year is None and bool(start_date) and bool(end_date)
+        if range_only:
+            close_year = None
+        else:
+            close_year = year if year is not None else today.year
         conditions = [
             "c.user_id = %s",
             "c.status != 'cancelled'",
-            "c.created_at >= %s",
-            "c.created_at < %s",
         ]
-        params: list[Any] = [target_user_id, year_start, year_end]
+        params: list[Any] = [target_user_id]
+        if close_year is not None:
+            year_start, year_end = eastern_year_utc_bounds(close_year)
+            conditions.append("c.created_at >= %s")
+            conditions.append("c.created_at < %s")
+            params.extend([year_start, year_end])
         if start_date:
             conditions.append("c.created_at >= %s")
             params.append(start_date)

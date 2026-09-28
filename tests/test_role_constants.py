@@ -31,14 +31,27 @@ def test_assignable_roles_are_canonical_minus_retired():
     assert not hasattr(authz, "SALES_TEAM_ROLES")
 
 
-def test_roster_rep_roles_match_the_sales_rep_picker():
-    assert authz.ROSTER_REP_ROLES == frozenset(authz.SALES_REP_DB_ROLES)
+def test_roster_rep_roles_are_sales_rep_roles_minus_the_legacy_alias():
+    assert authz.ROSTER_REP_ROLES == (
+        frozenset(authz.SALES_REP_DB_ROLES) - frozenset(authz.LEGACY_ROLE_MAP)
+    )
+    assert "outside_sales" not in authz.ROSTER_REP_ROLES
+    assert "sales" in authz.ROSTER_REP_ROLES
     assert "vp_sales" in authz.ROSTER_REP_ROLES
     assert authz.is_roster_rep("vp_sales")
+    assert authz.is_roster_rep("sales")
     assert authz.is_roster_rep("outside_sales")
-    assert "vp_sales" in authz.ROSTER_REP_ROLE_DETAIL
-    for role in sorted(authz.ROSTER_REP_ROLES):
-        assert role in authz.ROSTER_REP_ROLE_DETAIL
+    for raw_key in (
+        "outside_sales", "inside_sales", "maintenance_sales", "install_sales", "vp_sales",
+    ):
+        assert raw_key not in authz.ROSTER_REP_ROLE_DETAIL
+    for label in (
+        "Inside Sales",
+        "Maintenance Sales",
+        "Install Sales",
+        "VP of Sales",
+    ):
+        assert label in authz.ROSTER_REP_ROLE_DETAIL
 
 
 def test_vp_sales_membership():

@@ -754,6 +754,73 @@ class TestRetiredSalesAssignment:
         mock_resolve.assert_not_called()
 
 
+class TestApplyRoleChange:
+    """The PATCH role block lives in _apply_role_change."""
+
+    @patch("api.settings._require_resolved_sales_rep", new_callable=AsyncMock)
+    @patch("api.settings._audit", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    async def test_unchanged_role_returns_before_validation(
+        self, mock_exec, mock_audit, mock_resolve
+    ):
+        from api.settings import _apply_role_change
+
+        await _apply_role_change(
+            "u9",
+            {"role": " outside_sales ", "email": "sal@juniperlandscaping.com", "aspire_rep_id": 7},
+            "outside_sales",
+            "admin@juniper.example",
+        )
+        mock_exec.assert_not_awaited()
+        mock_audit.assert_not_awaited()
+        mock_resolve.assert_not_awaited()
+
+    @patch("api.settings._require_resolved_sales_rep", new_callable=AsyncMock)
+    @patch("api.settings._audit", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    async def test_retired_sales_is_400_and_writes_nothing(
+        self, mock_exec, mock_audit, mock_resolve
+    ):
+        from api.settings import _apply_role_change
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            await _apply_role_change(
+                "u9",
+                {"role": "manager", "email": "bm@juniperlandscaping.com", "aspire_rep_id": None},
+                "sales",
+                "admin@juniper.example",
+            )
+        assert exc.value.status_code == 400
+        assert exc.value.detail == RETIRED_SALES_ASSIGNMENT_DETAIL
+        mock_exec.assert_not_awaited()
+        mock_audit.assert_not_awaited()
+        mock_resolve.assert_not_awaited()
+
+    @patch("api.settings._require_resolved_sales_rep", new_callable=AsyncMock)
+    @patch("api.settings._audit", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    async def test_vp_sales_updates_and_audits_without_aspire(
+        self, mock_exec, mock_audit, mock_resolve
+    ):
+        from api.settings import _apply_role_change
+
+        await _apply_role_change(
+            "u9",
+            {"role": "manager", "email": "bm@juniperlandscaping.com", "aspire_rep_id": None},
+            "vp_sales",
+            "admin@juniper.example",
+        )
+        mock_resolve.assert_not_awaited()
+        mock_exec.assert_awaited_once()
+        sql, params = mock_exec.await_args.args
+        assert "UPDATE users SET role" in sql
+        assert params == ["vp_sales", None, "u9"]
+        mock_audit.assert_awaited_once()
+        assert mock_audit.await_args.kwargs["from_value"] == "manager"
+        assert mock_audit.await_args.kwargs["to_value"] == "vp_sales"
+
+
 class TestAdminEquivalentRoleAssignment:
     def test_sales_rep_db_roles_include_the_new_roles_only(self):
         assert "vp_sales" in SALES_REP_DB_ROLES

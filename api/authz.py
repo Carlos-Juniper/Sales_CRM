@@ -95,12 +95,28 @@ SALES_REP_DB_ROLES = (
     "outside_sales",
 )
 
-# Anyone who appears in the sales-rep picker can own a client-reference or
-# team-roster row. outside_sales normalizes to sales before the check.
-ROSTER_REP_ROLES = frozenset(SALES_REP_DB_ROLES)
+# Roster ownership after normalize_role. The legacy alias is not a member:
+# is_roster_rep maps outside_sales to sales before this check, so listing
+# the alias here would be a second name for a value that never matches.
+# `sales` stays, so an un-migrated row still owns a roster. SALES_REP_DB_ROLES
+# is the stored-value query list and still includes the alias.
+ROSTER_REP_ROLES = frozenset(SALES_REP_DB_ROLES) - frozenset(LEGACY_ROLE_MAP)
+
+# Labels for the assignable roster roles. Retired sales is omitted from the
+# user-facing 400 even though a stored `sales` row still passes is_roster_rep.
+_ROSTER_REP_LABELS = {
+    "inside_sales": "Inside Sales",
+    "maintenance_sales": "Maintenance Sales",
+    "install_sales": "Install Sales",
+    "vp_sales": "VP of Sales",
+}
 ROSTER_REP_ROLE_DETAIL = (
     "rep_id must be an active user with a sales role ("
-    + ", ".join(sorted(ROSTER_REP_ROLES))
+    + ", ".join(
+        _ROSTER_REP_LABELS[role]
+        for role in SALES_REP_DB_ROLES
+        if role in ROSTER_REP_ROLES and role in ASSIGNABLE_ROLES
+    )
     + ")."
 )
 
@@ -232,9 +248,10 @@ def is_marketing_manager(role: Optional[str]) -> bool:
 def is_roster_rep(role: Optional[str]) -> bool:
     """True for a role that owns its own client references and team roster.
 
-    Same set as SALES_REP_DB_ROLES, including vp_sales. outside_sales
-    normalizes to sales first. This is not the lead-book check:
-    `inside_sales` and `vp_sales` own a roster and are not field sales.
+    Membership is ROSTER_REP_ROLES (sales-rep roles minus the outside_sales
+    alias), including vp_sales and legacy sales. outside_sales normalizes to
+    sales first. This is not the lead-book check: `inside_sales` and
+    `vp_sales` own a roster and are not field sales.
     """
     return normalize_role(role) in ROSTER_REP_ROLES
 
@@ -268,7 +285,8 @@ def roster_rep_query(
             "Owning sales rep (users.id). On reads, filters client references "
             "and the team roster to that rep. On creates, the new row is owned "
             "by that rep. Marketing and admin may name any roster rep "
-            "(ROSTER_REP_ROLES, the same set as the sales-rep picker). "
+            "(ROSTER_REP_ROLES: sales-rep roles after the legacy alias is "
+            "normalized away). "
             "A roster rep may name only themselves; omitting "
             "it on a write assigns the row to the caller. On a read, field "
             "sales who omit it are scoped to their own id. Marketing, admin, "

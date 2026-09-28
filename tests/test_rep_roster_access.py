@@ -406,7 +406,9 @@ class TestMarketingEditsAnyRep:
         )
         assert r.status_code == 400
         assert r.json()["detail"] == authz.ROSTER_REP_ROLE_DETAIL
-        assert "vp_sales" in r.json()["detail"]
+        assert "VP of Sales" in r.json()["detail"]
+        assert "outside_sales" not in r.json()["detail"]
+        assert "Legacy: Sales" not in r.json()["detail"]
         mock_exec.assert_not_awaited()
 
         mock_query.return_value = []

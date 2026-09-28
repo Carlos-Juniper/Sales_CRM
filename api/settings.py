@@ -235,11 +235,55 @@ def _audit_scope_for_branch(aspire_branch_id: Optional[int]) -> tuple[str, Optio
     return "company", None
 
 
+async def _apply_role_change(
+    user_id: str,
+    current: dict,
+    submitted: str,
+    actor: str,
+) -> None:
+    """Write a users.role change, or return when the stored role is unchanged.
+
+    An equal role skips assignability and the Aspire re-resolve, so saving
+    branches on a legacy row does not rewrite users.role. A real change
+    rejects retired sales (400), resolves an Aspire rep when the new role
+    requires one, then updates and audits.
+    """
+    submitted = submitted.strip()
+    stored = (current.get("role") or "").strip()
+    if submitted == stored:
+        return
+
+    new_role = authz.ensure_assignable_role(submitted)
+    new_rep_id = current.get("aspire_rep_id")
+    if authz.requires_aspire_sales_rep(new_role):
+        # Block a field-sales role that cannot resolve an Aspire contact
+        # BEFORE writing anything (prevent-don't-repair). An existing
+        # aspire_rep_id is trusted, so reassigning sales → a split role
+        # does not drop the link.
+        new_rep_id = await _require_resolved_sales_rep(
+            current.get("email") or "", current.get("aspire_rep_id")
+        )
+
+    await execute(
+        "UPDATE users SET role = %s, aspire_rep_id = %s WHERE id = %s",
+        [new_role, new_rep_id, user_id],
+    )
+    await _audit(
+        scope_type="company",
+        scope_id=None,
+        setting_key=f"user.{user_id}.role",
+        from_value=stored,
+        to_value=new_role,
+        actor=actor,
+    )
+
+
 async def _require_active_sales_rep(rep_id: str) -> None:
     """404/400 unless rep_id is an active roster rep.
 
-    A roster rep is any role in ROSTER_REP_ROLES (the sales-rep picker,
-    including vp_sales). Other active users are not targets.
+    A roster rep is any role in ROSTER_REP_ROLES (normalized sales-rep
+    roles, including vp_sales and legacy sales). Other active users are
+    not targets.
     """
     rows = await query(
         "SELECT id, role, active FROM users WHERE id = %s",
@@ -1314,37 +1358,8 @@ def register(app, require_auth) -> None:
         actor = _actor(user)
 
         # ── role ─────────────────────────────────────────────────────────────
-        # An unchanged role skips assignability and the Aspire re-resolve, so
-        # saving branches on a legacy row does not rewrite users.role.
-        # outside_sales is not writable when the role actually changes.
         if body.role is not None:
-            submitted = (body.role or "").strip()
-            stored = (current.get("role") or "").strip()
-            if submitted != stored:
-                new_role = authz.ensure_assignable_role(submitted)
-
-                new_rep_id = current.get("aspire_rep_id")
-                if authz.requires_aspire_sales_rep(new_role):
-                    # Block a field-sales role that cannot resolve an Aspire
-                    # contact BEFORE writing anything (prevent-don't-repair).
-                    # An existing aspire_rep_id is trusted, so reassigning
-                    # sales → a split role does not drop the link.
-                    new_rep_id = await _require_resolved_sales_rep(
-                        current.get("email") or "", current.get("aspire_rep_id")
-                    )
-
-                await execute(
-                    "UPDATE users SET role = %s, aspire_rep_id = %s WHERE id = %s",
-                    [new_role, new_rep_id, user_id],
-                )
-                await _audit(
-                    scope_type="company",
-                    scope_id=None,
-                    setting_key=f"user.{user_id}.role",
-                    from_value=stored,
-                    to_value=new_role,
-                    actor=actor,
-                )
+            await _apply_role_change(user_id, current, body.role, actor)
 
         # ── active (deactivate/reactivate) ───────────────────────────────────
         if body.active is not None:

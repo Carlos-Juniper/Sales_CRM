@@ -12,7 +12,8 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Info, Plus, RotateCcw, Save, TriangleAlert } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Info, Plus, RotateCcw, Save, Settings2, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -30,6 +31,7 @@ import { acresFromSqft, contractTotal, tierForValue } from '@/lib/estimating/cal
 import { formatOptionalBudget } from '@/lib/estimating/contractBudgets'
 import { tiersForType } from '@/lib/estimating/config'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
+import { useResolvedCrewRate } from '@/hooks/useResolvedCrewRate'
 import {
   buildDefaultSection,
   catalogToService,
@@ -49,6 +51,19 @@ import { RushBadge } from './RushIndicators'
 import { cn } from '@/lib/utils'
 
 const TARGET_MARGIN_DEFAULT = 0.22
+
+/**
+ * Same sentence the API returns as a 422 when a priced maintenance line is
+ * saved without a crew rate. The editor blocks first; the server is the backstop.
+ */
+export const MAINTENANCE_CREW_RATE_REQUIRED =
+  'Maintenance pricing is blocked: no crew rate is set for this estimate\'s branch. Set it in Settings → Branch → Crew rate before saving priced maintenance lines.'
+
+function draftHasPricedLines(estimate: MaintenanceEstimate): boolean {
+  return estimate.sections.some((section) =>
+    section.services.some((svc) => (svc.unitSellCents ?? 0) !== 0),
+  )
+}
 
 function scopeNotesFromIntake(rows: { payload: Record<string, unknown> }[]): string | null {
   let found: string | null = null
@@ -128,6 +143,9 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   // approval_tiers + catalog_items come from the API-fetched config;
   // the config.ts / maintenance.ts literals are only the offline fallback.
   const { approvalTiers, catalogItems } = useEstimatingConfig()
+  // Same resolution as Margin Analysis: frozen snapshot, else the live branch
+  // rate from GET /api/settings/branch/{id}. Null blocks pricing — never $180.
+  const crew = useResolvedCrewRate(estimate)
 
   const [draft, setDraft] = useState<MaintenanceEstimate>(estimate)
   /** Snapshot Reset restores to (last saved state). */
@@ -145,7 +163,16 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     [approvalTiers],
   )
   // Kits come from GET /catalog-items; literal = offline fallback.
-  const maintCatalog = useMemo(() => maintenanceCatalogFromItems(catalogItems), [catalogItems])
+  // Derived $/1,000 SF uses the resolved crew rate. No rate → no catalog
+  // prices (the offline literal is priced too, so it stays hidden).
+  const pricingBlocked = !crew.isLoading && crew.crewRateCents == null
+  const maintCatalog = useMemo(
+    () =>
+      crew.crewRateCents == null
+        ? []
+        : maintenanceCatalogFromItems(catalogItems, crew.crewRateCents),
+    [catalogItems, crew.crewRateCents],
+  )
   const tier = tierForValue(contractCents, maintenanceTiers)
   const removeTarget = draft.sections.find((s) => s.id === confirmRemoveId) ?? null
 
@@ -197,6 +224,13 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   }
 
   async function handleSave() {
+    if (crew.isLoading) return
+    // Priced lines need the branch crew rate. The server rejects the same
+    // case with a 422; block here so the message shows before the request.
+    if (crew.crewRateCents == null && draftHasPricedLines(draft)) {
+      setSaveError(MAINTENANCE_CREW_RATE_REQUIRED)
+      return
+    }
     // Save guard (client half — the server enforces it with a 422):
     // every maintenance line must resolve a production rate (kit) or hours.
     const unresolved = unresolvedProductionRateLabels(draft.sections, catalogItems)
@@ -316,7 +350,11 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
             <RotateCcw className="h-3.5 w-3.5" />
             Reset
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={saving || crew.isLoading || (pricingBlocked && draftHasPricedLines(draft))}
+          >
             <Save className="h-3.5 w-3.5" />
             {saving ? 'Saving…' : 'Save'}
           </Button>
@@ -335,6 +373,50 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
       </div>
 
       <MaintenanceScopeSummary estimate={draft} />
+
+      {crew.crewRateCents != null && (
+        <p
+          data-testid="maintenance-crew-rate"
+          data-source={crew.source}
+          className="m-0 text-[11px] text-[hsl(var(--muted-fg))]"
+        >
+          Sell price per 1,000 SF uses {formatCents(crew.crewRateCents)}/hr
+          {draft.branchCity ? ` — ${draft.branchCity}` : ''}
+          {crew.source === 'snapshot' ? ' (frozen at submission)' : ' (branch crew rate)'}.
+        </p>
+      )}
+
+      {pricingBlocked && (
+        <div
+          data-testid="maintenance-no-crew-rate"
+          className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-900"
+        >
+          <div className="flex items-start gap-2">
+            <TriangleAlert className="h-4 w-4 flex-shrink-0 text-amber-600 mt-0.5" />
+            <div>
+              <p className="m-0 font-semibold">
+                No crew rate configured{draft.branchCity ? ` for ${draft.branchCity}` : ''}
+              </p>
+              <p className="m-0 mt-1">{MAINTENANCE_CREW_RATE_REQUIRED}</p>
+            </div>
+          </div>
+          {draft.aspireBranchId != null ? (
+            <Link
+              data-testid="crew-rate-settings-link"
+              to={`/settings/branch/${draft.aspireBranchId}/crew-rate`}
+              className="inline-flex w-fit items-center gap-1.5 rounded-md border border-amber-400 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Set the crew rate in Settings → Branch → Crew rate
+            </Link>
+          ) : (
+            <p className="m-0 pl-6">
+              This estimate has no branch yet. Open Settings → Branch → Crew rate, choose the
+              branch, and set the crew rate.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ---- Save error (design-added state) ---- */}
       {saveError && (

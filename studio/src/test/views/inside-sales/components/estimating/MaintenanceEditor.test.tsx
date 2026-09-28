@@ -27,11 +27,18 @@ import { EstimatingToastProvider } from '@/views/inside-sales/components/estimat
 import { EstimatingShellContext } from '@/views/inside-sales/components/estimating/useEstimatingShell'
 
 function renderMaint(estimate: Estimate = buildMaintenanceEstimate()) {
+  // Existing specs price an estimate that already has line sells. Give them a
+  // resolved crew rate (frozen snapshot) so the editor does not block on the
+  // missing-rate gate. Pass crewRateCentsPerHour: null to exercise that gate.
+  const priced =
+    estimate.crewRateCentsPerHour === undefined
+      ? { ...estimate, crewRateCentsPerHour: 18_000 }
+      : estimate
   const setOpenEstimate = vi.fn()
   const utils = render(
     <EstimatingToastProvider>
       <EstimatingShellContext.Provider
-        value={{ activeTab: 'editor', setActiveTab: vi.fn(), openEstimate: estimate, setOpenEstimate, openEstimateAt: vi.fn() }}
+        value={{ activeTab: 'editor', setActiveTab: vi.fn(), openEstimate: priced, setOpenEstimate, openEstimateAt: vi.fn() }}
       >
         <LineItemEditor />
       </EstimatingShellContext.Provider>
@@ -621,5 +628,86 @@ describe('MaintenanceEditor — rush badge', () => {
       }),
     )
     expect(screen.queryByTestId('rush-badge')).not.toBeInTheDocument()
+  })
+})
+
+describe('MaintenanceEditor — branch crew rate', () => {
+  it('prices a new kit line from the live branch crew rate', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get('/api/estimating/catalog-items', () => HttpResponse.json([RATED_KIT])),
+      http.get('/api/settings/branch/3696', () =>
+        HttpResponse.json({ aspireBranchId: 3696, crewRateCentsPerHour: 22_500 }),
+      ),
+    )
+    renderMaint(
+      buildMaintenanceEstimate({
+        crewRateCentsPerHour: null,
+        aspireBranchId: 3696,
+        branchCity: 'Fort Myers, FL',
+      }),
+    )
+    expect(await screen.findByTestId('maintenance-crew-rate')).toHaveTextContent(
+      'Sell price per 1,000 SF uses $225.00/hr — Fort Myers, FL (branch crew rate).',
+    )
+    const s1 = sectionCard('Common Area')
+    await waitFor(() =>
+      expect(
+        within(s1).getByRole('option', { name: 'Standard Production Mowing' }),
+      ).toBeInTheDocument(),
+    )
+    await user.selectOptions(within(s1).getByLabelText(/add line item/i), RATED_KIT.id)
+    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
+    // 1000/67650 × 22500¢ / 0.78 = 426¢ per 1,000 SF
+    // 120,000 SF × 426¢ × qty 1 × 1.10 complexity = $562.32
+    const row = within(s1).getByTestId('service-row-Standard Production Mowing')
+    expect(within(row).getByText('$562.32')).toBeInTheDocument()
+  })
+
+  it('uses a frozen snapshot and labels it as frozen at submission', () => {
+    renderMaint(
+      buildMaintenanceEstimate({
+        crewRateCentsPerHour: 19_500,
+        branchCity: 'Fort Myers, FL',
+      }),
+    )
+    const rate = screen.getByTestId('maintenance-crew-rate')
+    expect(rate).toHaveTextContent('$195.00/hr — Fort Myers, FL (frozen at submission)')
+    expect(rate).toHaveAttribute('data-source', 'snapshot')
+  })
+
+  it('blocks pricing and names Settings → Branch → Crew rate when the branch rate is missing', async () => {
+    server.use(
+      http.get('/api/settings/branch/2224', () =>
+        HttpResponse.json({ aspireBranchId: 2224, crewRateCentsPerHour: null }),
+      ),
+    )
+    renderMaint(
+      buildMaintenanceEstimate({
+        crewRateCentsPerHour: null,
+        aspireBranchId: 2224,
+        branchCity: '*** PICK A BRANCH ***',
+      }),
+    )
+    const notice = await screen.findByTestId('maintenance-no-crew-rate')
+    expect(notice).toHaveTextContent('No crew rate configured for *** PICK A BRANCH ***')
+    expect(notice).toHaveTextContent('Settings → Branch → Crew rate')
+    expect(screen.getByTestId('crew-rate-settings-link')).toHaveAttribute(
+      'href',
+      '/settings/branch/2224/crew-rate',
+    )
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled()
+    expect(screen.queryByTestId('maintenance-crew-rate')).not.toBeInTheDocument()
+  })
+
+  it('blocks an estimate with no branch instead of pricing at a default rate', () => {
+    renderMaint(
+      buildMaintenanceEstimate({ crewRateCentsPerHour: null, aspireBranchId: null }),
+    )
+    expect(screen.getByTestId('maintenance-no-crew-rate')).toHaveTextContent(
+      'Settings → Branch → Crew rate',
+    )
+    expect(screen.queryByTestId('crew-rate-settings-link')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled()
   })
 })

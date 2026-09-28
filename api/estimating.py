@@ -1627,6 +1627,65 @@ async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
     return section_id
 
 
+# ── Crew-rate gate for priced maintenance lines ──────────────────────────────
+#
+# $/1,000 SF is derived in ONE place: sellRateCentsPer1000Sf in
+# studio/src/lib/estimating/maintenance.ts
+#   (1000 / production_rate) × crew_rate / (1 − target_gm).
+# This module does not reimplement that formula. It only refuses to persist a
+# priced maintenance line when the estimate has no crew rate to price from.
+#
+# Resolution matches useResolvedCrewRate: the frozen snapshot on the estimate
+# wins, otherwise the live branch_settings.crew_rate_cents_per_hour. Neither
+# missing is filled in with a default.
+#
+# A line is priced when unitSellCents is present and non-zero. Unpriced lines
+# (null or 0 — ancillary items left for the branch) may still be saved.
+
+CREW_RATE_REQUIRED_DETAIL = (
+    "Maintenance pricing is blocked: no crew rate is set for this estimate's branch. "
+    "Set it in Settings → Branch → Crew rate before saving priced maintenance lines."
+)
+
+
+def _maintenance_line_is_priced(svc: dict) -> bool:
+    sell = svc.get("unitSellCents")
+    if sell is None:
+        return False
+    if isinstance(sell, bool) or not isinstance(sell, (int, float)):
+        return True
+    return sell != 0
+
+
+async def _crew_rate_cents_for_pricing(
+    aspire_branch_id: int | None, frozen_cents: int | None
+) -> int | None:
+    """Frozen snapshot, else the live branch rate. Never an invented default."""
+    if frozen_cents is not None:
+        return int(frozen_cents)
+    if aspire_branch_id is None:
+        return None
+    rows = await query(
+        "SELECT crew_rate_cents_per_hour FROM branch_settings WHERE aspire_branch_id = %s",
+        [aspire_branch_id],
+    )
+    if not rows or rows[0].get("crew_rate_cents_per_hour") is None:
+        return None
+    return int(rows[0]["crew_rate_cents_per_hour"])
+
+
+async def _require_crew_rate_for_priced_maintenance_lines(
+    services: list[dict],
+    aspire_branch_id: int | None,
+    frozen_cents: int | None = None,
+) -> None:
+    """422 when a priced maintenance line would be saved with no crew rate."""
+    if not any(_maintenance_line_is_priced(svc) for svc in services):
+        return
+    if await _crew_rate_cents_for_pricing(aspire_branch_id, frozen_cents) is None:
+        raise HTTPException(status_code=422, detail=CREW_RATE_REQUIRED_DETAIL)
+
+
 # ── Production-rate save guard (LOCKED decision) ─────────────────────────────
 #
 # Production rates are REQUIRED: a maintenance service line cannot be saved
@@ -1940,11 +1999,17 @@ def register(app, require_auth) -> None:
         _require_due_back_not_past(body.get("dueBackDate"))
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
-            await _require_resolvable_maintenance_lines([
+            nested_services = [
                 svc
                 for section in (body.get("sections") or [])
                 for svc in (section.get("services") or [])
-            ])
+            ]
+            await _require_resolvable_maintenance_lines(nested_services)
+            # Create has no frozen snapshot yet — the live branch rate is the
+            # only source. A missing row blocks priced lines (no $180 fill-in).
+            await _require_crew_rate_for_priced_maintenance_lines(
+                nested_services, aspire_branch_id, None
+            )
         # Budgets are optional. Resolve before the INSERT so a 400 persists
         # nothing, and so a blank string is NULL rather than 0. These dollars
         # are not the priced contract value — contract_value_cents, the ITB
@@ -2426,13 +2491,22 @@ def register(app, require_auth) -> None:
     async def create_section(estimate_id: str, body: dict, _user: dict = Depends(require_auth)) -> dict:
         authz.require_estimator(_user)  # sections are estimator-owned
         est_rows = await query(
-            "SELECT id, estimate_type FROM estimates WHERE id = %s", [estimate_id]
+            "SELECT id, estimate_type, aspire_branch_id, crew_rate_cents_per_hour "
+            "FROM estimates WHERE id = %s",
+            [estimate_id],
         )
         if not est_rows:
             raise HTTPException(status_code=404, detail="Not found")
-        # Nested services must resolve a production rate/hours.
+        # Nested services must resolve a production rate/hours, and priced
+        # maintenance lines need the branch (or frozen) crew rate.
         if est_rows[0].get("estimate_type") == "maintenance":
-            await _require_resolvable_maintenance_lines(body.get("services") or [])
+            nested = body.get("services") or []
+            await _require_resolvable_maintenance_lines(nested)
+            await _require_crew_rate_for_priced_maintenance_lines(
+                nested,
+                est_rows[0].get("aspire_branch_id"),
+                est_rows[0].get("crew_rate_cents_per_hour"),
+            )
         idx = await _next_sort_order("estimate_sections", "estimate_id", estimate_id, body)
         section_id = await _insert_section(estimate_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
@@ -2501,10 +2575,17 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=404, detail="Not found")
         # A maintenance line must resolve a production rate/hours.
         est_rows = await query(
-            "SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id]
+            "SELECT estimate_type, aspire_branch_id, crew_rate_cents_per_hour "
+            "FROM estimates WHERE id = %s",
+            [estimate_id],
         )
         if est_rows and est_rows[0].get("estimate_type") == "maintenance":
             await _require_resolvable_maintenance_lines([body])
+            await _require_crew_rate_for_priced_maintenance_lines(
+                [body],
+                est_rows[0].get("aspire_branch_id"),
+                est_rows[0].get("crew_rate_cents_per_hour"),
+            )
         idx = await _next_sort_order("section_services", "section_id", section_id, body)
         service_id = await _insert_service(section_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
@@ -2540,7 +2621,9 @@ def register(app, require_auth) -> None:
         # Guard the MERGED line (row + patch): an edit may not null-out hours
         # or repoint at an unrated kit and leave the line unresolvable.
         est_rows = await query(
-            "SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id]
+            "SELECT estimate_type, aspire_branch_id, crew_rate_cents_per_hour "
+            "FROM estimates WHERE id = %s",
+            [estimate_id],
         )
         if est_rows and est_rows[0].get("estimate_type") == "maintenance":
             merged = {
@@ -2549,8 +2632,16 @@ def register(app, require_auth) -> None:
                 "catalogItemId": body["catalogItemId"]
                 if "catalogItemId" in body
                 else current.get("catalog_item_id"),
+                "unitSellCents": body["unitSellCents"]
+                if "unitSellCents" in body
+                else current.get("unit_sell_cents"),
             }
             await _require_resolvable_maintenance_lines([merged])
+            await _require_crew_rate_for_priced_maintenance_lines(
+                [merged],
+                est_rows[0].get("aspire_branch_id"),
+                est_rows[0].get("crew_rate_cents_per_hour"),
+            )
         cols = {
             "catalogItemId": "catalog_item_id",
             "discipline": "discipline",

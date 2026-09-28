@@ -23,19 +23,6 @@ import type { LegacyUserRole, UserRole } from '@/types'
 import { normalizeRole } from '@/hooks/useRole'
 import { per1000SfRead } from './calc'
 
-/**
- * Loaded crew-hour rate (labor + equipment burden) used to derive a kit's
- * SELL rate from its production rate when the catalog row carries no explicit
- * unit sell, integer cents/hr. PROVISIONAL demo config — TODO(carlos): replace
- * with real branch crew rates (kit production-rate migration) before ship.
- *
- * Slice 11b NOTE: this is a PRICING helper default, NOT a margin source. The
- * Margin Analysis panel must NEVER silently fall back to this value — it
- * resolves the crew rate snapshot→live→null and refuses a number when null
- * (§2.3). Do not reintroduce this as a default in margins.ts.
- */
-export const MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR = 18_000
-
 // ----- Complexity (I-9.7) ----------------------------------------------------
 
 /**
@@ -112,11 +99,16 @@ export const MAINTENANCE_SERVICE_CATALOG: MaintenanceCatalogService[] = [
  * production rate when the catalog row carries no explicit unit sell:
  * cost/1,000 SF = (1,000 ÷ rate) hours × loaded crew rate, marked up to the
  * kit's target GM. Keeps hours-driven kits priced from hours, never a guess.
+ *
+ * `crewRateCents` is the estimate's resolved branch crew rate (frozen snapshot,
+ * else `branch_settings.crew_rate_cents_per_hour`). There is no default: a
+ * missing rate must block pricing, not invent one. This is the only copy of
+ * the formula — the API enforces that a rate exists and does not recompute it.
  */
 export function sellRateCentsPer1000Sf(
   productionRate: number,
   targetGm: number,
-  crewRateCents: number = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
+  crewRateCents: number,
 ): number {
   const costPer1000 = (1000 / productionRate) * crewRateCents
   const gm = targetGm >= 1 || targetGm < 0 ? 0 : targetGm
@@ -133,7 +125,7 @@ export function sellRateCentsPer1000Sf(
  */
 export function maintenanceCatalogFromItems(
   items: CatalogItem[],
-  crewRateCents: number = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
+  crewRateCents: number,
 ): MaintenanceCatalogService[] {
   const kits = items.filter(
     (k) =>

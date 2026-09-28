@@ -22,7 +22,6 @@ import {
   assertCanEdit,
   estimatingRolesForUser,
   canUserEditField,
-  MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
   formatCents,
   lineCentsPerSqft,
   maintenanceCatalogFromItems,
@@ -232,13 +231,14 @@ const kit = (over: Partial<CatalogItem> & Pick<CatalogItem, 'id' | 'description'
 
 describe('maintenanceCatalogFromItems (API catalog adapter)', () => {
   const rated = kit({ id: 'kit-1', description: 'Standard Production Mowing', productionRate: 67650 })
+  const branchRate = 22_500
 
   it('falls back to the literal when the API returned no usable kits', () => {
-    expect(maintenanceCatalogFromItems([])).toBe(MAINTENANCE_SERVICE_CATALOG)
+    expect(maintenanceCatalogFromItems([], branchRate)).toBe(MAINTENANCE_SERVICE_CATALOG)
   })
 
   it('adapts rated sq-ft maintenance kits to editor catalog rows (kit id = key)', () => {
-    const rows = maintenanceCatalogFromItems([rated])
+    const rows = maintenanceCatalogFromItems([rated], branchRate)
     expect(rows).toHaveLength(1)
     expect(rows[0].key).toBe('kit-1')
     expect(rows[0].label).toBe('Standard Production Mowing')
@@ -253,22 +253,31 @@ describe('maintenanceCatalogFromItems (API catalog adapter)', () => {
       kit({ id: 'kit-count', description: 'Tree Rings', productionRate: 10, uom: 'CT' }),
       kit({ id: 'kit-install', description: 'Mulch', productionRate: 5, kitType: 'install_quantity' }),
     ]
-    expect(maintenanceCatalogFromItems(items).map((r) => r.key)).toEqual(['kit-1'])
+    expect(maintenanceCatalogFromItems(items, branchRate).map((r) => r.key)).toEqual(['kit-1'])
   })
 
-  it('derives the sell rate from the production rate + crew rate + target GM when unit sell is 0', () => {
-    const rows = maintenanceCatalogFromItems([rated])
+  it('derives the sell rate from the branch crew rate + target GM when unit sell is 0', () => {
+    const rows = maintenanceCatalogFromItems([rated], branchRate)
     expect(rows[0].rateCentsPer1000Sf).toBe(
-      sellRateCentsPer1000Sf(67650, 0.22, MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+      sellRateCentsPer1000Sf(67650, 0.22, branchRate),
     )
+    // $180/hr is not a silent default — a different branch rate prices differently
+    expect(rows[0].rateCentsPer1000Sf).not.toBe(sellRateCentsPer1000Sf(67650, 0.22, 18_000))
     // and an explicit unit sell wins
     const priced = kit({ id: 'kit-2', description: 'Priced', productionRate: 5000, unitSellCents: 450 })
-    expect(maintenanceCatalogFromItems([priced])[0].rateCentsPer1000Sf).toBe(450)
+    expect(maintenanceCatalogFromItems([priced], branchRate)[0].rateCentsPer1000Sf).toBe(450)
   })
 
   it('sellRateCentsPer1000Sf = (1000 ÷ rate) × crew rate ÷ (1 − GM)', () => {
     // 1000/60000 h × 18,000¢ = 300¢ cost → /0.78 = 385¢
     expect(sellRateCentsPer1000Sf(60_000, 0.22, 18_000)).toBe(385)
+    // Same formula at a branch rate of $225/hr: 375¢ cost → /0.78 = 481¢
+    expect(sellRateCentsPer1000Sf(60_000, 0.22, 22_500)).toBe(481)
+  })
+
+  it('does not export a provisional crew-rate default', async () => {
+    const maintenance = await import('@/lib/estimating/maintenance')
+    expect('MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR' in maintenance).toBe(false)
   })
 })
 

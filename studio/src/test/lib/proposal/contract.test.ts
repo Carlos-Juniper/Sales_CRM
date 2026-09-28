@@ -231,7 +231,7 @@ describe('buildPaymentSchedule', () => {
 
   describe('a line with no derivable billing type', () => {
     // All maintenance work bundles into the contract and is split across the
-    // 12-month schedule. A hand-entered line has no catalog item to derive a
+    // 12-month schedule. A hand-entered line has no service kit to derive a
     // billing type from and arrives as null — it must still bundle, not vanish
     // from the schedule while still counting toward the contract total.
     const withNullBillingType = () =>

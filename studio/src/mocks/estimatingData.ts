@@ -685,7 +685,7 @@ export const mockTakeoffLines: TakeoffLine[] = buildTakeoffLines(mockEstimatesV2
 
 // ---------------------------------------------------------------------------
 // service_kits seed for GET /service-kits. The maintenance
-// rows mirror real workbook kits from sql/migrations/009_seed_catalog_items.sql
+// rows mirror real workbook kits from the kit seed migration
 // (rated + deliberately UNRATED rows, so the production-rate save guard is
 // exercisable in dev); the install rows reuse the kit literals (same ids, so
 // editor fixtures resolve whether the config API has loaded or not).

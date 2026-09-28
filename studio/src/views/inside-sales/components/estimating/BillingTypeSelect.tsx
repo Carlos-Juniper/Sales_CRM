@@ -3,11 +3,11 @@
 //
 // All maintenance work bundles into the contract cost and is broken into the
 // Landscape Maintenance Agreement's 12-month payment schedule. That is the
-// default for every line, including hand-entered ones with no catalog item.
+// default for every line, including hand-entered ones with no service kit.
 // This control exists to mark the exception: work billed once, when performed,
 // which appears in the contract total but is left out of the monthly schedule.
 //
-// "Auto" (null) derives from the line's catalog item, and every item in the
+// "Auto" (null) derives from the line's service kit, and every kit in the
 // catalog is recurring — so Auto and Recurring resolve the same today. They
 // are kept distinct because Auto follows the catalog if an item is ever
 // reclassified, whereas Recurring pins this line regardless.

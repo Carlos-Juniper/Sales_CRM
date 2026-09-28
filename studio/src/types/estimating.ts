@@ -365,8 +365,7 @@ export interface SectionServiceComponent {
 export type KitType = 'maintenance_hours' | 'install_quantity'
 
 /**
- * Priced service kit from GET /api/estimating/service-kits
- * (`service_kits`, renamed from catalog_items in migration 069).
+ * Priced service kit from GET /api/estimating/service-kits (`service_kits`).
  * `scopeText` and `billingType` are not on this list; estimate loads copy
  * them onto the section service.
  */

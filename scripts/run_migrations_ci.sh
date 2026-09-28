@@ -25,6 +25,7 @@ echo "==> Installing pymysql"
 # --break-system-packages: this container is disposable per-build (PEP 668
 # blocks system-wide pip installs on the cloud-sdk image's Debian/Python 3.13
 # base) — safe here since nothing else on the image depends on this env.
+# Pin matches requirements-dev.txt. This step only needs the migrate driver.
 pip install --quiet --break-system-packages "pymysql==1.1.1"
 
 echo "==> Downloading cloud-sql-proxy ${PROXY_VERSION}"

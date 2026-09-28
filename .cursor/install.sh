@@ -26,8 +26,7 @@ fi
 # shellcheck disable=SC1091
 . .venv/bin/activate
 python -m pip install --upgrade pip
-# pymysql: sync driver used by scripts/migrate.py. pytest*: backend test suite.
-python -m pip install -r requirements.txt pymysql pytest pytest-asyncio
+python -m pip install -r requirements.txt -r requirements-dev.txt
 
 echo "==> [install] Playwright Chromium (used for proposal PDF rendering)"
 # --with-deps installs the browser and its OS libraries. Cached under

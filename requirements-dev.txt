@@ -1,0 +1,5 @@
+# Local and CI extras. The production image installs requirements.txt only.
+# scripts/run_migrations_ci.sh installs the same pymysql pin.
+pymysql==1.1.1
+pytest
+pytest-asyncio

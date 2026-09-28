@@ -8,7 +8,7 @@
 //                   error state and a success state.
 // material-factors: renders factor fields, PATCHes changed factors keyed on the
 //                   materialKey, and exposes NO unit_cost/unit_sell control.
-// production-rates: edits a catalog item's production_rate and PATCHes it.
+// production-rates: edits a service kit's production_rate and PATCHes it.
 // branch-profile:   read-only note (no lat/lng write path exists server-side).
 // ---------------------------------------------------------------------------
 
@@ -219,8 +219,8 @@ describe('MaterialFactorsForm', () => {
 
 describe('ProductionRatesForm', () => {
   it('renders a production-rate field per maintenance kit', async () => {
-    // ProductionRatesForm now reads from the enriched branch GET (commits
-    // 32c58fe / 2750a9d) — no separate catalog-items endpoint call.
+    // ProductionRatesForm reads production rates from the enriched branch GET
+    // (commits 32c58fe / 2750a9d). It does not call a separate kit-list endpoint.
     mockEnrichedBranch()
     renderComp(<ProductionRatesForm aspireBranchId={BRANCH_ID} />)
     const rate = (await screen.findByLabelText(
@@ -229,7 +229,7 @@ describe('ProductionRatesForm', () => {
     expect(rate.value).toBe('12000')
   })
 
-  it('PATCHes the changed production_rate keyed on catalog item id', async () => {
+  it('PATCHes the changed production_rate keyed on service kit id', async () => {
     mockEnrichedBranch()
     let body: Record<string, unknown> | null = null
     server.use(

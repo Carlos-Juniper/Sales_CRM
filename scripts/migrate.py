@@ -157,6 +157,24 @@ def file_checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _sql_word(text: str, i: int) -> str:
+    """Uppercase identifier starting at i, or '' when i is mid-token."""
+    if i > 0 and (text[i - 1].isalnum() or text[i - 1] == "_"):
+        return ""
+    j = i
+    while j < len(text) and (text[j].isalnum() or text[j] == "_"):
+        j += 1
+    return text[i:j].upper()
+
+
+def _end_closes_block(text: str, i: int) -> bool:
+    """True for a block END, false for END IF / END LOOP / END WHILE / END CASE."""
+    j = i + 3
+    while j < len(text) and text[j].isspace():
+        j += 1
+    return _sql_word(text, j) not in {"IF", "LOOP", "WHILE", "CASE", "REPEAT"}
+
+
 def split_statements(sql_text: str) -> list[str]:
     """
     Split SQL text on ';' boundaries, returning only executable DML/DDL.
@@ -165,21 +183,61 @@ def split_statements(sql_text: str) -> list[str]:
     (e.g. "-- name; rest of comment" in 011) cannot create phantom segments.
     Skips blank segments and pure SELECT statements (informational checksums).
 
-    The migration set has no stored procedures or ';'-containing string literals,
-    so semicolon splitting is safe after comment removal.
+    A CREATE TRIGGER ... BEGIN ... END block is one statement. Semicolons
+    inside that block, and inside single-quoted strings, do not split it.
     """
-    # Remove everything from -- to end of line before splitting.
     cleaned = re.sub(r"--[^\n]*", "", sql_text)
-    result = []
-    for part in cleaned.split(";"):
-        effective = part.strip()
-        if not effective:
+    result: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    i = 0
+    n = len(cleaned)
+    while i < n:
+        ch = cleaned[i]
+        if ch == "'":
+            buf.append(ch)
+            i += 1
+            while i < n:
+                buf.append(cleaned[i])
+                if cleaned[i] == "'":
+                    if i + 1 < n and cleaned[i + 1] == "'":
+                        buf.append("'")
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
             continue
-        first_word = effective.split()[0].upper()
-        if first_word == "SELECT":
-            continue  # informational count query, not DDL/DML to execute
-        result.append(effective)
+        word = _sql_word(cleaned, i)
+        if word == "BEGIN":
+            depth += 1
+            buf.append(cleaned[i:i + 5])
+            i += 5
+            continue
+        if word == "END" and _end_closes_block(cleaned, i):
+            if depth:
+                depth -= 1
+            buf.append(cleaned[i:i + 3])
+            i += 3
+            continue
+        if ch == ";" and depth == 0:
+            _append_statement(result, "".join(buf))
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    _append_statement(result, "".join(buf))
     return result
+
+
+def _append_statement(result: list[str], chunk: str) -> None:
+    effective = chunk.strip()
+    if not effective:
+        return
+    if effective.split()[0].upper() == "SELECT":
+        return  # informational count query, not DDL/DML to execute
+    result.append(effective)
 
 
 def exec_statements(conn, stmts: list[str], verbose: bool = False) -> None:
@@ -858,6 +916,29 @@ def detect_069(conn) -> bool:
     )
 
 
+def detect_070(conn) -> bool:
+    """070 applied ↔ materials, material_prices, and the load trigger exist.
+
+    materials is the item master (inventory_id, no kit_type, no cost column).
+    material_prices has the one-current unique key, the item foreign key, and
+    both marker triggers. material_price_loads and trg_material_price_load_bi
+    record price history. A partial apply stays False.
+    """
+    return (
+        table_exists(conn, "materials")
+        and column_exists(conn, "materials", "inventory_id")
+        and not column_exists(conn, "materials", "kit_type")
+        and not column_exists(conn, "materials", "unit_cost_cents")
+        and table_exists(conn, "material_prices")
+        and index_exists(conn, "material_prices", "uq_material_prices_one_current")
+        and foreign_key_exists(conn, "material_prices", "fk_material_prices_item")
+        and trigger_exists(conn, "trg_material_prices_bi")
+        and trigger_exists(conn, "trg_material_prices_bu")
+        and table_exists(conn, "material_price_loads")
+        and trigger_exists(conn, "trg_material_price_load_bi")
+    )
+
+
 def detect_064(conn) -> bool:
     """064 applied ↔ estimates.irrigation_occurrences column exists.
 
@@ -957,6 +1038,7 @@ _DETECT: dict = {
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
     "069_service_kits":                           detect_069,
+    "070_materials_catalog":                      detect_070,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

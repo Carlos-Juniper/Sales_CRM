@@ -85,11 +85,6 @@ export function getCommissionPeriodDates(period: Period, now = new Date()): { st
   return { start_date, end_date }
 }
 
-/** Calendar year of a period end date. Sent as the payout-schedule `year`. */
-export function scheduleCloseYear(endDate: string): number {
-  return Number(endDate.slice(0, 4))
-}
-
 export function closedCommissionLabel(period: Period): string {
   if (period === 'this_year') return 'Closed this year'
   if (period === 'all_time') return 'All closed commission'

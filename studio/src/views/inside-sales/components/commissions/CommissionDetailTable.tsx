@@ -85,7 +85,7 @@ function InstallmentLines({
                 Collected {formatCents(installment.collected_amount_cents)}
               </span>
             )}
-            {isAdmin && installment.payable && (
+            {isAdmin && installment.payable && installment.status !== 'paid' && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -310,7 +310,7 @@ export function CommissionDetailTable({
                     )}
                     {isAdmin && (
                       <td className="px-4 py-3 text-right">
-                        {commission.payable && (
+                        {commission.payable && commission.status !== 'paid' && (
                           <Button
                             size="sm"
                             variant="ghost"

@@ -56,6 +56,8 @@ function makeCommission(
     client_type: null,
     contract_start_date: '2026-04-01',
     payable,
+    payout_period: 'June 2026',
+    payout_period_label: 'June 2026',
     installments,
   }
 }
@@ -164,5 +166,30 @@ describe('CommissionDetailTable installments', () => {
     renderTable(true, 'approved', false)
     expect(screen.queryByRole('button', { name: 'Mark Paid' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Mark payment 1 on Dobson Ranch HOA paid' })).toBeInTheDocument()
+  })
+
+  it('hides mark-paid on a paid row that is still payable', () => {
+    const paidInstallment = installment({
+      id: 'paid-1',
+      payout_period: 'March 2026',
+      payout_period_label: 'March 2026',
+      payout_date: '2026-03-31',
+      amount_cents: 40_000,
+      status: 'paid',
+      bucket: 'dated',
+      payable: true,
+    })
+    render(
+      <CommissionDetailTable
+        commissions={[makeCommission([paidInstallment], 'paid', true)]}
+        isLoading={false}
+        filters={filters}
+        onFiltersChange={() => {}}
+        isAdmin
+      />,
+    )
+    expect(screen.getAllByText('Paid').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Mark Paid' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Mark payment 1 on Dobson Ranch HOA paid' })).not.toBeInTheDocument()
   })
 })

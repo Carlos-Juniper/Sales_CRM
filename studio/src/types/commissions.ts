@@ -62,13 +62,17 @@ export interface Commission {
   client_type: string | null
   contract_start_date: string | null
   payable: boolean
+  payout_period: string
+  payout_period_label: string
   installments: CommissionInstallment[]
 }
 
 export interface CommissionNextPayout {
   payout_period: string
+  payout_period_label: string
   payout_date: string
   amount_cents: number
+  bucket: CommissionPayoutBucket
 }
 
 export interface CommissionSummary {
@@ -118,7 +122,7 @@ export type CommissionPayoutPeriod = CommissionPayoutRow
 
 export interface CommissionPayoutSchedule {
   user_id: string
-  year: number
+  year: number | null
   quarters: CommissionCloseQuarter[]
   by_payout_period: CommissionPayoutPeriod[]
 }

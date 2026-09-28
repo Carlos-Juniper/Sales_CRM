@@ -3,8 +3,10 @@
   "paid_ytd_cents": 80000,
   "next_payout": {
     "payout_period": "June 2026",
+    "payout_period_label": "June 2026",
     "payout_date": "2026-06-30",
-    "amount_cents": 15000
+    "amount_cents": 15000,
+    "bucket": "dated"
   },
   "upcoming_cents": 7500,
   "due_cents": 15000,

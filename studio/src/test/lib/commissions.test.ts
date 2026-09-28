@@ -4,7 +4,6 @@ import {
   getCommissionPeriodDates,
   getPeriodDates,
   payoutAmountLabel,
-  scheduleCloseYear,
   type Period,
 } from '@/lib/commissions'
 
@@ -49,15 +48,6 @@ describe('formatCloseQuarter', () => {
     ['not-a-quarter', 'not-a-quarter'],
   ])('%s → %s', (input, expected) => {
     expect(formatCloseQuarter(input)).toBe(expected)
-  })
-})
-
-describe('scheduleCloseYear', () => {
-  it('uses the year of the period end date, including a window in the previous year', () => {
-    expect(scheduleCloseYear(getCommissionPeriodDates('this_year', SEP_25).end_date)).toBe(2026)
-    expect(scheduleCloseYear(getCommissionPeriodDates('last_quarter', FEB_15).end_date)).toBe(2025)
-    expect(scheduleCloseYear(getCommissionPeriodDates('last_month', JAN_15).end_date)).toBe(2025)
-    expect(scheduleCloseYear(getCommissionPeriodDates('all_time', SEP_25).end_date)).toBe(2026)
   })
 })
 

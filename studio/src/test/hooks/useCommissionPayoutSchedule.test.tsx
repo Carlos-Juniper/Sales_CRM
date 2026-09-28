@@ -13,7 +13,7 @@ import type { CommissionPayoutSchedule, CommissionSummary } from '@/types/commis
 
 const schedule: CommissionPayoutSchedule = {
   user_id: 'rep-1',
-  year: 2026,
+  year: null,
   quarters: [
     {
       close_quarter: '2026-Q2',
@@ -49,7 +49,13 @@ const schedule: CommissionPayoutSchedule = {
 const summary: CommissionSummary = {
   scheduled_ytd_cents: 125_000,
   paid_ytd_cents: 80_000,
-  next_payout: { payout_period: 'June 2026', payout_date: '2026-06-30', amount_cents: 15_000 },
+  next_payout: {
+    payout_period: 'June 2026',
+    payout_period_label: 'June 2026',
+    payout_date: '2026-06-30',
+    amount_cents: 15_000,
+    bucket: 'dated',
+  },
   due_cents: 15_000,
   upcoming_cents: 7_500,
   plan_key: 'standard',
@@ -69,7 +75,6 @@ describe('useCommissionPayoutSchedule', () => {
     const { result } = renderHook(
       () => useCommissionPayoutSchedule({
         user_id: 'rep-1',
-        year: 2026,
         start_date: '2026-01-01',
         end_date: '2026-09-25',
       }),
@@ -82,7 +87,33 @@ describe('useCommissionPayoutSchedule', () => {
     expect(urls[0]).toContain('user_id=rep-1')
     expect(urls[0]).toContain('start_date=2026-01-01')
     expect(urls[0]).toContain('end_date=2026-09-25')
-    expect(urls[0]).toContain('year=2026')
+    expect(urls[0]).not.toContain('year=')
+    expect(result.current.data?.year).toBeNull()
+  })
+
+  it('omits year for a December-to-January close window', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('/api/commissions/payout-schedule', ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({ ...schedule, year: null })
+      }),
+    )
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(
+      () => useCommissionPayoutSchedule({
+        user_id: 'rep-1',
+        start_date: '2025-12-01',
+        end_date: '2026-01-31',
+      }),
+      { wrapper },
+    )
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(urls[0]).toContain('start_date=2025-12-01')
+    expect(urls[0]).toContain('end_date=2026-01-31')
+    expect(urls[0]).not.toContain('year=')
+    expect(result.current.data?.year).toBeNull()
   })
 
   it('refetches list, summary, and the payout schedule after marking an installment paid', async () => {
@@ -113,7 +144,6 @@ describe('useCommissionPayoutSchedule', () => {
       () => ({
         schedule: useCommissionPayoutSchedule({
           user_id: 'rep-1',
-          year: 2026,
           start_date: '2026-01-01',
           end_date: '2026-09-25',
         }),

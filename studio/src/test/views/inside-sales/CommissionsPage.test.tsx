@@ -142,7 +142,7 @@ describe('CommissionsPage rep picker', () => {
     const schedule = calls.find((url) => url.startsWith('/api/commissions/payout-schedule'))
     expect(schedule).toContain('start_date=2026-01-01')
     expect(schedule).toContain('end_date=2026-09-25')
-    expect(schedule).toContain('year=2026')
+    expect(schedule).not.toContain('year=')
     expect(screen.getByText('$625.00')).toBeInTheDocument()
     expect(screen.getAllByText('Unscheduled').length).toBeGreaterThan(0)
     expect(screen.queryByText(/this schedule/i)).not.toBeInTheDocument()
@@ -162,7 +162,7 @@ describe('CommissionsPage rep picker', () => {
             url.startsWith('/api/commissions/payout-schedule')
             && url.includes('start_date=2026-09-01')
             && url.includes('end_date=2026-09-25')
-            && url.includes('year=2026'),
+            && !url.includes('year='),
         ),
       ).toBe(true)
     })
@@ -178,7 +178,7 @@ describe('CommissionsPage rep picker', () => {
             url.startsWith('/api/commissions/payout-schedule')
             && url.includes('start_date=2026-08-01')
             && url.includes('end_date=2026-08-31')
-            && url.includes('year=2026'),
+            && !url.includes('year='),
         ),
       ).toBe(true)
     })

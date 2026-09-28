@@ -6,7 +6,13 @@ describe('CommissionOpenCheckCards', () => {
   it('shows the next dated check plus due and upcoming totals', () => {
     render(
       <CommissionOpenCheckCards
-        nextPayout={{ payout_period: 'June 2026', payout_date: '2026-06-30', amount_cents: 15_000 }}
+        nextPayout={{
+          payout_period: 'June 2026',
+          payout_period_label: 'June 2026',
+          payout_date: '2026-06-30',
+          amount_cents: 15_000,
+          bucket: 'dated',
+        }}
         dueCents={15_000}
         upcomingCents={7_500}
         isLoading={false}

@@ -22,9 +22,8 @@ export function useCommissionsList(filters?: CommissionFilters) {
   })
 }
 
-export function useCommissionPayoutSchedule(params: {
+export function useCommissionPayoutSchedule(params?: {
   user_id?: string
-  year: number
   start_date?: string
   end_date?: string
 }) {
@@ -32,10 +31,9 @@ export function useCommissionPayoutSchedule(params: {
     queryKey: [
       COMMISSIONS_KEY,
       'payout-schedule',
-      params.user_id ?? null,
-      params.year,
-      params.start_date ?? null,
-      params.end_date ?? null,
+      params?.user_id ?? null,
+      params?.start_date ?? null,
+      params?.end_date ?? null,
     ],
     queryFn: () => commissionsApi.getPayoutSchedule(params),
     staleTime: 30_000,

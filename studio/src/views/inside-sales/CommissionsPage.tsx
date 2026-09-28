@@ -19,7 +19,6 @@ import {
   formatPayoutDate,
   formatRate,
   getCommissionPeriodDates,
-  scheduleCloseYear,
 } from '@/lib/commissions'
 import type { Period } from '@/lib/commissions'
 import type { CommissionFilters } from '@/types/commissions'
@@ -61,7 +60,6 @@ export default function CommissionsPage() {
   const { data: reps } = useCommissionReps()
   const { data: schedule, isLoading: scheduleLoading } = useCommissionPayoutSchedule({
     user_id: queryFilters.user_id,
-    year: scheduleCloseYear(periodDates.end_date),
     start_date: periodDates.start_date,
     end_date: periodDates.end_date,
   })

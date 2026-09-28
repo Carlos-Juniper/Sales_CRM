@@ -67,7 +67,9 @@
         "bucket": "pending_billing_data",
         "payable": false
       }
-    ]
+    ],
+    "payout_period": "September 2026",
+    "payout_period_label": "September 2026"
   },
   {
     "id": "comm-dobson",
@@ -137,7 +139,9 @@
         "bucket": "pending_billing_data",
         "payable": false
       }
-    ]
+    ],
+    "payout_period": "June 2026",
+    "payout_period_label": "June 2026"
   },
   {
     "id": "comm-palm",
@@ -179,7 +183,7 @@
         "billing_installment_number": null,
         "collected_amount_cents": null,
         "bucket": "dated",
-        "payable": false
+        "payable": true
       },
       {
         "id": "f59af20e-b91d-11f1-8921-822b383dbcd0",
@@ -192,7 +196,7 @@
         "billing_installment_number": 6,
         "collected_amount_cents": null,
         "bucket": "unscheduled",
-        "payable": false
+        "payable": true
       },
       {
         "id": "f59af273-b91d-11f1-8921-822b383dbcd0",
@@ -207,6 +211,8 @@
         "bucket": "pending_billing_data",
         "payable": false
       }
-    ]
+    ],
+    "payout_period": "August 2026",
+    "payout_period_label": "August 2026"
   }
 ]

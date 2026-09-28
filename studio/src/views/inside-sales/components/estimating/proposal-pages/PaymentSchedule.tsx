@@ -5,29 +5,32 @@
 // Matches the reference (business docs/Pointe Jupiter Yacht Club.pdf, p.42):
 // one row per month (Schedule / Price / Sales Tax / Total Price) starting
 // from the service start date, with a totals row. The annual base is the
-// approved contract value (the same number as Annual Maintenance Price).
+// scaled recurring subtotal (buildContractTotals), the same number as the
+// Annual Maintenance Price.
 // ---------------------------------------------------------------------------
 
-import { buildApprovedPaymentSchedule, buildContractRows } from '@/lib/proposal/contract'
+import {
+  buildContractRows,
+  buildContractTotals,
+  buildPaymentSchedule,
+  scaleRowsToContractValue,
+} from '@/lib/proposal/contract'
 import { formatCents } from '@/lib/proposal/formatCents'
 import type { Estimate } from '@/types/estimating'
 
 export function PaymentSchedule({ estimate }: { estimate: Estimate }) {
-  const rows = buildContractRows(estimate)
+  const rows = scaleRowsToContractValue(
+    buildContractRows(estimate),
+    estimate.contractValueCents ?? null,
+  )
 
   // Parse serviceStartDate from ISO string to Date
   const serviceStartDate = estimate.serviceStartDate
     ? new Date(estimate.serviceStartDate)
     : null
 
-  // Same approved number as the Annual Maintenance Price, so the twelve
-  // months and their total agree with the contract value to the cent.
-  const schedule = buildApprovedPaymentSchedule(
-    rows,
-    estimate.contractValueCents ?? null,
-    serviceStartDate,
-  )
-  const totalCents = schedule.reduce((sum, m) => sum + m.amountCents, 0)
+  const schedule = buildPaymentSchedule(rows, serviceStartDate)
+  const totalCents = buildContractTotals(rows.filter((row) => row.isRecurring)).extPriceCents
 
   return (
     <div className="payment-schedule">

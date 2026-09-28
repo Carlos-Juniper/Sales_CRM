@@ -6,9 +6,8 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect } from 'vitest'
+import { contractTotal } from '@/lib/estimating/calc'
 import {
-  approvedTotalCents,
-  buildApprovedPaymentSchedule,
   buildContractRows,
   buildContractTotals,
   buildPaymentSchedule,
@@ -351,15 +350,54 @@ describe('scaleRowsToContractValue', () => {
     expect(scaleRowsToContractValue(rows, 10_000)).toBe(rows)
   })
 
-  it('leaves a zero line sum unchanged and still reports the approved total', () => {
+  it('prints unscaled rows when the contract total is zero', () => {
     const rows = [
       contractRow({ label: 'Mowing', extPriceCents: 0 }),
       contractRow({ label: 'Unpriced', extPriceCents: 0, hasUnitPrice: false }),
     ]
 
     expect(scaleRowsToContractValue(rows, 4_800_000)).toBe(rows)
-    expect(approvedTotalCents(rows, 4_800_000)).toBe(4_800_000)
-    expect(rows[0].extPriceCents).toBe(0)
+    expect(buildContractTotals(rows).extPriceCents).toBe(0)
+  })
+
+  it('scales recurring and optional lines by one ratio', () => {
+    const rows = [
+      contractRow({ label: 'Mowing', extPriceCents: 6_000, isRecurring: true, priceEachCents: 500 }),
+      contractRow({
+        label: 'Mulch',
+        extPriceCents: 4_000,
+        isRecurring: false,
+        occurs: null,
+        priceEachCents: 4_000,
+      }),
+    ]
+
+    const scaled = scaleRowsToContractValue(rows, 5_000)
+    const maintenance = buildContractTotals(scaled.filter((row) => row.isRecurring)).extPriceCents
+    const optional = buildContractTotals(scaled.filter((row) => !row.isRecurring)).extPriceCents
+
+    expect(maintenance).toBe(3_000)
+    expect(optional).toBe(2_000)
+    expect(buildContractTotals(scaled).extPriceCents).toBe(5_000)
+    expect(scaled[0].priceEachCents).toBe(250)
+    expect(scaled[1].priceEachCents).toBe(2_000)
+  })
+
+  it('uses largest remainder so mixed lines sum exactly to the approved value', () => {
+    const rows = [
+      contractRow({ label: 'Mowing', extPriceCents: 100, isRecurring: true }),
+      contractRow({ label: 'Edging', extPriceCents: 100, isRecurring: true }),
+      contractRow({ label: 'Mulch', extPriceCents: 100, isRecurring: false, occurs: null }),
+    ]
+
+    const scaled = scaleRowsToContractValue(rows, 100)
+
+    expect(scaled.map((row) => row.extPriceCents)).toEqual([34, 33, 33])
+    expect(buildContractTotals(scaled).extPriceCents).toBe(100)
+    expect(
+      buildContractTotals(scaled.filter((row) => row.isRecurring)).extPriceCents +
+        buildContractTotals(scaled.filter((row) => !row.isRecurring)).extPriceCents,
+    ).toBe(100)
   })
 
   it('scales the same way when the approved value is below the line sum', () => {
@@ -375,7 +413,7 @@ describe('scaleRowsToContractValue', () => {
     expect(scaled.every((row, i) => row.extPriceCents < rows[i].extPriceCents)).toBe(true)
   })
 
-  it('scales the seeded Coral Bay recurring lines to the $48,000 approved value', () => {
+  it('scales seeded Coral Bay recurring and optional lines onto the $48,000 approved value', () => {
     const estimate = makeEstimate(
       [
         {
@@ -402,20 +440,24 @@ describe('scaleRowsToContractValue', () => {
     estimate.contractValueCents = 4_800_000
 
     const rows = buildContractRows(estimate)
-    const recurring = rows.filter((row) => row.isRecurring)
-    const scaled = scaleRowsToContractValue(recurring, estimate.contractValueCents)
+    expect(buildContractTotals(rows).extPriceCents).toBe(contractTotal(estimate))
 
-    expect(scaled.reduce((sum, row) => sum + row.extPriceCents, 0)).toBe(4_800_000)
-    expect(approvedTotalCents(recurring, estimate.contractValueCents)).toBe(4_800_000)
-    expect(scaled[0].extPriceCents).toBe(1_723_077)
-    expect(rows.filter((row) => !row.isRecurring).map((row) => row.extPriceCents)).toEqual([
-      11_970_000,
-      24_510_000,
-    ])
+    const scaled = scaleRowsToContractValue(rows, estimate.contractValueCents)
+    const maintenance = buildContractTotals(scaled.filter((row) => row.isRecurring)).extPriceCents
+    const optional = buildContractTotals(scaled.filter((row) => !row.isRecurring)).extPriceCents
 
-    const schedule = buildApprovedPaymentSchedule(rows, estimate.contractValueCents, null)
-    expect(schedule.reduce((sum, month) => sum + month.amountCents, 0)).toBe(4_800_000)
-    expect(schedule.every((month) => month.amountCents === 400_000)).toBe(true)
+    expect(maintenance).toBe(474_457)
+    expect(optional).toBe(4_325_543)
+    expect(buildContractTotals(scaled).extPriceCents).toBe(4_800_000)
+    expect(maintenance + optional).toBe(estimate.contractValueCents)
+
+    const mulch = scaled.find((row) => row.label === 'Mulch Application')
+    const flowers = scaled.find((row) => row.label === 'Annual Flower Installation')
+    expect(mulch?.priceEachCents).toBe(mulch?.extPriceCents)
+    expect(flowers?.priceEachCents).toBe(flowers?.extPriceCents)
+
+    const schedule = buildPaymentSchedule(scaled, null)
+    expect(schedule.reduce((sum, month) => sum + month.amountCents, 0)).toBe(maintenance)
   })
 })
 

@@ -109,34 +109,27 @@ export function buildContractTotals(rows: ContractRow[]): ContractTotals {
 }
 
 /**
- * Extended price of rows that actually have a unit price. Unpriced rows
- * contribute nothing — their extended price is already 0, and they must not
- * take a share of an approved-value adjustment.
- */
-function pricedExtSum(rows: ContractRow[]): number {
-  return rows.reduce((sum, row) => sum + (row.hasUnitPrice ? row.extPriceCents : 0), 0)
-}
-
-/**
- * Scale priced rows so their extended prices sum to `targetCents`.
+ * Scale every priced row by `targetCents / contractTotal`.
  *
- * Approvers store one approved number on `estimate.contractValueCents` and
- * do not rewrite section lines. The caller passes the rows that make up that
- * number — on the agreement, the recurring services behind the Annual
- * Maintenance Price and the payment schedule. One-time optional rows are a
- * separate quote and are not passed in.
+ * `contractValueCents` is the approved price of the whole estimate: recurring
+ * maintenance and optional one-time services. The caller passes every contract
+ * row. Their extended-price total is `contractTotal` (the same rollup as
+ * `contractTotal()` in lib/estimating/calc). Largest-remainder rounding, ties
+ * broken by earlier row, makes the scaled extended prices sum exactly to the
+ * approved value. Recurring and optional subtotals are then
+ * `buildContractTotals` of each group — they are not the approved value by
+ * themselves.
  *
- * Largest-remainder rounding (integer cents, ties broken by earlier row)
- * makes the scaled cents sum exactly to the target. A null target, a target
- * already equal to the priced line sum, or a zero line sum returns the rows
- * unchanged — a zero sum cannot be divided.
+ * A missing target, a target already equal to the line sum, or a zero
+ * contract total returns the rows unchanged. A zero total cannot be divided,
+ * and the agreement prints the unscaled lines.
  */
 export function scaleRowsToContractValue(
   rows: ContractRow[],
   targetCents: number | null,
 ): ContractRow[] {
   if (targetCents == null) return rows
-  const lineSum = pricedExtSum(rows)
+  const lineSum = buildContractTotals(rows).extPriceCents
   if (lineSum === 0 || lineSum === targetCents) return rows
 
   const weights = rows.map((row) => (row.hasUnitPrice ? row.extPriceCents : 0))
@@ -169,22 +162,21 @@ export function scaleRowsToContractValue(
   return rows.map((row, index) => {
     if (!row.hasUnitPrice || weights[index] === 0) return row
     const extPriceCents = floors[index] + extras[index]
+    const oldExt = row.extPriceCents
+    // Keep Cost per Occ. on the same ratio as this line's extended price.
+    // A one-time row (qty 1) has price-each equal to extended price, so both
+    // printed columns stay equal after the cent is assigned.
+    const priceEachCents =
+      oldExt === 0
+        ? row.priceEachCents
+        : Number((BigInt(row.priceEachCents) * BigInt(extPriceCents)) / BigInt(oldExt))
     return {
       ...row,
+      priceEachCents,
       extPriceCents,
       totalPriceCents: extPriceCents + row.salesTaxCents,
     }
   })
-}
-
-/**
- * Printed total for `rows` after scaling to the approved value.
- * When the priced line sum is 0 the rows cannot move, but the approved
- * number is still what the agreement prints.
- */
-export function approvedTotalCents(rows: ContractRow[], targetCents: number | null): number {
-  if (targetCents != null && pricedExtSum(rows) === 0) return targetCents
-  return pricedExtSum(scaleRowsToContractValue(rows, targetCents))
 }
 
 const MONTH_NAMES = [
@@ -239,25 +231,6 @@ export function buildPaymentSchedule(
   rows: ContractRow[],
   serviceStartDate: Date | null,
 ): PaymentScheduleMonth[] {
-  const base = rows
-    .filter((r) => r.isRecurring)
-    .reduce((sum, r) => sum + r.extPriceCents, 0)
-
+  const base = buildContractTotals(rows.filter((row) => row.isRecurring)).extPriceCents
   return distributeAcrossMonths(base, serviceStartDate)
-}
-
-/**
- * Payment schedule for the agreement. The base is the approved contract
- * value when one is set, allocated the same way as the Annual Maintenance
- * Price (recurring rows only). A zero recurring line sum still prints the
- * approved total across the twelve months; the service lines themselves
- * stay unscaled.
- */
-export function buildApprovedPaymentSchedule(
-  rows: ContractRow[],
-  targetCents: number | null,
-  serviceStartDate: Date | null,
-): PaymentScheduleMonth[] {
-  const recurring = rows.filter((row) => row.isRecurring)
-  return distributeAcrossMonths(approvedTotalCents(recurring, targetCents), serviceStartDate)
 }

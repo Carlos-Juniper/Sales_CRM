@@ -10,13 +10,14 @@
 // Neither table carries scope narrative — that's ContractScopeNarrative's job.
 // A row whose service has no unit price leaves its money cells blank. A stored
 // zero still prints $0.00. When the estimate carries an approved contract
-// value, recurring line prices are scaled so they sum to that value. Optional
-// one-time rows are not part of that total and are left on their line prices.
+// value, every priced line — recurring and optional — is scaled by
+// contractValueCents / contractTotal. The Annual Maintenance Price is the
+// scaled recurring subtotal, not the whole approved value.
 // ---------------------------------------------------------------------------
 
 import {
-  approvedTotalCents,
   buildContractRows,
+  buildContractTotals,
   scaleRowsToContractValue,
 } from '@/lib/proposal/contract'
 import { formatCents } from '@/lib/proposal/formatCents'
@@ -26,15 +27,12 @@ export function ContractLines({ estimate }: { estimate: Estimate }) {
   const rows = buildContractRows(estimate)
   if (rows.length === 0) return null
 
-  // contractValueCents is the approved contract number. It matches the
-  // recurring maintenance the customer pays (Annual Maintenance Price and
-  // the payment schedule), not the optional one-time table. Scale only
-  // those rows so the printed total equals the approved value to the cent.
-  const unscaledRecurring = rows.filter((r) => r.isRecurring)
-  const oneTimeRows = rows.filter((r) => !r.isRecurring)
-  const approvedCents = estimate.contractValueCents ?? null
-  const recurringRows = scaleRowsToContractValue(unscaledRecurring, approvedCents)
-  const annualMaintenancePriceCents = approvedTotalCents(unscaledRecurring, approvedCents)
+  // One ratio for every line. A missing approved value leaves the rows
+  // unscaled; scaleRowsToContractValue also leaves a zero contract total alone.
+  const scaled = scaleRowsToContractValue(rows, estimate.contractValueCents ?? null)
+  const recurringRows = scaled.filter((r) => r.isRecurring)
+  const oneTimeRows = scaled.filter((r) => !r.isRecurring)
+  const annualMaintenancePriceCents = buildContractTotals(recurringRows).extPriceCents
 
   return (
     <div className="contract-lines">

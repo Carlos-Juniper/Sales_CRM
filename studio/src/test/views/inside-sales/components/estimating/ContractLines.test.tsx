@@ -95,7 +95,7 @@ describe('ContractLines', () => {
     expect(cellsIn('Included flowers')).toEqual(['Included flowers', '1', '$0.00', '$0.00'])
   })
 
-  it('prints the seeded Coral Bay approved value with recurring lines that sum to it', () => {
+  it('prints Coral Bay recurring and optional lines that together equal the approved value', () => {
     // Same sections, quantities, rates, and square footage as
     // scripts/seed_contract_estimate.py, whose stored contract value is $48,000.
     const coralBay = {
@@ -155,17 +155,25 @@ describe('ContractLines', () => {
     const serviceRows = within(servicesTable)
       .getAllByRole('row')
       .filter((row) => within(row).queryAllByRole('cell').length === 3)
-    const lineCents = serviceRows.map((row) => {
-      const price = within(row).getAllByRole('cell')[2].textContent ?? ''
-      return Math.round(Number(price.replace(/[$,]/g, '')) * 100)
-    })
+    const cents = (text: string | null) => Math.round(Number((text ?? '').replace(/[$,]/g, '')) * 100)
+    const lineCents = serviceRows.map((row) => cents(within(row).getAllByRole('cell')[2].textContent))
     const totalRow = within(servicesTable).getByRole('row', { name: /Annual Maintenance Price/ })
-    const totalText = within(totalRow).getAllByRole('cell')[1].textContent
+    const maintenanceCents = cents(within(totalRow).getAllByRole('cell')[1].textContent)
+    const optionalRows = within(optionalTable)
+      .getAllByRole('row')
+      .filter((row) => within(row).queryAllByRole('cell').length === 4)
+    const optionalCents = optionalRows.map((row) => {
+      const cells = within(row).getAllByRole('cell')
+      return { each: cents(cells[2].textContent), annual: cents(cells[3].textContent) }
+    })
+    const optionalSum = optionalCents.reduce((sum, row) => sum + row.annual, 0)
 
     expect(lineCents).toHaveLength(7)
-    expect(lineCents.reduce((sum, cents) => sum + cents, 0)).toBe(4_800_000)
-    expect(totalText).toBe('$48,000.00')
-    expect(within(optionalTable).getByRole('cell', { name: 'Mulch Application' })).toBeInTheDocument()
-    expect(within(optionalTable).getByRole('cell', { name: 'Annual Flower Installation' })).toBeInTheDocument()
+    expect(lineCents.reduce((sum, value) => sum + value, 0)).toBe(maintenanceCents)
+    expect(optionalCents).toHaveLength(2)
+    expect(optionalCents.every((row) => row.each === row.annual)).toBe(true)
+    expect(maintenanceCents + optionalSum).toBe(4_800_000)
+    expect(maintenanceCents).toBe(474_457)
+    expect(optionalSum).toBe(4_325_543)
   })
 })

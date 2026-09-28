@@ -28,7 +28,7 @@ from typing import Any
 from fastapi import HTTPException
 
 # Stable code. The editor owns the sentence the user reads.
-BRANCH_CREW_RATE_MISSING = "branch_crew_rate_missing"
+CREW_RATE_REQUIRED = "crew_rate_required"
 
 OPEN_DRAFT_STATUSES = frozenset({"new_from_sales", "queued", "in_progress"})
 
@@ -85,38 +85,24 @@ async def _live_branch_crew_rate(aspire_branch_id: int | None) -> int | None:
 
 
 def annotate_maintenance_sections(sections: list[dict] | None) -> list[dict]:
-    """Flatten nested sections and tag each line so a 422 can point at it."""
-    services: list[dict] = []
-    for section_index, section in enumerate(sections or []):
-        name = section.get("name")
-        section_name = name if isinstance(name, str) else None
-        raw_section_id = section.get("id")
-        section_id = raw_section_id if isinstance(raw_section_id, str) else None
-        for line_index, svc in enumerate(section.get("services") or []):
-            svc["_sectionIndex"] = section_index
-            svc["_sectionName"] = section_name
-            svc["_sectionId"] = section_id
-            svc["_lineIndex"] = line_index
-            services.append(svc)
-    return services
+    """Flatten nested sections. Handlers stamp ids for the 422."""
+    return [
+        svc
+        for section in (sections or [])
+        for svc in (section.get("services") or [])
+    ]
 
 
-def _line_ref(svc: dict, index: int) -> dict:
-    section_index = svc.get("_sectionIndex")
-    line_index = svc.get("_lineIndex", index)
-    catalog_id = svc.get("catalogItemId")
-    service_id = svc.get("id")
-    section_name = svc.get("_sectionName")
+def _blocked_line(svc: dict) -> dict | None:
+    """Match crewRateError.ts. None when the line has no section_services id yet."""
+    service_id = svc.get("_serviceId")
+    if not isinstance(service_id, str) or service_id == "":
+        return None
+    line = {"serviceId": service_id}
     section_id = svc.get("_sectionId")
-    return {
-        "sectionIndex": section_index if isinstance(section_index, int) and not isinstance(section_index, bool) else None,
-        "sectionId": section_id if isinstance(section_id, str) else None,
-        "sectionName": section_name if isinstance(section_name, str) else None,
-        "lineIndex": int(line_index) if isinstance(line_index, int) and not isinstance(line_index, bool) else index,
-        "label": str(svc.get("label") or ""),
-        "catalogItemId": catalog_id if isinstance(catalog_id, str) else None,
-        "serviceId": service_id if isinstance(service_id, str) else None,
-    }
+    if isinstance(section_id, str) and section_id != "":
+        line["sectionId"] = section_id
+    return line
 
 
 async def _kits_by_id(services: list[dict]) -> dict[str, dict]:
@@ -147,15 +133,17 @@ async def apply_maintenance_crew_prices(
 ) -> None:
     """Write the computed sell onto crew-rate-derived lines.
 
-    Raises 422 branch_crew_rate_missing listing only the lines that need a
-    derived price and have no live branch rate. Catalog prices and
-    hand-entered prices are left unchanged. Nothing is written to the
-    database here — callers persist only if this returns.
+    Raises 422 crew_rate_required. blockedLines names only derived lines
+    that already have a section_services id. A create has no such id yet:
+    the save is still rejected and blockedLines is empty for those lines.
+    Catalog prices and hand-entered prices are left unchanged. Nothing is
+    written to the database here — callers persist only if this returns.
     """
     kits = await _kits_by_id(services)
     derived: list[tuple[dict, int]] = []
     blocked: list[dict] = []
-    for index, svc in enumerate(services):
+    unnamed = False
+    for svc in services:
         kit = kits.get(svc.get("catalogItemId"))
         if not _kit_derives_sell(kit):
             continue
@@ -173,11 +161,15 @@ async def apply_maintenance_crew_prices(
             continue
         if explicit:
             continue  # hand-entered; a missing rate does not block it
-        blocked.append(_line_ref(svc, index))
-    if blocked:
+        ref = _blocked_line(svc)
+        if ref is None:
+            unnamed = True
+        else:
+            blocked.append(ref)
+    if blocked or unnamed:
         raise HTTPException(
             status_code=422,
-            detail={"code": BRANCH_CREW_RATE_MISSING, "lines": blocked},
+            detail={"code": CREW_RATE_REQUIRED, "blockedLines": blocked},
         )
     for svc, computed in derived:
         svc["unitSellCents"] = computed

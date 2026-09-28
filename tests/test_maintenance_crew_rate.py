@@ -3,7 +3,7 @@
 The server computes the $/1,000 SF sell from the live branch crew rate and
 writes it onto lines whose kit has no catalog price. A positive unit sell
 that is not that formula is hand-entered. A kit with unit_sell_cents > 0 is
-catalog-priced. Only derived lines are blocked (422 branch_crew_rate_missing)
+catalog-priced. Only derived lines are blocked (422 crew_rate_required)
 when the live rate is missing, and only those lines are repriced when
 Settings changes the rate. The frozen snapshot is not a pricing source.
 """
@@ -116,24 +116,20 @@ def _derived(**overrides) -> dict:
     })
 
 
-def _assert_missing(resp, n: int = 1) -> list[dict]:
+def _assert_missing(resp, lines: list[dict] | None = None) -> list[dict]:
     assert resp.status_code == 422, resp.text
     detail = resp.json()["detail"]
-    assert detail["code"] == "branch_crew_rate_missing"
-    assert isinstance(detail["lines"], list) and len(detail["lines"]) == n
-    for line in detail["lines"]:
-        assert set(line) == {
-            "sectionIndex", "sectionId", "sectionName", "lineIndex", "label",
-            "catalogItemId", "serviceId",
-        }
-        assert line["sectionIndex"] is None or isinstance(line["sectionIndex"], int)
-        assert line["sectionId"] is None or isinstance(line["sectionId"], str)
-        assert line["sectionName"] is None or isinstance(line["sectionName"], str)
-        assert isinstance(line["lineIndex"], int)
-        assert isinstance(line["label"], str)
-        assert line["catalogItemId"] is None or isinstance(line["catalogItemId"], str)
-        assert line["serviceId"] is None or isinstance(line["serviceId"], str)
-    return detail["lines"]
+    assert set(detail) == {"code", "blockedLines"}
+    assert detail["code"] == "crew_rate_required"
+    assert isinstance(detail["blockedLines"], list)
+    for line in detail["blockedLines"]:
+        assert set(line) <= {"serviceId", "sectionId"}
+        assert isinstance(line["serviceId"], str) and line["serviceId"] != ""
+        if "sectionId" in line:
+            assert isinstance(line["sectionId"], str) and line["sectionId"] != ""
+    if lines is not None:
+        assert detail["blockedLines"] == lines
+    return detail["blockedLines"]
 
 
 class TestBranchCrewRateGate:
@@ -188,16 +184,17 @@ class TestBranchCrewRateGate:
                 _svc(label="Catalog price", catalogItemId=CATALOG_KIT["id"], unitSellCents=450),
             ]),
         )
-        lines = _assert_missing(resp)
-        assert lines[0]["sectionIndex"] == 0
-        assert lines[0]["sectionName"] == "Common Area"
-        assert lines[0]["lineIndex"] == 0
-        assert lines[0]["label"] == "Derived mow"
-        assert lines[0]["catalogItemId"] == RATED_KIT["id"]
-        assert lines[0]["sectionId"] is None
-        assert lines[0]["serviceId"] is None
+        _assert_missing(resp, [])
         assert len(db.tables["estimates"]) == 0
         assert len(db.tables["section_services"]) == 0
+
+    def test_create_ignores_a_client_id_that_is_not_a_saved_line(self, estimator, db):
+        resp = client.post(
+            "/api/estimating/estimates",
+            json=_payload(BRANCH_WITHOUT_RATE, [_derived(id="client-tmp")]),
+        )
+        _assert_missing(resp, [])
+        assert len(db.tables["estimates"]) == 0
 
     def test_unpriced_line_without_a_deriving_kit_is_saved(self, estimator):
         resp = client.post(
@@ -261,9 +258,7 @@ class TestBranchCrewRateGate:
             f"/api/estimating/estimates/{estimate_id}/sections",
             json={"name": "Common Area", "squareFeet": 120_000, "services": [_derived()]},
         )
-        lines = _assert_missing(resp)
-        assert lines[0]["label"] == "Derived mow"
-        assert lines[0]["sectionName"] == "Common Area"
+        _assert_missing(resp, [])
         assert len(db.tables["estimate_sections"]) == 0
 
     def test_section_post_blocks_only_the_derived_line(self, estimator, db):
@@ -283,10 +278,7 @@ class TestBranchCrewRateGate:
                 ],
             },
         )
-        lines = _assert_missing(resp)
-        assert lines[0]["lineIndex"] == 1
-        assert lines[0]["sectionIndex"] == 0
-        assert lines[0]["serviceId"] is None
+        _assert_missing(resp, [])
         assert len(db.tables["estimate_sections"]) == 0
 
     def test_service_post_returns_the_structured_error(self, estimator, db):
@@ -303,11 +295,7 @@ class TestBranchCrewRateGate:
             f"/api/estimating/estimates/{created.json()['id']}/sections/{section.json()['id']}/services",
             json=_derived(),
         )
-        lines = _assert_missing(resp)
-        assert lines[0]["lineIndex"] == 0
-        assert lines[0]["sectionId"] == section.json()["id"]
-        assert lines[0]["serviceId"] is None
-        assert lines[0]["catalogItemId"] == RATED_KIT["id"]
+        _assert_missing(resp, [])
         assert len(db.tables["section_services"]) == 0
 
     def test_patch_blocks_a_derived_line_and_persists_nothing(self, estimator, db):
@@ -325,10 +313,7 @@ class TestBranchCrewRateGate:
             f"/api/estimating/estimates/{est['id']}/sections/{section['id']}/services/{svc['id']}",
             json={"unitSellCents": 0, "qty": 21},
         )
-        lines = _assert_missing(resp)
-        assert lines[0]["serviceId"] == svc["id"]
-        assert lines[0]["sectionId"] == section["id"]
-        assert lines[0]["label"] == "Derived mow"
+        _assert_missing(resp, [{"serviceId": svc["id"], "sectionId": section["id"]}])
         assert db.tables["section_services"][svc["id"]]["qty"] == 42
         assert db.tables["section_services"][svc["id"]]["unit_sell_cents"] == DERIVED_AT_LIVE
 
@@ -348,7 +333,9 @@ class TestGuardLivesInOneModule:
         assert "CREW_RATE_REQUIRED_DETAIL" not in text
         assert "branch_crew_rate_missing" not in text
         pricing = (ROOT / "api" / "maintenance_pricing.py").read_text()
-        assert "branch_crew_rate_missing" in pricing
+        assert 'CREW_RATE_REQUIRED = "crew_rate_required"' in pricing
+        assert "CREW_RATE_REQUIRED_DETAIL" not in pricing
+        assert "branch_crew_rate_missing" not in pricing
         assert "MAINTENANCE_SERVICE_CATALOG" not in pricing
 
 

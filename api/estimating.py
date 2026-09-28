@@ -2495,7 +2495,6 @@ def register(app, require_auth) -> None:
             [estimate_id],
         )
         if est_rows and est_rows[0].get("estimate_type") == "maintenance":
-            body["_sectionId"] = section_id
             await _require_resolvable_maintenance_lines(
                 [body], await _live_branch_crew_rate(est_rows[0].get("aspire_branch_id")),
             )
@@ -2537,7 +2536,7 @@ def register(app, require_auth) -> None:
         )
         if est_rows and est_rows[0].get("estimate_type") == "maintenance":
             merged = {
-                "id": service_id,
+                "_serviceId": service_id,
                 "_sectionId": section_id,
                 "label": body.get("label", current.get("label")),
                 "hours": body["hours"] if "hours" in body else current.get("hours"),

@@ -83,10 +83,12 @@ class TestCommissionEndpoints:
         assert body["due_cents"] == 0
         assert body["next_payout"] == {
             "payout_period": "April 2026",
+            "payout_period_label": "April 2026",
             "payout_date": "2026-04-01",
             "amount_cents": 100,
+            "bucket": "dated",
         }
-        assert body["balances_period_filtered"] is False
+        assert "balances_period_filtered" not in body
         assert body["plan_key"] is None
         assert body["plan_name"] is None
 
@@ -146,6 +148,12 @@ class TestCommissionEndpoints:
         assert row["installments"][1]["status"] == "upcoming"
         assert row["installments"][0]["id"] == "i1"
         assert row["installments"][0]["payout_period"] == "April 2026"
+        assert row["installments"][0]["payout_period_label"] == "April 2026"
+        assert row["installments"][0]["bucket"] == "dated"
+        assert row["installments"][0]["payable"] is True
+        assert row["payable"] is True
+        assert row["payout_period"] == "April 2026"
+        assert row["payout_period_label"] == "April 2026"
         assert row["installments"][0]["amount_cents"] + row["installments"][1]["amount_cents"] == 3
 
     def test_payout_schedule_auth_and_shape(self, as_role, monkeypatch):
@@ -194,8 +202,20 @@ class TestCommissionEndpoints:
         assert body["quarters"][0]["sales_count"] == 1
         assert body["quarters"][0]["commission_total_cents"] == 100
         assert body["by_payout_period"][0]["payout_period"] == "April 2026"
+        assert body["by_payout_period"][0]["payout_period_label"] == "April 2026"
+        assert body["by_payout_period"][0]["bucket"] == "dated"
+        assert isinstance(body["year"], int)
         assert body["by_payout_period"][0]["amount_cents"] == 50
         assert body["by_payout_period"][0]["status"] == "upcoming"
+        for period in body["by_payout_period"]:
+            assert period["bucket"]
+            assert period["payout_period"]
+            assert period["payout_period_label"] == period["payout_period"]
+        for quarter in body["quarters"]:
+            for installment in quarter["installments"]:
+                assert installment["bucket"]
+                assert installment["payout_period"]
+                assert installment["payout_period_label"] == installment["payout_period"]
 
         as_role("regional_director", user_id="rd-1")
         with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
@@ -379,7 +399,7 @@ class TestCommissionEndpoints:
             )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["balances_period_filtered"] is False
+        assert "balances_period_filtered" not in body
         assert body["upcoming_cents"] == 80
         assert body["plan_key"] == "standard"
         assert body["plan_name"] == "Standard Sales Commission"

@@ -345,11 +345,42 @@ _INSTALLMENT_NOT_PAYABLE = (
 _COMMISSION_NOT_PAYABLE = "Commission has installments that are not payable"
 
 
-def _reject_unpayable(row: dict, *, cancelled_detail: str, unknown_detail: str) -> None:
-    """409 when a row is cancelled, pending billing data, or has a null amount."""
+def unpayable_reason(row: dict) -> Optional[str]:
+    """Why mark-paid must 409, or None when the row may be marked paid.
+
+    `cancelled` is a cancelled installment or a cancelled parent commission.
+    `unknown` is pending_billing_data or a null amount. An already-paid row
+    with a known amount returns None: mark-paid does not rewrite paid_at.
+    """
     if row.get("status") == "cancelled" or row.get("commission_status") == "cancelled":
-        raise HTTPException(status_code=409, detail=cancelled_detail)
+        return "cancelled"
     if row.get("status") == "pending_billing_data" or row.get("amount_cents") is None:
+        return "unknown"
+    return None
+
+
+def is_payable(row: dict) -> bool:
+    """True when `_reject_unpayable` would not raise for this row."""
+    return unpayable_reason(row) is None
+
+
+def commission_is_payable(commission_status: str, installments: list[dict]) -> bool:
+    """True when whole-commission mark-paid would not 409.
+
+    A cancelled commission is not payable. Each installment uses `is_payable`.
+    A commission with no installments is payable when it is not cancelled.
+    """
+    if commission_status == "cancelled":
+        return False
+    return all(is_payable(row) for row in installments)
+
+
+def _reject_unpayable(row: dict, *, cancelled_detail: str, unknown_detail: str) -> None:
+    """409 when `unpayable_reason` is cancelled or unknown."""
+    reason = unpayable_reason(row)
+    if reason == "cancelled":
+        raise HTTPException(status_code=409, detail=cancelled_detail)
+    if reason == "unknown":
         raise HTTPException(status_code=409, detail=unknown_detail)
 
 

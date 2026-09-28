@@ -5,11 +5,15 @@ from datetime import date
 
 import pytest
 
+from fastapi import HTTPException
+
 from api.commission_schedule import (
     build_payout_schedule,
     derive_installment_status,
+    public_installment,
     rollup_status,
 )
+from api.commission_service import _reject_unpayable, is_payable
 
 
 class TestInstallmentStatus:
@@ -256,4 +260,91 @@ class TestScheduleRollup:
         assert [row["bucket"] for row in schedule["by_payout_period"]] == [
             "dated", "unscheduled",
         ]
+
+
+def _assert_listed_period_fields(row: dict) -> None:
+    assert row["bucket"] in ("dated", "unscheduled", "pending_billing_data")
+    assert isinstance(row["payout_period"], str) and row["payout_period"]
+    assert row["payout_period_label"] == row["payout_period"]
+
+
+class TestPayableMatchesReject:
+    def test_payable_and_unpayable_rows(self):
+        cases = [
+            ({"status": "scheduled", "amount_cents": 100, "commission_status": "approved"}, True),
+            ({"status": "paid", "amount_cents": 40, "commission_status": "paid"}, True),
+            ({"status": "due", "amount_cents": 10, "commission_status": "approved"}, True),
+            ({"status": "cancelled", "amount_cents": 100, "commission_status": "approved"}, False),
+            ({"status": "scheduled", "amount_cents": 100, "commission_status": "cancelled"}, False),
+            ({"status": "pending_billing_data", "amount_cents": 150, "commission_status": "approved"}, False),
+            ({"status": "scheduled", "amount_cents": None, "commission_status": "approved"}, False),
+            ({"status": "pending_billing_data", "amount_cents": None, "commission_status": "approved"}, False),
+        ]
+        for row, expected in cases:
+            assert is_payable(row) is expected
+            if expected:
+                _reject_unpayable(row, cancelled_detail="cancelled", unknown_detail="unknown")
+                continue
+            with pytest.raises(HTTPException) as raised:
+                _reject_unpayable(row, cancelled_detail="cancelled", unknown_detail="unknown")
+            assert raised.value.status_code == 409
+            if row["status"] == "cancelled" or row["commission_status"] == "cancelled":
+                assert raised.value.detail == "cancelled"
+            else:
+                assert raised.value.detail == "unknown"
+
+
+class TestListedRowsAlwaysHaveBucketAndPeriod:
+    def test_null_labels_are_filled_on_installments_and_schedule_rows(self):
+        today = date(2026, 4, 1)
+        dated = public_installment({
+            "id": "i1",
+            "installment_number": 1,
+            "payout_period_label": None,
+            "payout_date": date(2026, 3, 31),
+            "amount_cents": 150,
+            "status": "scheduled",
+        }, "approved", today)
+        unscheduled = public_installment({
+            "id": "i2",
+            "installment_number": 2,
+            "payout_period_label": None,
+            "payout_date": None,
+            "amount_cents": 150,
+            "status": "pending_billing_data",
+        }, "approved", today)
+        pending = public_installment({
+            "id": "i3",
+            "installment_number": 3,
+            "payout_period_label": None,
+            "payout_date": None,
+            "amount_cents": None,
+            "status": "pending_billing_data",
+        }, "approved", today)
+        assert dated["payable"] is True
+        assert dated["payout_period"] == "March 2026"
+        assert dated["bucket"] == "dated"
+        assert unscheduled["payable"] is False
+        assert unscheduled["bucket"] == "unscheduled"
+        assert unscheduled["payout_period"] == "Unscheduled"
+        assert pending["payable"] is False
+        assert pending["bucket"] == "pending_billing_data"
+        assert pending["payout_period"] == "Pending billing data"
+        for row in (dated, unscheduled, pending):
+            _assert_listed_period_fields(row)
+
+        schedule = build_payout_schedule([{
+            "close_quarter": "2026-Q1",
+            "commission_amount_cents": 300,
+            "installments": [dated, unscheduled, pending],
+        }])
+        listed = list(schedule["by_payout_period"])
+        listed.extend(schedule["quarters"][0]["installments"])
+        assert listed
+        for row in listed:
+            _assert_listed_period_fields(row)
+        pending_period = next(
+            row for row in schedule["by_payout_period"] if row["bucket"] == "pending_billing_data"
+        )
+        assert pending_period["payout_period"] == "Pending billing data"
 

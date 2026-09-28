@@ -29,6 +29,7 @@ from api import commission_service
 from api.commission_calc import close_quarter_label, eastern_year_utc_bounds, et_today
 from api.commission_schedule import (
     build_payout_schedule,
+    commission_payout_period,
     public_installment,
     summarize_open_installments,
 )
@@ -113,8 +114,7 @@ def register(app, require_auth) -> None:
         scheduled_ytd_cents and paid_ytd_cents follow start_date and end_date
         (commission created_at). next_payout, upcoming_cents, and due_cents
         are open dated checks as of today in America/New_York. They are not
-        filtered by start_date or end_date. balances_period_filtered is false
-        for that reason.
+        filtered by start_date or end_date.
 
         plan_key and plan_name are the requested rep's current
         user_commission_plans row. Both are null when that rep has no
@@ -169,8 +169,6 @@ def register(app, require_auth) -> None:
             "next_payout": open_money["next_payout"],
             "upcoming_cents": open_money["upcoming_cents"],
             "due_cents": open_money["due_cents"],
-            # next_payout, upcoming_cents, and due_cents ignore start_date/end_date.
-            "balances_period_filtered": False,
             "plan_key": plan_key,
             "plan_name": plan_name,
         }
@@ -233,6 +231,7 @@ def register(app, require_auth) -> None:
         )
         ids = [row["id"] for row in rows if row.get("id")]
         inst_by: dict[str, list] = {cid: [] for cid in ids}
+        raw_by: dict[str, list] = {cid: [] for cid in ids}
         if ids:
             placeholders = ", ".join(["%s"] * len(ids))
             inst_rows = await query(
@@ -252,6 +251,7 @@ def register(app, require_auth) -> None:
                 cid = inst.get("commission_id")
                 if not cid or cid not in inst_by:
                     continue
+                raw_by[cid].append(inst)
                 inst_by[cid].append(
                     public_installment(inst, status_by_id[cid], today)
                 )
@@ -267,7 +267,15 @@ def register(app, require_auth) -> None:
             item["rep_plan_key"] = rep_plan_key
             item["plan_name"] = rep_plan_name
             item["contract_start_date"] = item.get("contract_start_date")
-            item["installments"] = inst_by.get(row.get("id"), []) if row.get("id") else []
+            installments = inst_by.get(row.get("id"), []) if row.get("id") else []
+            item["installments"] = installments
+            item["payable"] = commission_service.commission_is_payable(
+                row.get("status") or "",
+                raw_by.get(row.get("id"), []) if row.get("id") else [],
+            )
+            period = commission_payout_period(row.get("payment_period"), installments)
+            item["payout_period"] = period
+            item["payout_period_label"] = period
             out.append(item)
         return out
 

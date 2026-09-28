@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional, Sequence
 
-from api.commission_calc import PENDING_BILLING_DATA, calendar_date
+from api.commission_calc import PENDING_BILLING_DATA, calendar_date, period_label
+from api.commission_service import is_payable
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ BUCKET_DATED = "dated"
 BUCKET_UNSCHEDULED = "unscheduled"
 BUCKET_PENDING = "pending_billing_data"
 _UNSCHEDULED_LABEL = "Unscheduled"
+_PENDING_PERIOD_LABEL = "Pending billing data"
 _KIND_ORDER = {
     BUCKET_DATED: 0,
     BUCKET_UNSCHEDULED: 1,
@@ -60,13 +62,38 @@ def derive_installment_status(
     return "upcoming"
 
 
+def resolve_payout_period(
+    label: Optional[str],
+    payout_date: Optional[date],
+    amount_cents: Optional[int],
+) -> str:
+    """Non-null check label.
+
+    A stored label wins. A payout date uses `period_label`. A known amount
+    with no date is Unscheduled. A null amount with no date is Pending
+    billing data.
+    """
+    text = label.strip() if isinstance(label, str) else ""
+    if text:
+        return text
+    if payout_date is not None:
+        return period_label(payout_date)
+    if amount_cents is not None:
+        return _UNSCHEDULED_LABEL
+    return _PENDING_PERIOD_LABEL
+
+
 def public_installment(row: dict, commission_status: str, today: date) -> dict:
-    """API installment object. `payout_period` is the check label.
+    """API installment object.
 
     `row` is the installment select: id, installment_number,
     payout_period_label, payout_date, amount_cents, and status. Billing
     columns are included when the query selected them. commission_status
     is the parent commission status from that same query.
+
+    `payable` uses the stored status and amount, the same predicate as
+    mark-paid. `payout_period` and `payout_period_label` are the same
+    non-null string. `bucket` is dated, unscheduled, or pending_billing_data.
     """
     raw_date = row["payout_date"]
     payout = None if raw_date is None else calendar_date(raw_date)
@@ -74,11 +101,14 @@ def public_installment(row: dict, commission_status: str, today: date) -> dict:
     amount = None if raw_amount is None else int(raw_amount)
     raw_billing = row.get("billing_installment_number")
     raw_collected = row.get("collected_amount_cents")
+    period = resolve_payout_period(row.get("payout_period_label"), payout, amount)
+    payout_iso = None if payout is None else payout.isoformat()
     return {
         "id": row["id"],
         "installment_number": int(row["installment_number"]),
-        "payout_period": row["payout_period_label"],
-        "payout_date": None if payout is None else payout.isoformat(),
+        "payout_period": period,
+        "payout_period_label": period,
+        "payout_date": payout_iso,
         "amount_cents": amount,
         "status": derive_installment_status(
             stored_status=row["status"],
@@ -86,6 +116,15 @@ def public_installment(row: dict, commission_status: str, today: date) -> dict:
             payout_date=payout,
             today=today,
         ),
+        "bucket": _installment_bucket({
+            "payout_date": payout_iso,
+            "amount_cents": amount,
+        }),
+        "payable": is_payable({
+            "status": row["status"],
+            "amount_cents": row["amount_cents"],
+            "commission_status": commission_status,
+        }),
         "billing_installment_number": None if raw_billing is None else int(raw_billing),
         "collected_amount_cents": None if raw_collected is None else int(raw_collected),
     }
@@ -136,10 +175,13 @@ def summarize_open_installments(installments: Sequence[dict]) -> dict:
         if status not in ("due", "upcoming"):
             continue
         key = inst["payout_date"]
+        period = inst.get("payout_period") or inst.get("payout_period_label") or _PENDING_PERIOD_LABEL
         slot = by_date.setdefault(key, {
-            "payout_period": inst.get("payout_period"),
+            "payout_period": period,
+            "payout_period_label": period,
             "payout_date": key,
             "amount_cents": 0,
+            "bucket": BUCKET_DATED,
         })
         slot["amount_cents"] += amount
     next_payout = by_date[min(by_date)] if by_date else None
@@ -190,15 +232,43 @@ class _AmountGroup:
             partial = False
         if self.labels and all(label == self.labels[0] for label in self.labels):
             period = self.labels[0]
-        else:
+        elif self.payout_date:
+            period = period_label(date.fromisoformat(str(self.payout_date)[:10]))
+        elif default_label:
             period = default_label
+        elif self.bucket == BUCKET_UNSCHEDULED:
+            period = _UNSCHEDULED_LABEL
+        else:
+            period = _PENDING_PERIOD_LABEL
         return {
             "payout_period": period,
+            "payout_period_label": period,
             "payout_date": self.payout_date,
             "amount_cents": amount,
             "amount_partial": partial,
             "status": rollup_status(self.statuses),
         }
+
+
+def commission_payout_period(payment_period: Optional[str], installments: Sequence[dict]) -> str:
+    """One non-null period for a commission row.
+
+    A stored payment_period wins. Otherwise the earliest dated installment
+    label, then Unscheduled when any amount is known without a date, then
+    Pending billing data.
+    """
+    text = payment_period.strip() if isinstance(payment_period, str) else ""
+    if text:
+        return text
+    dated = [inst for inst in installments if inst.get("payout_date")]
+    if dated:
+        earliest = min(dated, key=lambda inst: inst["payout_date"])
+        label = earliest.get("payout_period") or earliest.get("payout_period_label")
+        if isinstance(label, str) and label.strip():
+            return label.strip()
+    if any(inst.get("bucket") == BUCKET_UNSCHEDULED for inst in installments):
+        return _UNSCHEDULED_LABEL
+    return _PENDING_PERIOD_LABEL
 
 
 def _installment_bucket(inst: dict) -> str:
@@ -278,6 +348,7 @@ def build_payout_schedule(deals: Sequence[dict]) -> dict:
             installments.append({
                 "installment_number": agg.installment_number,
                 "payout_period": finished["payout_period"],
+                "payout_period_label": finished["payout_period_label"],
                 "payout_date": finished["payout_date"],
                 "amount_cents": finished["amount_cents"],
                 "amount_partial": finished["amount_partial"],
@@ -307,6 +378,7 @@ def build_payout_schedule(deals: Sequence[dict]) -> dict:
         finished = _render_group(period, default_label=default_label)
         by_payout_period.append({
             "payout_period": finished["payout_period"],
+            "payout_period_label": finished["payout_period_label"],
             "payout_date": finished["payout_date"],
             "amount_cents": finished["amount_cents"],
             "amount_partial": finished["amount_partial"],

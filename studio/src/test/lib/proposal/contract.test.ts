@@ -1,19 +1,18 @@
 // ---------------------------------------------------------------------------
-// contract.test.ts — Contract generator calculation layer tests
-//
-// Covers buildContractRows, buildContractTotals, and buildPaymentSchedule
-// functions from lib/proposal/contract.ts
+// contract.test.ts — buildContract() for the maintenance agreement.
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { buildContract } from '@/lib/proposal/contract'
 import {
-  buildContractRows,
-  buildContractTotals,
-  buildPaymentSchedule,
-} from '@/lib/proposal/contract'
+  CORAL_BAY_ANNUAL_MAINTENANCE_CENTS,
+  CORAL_BAY_CONTRACT_VALUE_CENTS,
+  CORAL_BAY_OPTIONAL_LABELS,
+  CORAL_BAY_RECURRING_LINES,
+  coralBayContractEstimate,
+} from '@/test/fixtures/coralBayContract'
 import type { Estimate } from '@/types/estimating'
 
-// Helper to create a minimal maintenance estimate
 function makeEstimate(
   sections: Array<{
     squareFeet: number
@@ -31,30 +30,8 @@ function makeEstimate(
     id: 'est-test',
     estimateType: 'maintenance',
     name: 'Test Estimate',
-    aspireNumber: '12345',
-    estimateNumber: 1,
-    aspireOpportunityId: null,
-    aspireSyncStatus: 'synced',
-    propertyId: null,
-    clientName: 'Test Client',
-    aspireBranchId: 1,
-    branchCity: 'Test City',
-    acreage: 5,
-    contractValueCents: 100000,
-    targetMargin: 0.22,
     status: 'approved',
-    lifecycle: 'approved',
-    aspireOwner: 'estimating',
-    priority: 'medium',
-    winProbability: 0.8,
-    siteWalkDate: null,
-    dueBackDate: '2024-01-01',
-    anticipatedCloseDate: null,
     serviceStartDate: serviceStartDate ?? null,
-    assignedLsEstimator: null,
-    assignedIrrEstimator: null,
-    crmRep: null,
-    customerType: 'commercial',
     sections: sections.map((sec, sIdx) => ({
       id: `sec-${sIdx}`,
       estimateId: 'est-test',
@@ -78,289 +55,194 @@ function makeEstimate(
         components: [],
       })),
     })),
-    createdAt: '2024-01-01T00:00:00Z',
-    updatedAt: '2024-01-01T00:00:00Z',
   } as Estimate
 }
 
-describe('buildContractRows', () => {
+function scheduledCents(estimate: Estimate): number {
+  return buildContract(estimate).schedule.reduce((sum, month) => sum + month.amountCents, 0)
+}
+
+describe('buildContract', () => {
   it('creates one row per service, ordered by section then service sortOrder', () => {
-    const estimate = makeEstimate([
-      {
-        squareFeet: 10000,
-        services: [
-          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
-          { label: 'Edging', qty: 12, unitSellCents: 200, complexityPct: 0 },
-        ],
-      },
-      {
-        squareFeet: 5000,
-        services: [
-          { label: 'Mulch', qty: 1, unitSellCents: 300, complexityPct: 0, billingType: 'one_time' },
-        ],
-      },
-    ])
+    const contract = buildContract(
+      makeEstimate([
+        {
+          squareFeet: 10000,
+          services: [
+            { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
+            { label: 'Edging', qty: 12, unitSellCents: 200, complexityPct: 0 },
+          ],
+        },
+        {
+          squareFeet: 5000,
+          services: [
+            { label: 'Cleanup', qty: 1, unitSellCents: 300, complexityPct: 0, billingType: 'one_time' },
+          ],
+        },
+      ]),
+    )
 
-    const rows = buildContractRows(estimate)
-
-    expect(rows).toHaveLength(3)
-    expect(rows[0].label).toBe('Mowing')
-    expect(rows[1].label).toBe('Edging')
-    expect(rows[2].label).toBe('Mulch')
+    expect(contract.rows.map((row) => row.label)).toEqual(['Mowing', 'Edging', 'Cleanup'])
   })
 
-  it('calculates priceEachCents correctly', () => {
-    const estimate = makeEstimate([
-      {
-        squareFeet: 10000,
-        services: [
-          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
-        ],
-      },
-    ])
+  it('calculates price per occurrence from the section area', () => {
+    const [row] = buildContract(
+      makeEstimate([
+        {
+          squareFeet: 10000,
+          services: [{ label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 }],
+        },
+      ]),
+    ).rows
 
-    const rows = buildContractRows(estimate)
-
-    expect(rows[0].priceEachCents).toBe(5000)
-    expect(rows[0].occurs).toBe(12)
+    expect(row.priceEachCents).toBe(5000)
+    expect(row.occurs).toBe(12)
   })
 
-  it('applies complexity percentage correctly', () => {
-    const estimate = makeEstimate([
-      {
-        squareFeet: 10000,
-        services: [
-          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0.10 },
-        ],
-      },
-    ])
+  it('applies complexity to the price per occurrence and the extended price', () => {
+    const [row] = buildContract(
+      makeEstimate([
+        {
+          squareFeet: 10000,
+          services: [{ label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0.1 }],
+        },
+      ]),
+    ).rows
 
-    const rows = buildContractRows(estimate)
-
-    expect(rows[0].priceEachCents).toBe(5500)
-    expect(rows[0].extPriceCents).toBe(66000)
+    expect(row.priceEachCents).toBe(5500)
+    expect(row.extPriceCents).toBe(66000)
   })
 
-  it('marks a known unit price, including a real zero', () => {
-    const estimate = makeEstimate([
-      {
-        squareFeet: 10000,
-        services: [
-          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
-          { label: 'Included', qty: 12, unitSellCents: 0, complexityPct: 0 },
-        ],
-      },
-    ])
+  it('keeps a stored zero and leaves a missing unit price null', () => {
+    const contract = buildContract(
+      makeEstimate([
+        {
+          squareFeet: 10000,
+          services: [
+            { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
+            { label: 'Included', qty: 12, unitSellCents: 0, complexityPct: 0 },
+            { label: 'Unpriced', qty: 4, unitSellCents: null, complexityPct: 0 },
+          ],
+        },
+      ]),
+    )
 
-    const rows = buildContractRows(estimate)
-
-    expect(rows[0].hasUnitPrice).toBe(true)
-    expect(rows[0].extPriceCents).toBe(60000)
-    expect(rows[1].hasUnitPrice).toBe(true)
-    expect(rows[1].extPriceCents).toBe(0)
+    expect(contract.rows[0].priceEachCents).not.toBeNull()
+    expect(contract.rows[0].extPriceCents).toBe(60000)
+    expect(contract.rows[1].priceEachCents).toBe(0)
+    expect(contract.rows[1].extPriceCents).toBe(0)
+    expect(contract.rows[2].priceEachCents).toBeNull()
+    expect(contract.rows[2].extPriceCents).toBeNull()
+    expect(contract.annualMaintenancePriceCents).toBe(60000)
   })
 
-  it('uses the extended price, not price-each times quantity, when those differ by rounding', () => {
+  it('uses the extended price, not price-each times quantity, when rounding differs', () => {
     // 1,500 sqft × 1¢ per 1,000 sqft rounds to 2¢ per occurrence, but
     // 2¢ × 3 occurrences is 6¢ while maintServiceLine rounds 4.5¢ to 5¢.
-    const estimate = makeEstimate([
-      {
-        squareFeet: 1500,
-        services: [
-          { label: 'Mowing', qty: 3, unitSellCents: 1, complexityPct: 0 },
-        ],
-      },
-    ])
+    const [row] = buildContract(
+      makeEstimate([
+        {
+          squareFeet: 1500,
+          services: [{ label: 'Mowing', qty: 3, unitSellCents: 1, complexityPct: 0 }],
+        },
+      ]),
+    ).rows
 
-    const rows = buildContractRows(estimate)
-
-    expect(rows[0].hasUnitPrice).toBe(true)
-    expect(rows[0].priceEachCents * 3).not.toBe(rows[0].extPriceCents)
-    expect(rows[0].extPriceCents).toBe(5)
+    expect(row.priceEachCents).not.toBeNull()
+    expect((row.priceEachCents ?? 0) * 3).not.toBe(row.extPriceCents)
+    expect(row.extPriceCents).toBe(5)
   })
 
-  it('flags a missing unit price and adds nothing to the extended price', () => {
-    const estimate = makeEstimate([
-      {
-        squareFeet: 10000,
-        services: [
-          { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
-          { label: 'Unpriced', qty: 4, unitSellCents: null, complexityPct: 0 },
-        ],
-      },
-    ])
-
-    const rows = buildContractRows(estimate)
-    const unpriced = rows.find((r) => r.label === 'Unpriced')
-
-    expect(unpriced?.hasUnitPrice).toBe(false)
-    expect(unpriced?.extPriceCents).toBe(0)
-    expect(unpriced?.priceEachCents).toBe(0)
-  })
-
-  it('sums priced recurring rows to the annual maintenance total', () => {
-    const estimate = makeEstimate([
-      {
-        squareFeet: 342000,
-        services: [
-          { label: 'Mowing', qty: 12, unitSellCents: 350, complexityPct: 0 },
-          { label: 'Unpriced', qty: 4, unitSellCents: null, complexityPct: 0 },
-          { label: 'Mulch', qty: 1, unitSellCents: 420000, complexityPct: 0, billingType: 'one_time' },
-        ],
-      },
-      {
-        squareFeet: 28500,
-        services: [
-          { label: 'Irrigation', qty: 12, unitSellCents: 1000, complexityPct: 0 },
-        ],
-      },
-    ])
-
-    const rows = buildContractRows(estimate)
-    const recurring = rows.filter((row) => row.isRecurring)
-    const shown = recurring.reduce(
-      (sum, row) => sum + (row.hasUnitPrice ? row.extPriceCents : 0),
-      0,
+  it('sums priced rows and leaves an unpriced recurring row out of the annual price', () => {
+    const contract = buildContract(
+      makeEstimate([
+        {
+          squareFeet: 342000,
+          services: [
+            { label: 'Mowing', qty: 12, unitSellCents: 350, complexityPct: 0 },
+            { label: 'Unpriced', qty: 4, unitSellCents: null, complexityPct: 0 },
+            { label: 'Cleanup', qty: 1, unitSellCents: 300, complexityPct: 0, billingType: 'one_time' },
+          ],
+        },
+        {
+          squareFeet: 28500,
+          services: [{ label: 'Irrigation', qty: 12, unitSellCents: 1000, complexityPct: 0 }],
+        },
+      ]),
     )
 
-    expect(shown).toBe(buildContractTotals(recurring).extPriceCents)
-    expect(rows.find((row) => row.label === 'Mulch')?.isRecurring).toBe(false)
-    expect(rows.find((row) => row.label === 'Unpriced')?.hasUnitPrice).toBe(false)
-  })
-
-  it('sums the seeded Coral Bay recurring services to $40,014.00', () => {
-    // Same services, quantities, rates, and square footage as
-    // scripts/seed_contract_estimate.py.
-    const estimate = makeEstimate([
-      {
-        squareFeet: 342_000,
-        services: [
-          { label: 'Mowing & Edging', qty: 12, unitSellCents: 350, complexityPct: 0 },
-          { label: 'Landscape Bed Maintenance', qty: 12, unitSellCents: 200, complexityPct: 0 },
-          { label: 'Fertilization', qty: 4, unitSellCents: 300, complexityPct: 0 },
-          { label: 'Weed Control', qty: 6, unitSellCents: 200, complexityPct: 0 },
-          { label: 'Tree Canopy Trimming', qty: 4, unitSellCents: 250, complexityPct: 0 },
-        ],
-      },
-      {
-        squareFeet: 28_500,
-        services: [
-          { label: 'Shrub & Hedge Trimming', qty: 6, unitSellCents: 1400, complexityPct: 0 },
-          { label: 'Irrigation System Maint.', qty: 12, unitSellCents: 1000, complexityPct: 0 },
-          { label: 'Mulch Application', qty: 1, unitSellCents: 420_000, complexityPct: 0, billingType: 'one_time' },
-          { label: 'Annual Flower Installation', qty: 1, unitSellCents: 860_000, complexityPct: 0, billingType: 'one_time' },
-        ],
-      },
-    ])
-
-    const rows = buildContractRows(estimate)
-    const recurring = rows.filter((row) => row.isRecurring)
-    const shown = recurring.reduce(
-      (sum, row) => sum + (row.hasUnitPrice ? row.extPriceCents : 0),
-      0,
+    const shown = contract.recurringRows.reduce((sum, row) => sum + (row.extPriceCents ?? 0), 0)
+    expect(shown).toBe(contract.annualMaintenancePriceCents)
+    expect(contract.oneTimeRows.map((row) => row.label)).toEqual(['Cleanup'])
+    expect(contract.rows.find((row) => row.label === 'Unpriced')?.extPriceCents).toBeNull()
+    expect(contract.totals.extPriceCents).toBe(
+      contract.annualMaintenancePriceCents + (contract.oneTimeRows[0].extPriceCents ?? 0),
     )
-
-    expect(recurring).toHaveLength(7)
-    expect(recurring.every((row) => row.hasUnitPrice)).toBe(true)
-    expect(shown).toBe(4_001_400)
-    const maintenance = buildContractTotals(recurring).extPriceCents
-    const optional = buildContractTotals(rows.filter((row) => !row.isRecurring)).extPriceCents
-    expect(maintenance).toBe(4_001_400)
-    expect(optional).toBe(11_970_000 + 24_510_000)
-    expect(buildContractTotals(rows).extPriceCents).toBe(maintenance + optional)
-    const scheduled = buildPaymentSchedule(rows, null).reduce((sum, month) => sum + month.amountCents, 0)
-    expect(scheduled).toBe(maintenance)
+    expect(contract.totals.salesTaxCents).toBe(0)
+    expect(contract.totals.totalPriceCents).toBe(contract.totals.extPriceCents)
   })
-})
 
-describe('buildContractTotals', () => {
-  it('sums all rows correctly', () => {
-    const rows = [
-      {
-        label: 'Mowing',
-        occurs: 12,
-        priceEachCents: 5000,
-        hasUnitPrice: true,
-        extPriceCents: 60000,
-        salesTaxCents: 0,
-        totalPriceCents: 60000,
-        isRecurring: true,
-      },
-      {
-        label: 'Mulch',
-        occurs: null,
-        priceEachCents: 1500,
-        hasUnitPrice: true,
-        extPriceCents: 1500,
-        salesTaxCents: 0,
-        totalPriceCents: 1500,
-        isRecurring: false,
-      },
-    ]
+  it('prices seeded Coral Bay recurring services and does not use the stored contract value', () => {
+    const estimate = coralBayContractEstimate()
+    const contract = buildContract(estimate)
+    const optional = contract.oneTimeRows.reduce((sum, row) => sum + (row.extPriceCents ?? 0), 0)
 
-    const totals = buildContractTotals(rows)
-
-    expect(totals.extPriceCents).toBe(61500)
-    expect(totals.totalPriceCents).toBe(61500)
+    expect(contract.recurringRows.map((row) => row.label)).toEqual(
+      CORAL_BAY_RECURRING_LINES.map((line) => line.label),
+    )
+    expect(contract.recurringRows.map((row) => row.extPriceCents)).toEqual(
+      CORAL_BAY_RECURRING_LINES.map((line) => line.extPriceCents),
+    )
+    expect(contract.annualMaintenancePriceCents).toBe(CORAL_BAY_ANNUAL_MAINTENANCE_CENTS)
+    expect(contract.annualMaintenancePriceCents).not.toBe(CORAL_BAY_CONTRACT_VALUE_CENTS)
+    expect(contract.oneTimeRows.map((row) => row.label)).toEqual([...CORAL_BAY_OPTIONAL_LABELS])
+    expect(contract.oneTimeRows.every((row) => row.priceEachCents != null)).toBe(true)
+    expect(contract.totals.extPriceCents).toBe(contract.annualMaintenancePriceCents + optional)
+    expect(scheduledCents(estimate)).toBe(contract.annualMaintenancePriceCents)
+    expect(contract.schedule[0].month).toBe('January')
   })
-})
 
-describe('buildPaymentSchedule', () => {
-  it('distributes payment evenly across 12 months', () => {
-    const rows = [
-      {
-        label: 'Mowing',
-        occurs: 12,
-        priceEachCents: 5000,
-        hasUnitPrice: true,
-        extPriceCents: 60000,
-        salesTaxCents: 0,
-        totalPriceCents: 60000,
-        isRecurring: true,
-      },
-    ]
-
-    const schedule = buildPaymentSchedule(rows, null)
+  it('distributes the annual price evenly across 12 months', () => {
+    const { schedule } = buildContract(
+      makeEstimate([
+        {
+          squareFeet: 10000,
+          services: [{ label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 }],
+        },
+      ]),
+    )
 
     expect(schedule).toHaveLength(12)
-    expect(schedule.every((m) => m.amountCents === 5000)).toBe(true)
+    expect(schedule.every((month) => month.amountCents === 5000)).toBe(true)
   })
 
-  it('starts from serviceStartDate month when provided', () => {
-    const rows = [
-      {
-        label: 'Mowing',
-        occurs: 12,
-        priceEachCents: 5000,
-        hasUnitPrice: true,
-        extPriceCents: 60000,
-        salesTaxCents: 0,
-        totalPriceCents: 60000,
-        isRecurring: true,
-      },
-    ]
-
-    const schedule = buildPaymentSchedule(rows, new Date('2024-03-01'))
+  it('starts from the service start month', () => {
+    const { schedule } = buildContract(
+      makeEstimate(
+        [
+          {
+            squareFeet: 10000,
+            services: [{ label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 }],
+          },
+        ],
+        '2024-03-01',
+      ),
+    )
 
     expect(schedule[0].month).toBe('March')
     expect(schedule[1].month).toBe('April')
+    expect(schedule[11].month).toBe('February')
   })
 
-  it('defaults to January when serviceStartDate is null', () => {
-    const rows = [
-      {
-        label: 'Mowing',
-        occurs: 12,
-        priceEachCents: 5000,
-        hasUnitPrice: true,
-        extPriceCents: 60000,
-        salesTaxCents: 0,
-        totalPriceCents: 60000,
-        isRecurring: true,
-      },
-    ]
-
-    const schedule = buildPaymentSchedule(rows, null)
+  it('defaults the schedule to January when the service start date is missing', () => {
+    const { schedule } = buildContract(
+      makeEstimate([
+        {
+          squareFeet: 10000,
+          services: [{ label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 }],
+        },
+      ]),
+    )
 
     expect(schedule[0].month).toBe('January')
   })
@@ -381,38 +263,33 @@ describe('buildPaymentSchedule', () => {
         },
       ])
 
-    it('treats it as recurring', () => {
-      const rows = buildContractRows(withNullBillingType())
-      expect(rows.find((r) => r.label === 'Hand-entered extra')?.isRecurring).toBe(true)
+    it('treats it as recurring and still prints its occurrence count', () => {
+      const row = buildContract(withNullBillingType()).rows.find((item) => item.label === 'Hand-entered extra')
+      expect(row?.isRecurring).toBe(true)
+      expect(row?.occurs).toBe(4)
     })
 
-    it('still prints its occurrence count', () => {
-      const rows = buildContractRows(withNullBillingType())
-      expect(rows.find((r) => r.label === 'Hand-entered extra')?.occurs).toBe(4)
+    it('includes it in the payment schedule, which reconciles to the total', () => {
+      const estimate = withNullBillingType()
+      const contract = buildContract(estimate)
+      expect(scheduledCents(estimate)).toBe(contract.totals.extPriceCents)
     })
 
-    it('includes it in the payment-schedule base, which reconciles to the total', () => {
-      const rows = buildContractRows(withNullBillingType())
-      const totals = buildContractTotals(rows)
-      const scheduled = buildPaymentSchedule(rows, null).reduce((n, m) => n + m.amountCents, 0)
-      expect(scheduled).toBe(totals.extPriceCents)
-    })
-
-    it('still lets an explicit one-time mark opt a line out', () => {
+    it('still lets an explicit one-time mark opt a line out of the schedule', () => {
       const estimate = makeEstimate([
         {
           squareFeet: 10000,
           services: [
             { label: 'Mowing', qty: 12, unitSellCents: 500, complexityPct: 0 },
-            { label: 'Mulch', qty: 1, unitSellCents: 300, complexityPct: 0, billingType: 'one_time' },
+            { label: 'Cleanup', qty: 1, unitSellCents: 300, complexityPct: 0, billingType: 'one_time' },
           ],
         },
       ])
-      const rows = buildContractRows(estimate)
-      const totals = buildContractTotals(rows)
-      const scheduled = buildPaymentSchedule(rows, null).reduce((n, m) => n + m.amountCents, 0)
-      expect(rows.find((r) => r.label === 'Mulch')?.isRecurring).toBe(false)
-      expect(scheduled).toBeLessThan(totals.extPriceCents)
+      const contract = buildContract(estimate)
+
+      expect(contract.oneTimeRows.map((row) => row.label)).toEqual(['Cleanup'])
+      expect(scheduledCents(estimate)).toBe(contract.annualMaintenancePriceCents)
+      expect(scheduledCents(estimate)).toBeLessThan(contract.totals.extPriceCents)
     })
   })
 })

@@ -1,6 +1,15 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { screen, within } from '@testing-library/react'
 import { render } from '@/test/utils'
+import { formatCents } from '@/lib/money'
+import { buildContract } from '@/lib/proposal/contract'
+import {
+  CORAL_BAY_ANNUAL_MAINTENANCE_CENTS,
+  CORAL_BAY_CONTRACT_VALUE_CENTS,
+  CORAL_BAY_OPTIONAL_LABELS,
+  CORAL_BAY_RECURRING_LINES,
+  coralBayContractEstimate,
+} from '@/test/fixtures/coralBayContract'
 import { ContractLines } from '@/views/inside-sales/components/estimating/proposal-pages/ContractLines'
 import type { Estimate, SectionService } from '@/types/estimating'
 
@@ -45,6 +54,10 @@ function cellsIn(label: string): string[] {
   return within(row as HTMLElement).getAllByRole('cell').map((cell) => cell.textContent)
 }
 
+function cents(text: string | null): number {
+  return Math.round(Number((text ?? '').replace(/[$,]/g, '')) * 100)
+}
+
 describe('ContractLines', () => {
   it('prints each priced service and leaves an unpriced price blank', () => {
     render(
@@ -62,6 +75,7 @@ describe('ContractLines', () => {
       />,
     )
 
+    expect(screen.getByRole('columnheader', { name: 'Annual Price' })).toBeInTheDocument()
     expect(cellsIn('Mowing')).toEqual(['Mowing', '12', '$600.00'])
     expect(cellsIn('Unpriced bed work')).toEqual(['Unpriced bed work', '4', ''])
     expect(cellsIn('Annual Maintenance Price')).toEqual(['Annual Maintenance Price', '$600.00'])
@@ -91,89 +105,41 @@ describe('ContractLines', () => {
       />,
     )
 
+    expect(screen.getByRole('columnheader', { name: 'Price per Occurrence' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Annual Price' })).toBeInTheDocument()
     expect(cellsIn('Unpriced mulch')).toEqual(['Unpriced mulch', '1', '', ''])
     expect(cellsIn('Included flowers')).toEqual(['Included flowers', '1', '$0.00', '$0.00'])
   })
 
-  it('prints each Coral Bay line at its own calculated price', () => {
-    // Same sections, quantities, rates, and square footage as
-    // scripts/seed_contract_estimate.py. contractValueCents is $48,000 and
-    // is not applied to these prices.
-    const coralBay = {
-      id: 'est-coral-bay',
-      estimateType: 'maintenance',
-      name: 'Coral Bay HOA — Contract Test',
-      status: 'approved',
-      contractValueCents: 4_800_000,
-      sections: [
-        {
-          id: 'sec-main',
-          estimateId: 'est-coral-bay',
-          name: 'Main Property',
-          squareFeet: 342_000,
-          sortOrder: 0,
-          services: [
-            service({ id: 'svc-1', label: 'Mowing & Edging', qty: 12, unitSellCents: 350, sortOrder: 0 }),
-            service({ id: 'svc-2', label: 'Landscape Bed Maintenance', qty: 12, unitSellCents: 200, sortOrder: 1 }),
-            service({ id: 'svc-3', label: 'Fertilization', qty: 4, unitSellCents: 300, sortOrder: 2 }),
-            service({ id: 'svc-4', label: 'Weed Control', qty: 6, unitSellCents: 200, sortOrder: 3 }),
-            service({ id: 'svc-5', label: 'Tree Canopy Trimming', qty: 4, unitSellCents: 250, sortOrder: 4 }),
-          ].map((row) => ({ ...row, sectionId: 'sec-main' })),
-        },
-        {
-          id: 'sec-entrance',
-          estimateId: 'est-coral-bay',
-          name: 'Entrance & Amenity Areas',
-          squareFeet: 28_500,
-          sortOrder: 1,
-          services: [
-            service({ id: 'svc-6', label: 'Shrub & Hedge Trimming', qty: 6, unitSellCents: 1400, sortOrder: 0 }),
-            service({ id: 'svc-7', label: 'Irrigation System Maint.', qty: 12, unitSellCents: 1000, sortOrder: 1 }),
-            service({
-              id: 'svc-8',
-              label: 'Mulch Application',
-              qty: 1,
-              unitSellCents: 420_000,
-              sortOrder: 2,
-              billingType: 'one_time',
-            }),
-            service({
-              id: 'svc-9',
-              label: 'Annual Flower Installation',
-              qty: 1,
-              unitSellCents: 860_000,
-              sortOrder: 3,
-              billingType: 'one_time',
-            }),
-          ].map((row) => ({ ...row, sectionId: 'sec-entrance' })),
-        },
-      ],
-    } as Estimate
-
+  it('prints each Coral Bay recurring line at its calculated price', () => {
+    const coralBay = coralBayContractEstimate()
     render(<ContractLines estimate={coralBay} />)
 
     const [servicesTable, optionalTable] = screen.getAllByRole('table')
     const serviceRows = within(servicesTable)
       .getAllByRole('row')
       .filter((row) => within(row).queryAllByRole('cell').length === 3)
-    const cents = (text: string | null) => Math.round(Number((text ?? '').replace(/[$,]/g, '')) * 100)
     const lineCents = serviceRows.map((row) => cents(within(row).getAllByRole('cell')[2].textContent))
     const totalRow = within(servicesTable).getByRole('row', { name: /Annual Maintenance Price/ })
     const maintenanceCents = cents(within(totalRow).getAllByRole('cell')[1].textContent)
     const optionalRows = within(optionalTable)
       .getAllByRole('row')
       .filter((row) => within(row).queryAllByRole('cell').length === 4)
-    const optionalCents = optionalRows.map((row) => {
-      const cells = within(row).getAllByRole('cell')
-      return { each: cents(cells[2].textContent), annual: cents(cells[3].textContent) }
-    })
-    const optionalSum = optionalCents.reduce((sum, row) => sum + row.annual, 0)
+    const optionalCents = optionalRows.map((row) => cents(within(row).getAllByRole('cell')[3].textContent))
 
-    expect(lineCents).toHaveLength(7)
+    expect(serviceRows.map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual(
+      CORAL_BAY_RECURRING_LINES.map((line) => line.label),
+    )
+    expect(lineCents).toEqual(CORAL_BAY_RECURRING_LINES.map((line) => line.extPriceCents))
     expect(lineCents.reduce((sum, value) => sum + value, 0)).toBe(maintenanceCents)
-    expect(maintenanceCents).toBe(4_001_400)
-    expect(optionalCents.map((row) => row.annual)).toEqual([11_970_000, 24_510_000])
-    expect(optionalCents.every((row) => row.each === row.annual)).toBe(true)
-    expect(maintenanceCents + optionalSum).toBe(40_481_400)
+    expect(maintenanceCents).toBe(CORAL_BAY_ANNUAL_MAINTENANCE_CENTS)
+    expect(formatCents(maintenanceCents)).not.toBe(formatCents(CORAL_BAY_CONTRACT_VALUE_CENTS))
+    expect(optionalRows.map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual([
+      ...CORAL_BAY_OPTIONAL_LABELS,
+    ])
+    expect(optionalCents.every((value) => value > 0)).toBe(true)
+    expect(maintenanceCents + optionalCents.reduce((sum, value) => sum + value, 0)).toBe(
+      buildContract(coralBay).totals.extPriceCents,
+    )
   })
 })

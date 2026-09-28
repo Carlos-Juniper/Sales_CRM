@@ -6,7 +6,7 @@
 -- Commissions are inserted by api/estimating.py when status transitions to
 -- 'won' (see _create_commission_on_won). No trigger is used.
 --
--- Applied by scripts/migrate.py (detect_046 keys on commissions table).
+-- Applied by scripts/migrate.py (detect_054 keys on the commissions table).
 -- ---------------------------------------------------------------------------
 
 -- ── 1. Commission rates ────────────────────────────────────────────────────

@@ -365,8 +365,8 @@ export interface SectionServiceComponent {
 export type KitType = 'maintenance_hours' | 'install_quantity'
 
 /**
- * Priced service kit (`service_kits`, renamed from catalog_items in migration 065).
- * Not a material SKU. Materials will live in the new catalog_items table.
+ * Priced service kit (`service_kits`, renamed from catalog_items in migration 069).
+ * Not a material SKU.
  */
 export interface ServiceKit {
   id: string

@@ -522,7 +522,7 @@ class TestDetectFunctions:
         assert M.detect_009(None) is True
 
     def test_detect_009_true_when_seed_row_is_on_service_kits(self, monkeypatch):
-        """After 065 the seeded kit lives in service_kits, not the materials table."""
+        """After 069 the seeded kit lives in service_kits."""
         def tables(conn, t):
             return t == "service_kits"
 
@@ -543,8 +543,8 @@ class TestDetectFunctions:
         monkeypatch.setattr(M, "table_exists", lambda conn, t: False)
         assert M.detect_009(None) is False
 
-    def test_detect_009_ignores_materials_catalog_items(self, monkeypatch):
-        """The new catalog_items table has no kit_type and must not be seeded."""
+    def test_detect_009_ignores_catalog_items_without_kit_type(self, monkeypatch):
+        """A catalog_items table that is not the kit catalog must not be seeded."""
         monkeypatch.setattr(M, "table_exists", lambda conn, t: t == "catalog_items")
         monkeypatch.setattr(M, "column_exists", lambda conn, t, c: False)
         called = {"fetch": False}

@@ -215,39 +215,6 @@ def column_exists(conn, table: str, column: str) -> bool:
     return bool(row and row["cnt"])
 
 
-def column_char_length(conn, table: str, column: str) -> int:
-    """CHARACTER_MAXIMUM_LENGTH, or 0 when the column is absent."""
-    row = _fetch_one(
-        conn,
-        "SELECT CHARACTER_MAXIMUM_LENGTH AS char_length FROM INFORMATION_SCHEMA.COLUMNS "
-        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
-        (table, column),
-    )
-    if not row or row.get("char_length") is None:
-        return 0
-    return int(row["char_length"])
-
-
-def inventory_id_accepts_any_nonempty(conn) -> bool:
-    """True when chk_catalog_items_inventory_id allows any non-empty string.
-
-    An earlier draft of 065 required exactly 10 digits. That check contains
-    a digit-class regexp. The shipped check is ``inventory_id <> ''``.
-    """
-    row = _fetch_one(
-        conn,
-        "SELECT CHECK_CLAUSE AS clause FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS "
-        "WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = %s",
-        ("chk_catalog_items_inventory_id",),
-    )
-    if not row or not row.get("clause"):
-        return False
-    clause = str(row["clause"]).lower()
-    if "0-9" in clause or "regexp" in clause:
-        return False
-    return "<>" in clause or "!=" in clause
-
-
 def column_nullable(conn, table: str, column: str) -> bool:
     """True only when the column exists and IS_NULLABLE = 'YES'.
 
@@ -297,11 +264,10 @@ def foreign_key_exists(conn, table: str, constraint: str) -> bool:
 
 
 def _service_kit_table(conn) -> Optional[str]:
-    """Priced kit catalog: service_kits after 065, catalog_items before it.
+    """Priced kit catalog: service_kits after 069, catalog_items before it.
 
-    The materials catalog_items table has no kit_type column. Detectors for
-    the kit seed and scope_text must not query that table or they will try
-    to re-apply kit SQL against the item master.
+    A catalog_items table without kit_type is not the kit catalog. Detectors
+    for the kit seed and scope_text must not query it.
     """
     if table_exists(conn, "service_kits") and column_exists(conn, "service_kits", "kit_type"):
         return "service_kits"
@@ -439,7 +405,7 @@ def detect_007(conn) -> bool:
 def detect_008(conn) -> bool:
     """008 applied ↔ the takeoff kit-link column exists.
 
-    065 renames takeoff_lines.catalog_item_id to service_kit_id. Either name
+    069 renames takeoff_lines.catalog_item_id to service_kit_id. Either name
     means 008 already landed. Treating only the old name as applied would
     re-run 008's bare ADD COLUMN after the rename.
     """
@@ -452,7 +418,7 @@ def detect_009(conn) -> bool:
     """
     009 applied ↔ at least one seeded kit row with id='kit-maint-5388' exists.
 
-    The row lives in service_kits after 065 and in catalog_items before it.
+    The row lives in service_kits after 069 and in catalog_items before it.
     Refreshing kits from a newer workbook is an explicit, separate operation
     (scripts/load_service_kits.py); never triggered here.
     """
@@ -586,9 +552,9 @@ def detect_044(conn) -> bool:
 
     Keyed on scope_text (the first column added by the migration). The migration
     also adds billing_type and estimates.estimate_number, but scope_text is
-    sufficient. After 065 the column is on service_kits. Looking it up on the
-    materials catalog_items table would miss it and re-run the ALTER against
-    the item master.
+    sufficient. After 069 the column is on service_kits. Looking it up on a
+    catalog_items table that is no longer the kit catalog would miss it and
+    re-run the ALTER against the wrong table.
     """
     table = _service_kit_table(conn)
     if table is None:
@@ -874,16 +840,12 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
-def detect_065(conn) -> bool:
-    """065 applied ↔ kits were renamed and the materials catalog exists.
+def detect_069(conn) -> bool:
+    """069 applied ↔ the kit catalog was renamed to service_kits.
 
-    True only when every effect is present: service_kits still has kit_type,
-    both child columns are service_kit_id, the new catalog_items table is the
-    item master (inventory_id, and not the kit columns), that id is a
-    non-empty string up to 64 characters (not a 10-digit code), catalog_prices
-    mirrors the width, catalog_prices has its one-current unique key and both
-    marker triggers, and the three FKs this file adds are in place. A partial
-    apply stays False so the guarded statements run again.
+    True when service_kits has kit_type, both child columns are service_kit_id
+    (the old catalog_item_id columns are gone), and both kit foreign keys are
+    in place. A partial apply stays False so the guarded statements run again.
     """
     return (
         _service_kit_table(conn) == "service_kits"
@@ -891,23 +853,8 @@ def detect_065(conn) -> bool:
         and not column_exists(conn, "section_services", "catalog_item_id")
         and column_exists(conn, "takeoff_lines", "service_kit_id")
         and not column_exists(conn, "takeoff_lines", "catalog_item_id")
-        and column_exists(conn, "catalog_items", "inventory_id")
-        and column_char_length(conn, "catalog_items", "inventory_id") >= 64
-        and column_char_length(conn, "catalog_prices", "inventory_id") >= 64
-        and column_char_length(conn, "catalog_prices", "current_inventory_id") >= 64
-        and inventory_id_accepts_any_nonempty(conn)
-        and not column_exists(conn, "catalog_items", "kit_type")
-        and not column_exists(conn, "catalog_items", "unit_cost_cents")
-        and not column_exists(conn, "catalog_items", "unit_sell_cents")
-        and table_exists(conn, "catalog_prices")
-        and column_exists(conn, "catalog_prices", "unit_cost_cents")
-        and column_exists(conn, "catalog_prices", "is_current")
-        and index_exists(conn, "catalog_prices", "uq_catalog_prices_one_current")
-        and trigger_exists(conn, "trg_catalog_prices_bi")
-        and trigger_exists(conn, "trg_catalog_prices_bu")
         and foreign_key_exists(conn, "section_services", "fk_services_service_kit")
         and foreign_key_exists(conn, "takeoff_lines", "fk_takeoff_service_kit")
-        and foreign_key_exists(conn, "catalog_prices", "fk_catalog_prices_item")
     )
 
 
@@ -1009,7 +956,7 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
-    "065_service_kits_and_materials_catalog":     detect_065,
+    "069_service_kits":                           detect_069,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

@@ -7,7 +7,7 @@ Contract under test (all authenticated, all read-only):
   GET /api/estimating/config/margin-bands                   → margin_bands rows
   GET /api/estimating/config/material-calcs                 → material_calcs rows (factors jsonb parsed)
   GET /api/estimating/config/itb-scopes                     → itb_scopes rows, ordered group then order
-  GET /api/estimating/service-kits?branch=&kit_type=&active= → service_kits rows w/ filters
+  GET /api/estimating/service-kits?kit_type=&active= → service_kits rows w/ filters
 
 JSON is shaped to the existing TS types (camelCase) so the frontend swap is a
 drop-in. NO write/admin endpoints exist for these tables (locked decision).

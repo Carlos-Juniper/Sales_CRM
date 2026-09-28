@@ -1,50 +1,21 @@
 -- ---------------------------------------------------------------------------
--- Rollback for 065_service_kits_and_materials_catalog.sql
+-- Rollback for 069_service_kits.sql
 --
 -- scripts/migrate.py does not run files outside sql/migrations/. Apply this
--- by hand only to undo 065 before any materials or prices have been loaded:
+-- by hand only to undo 069:
 --
---   mysql ... crm < sql/rollbacks/065_service_kits_and_materials_catalog_down.sql
+--   mysql ... crm < sql/rollbacks/069_service_kits_down.sql
 --
--- This DROPs catalog_prices and the materials catalog_items table. Do not
--- run it after the spreadsheet import. Kit rows in service_kits are renamed
--- back to catalog_items; they are not deleted.
---
--- The materials inventory_id dropped here is VARCHAR(64), a non-empty string
--- stored exactly as it was given (not a 10-digit code). catalog_prices
--- .inventory_id and current_inventory_id are the same width and go with the
--- DROP TABLE.
+-- Kit rows in service_kits are renamed back to catalog_items; they are not
+-- deleted.
 --
 -- After rollback, both dev and prod have fk_services_catalog_item and
--- fk_takeoff_catalog_item. Prod had the takeoff FK before 065; dev did not.
+-- fk_takeoff_catalog_item. Prod had the takeoff FK before 069; dev did not.
 -- Rollback does not recreate that drift.
 --
--- Statements are guarded so a second run is a no-op.
+-- The schema_migrations row for this file is deleted so the runner will
+-- apply 069 again. Statements are guarded so a second run is a no-op.
 -- ---------------------------------------------------------------------------
-
-SET @drop_prices = IF(
-    (SELECT COUNT(*) FROM information_schema.TABLES
-      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'catalog_prices') = 0,
-    'SELECT 1',
-    'DROP TABLE catalog_prices'
-);
-PREPARE stmt_drop_prices FROM @drop_prices;
-EXECUTE stmt_drop_prices;
-DEALLOCATE PREPARE stmt_drop_prices;
-
--- Drop only the materials master. kit_type means this is still the kit table
--- and must not be dropped.
-SET @drop_materials = IF(
-    (SELECT COUNT(*) FROM information_schema.COLUMNS
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = 'catalog_items'
-        AND COLUMN_NAME = 'inventory_id') = 0,
-    'SELECT 1',
-    'DROP TABLE catalog_items'
-);
-PREPARE stmt_drop_materials FROM @drop_materials;
-EXECUTE stmt_drop_materials;
-DEALLOCATE PREPARE stmt_drop_materials;
 
 SET @fk_services = (
     SELECT CONSTRAINT_NAME
@@ -228,3 +199,17 @@ SET @add_fk_takeoff = IF(
 PREPARE stmt_add_fk_takeoff FROM @add_fk_takeoff;
 EXECUTE stmt_add_fk_takeoff;
 DEALLOCATE PREPARE stmt_add_fk_takeoff;
+
+-- Drop this file's tracking row so a later migrate reapplies 069.
+-- No-op when the runner's schema_migrations table is absent.
+SET @clear_069 = IF(
+    (SELECT COUNT(*) FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'schema_migrations'
+        AND COLUMN_NAME = 'id') = 0,
+    'SELECT 1',
+    'DELETE FROM schema_migrations WHERE id = ''069_service_kits'''
+);
+PREPARE stmt_clear_069 FROM @clear_069;
+EXECUTE stmt_clear_069;
+DEALLOCATE PREPARE stmt_clear_069;

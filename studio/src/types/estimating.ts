@@ -313,13 +313,23 @@ export interface SectionService {
   label: string
   /** Occurrences/yr (maintenance) or quantity (install). */
   qty: number
-  /** `/yr`, `ea`, `plt`, `FT`, `30g`, … */
+  /**
+   * Line unit label (`/yr`, `ea`, `plt`, `FT`, `30g`, …). Not a pricing
+   * signal — the contract seed stores `/yr` on flat-priced lines.
+   */
   uom: string
+  /**
+   * `catalog_items.uom`, joined on read. `lineSellCents` uses this to tell a
+   * flat unit price (EA, CT, and any other non-area unit) from a per-1,000-sf
+   * rate (Sq. Ft., SF). Null when the line has no catalog item. Not persisted.
+   */
+  catalogUom?: string | null
   /** Maintenance hours adder, decimal (0.10 = +10%). */
   complexityPct: number
   /**
    * Integer cents. Install: unit sell price (U/P).
-   * Maintenance: rate per 1,000 sqft per occurrence.
+   * Maintenance, square-foot catalog UOM: rate per 1,000 sqft per occurrence.
+   * Maintenance, any other catalog UOM: flat unit price (qty × this).
    */
   unitSellCents: number | null
   /** Install SUB COST, integer cents. */

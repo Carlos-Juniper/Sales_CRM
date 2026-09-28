@@ -20,8 +20,7 @@ import {
   SQFT_PER_ACRE,
   contractTotal,
   groupMargin,
-  installLineTotal,
-  maintServiceLine,
+  lineSellCents,
 } from './calc'
 
 // ----- Benchmark config (provisional, BRD III-6) ------------------------------
@@ -289,13 +288,15 @@ export function serviceGroupMargins(
         }
         groups.set(svc.label, g)
       }
+      g.priceCents += lineSellCents(
+        estimate.estimateType,
+        section.squareFeet,
+        svc.unitSellCents ?? 0,
+        svc.qty,
+        svc.complexityPct,
+        svc.catalogUom,
+      )
       if (estimate.estimateType === 'maintenance') {
-        g.priceCents += maintServiceLine(
-          section.squareFeet,
-          svc.unitSellCents ?? 0,
-          svc.qty,
-          svc.complexityPct,
-        )
         g.costCents += maintenanceLineCost(section, svc, catalogItems, crewRateCents)
         g.hoursPerYear += maintenanceLineHours(
           svc,
@@ -303,7 +304,6 @@ export function serviceGroupMargins(
         )
       } else {
         const split = installLineCostSplit(svc)
-        g.priceCents += installLineTotal(svc.qty, svc.unitSellCents ?? 0)
         g.costCents += installLineCost(svc)
         g.materialCostCents += split.materialCents
         g.laborCostCents += split.laborCents

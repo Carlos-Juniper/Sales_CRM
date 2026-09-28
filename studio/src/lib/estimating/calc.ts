@@ -25,10 +25,40 @@ export function acresFromSqft(sqft: number): number {
 }
 
 /**
- * Maintenance line total in integer cents.
+ * Square-foot catalog units. Compared after stripping spaces and periods, so
+ * "Sq. Ft.", "sq ft", and "SF" all match. Every other catalog unit (EA, CT,
+ * LF, HR, "3CF Bag", …) is a flat unit price.
+ *
+ * Paired with api/estimating.py `_is_flat_catalog_uom` — keep the two in step.
+ */
+const AREA_CATALOG_UOMS = new Set(['sqft', 'sf'])
+
+/** Catalog UOM, comparable: lowercase, no spaces or periods. */
+export function normalizeCatalogUom(uom: string | null | undefined): string {
+  if (!uom) return ''
+  return uom.toLowerCase().replace(/[\s.]/g, '')
+}
+
+/**
+ * Flat unit price when the catalog item's UOM is present and is not a
+ * square-foot unit. A missing catalog UOM is not flat — a hand-entered line
+ * has no catalog item, and the line's own `uom` is not a pricing signal
+ * (the contract seed stores `/yr` on flat-priced lines).
+ */
+export function isFlatCatalogUom(uom: string | null | undefined): boolean {
+  const normalized = normalizeCatalogUom(uom)
+  if (!normalized) return false
+  return !AREA_CATALOG_UOMS.has(normalized)
+}
+
+/**
+ * Area-priced maintenance line total in integer cents.
  * (sqft/1000) × rate-per-1000sf (cents) × occurrences/yr × (1 + complexity).
  * Complexity adjusts hours (and therefore price) — never adjust hours to hit
  * a price; margin is the commercial lever.
+ *
+ * Callers price a line through `lineSellCents`. This is only the per-1,000-sf
+ * engine.
  */
 export function maintServiceLine(
   sqft: number,
@@ -39,22 +69,31 @@ export function maintServiceLine(
   return Math.round((sqft / 1000) * rateCentsPer1000Sf * qty * (1 + complexityPct))
 }
 
-/**
- * Price per occurrence for a maintenance service in integer cents.
- * This is maintServiceLine with qty=1, used in contract "PRICE EACH" column.
- * Computed independently (not as extPrice / qty) to avoid rounding drift.
- */
-export function priceEachCents(
-  sqft: number,
-  rateCentsPer1000Sf: number,
-  complexityPct: number,
-): number {
-  return maintServiceLine(sqft, rateCentsPer1000Sf, 1, complexityPct)
-}
-
-/** Install line total in integer cents: QTY × unit sell price. */
+/** Quantity × unit price in integer cents. Install lines, and flat maintenance lines. */
 export function installLineTotal(qty: number, unitSellCents: number): number {
   return Math.round(qty * unitSellCents)
+}
+
+/**
+ * Sell price of one line, integer cents. The only line-pricing decision.
+ *
+ * Install is always qty × unitSellCents. Maintenance uses the per-1,000-sf
+ * engine when the catalog UOM is square feet (or when the line has no catalog
+ * UOM). A non-area catalog UOM is a flat unit price: qty × unitSellCents,
+ * with no section-area multiplier and no complexity adder.
+ */
+export function lineSellCents(
+  estimateType: EstimateType,
+  sqft: number,
+  unitSellCents: number,
+  qty: number,
+  complexityPct: number,
+  catalogUom: string | null | undefined,
+): number {
+  if (estimateType !== 'maintenance' || isFlatCatalogUom(catalogUom)) {
+    return installLineTotal(qty, unitSellCents)
+  }
+  return maintServiceLine(sqft, unitSellCents, qty, complexityPct)
 }
 
 /** Kit component cost in integer cents: QTY × unit cost. */
@@ -71,9 +110,7 @@ export function sectionTotal(section: EstimateSection, estimateType: EstimateTyp
     const rate = svc.unitSellCents ?? 0
     return (
       sum +
-      (estimateType === 'maintenance'
-        ? maintServiceLine(section.squareFeet, rate, svc.qty, svc.complexityPct)
-        : installLineTotal(svc.qty, rate))
+      lineSellCents(estimateType, section.squareFeet, rate, svc.qty, svc.complexityPct, svc.catalogUom)
     )
   }, 0)
 }

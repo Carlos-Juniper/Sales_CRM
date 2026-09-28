@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS crm.section_services (
     qty                 DECIMAL(12,4) NOT NULL DEFAULT 0,         -- occurrences/yr (maint) or quantity (install)
     uom                 VARCHAR(20)   NOT NULL,                   -- /yr, ea, plt, FT, 30g, …
     complexity_pct      DECIMAL(6,4)  NOT NULL DEFAULT 0,         -- maintenance hours adder
-    unit_sell_cents     BIGINT        DEFAULT NULL,               -- install U/P; maint: rate per 1,000 sqft
+    unit_sell_cents     BIGINT        DEFAULT NULL,               -- install U/P; maint area: rate per 1,000 sqft; maint flat (non-area catalog UOM): unit price
     embedded_cost_cents BIGINT        DEFAULT NULL,               -- install SUB COST
     target_gm           DECIMAL(6,4)  DEFAULT NULL,               -- install per-line GM% (e.g. 0.45 irrigation)
     hours               DECIMAL(10,4) DEFAULT NULL,               -- production planning only; does NOT drive price

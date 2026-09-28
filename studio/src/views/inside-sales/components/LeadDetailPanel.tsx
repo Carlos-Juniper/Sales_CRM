@@ -95,7 +95,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
           ) : (
             <>
               {/* Top header bar */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
+              <div className="flex items-center gap-3 px-4 py-3 max-md:gap-2 max-md:px-3 max-md:py-2 border-b border-gray-100 flex-shrink-0">
                 <button
                   type="button"
                   onClick={onClose}
@@ -145,7 +145,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                     disabled={!onPrev}
                     className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
-                    <ChevronUp className="h-3.5 w-3.5" /> Prev
+                    <ChevronUp className="h-3.5 w-3.5" /> <span className="max-md:hidden">Prev</span>
                   </button>
                   <button
                     type="button"
@@ -153,7 +153,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                     disabled={!onNext}
                     className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
-                    Next <ChevronDown className="h-3.5 w-3.5" />
+                    <span className="max-md:hidden">Next</span> <ChevronDown className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
@@ -161,7 +161,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
               {/* Scrollable body */}
               <div className="flex-1 overflow-y-auto">
                 {/* Title + address */}
-                <div className="px-6 pt-5 pb-4">
+                <div className="px-6 pt-5 pb-4 max-md:px-4 max-md:pt-4">
                   <h2 className="text-2xl font-bold text-gray-900 leading-tight mb-1.5">
                     {lead.property_name}
                   </h2>
@@ -187,7 +187,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
 
                 {/* Tabs */}
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col">
-                  <div className="px-6 border-b border-gray-100 flex-shrink-0">
+                  <div className="px-6 border-b border-gray-100 flex-shrink-0 max-md:px-4">
                     <TabsList className="w-auto bg-transparent p-0 gap-0 h-auto rounded-none">
                       {[
                         { value: 'overview', label: 'Overview' },
@@ -226,11 +226,11 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
               </div>
 
               {/* Sticky bottom action bar */}
-              <div className="flex-shrink-0 border-t border-gray-100 bg-white px-4 py-3 flex items-center gap-2">
+              <div className="flex-shrink-0 border-t border-gray-100 bg-white px-4 py-3 flex items-center gap-2 max-md:px-3">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="flex items-center gap-1.5 text-gray-700"
+                  className="flex items-center gap-1.5 text-gray-700 max-md:hidden"
                   onClick={() => { onClose(); navigate('/inside-sales/estimating') }}
                 >
                   Open in Estimating

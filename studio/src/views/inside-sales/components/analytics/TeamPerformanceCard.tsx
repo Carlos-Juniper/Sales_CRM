@@ -66,10 +66,10 @@ export function TeamPerformanceCard() {
         ) : (
           <div className="space-y-0">
             {/* Header row */}
-            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-1 pb-1.5 border-b border-[hsl(var(--border))]">
+            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-1 pb-1.5 border-b border-[hsl(var(--border))] max-md:grid-cols-[1fr_auto_auto]">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))]">Rep</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] text-center w-10">Leads</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] text-center w-12">Props</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] text-center w-10 max-md:hidden">Leads</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] text-center w-12 max-md:hidden">Props</span>
               <span className="text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] text-center w-12">Win %</span>
               <span className="text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] text-right w-16">Revenue</span>
             </div>
@@ -80,7 +80,7 @@ export function TeamPerformanceCard() {
               repMetrics.map((rep) => (
                 <div
                   key={rep.user.id}
-                  className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center px-1 py-2.5 border-b border-[hsl(var(--border))] last:border-0"
+                  className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center px-1 py-2.5 border-b border-[hsl(var(--border))] last:border-0 max-md:grid-cols-[1fr_auto_auto]"
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <AssigneeAvatar user={rep.user} size="sm" />
@@ -89,8 +89,8 @@ export function TeamPerformanceCard() {
                       <p className="text-[10px] text-[hsl(var(--muted-fg))]">{roleLabel(rep.user.role)}</p>
                     </div>
                   </div>
-                  <span className="text-xs font-medium text-[hsl(var(--fg))] text-center w-10">{rep.leadsAssigned}</span>
-                  <span className="text-xs font-medium text-[hsl(var(--fg))] text-center w-12">{rep.proposalsSent}</span>
+                  <span className="text-xs font-medium text-[hsl(var(--fg))] text-center w-10 max-md:hidden">{rep.leadsAssigned}</span>
+                  <span className="text-xs font-medium text-[hsl(var(--fg))] text-center w-12 max-md:hidden">{rep.proposalsSent}</span>
                   <span className={`text-xs font-semibold text-center w-12 ${rep.winRate >= 50 ? 'text-emerald-600 dark:text-emerald-400' : rep.winRate > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-[hsl(var(--muted-fg))]'}`}>
                     {rep.wins > 0 ? `${rep.winRate}%` : '—'}
                   </span>

@@ -31,7 +31,7 @@ interface StageTrackerProps {
 export function StageTracker({ status, onStageChange }: StageTrackerProps) {
   const currentIdx = STAGE_SEQUENCE.findIndex(s => s.key === status)
   return (
-    <div className="px-6 pb-4">
+    <div className="px-6 pb-4 max-md:px-4">
       <div className="flex items-stretch rounded-lg overflow-hidden border border-gray-200">
         {STAGE_SEQUENCE.map((stage, idx) => {
           const isActive = stage.key === status

@@ -61,24 +61,28 @@ def derive_installment_status(
 
 
 def public_installment(row: dict, commission_status: str, today: date) -> dict:
-    """API installment object. `payout_period` is the check label."""
-    raw_date = row.get("payout_date")
+    """API installment object. `payout_period` is the check label.
+
+    `row` is the installment select: id, installment_number,
+    payout_period_label, payout_date, amount_cents, and status. Billing
+    columns are included when the query selected them. commission_status
+    is the parent commission status from that same query.
+    """
+    raw_date = row["payout_date"]
     payout = None if raw_date is None else calendar_date(raw_date)
-    raw_amount = row.get("amount_cents")
+    raw_amount = row["amount_cents"]
     amount = None if raw_amount is None else int(raw_amount)
     raw_billing = row.get("billing_installment_number")
     raw_collected = row.get("collected_amount_cents")
-    stored = row.get("status") or row.get("installment_status") or "scheduled"
-    parent = row.get("commission_status") or commission_status or "approved"
     return {
-        "id": row.get("id") or row.get("installment_id"),
-        "installment_number": int(row.get("installment_number") or 0),
-        "payout_period": row.get("payout_period_label") or row.get("payout_period"),
+        "id": row["id"],
+        "installment_number": int(row["installment_number"]),
+        "payout_period": row["payout_period_label"],
         "payout_date": None if payout is None else payout.isoformat(),
         "amount_cents": amount,
         "status": derive_installment_status(
-            stored_status=stored,
-            commission_status=parent,
+            stored_status=row["status"],
+            commission_status=commission_status,
             payout_date=payout,
             today=today,
         ),

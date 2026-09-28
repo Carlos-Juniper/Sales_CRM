@@ -13,9 +13,11 @@ from api.commission_calc import (
     calendar_date,
     close_quarter_label,
     compute_plan_amount,
+    eastern_year_utc_bounds,
     effective_rate,
     maintenance_known_halves,
     marginal_amount_cents,
+    payout_schedule_for,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -39,6 +41,15 @@ def _marginal(cumulative: int, deal: int, tiers: list[CommissionTier]) -> int:
 
 
 class TestPayoutCadence:
+    def test_estimate_type_maps_to_one_schedule(self):
+        assert payout_schedule_for("maintenance") == "maintenance_3_payment"
+        assert payout_schedule_for("install") == "construction_billing_quarterly"
+        with pytest.raises(ValueError):
+            payout_schedule_for("enhancement")
+        start, end = eastern_year_utc_bounds(2026)
+        assert start == datetime(2026, 1, 1, 5, 0)
+        assert end == datetime(2027, 1, 1, 5, 0)
+
     def test_maintenance_three_payments_follow_the_start_quarter(self):
         cases = [
             (datetime(2026, 1, 1, 0, 10, tzinfo=ET), "2026-Q1", date(2026, 3, 31), "March 2026"),

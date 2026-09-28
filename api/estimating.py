@@ -34,7 +34,7 @@ import api.attachments as _att_mod
 from db import execute, query
 from api import aspire_sync
 from api import authz
-from api import commissions
+from api.commission_service import cancel_for_estimate, create_on_won
 from api import properties as _props_mod
 from api.aspire_sync import OpportunityInput
 from api.aspire_config import ASPIRE_BRANCH_MAP, ASPIRE_BRANCH_INSTALL_FALLBACKS
@@ -2193,9 +2193,9 @@ def register(app, require_auth) -> None:
 
         # Commission creation and cancellation — only on the actual transition.
         if target_status == "won" and current.get("status") != "won":
-            background.add_task(commissions.create_on_won, estimate_id)
+            background.add_task(create_on_won, estimate_id)
         if target_status == "lost" and current.get("status") != "lost":
-            background.add_task(commissions.cancel_for_estimate, estimate_id)
+            background.add_task(cancel_for_estimate, estimate_id)
 
         # Estimate Save triggers ONE batched, best-effort
         # push of the takeoff quantities that carry a catalog_item_id. Never

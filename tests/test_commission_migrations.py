@@ -29,14 +29,6 @@ class TestMigration065:
         )
         assert M.detect_065(None) is False
 
-        monkeypatch.setattr(
-            M, "column_exists",
-            lambda conn, table, column: not (
-                table == "commission_plan_rules" and column == "payout_schedule"
-            ),
-        )
-        assert M.detect_065(None) is False
-
         monkeypatch.setattr(M, "column_exists", lambda conn, table, column: True)
         monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
         monkeypatch.setattr(M, "view_exists", lambda conn, name: False)
@@ -101,8 +93,8 @@ class TestMigration065:
         assert "INSERT IGNORE INTO USER_COMMISSION_PLANS" not in upper
         assert "INSERT INTO COMMISSION_RATES" not in upper
         assert "UPDATE COMMISSION_RATES" not in upper
-        assert "'maintenance_3_payment'" in sql
-        assert "'construction_billing_quarterly'" in sql
+        assert "maintenance_3_payment" in sql
+        assert "construction_billing_quarterly" in sql
         assert "enhancement_month_after_quarter" not in sql
         assert "rule-standard-enh" not in sql
         assert "0.01500" not in sql
@@ -116,9 +108,7 @@ class TestMigration065:
         assert "billing_installment_number" in sql
         assert "collected_amount_cents" in sql
         assert "INSERT INTO COMMISSION_BILLING_EVENTS" not in upper
-        assert "COALESCE(e.estimate_type, '') = 'maintenance'" in sql
-        assert "COALESCE(e.estimate_type, '') <> 'maintenance'" in sql
-        assert "SELECT 3" in upper
+        assert "payout_schedule" not in sql
         assert "0.03000" in sql
         assert "0.00400" in sql
         assert "0.00800" in sql
@@ -141,185 +131,25 @@ class TestMigration065:
         stmts = M.split_statements(sql)
         joined = "\n".join(stmts).upper()
         assert "DELETE" not in joined
-        assert "INFORMATION_SCHEMA" not in joined
-        assert "PREPARE" not in joined
-        assert "INSERT IGNORE INTO COMMISSION_INSTALLMENTS" in joined
-        alters = [stmt for stmt in stmts if stmt.split()[0].upper() == "ALTER"]
-        assert len(alters) == 3
-        assert all(stmt.upper().startswith("ALTER TABLE COMMISSIONS ") for stmt in alters)
-        assert any("PLAN_KEY" in stmt.upper() for stmt in alters)
-        assert any("CLIENT_TYPE" in stmt.upper() for stmt in alters)
-        assert any("CONTRACT_START_DATE" in stmt.upper() for stmt in alters)
+        assert "INSERT IGNORE INTO COMMISSION_INSTALLMENTS" not in joined
+        assert "INSERT INTO COMMISSION_INSTALLMENTS" not in joined
+        assert "information_schema.columns" in sql
+        assert sum(1 for line in sql.splitlines() if line.startswith("PREPARE stmt_")) == 3
+        for column in ("plan_key", "client_type", "contract_start_date"):
+            assert f"ADD COLUMN {column}" in sql
+        assert not any(stmt.split()[0].upper() == "ALTER" for stmt in stmts)
 
 
-class TestMigration066:
-    def test_detector_registered(self):
-        assert M._DETECT["066_assign_standard_commission_plan"] is M.detect_066
-        assert not hasattr(M, "warn_066_name_matches")
-        assert not hasattr(M, "_SALES_ROLES_066")
-        assert not hasattr(M, "_roles_sql_066")
+class TestMigration065Ordinary:
+    def test_no_special_case_helpers(self):
+        assert not hasattr(M, "check_065_gate")
+        assert not hasattr(M, "_ensure_current_plan_view")
+        assert not hasattr(M, "detect_066")
+        assert "066_assign_standard_commission_plan" not in M._DETECT
 
-    def test_sql_matches_exact_names_and_aborts_when_unresolved(self):
-        sql = (M.MIGRATIONS_DIR / "066_assign_standard_commission_plan.sql").read_text()
-        upper = sql.upper()
-        assert "2026-09-25" in sql
-        assert "LOWER(TRIM(name)) = 'michelle cady'" in sql
-        assert "LOWER(TRIM(name)) = 'rodrigo leon'" in sql
-        assert "LIKE" not in upper
-        assert "vp_sales" not in sql
-        assert "067" not in sql
-        assert "inside_sales" in sql
-        assert "outside_sales" in sql
-        assert "maintenance_sales" in sql
-        assert "install_sales" in sql
-        assert "'sales'" in sql
-        assert "066_abort_cady_" in sql
-        assert "INSERT IGNORE INTO user_commission_plans" in sql
-        assert "commission_migration_markers" in sql
-        assert "066_assign_standard_commission_plan" in sql
-        assert "NOT EXISTS" in upper
-        assert "DELETE" not in upper
-        executable = "\n".join(M.split_statements(sql))
-        assert "commission_rates" not in executable
-        first = [stmt.split()[0].upper() for stmt in M.split_statements(sql)]
-        assert first == [
-            "SET", "SET", "SET", "PREPARE", "EXECUTE", "DEALLOCATE",
-            "INSERT", "CREATE", "INSERT",
-        ]
-
-    def test_detector_keys_on_the_marker_not_current_assignments(self, monkeypatch):
-        monkeypatch.setattr(M, "table_exists", lambda conn, name: False)
-
-        def boom(*_args, **_kwargs):
-            raise AssertionError("detector queried before the marker table existed")
-
-        monkeypatch.setattr(M, "_fetch_one", boom)
-        assert M.detect_066(None) is False
-
-        monkeypatch.setattr(
-            M, "table_exists",
-            lambda conn, name: name == "commission_migration_markers",
-        )
-        seen = {"cnt": 1}
-
-        def fetch(_conn, sql, params=()):
-            assert "commission_migration_markers" in sql
-            assert "user_commission_plans" not in sql
-            assert params == (M._MARKER_066,)
-            return {"cnt": seen["cnt"]}
-
-        monkeypatch.setattr(M, "_fetch_one", fetch)
-        assert M.detect_066(None) is True
-        seen["cnt"] = 0
-        assert M.detect_066(None) is False
-
-    def test_step_dry_run_still_will_apply(self, monkeypatch):
+    def test_step_dry_run_will_apply(self, monkeypatch):
         monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
-        monkeypatch.setattr(M, "table_exists", lambda conn, name: False)
-        tag, message = M._step(
-            None,
-            "066_assign_standard_commission_plan",
-            M.MIGRATIONS_DIR / "066_assign_standard_commission_plan.sql",
-            dry_run=True,
-            verbose=False,
-        )
-        assert tag == "ok"
-        assert message == "will-apply"
-
-    def test_step_returns_blocked_when_name_guard_aborts(self, monkeypatch):
-        """A count mismatch is blocked, not a warning that lets the run continue."""
-        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
-        monkeypatch.setattr(M, "detect_066", lambda conn: False)
-
-        def boom(_conn, _path, verbose=False):
-            raise RuntimeError(
-                "Table 'crm.066_abort_cady_0_leon_2' doesn't exist"
-            )
-
-        monkeypatch.setattr(M, "exec_file", boom)
-        tag, message = M._step(
-            None,
-            "066_assign_standard_commission_plan",
-            M.MIGRATIONS_DIR / "066_assign_standard_commission_plan.sql",
-            dry_run=False,
-            verbose=False,
-        )
-        assert tag == "blocked"
-        assert "BLOCKED" in message
-        assert "066_abort_cady_0_leon_2" in message
-
-    def test_step_does_not_swallow_other_066_errors(self, monkeypatch):
-        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
-        monkeypatch.setattr(M, "detect_066", lambda conn: False)
-
-        def boom(_conn, _path, verbose=False):
-            raise RuntimeError("disk full")
-
-        monkeypatch.setattr(M, "exec_file", boom)
-        with pytest.raises(RuntimeError, match="disk full"):
-            M._step(
-                None,
-                "066_assign_standard_commission_plan",
-                M.MIGRATIONS_DIR / "066_assign_standard_commission_plan.sql",
-                dry_run=False,
-                verbose=False,
-            )
-
-
-class TestMigration065Gate:
-    def test_gate_is_zero_before_the_installment_table_exists(self, monkeypatch):
-        monkeypatch.setattr(M, "table_exists", lambda conn, name: False)
-
-        def boom(*_args, **_kwargs):
-            raise AssertionError("gate queried before commission_installments existed")
-
-        monkeypatch.setattr(M, "_fetch_one", boom)
-        assert M.check_065_gate(None) == 0
-
-    def test_gate_counts_billing_or_payment_rows(self, monkeypatch):
-        monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
-        monkeypatch.setattr(M, "column_exists", lambda conn, table, column: True)
-        seen = {}
-
-        def fetch(_conn, sql, params=()):
-            seen["sql"] = sql
-            return {"cnt": 4}
-
-        monkeypatch.setattr(M, "_fetch_one", fetch)
-        assert M.check_065_gate(None) == 4
-        assert "collected_amount_cents IS NOT NULL" in seen["sql"]
-        assert "billing_installment_number IS NOT NULL" in seen["sql"]
-        assert "paid_at IS NOT NULL" in seen["sql"]
-
-    def test_step_blocks_when_installments_already_have_billing_data(self, monkeypatch):
-        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
-        monkeypatch.setattr(M, "detect_065", lambda conn: False)
-        monkeypatch.setattr(M, "view_exists", lambda conn, name: False)
-        monkeypatch.setattr(M, "table_exists", lambda conn, name: False)
-        monkeypatch.setattr(M, "check_065_gate", lambda conn: 2)
-        applied = {"n": 0}
-
-        def boom(*_args, **_kwargs):
-            applied["n"] += 1
-            raise AssertionError("065 must not execute when the gate is open")
-
-        monkeypatch.setattr(M, "exec_file", boom)
-        tag, message = M._step(
-            None,
-            "065_commission_cadence_and_plans",
-            M.MIGRATIONS_DIR / "065_commission_cadence_and_plans.sql",
-            dry_run=False,
-            verbose=False,
-        )
-        assert tag == "blocked"
-        assert "BLOCKED" in message
-        assert "2 commission installment" in message
-        assert applied["n"] == 0
-
-    def test_step_applies_when_the_gate_is_clear(self, monkeypatch):
-        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
-        monkeypatch.setattr(M, "detect_065", lambda conn: False)
-        monkeypatch.setattr(M, "check_065_gate", lambda conn: 0)
+        monkeypatch.setitem(M._DETECT, "065_commission_cadence_and_plans", lambda conn: False)
         tag, message = M._step(
             None,
             "065_commission_cadence_and_plans",
@@ -330,26 +160,17 @@ class TestMigration065Gate:
         assert tag == "ok"
         assert message == "will-apply"
 
-    def test_tracked_065_creates_missing_view_without_rerunning_the_file(self, monkeypatch, capsys):
-        """A tracking row from before the view existed must still create the view."""
+    def test_tracked_065_warns_once_and_does_not_rerun(self, monkeypatch, capsys):
         monkeypatch.setattr(
             M, "get_tracked",
             lambda conn, mid: {"checksum": "stale", "detected": 0},
         )
-        monkeypatch.setattr(M, "view_exists", lambda conn, name: False)
-        monkeypatch.setattr(M, "table_exists", lambda conn, name: True)
-        monkeypatch.setattr(M, "detect_065", lambda conn: False)
-        monkeypatch.setattr(M, "check_065_gate", lambda conn: 3)
-        seen = {}
 
-        def exec_statements(_conn, stmts, verbose=False):
-            seen["stmts"] = stmts
+        def forbid(*_args, **_kwargs):
+            raise AssertionError("tracked 065 must not re-run")
 
-        def forbid_file(*_args, **_kwargs):
-            raise AssertionError("065 must not re-run the whole file")
-
-        monkeypatch.setattr(M, "exec_statements", exec_statements)
-        monkeypatch.setattr(M, "exec_file", forbid_file)
+        monkeypatch.setattr(M, "apply_065", forbid)
+        monkeypatch.setattr(M, "exec_file", forbid)
         tag, message = M._step(
             None,
             "065_commission_cadence_and_plans",
@@ -359,11 +180,28 @@ class TestMigration065Gate:
         )
         assert tag == "ok"
         assert "already-applied" in message
-        assert len(seen["stmts"]) == 1
-        assert seen["stmts"][0].lstrip().upper().startswith("CREATE OR REPLACE VIEW")
-        assert "v_current_commission_plans" in seen["stmts"][0]
-        assert "WHERE rn = 1" in seen["stmts"][0]
-        assert "checksum mismatch" in capsys.readouterr().err
+        assert capsys.readouterr().err.count("checksum mismatch") == 1
+
+    def test_untracked_step_calls_apply_065(self, monkeypatch):
+        monkeypatch.setattr(M, "get_tracked", lambda conn, mid: None)
+        monkeypatch.setitem(M._DETECT, "065_commission_cadence_and_plans", lambda conn: False)
+        seen = {}
+
+        def apply(_conn, _path, verbose=False):
+            seen["apply"] = True
+
+        monkeypatch.setattr(M, "apply_065", apply)
+        monkeypatch.setattr(M, "record_migration", lambda *args, **kwargs: seen.setdefault("recorded", True))
+        tag, message = M._step(
+            None,
+            "065_commission_cadence_and_plans",
+            M.MIGRATIONS_DIR / "065_commission_cadence_and_plans.sql",
+            dry_run=False,
+            verbose=False,
+        )
+        assert tag == "ok"
+        assert message == "applied"
+        assert seen == {"apply": True, "recorded": True}
 
 
 _TEST_DB = os.environ.get("MYSQL_TEST_DB", "crm_migrate_test")
@@ -465,24 +303,27 @@ def mysql_conn():
 
 @requires_mysql
 class TestCommissionMigrationsOnMysql:
-    def test_065_and_066_apply_and_reapply_leaves_paid_installments(self, mysql_conn):
-        """Execute 065 and 066 against MySQL.
+    def test_065_apply_backfill_and_reapply_leaves_paid_installments(self, mysql_conn):
+        """065 creates the view and installments. A second backfill leaves paid rows.
 
-        Re-applying the installment backfill leaves paid installments 2 and 3
-        untouched. A name-count mismatch makes _step return blocked.
+        The schema file is safe to execute twice. Assigning people is the
+        one-off script, not a migration.
         """
+        from scripts.assign_standard_commission_plan import assign
+
         conn = mysql_conn
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO users (id, name, email, role, avatar_initials) VALUES "
                 "('u-cady', 'Michelle Cady', 'cady@example.com', 'sales', 'MC'),"
-                "('u-leon', 'Rodrigo Leon', 'leon@example.com', 'sales', 'RL'),"
+                "('u-leon', 'Rodrigo Leon', 'leon@example.com', 'vp_sales', 'RL'),"
                 "('u-alex', 'Alex Sales', 'alex@example.com', 'inside_sales', 'AS')"
             )
             cur.execute("INSERT INTO leads (id) VALUES ('lead-1')")
             cur.execute(
-                "INSERT INTO estimates (id, estimate_type, service_start_date) "
-                "VALUES ('est-m', 'maintenance', '2026-02-01')"
+                "INSERT INTO estimates (id, estimate_type, service_start_date) VALUES "
+                "('est-m', 'maintenance', '2026-02-01'),"
+                "('est-i', 'install', NULL)"
             )
             cur.execute(
                 "INSERT INTO commissions ("
@@ -490,9 +331,12 @@ class TestCommissionMigrationsOnMysql:
                 "commission_rate, commission_amount_cents, status, created_at"
                 ") VALUES ("
                 "'comm-m', 'est-m', 'lead-1', 'u-alex', 100000, 0.03000, 300, "
+                "'approved', '2026-02-10 16:00:00'),"
+                "('comm-i', 'est-i', 'lead-1', 'u-cady', 100000, 0.00400, 400, "
                 "'approved', '2026-02-10 16:00:00')"
             )
 
+        M.apply_065(conn, M.MIGRATIONS_DIR / "065_commission_cadence_and_plans.sql")
         M.exec_file(conn, M.MIGRATIONS_DIR / "065_commission_cadence_and_plans.sql")
         with conn.cursor() as cur:
             cur.execute(
@@ -501,33 +345,31 @@ class TestCommissionMigrationsOnMysql:
                 "AND TABLE_NAME = 'v_current_commission_plans'"
             )
             assert int(cur.fetchone()["cnt"]) == 1
-            cur.execute("DROP VIEW v_current_commission_plans")
-        M.ensure_tracking_table(conn)
-        tag, message = M._step(
-            conn,
-            "065_commission_cadence_and_plans",
-            M.MIGRATIONS_DIR / "065_commission_cadence_and_plans.sql",
-            dry_run=False,
-            verbose=False,
-        )
-        assert tag == "ok", message
-        with conn.cursor() as cur:
             cur.execute(
-                "SELECT COUNT(*) AS cnt FROM information_schema.VIEWS "
-                "WHERE TABLE_SCHEMA = DATABASE() "
-                "AND TABLE_NAME = 'v_current_commission_plans'"
-            )
-            assert int(cur.fetchone()["cnt"]) == 1
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT installment_number, status, amount_cents "
+                "SELECT installment_number, status, amount_cents, payout_date, "
+                "payout_period_label, billing_installment_number "
                 "FROM commission_installments WHERE commission_id = 'comm-m' "
                 "ORDER BY installment_number"
             )
             created = cur.fetchall()
+            cur.execute(
+                "SELECT installment_number, status, amount_cents, payout_date "
+                "FROM commission_installments WHERE commission_id = 'comm-i'"
+            )
+            install_rows = cur.fetchall()
         assert [row["installment_number"] for row in created] == [1, 2, 3]
+        assert created[0]["status"] == "scheduled"
+        assert str(created[0]["payout_date"]) == "2026-03-31"
+        assert created[0]["payout_period_label"] == "March 2026"
+        assert int(created[0]["amount_cents"]) == 150
         assert created[1]["status"] == "pending_billing_data"
+        assert int(created[1]["billing_installment_number"]) == 6
         assert created[2]["status"] == "pending_billing_data"
+        assert int(created[2]["billing_installment_number"]) == 12
+        assert len(install_rows) == 1
+        assert install_rows[0]["status"] == "pending_billing_data"
+        assert install_rows[0]["amount_cents"] is None
+        assert install_rows[0]["payout_date"] is None
 
         with conn.cursor() as cur:
             cur.execute(
@@ -537,14 +379,7 @@ class TestCommissionMigrationsOnMysql:
                 "billing_installment_number = 99 "
                 "WHERE commission_id = 'comm-m' AND installment_number IN (2, 3)"
             )
-        backfill = [
-            stmt for stmt in M.split_statements(
-                (M.MIGRATIONS_DIR / "065_commission_cadence_and_plans.sql").read_text()
-            )
-            if "INSERT IGNORE INTO commission_installments" in stmt
-        ]
-        assert len(backfill) == 2
-        M.exec_statements(conn, backfill)
+        M.backfill_065_installments(conn)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT installment_number, status, amount_cents, collected_amount_cents, "
@@ -562,32 +397,20 @@ class TestCommissionMigrationsOnMysql:
             assert int(row["billing_installment_number"]) == 99
             assert str(row["paid_at"]).startswith("2026-08-01 15:00:00")
 
-        M.exec_file(conn, M.MIGRATIONS_DIR / "066_assign_standard_commission_plan.sql")
-        M.exec_file(conn, M.MIGRATIONS_DIR / "066_assign_standard_commission_plan.sql")
+        preview = assign(conn, dry_run=True)
+        assert [row["name"] for row in preview] == ["Alex Sales", "Michelle Cady", "Rodrigo Leon"]
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS cnt FROM user_commission_plans")
+            assert int(cur.fetchone()["cnt"]) == 0
+        assigned = assign(conn, dry_run=False)
+        assert [row["name"] for row in assigned] == ["Alex Sales", "Michelle Cady", "Rodrigo Leon"]
+        again = assign(conn, dry_run=False)
+        assert again == []
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT u.name FROM user_commission_plans p "
                 "JOIN users u ON u.id = p.user_id ORDER BY u.name"
             )
-            assigned = [row["name"] for row in cur.fetchall()]
-        assert assigned == ["Alex Sales"]
+            names = [row["name"] for row in cur.fetchall()]
+        assert names == ["Alex Sales", "Michelle Cady", "Rodrigo Leon"]
 
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO users (id, name, email, role, avatar_initials) VALUES "
-                "('u-cady-2', 'Michelle Cady', 'cady2@example.com', 'sales', 'M2')"
-            )
-            cur.execute("DELETE FROM commission_migration_markers")
-        tag, message = M._step(
-            conn,
-            "066_assign_standard_commission_plan",
-            M.MIGRATIONS_DIR / "066_assign_standard_commission_plan.sql",
-            dry_run=False,
-            verbose=False,
-        )
-        assert tag == "blocked", message
-        assert "BLOCKED" in message
-        assert "066_abort_cady_" in message
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS cnt FROM user_commission_plans")
-            assert int(cur.fetchone()["cnt"]) == 1

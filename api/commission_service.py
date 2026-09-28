@@ -5,17 +5,18 @@ Rate precedence (the user's role is not a gate):
      rate query does not run.
   2. Else an active v_current_commission_rates row → today's flat rate on
      contract_value_cents, plan_key left NULL. Payout timing still comes
-     from the standard plan rule for this estimate type.
+     from the estimate type.
   3. Else a maintenance or install estimate → the standard plan.
   4. Else no-op.
 
-Installment rows follow the matched rule's payout_schedule. A missing
-schedule is logged and the commission still gets installment 1, stored as
-pending_billing_data with a null amount and a null date, so a won commission
-is never committed with zero installments. The commission insert and the
-installment insert commit in one transaction. If the installment insert
-fails, the commission insert rolls back, and a retry is not blocked by
-INSERT IGNORE.
+Installment rows follow payout_schedule_for(estimate_type): maintenance is
+maintenance_3_payment and install is construction_billing_quarterly. The
+commission insert and the installment insert commit in one transaction. If
+the installment insert fails, the commission insert rolls back, and a retry
+is not blocked by INSERT IGNORE.
+
+Mark-paid lives here too. mark_installment_paid and mark_commission_paid
+each run in one transaction and lock the rows they change.
 """
 from __future__ import annotations
 
@@ -26,15 +27,17 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
+from fastapi import HTTPException
+
 from db import execute, query, transaction
 from api.commission_calc import (
-    PENDING_BILLING_DATA,
     PLAN_ESTIMATE_TYPES,
     STANDARD_PLAN_KEY,
     build_installment_rows,
     calendar_date,
     compute_plan_amount,
     effective_rate,
+    payout_schedule_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,10 +68,10 @@ WHERE c.user_id = %s
 """
 
 _RULES_SQL = """
-SELECT tier_min_cents, tier_max_cents, rate, basis, payout_schedule
+SELECT tier_min_cents, tier_max_cents, rate, basis
 FROM (
     SELECT
-        tier_min_cents, tier_max_cents, rate, basis, payout_schedule, effective_date,
+        tier_min_cents, tier_max_cents, rate, basis, effective_date,
         MAX(effective_date) OVER (
             PARTITION BY plan_key, estimate_type, client_type
         ) AS max_effective
@@ -88,46 +91,21 @@ class CommissionBasis:
     plan_key: Optional[str]
     amount_cents: int
     rate: Decimal
-    payout_schedule: Optional[str]
+    payout_schedule: str
     client_type: Optional[str]
     notes: Optional[str]
 
 
-async def _lookup_payout_schedule(plan_key: str, estimate_type: str) -> Optional[str]:
-    """First schedule found for the requested plan, then the standard plan.
-
-    The warning names the plan that was asked for, even when the standard
-    plan was also checked.
-    """
-    for key in dict.fromkeys([plan_key, STANDARD_PLAN_KEY]):
-        rows = await query(
-            """
-            SELECT payout_schedule
-            FROM commission_plan_rules
-            WHERE plan_key = %s
-              AND estimate_type = %s
-              AND effective_date <= CURDATE()
-              AND payout_schedule IS NOT NULL
-            ORDER BY effective_date DESC
-            LIMIT 1
-            """,
-            [key, estimate_type],
+def _schedule_for_basis(estimate_type: str, plan_key: Optional[str], estimate_id: str) -> Optional[str]:
+    """Schedule from the estimate type. None when this type has no map."""
+    try:
+        return payout_schedule_for(estimate_type)
+    except ValueError:
+        logger.warning(
+            "No payout schedule for estimate %s plan %s type %s",
+            estimate_id, plan_key, estimate_type,
         )
-        if rows and rows[0].get("payout_schedule"):
-            return str(rows[0]["payout_schedule"])
-    logger.warning(
-        "No payout_schedule for plan %s estimate type %s",
-        plan_key, estimate_type,
-    )
-    return None
-
-
-def _schedule_from_rules(rules: list[dict]) -> Optional[str]:
-    for rule in rules:
-        schedule = rule.get("payout_schedule")
-        if schedule:
-            return str(schedule)
-    return None
+        return None
 
 
 async def _plan_basis(
@@ -163,9 +141,9 @@ async def _plan_basis(
             plan_key, estimate_id, estimate_type,
         )
         return None
-    schedule = _schedule_from_rules(rules)
+    schedule = _schedule_for_basis(estimate_type, plan_key, estimate_id)
     if schedule is None:
-        schedule = await _lookup_payout_schedule(plan_key, estimate_type)
+        return None
     return CommissionBasis(
         plan_key=plan_key,
         amount_cents=amount,
@@ -196,7 +174,9 @@ async def _legacy_basis(
         return None
     rate = Decimal(str(rows[0]["commission_rate"]))
     amount = round(contract_value_cents * float(rate))
-    schedule = await _lookup_payout_schedule(STANDARD_PLAN_KEY, estimate_type)
+    schedule = _schedule_for_basis(estimate_type, None, "")
+    if schedule is None:
+        return None
     return CommissionBasis(
         plan_key=None,
         amount_cents=amount,
@@ -233,23 +213,6 @@ async def _resolve_basis(row: dict, estimate_id: str, close_year: int) -> Option
     return None
 
 
-def _pending_installment_one() -> dict:
-    """Installment 1 when the plan has no payout schedule.
-
-    The commission amount stays on the commission row. The check amount and
-    date stay null until a schedule exists.
-    """
-    return {
-        "installment_number": 1,
-        "payout_period": None,
-        "payout_date": None,
-        "amount_cents": None,
-        "status": PENDING_BILLING_DATA,
-        "billing_installment_number": None,
-        "collected_amount_cents": None,
-    }
-
-
 async def _insert_commission_installments(commission_id: str, rows: list[dict]) -> None:
     """Persist payout installments. Dates and amounts may be null."""
     if not rows:
@@ -266,7 +229,7 @@ async def _insert_commission_installments(commission_id: str, rows: list[dict]) 
             row.get("payout_period"),
             None if payout is None else payout.isoformat(),
             row.get("amount_cents"),
-            row.get("status") or "scheduled",
+            row["status"],
             row.get("billing_installment_number"),
             row.get("collected_amount_cents"),
         ])
@@ -287,18 +250,9 @@ async def _persist_won_commission(estimate_id: str, row: dict, basis: Commission
     now_utc = datetime.now(timezone.utc).replace(microsecond=0)
     raw_start = row.get("service_start_date")
     contract_start = calendar_date(raw_start) if raw_start else None
-    installments: list[dict] = []
-    if basis.payout_schedule:
-        installments = build_installment_rows(
-            now_utc, basis.amount_cents, basis.payout_schedule, contract_start,
-        )
-    if not installments:
-        logger.error(
-            "No payout schedule for estimate %s plan %s; "
-            "inserting installment 1 as pending_billing_data",
-            estimate_id, basis.plan_key,
-        )
-        installments = [_pending_installment_one()]
+    installments = build_installment_rows(
+        now_utc, basis.amount_cents, basis.payout_schedule, contract_start,
+    )
     commission_id = str(uuid.uuid4())
     async with transaction():
         inserted = await execute(
@@ -381,3 +335,172 @@ async def cancel_for_estimate(estimate_id: str) -> None:
     )
     for row in rows:
         await cancel_commission(row["id"])
+
+
+_CANCELLED_PAID = "Cancelled installment cannot be marked paid"
+_CANCELLED_COMMISSION = "Cancelled commission cannot be marked paid"
+_INSTALLMENT_NOT_PAYABLE = (
+    "Installment is not payable until its amount and billing data are known"
+)
+_COMMISSION_NOT_PAYABLE = "Commission has installments that are not payable"
+
+
+def _reject_unpayable(row: dict, *, cancelled_detail: str, unknown_detail: str) -> None:
+    """409 when a row is cancelled, pending billing data, or has a null amount."""
+    if row.get("status") == "cancelled" or row.get("commission_status") == "cancelled":
+        raise HTTPException(status_code=409, detail=cancelled_detail)
+    if row.get("status") == "pending_billing_data" or row.get("amount_cents") is None:
+        raise HTTPException(status_code=409, detail=unknown_detail)
+
+
+def _latest_dated_period(siblings: list[dict]) -> Optional[str]:
+    """payment_period from the latest payout_date, then installment_number.
+
+    An undated row, including a higher installment number with a null date,
+    does not win over a dated row.
+    """
+    dated = [row for row in siblings if row.get("payout_date") is not None]
+    if not dated:
+        return None
+    chosen = max(
+        dated,
+        key=lambda row: (row["payout_date"], int(row.get("installment_number") or 0)),
+    )
+    return chosen.get("payout_period_label")
+
+
+async def _close_if_all_paid(
+    commission_id: str,
+    commission_status: str,
+    siblings: list[dict],
+    payment_period: Optional[str],
+) -> None:
+    """Mark the parent paid when every installment is already paid.
+
+    An already-paid parent is left alone, including paid_at. An empty sibling
+    list does not close the parent.
+    """
+    if commission_status == "paid":
+        return
+    if not siblings or not all(row.get("status") == "paid" for row in siblings):
+        return
+    await execute(
+        """
+        UPDATE commissions
+        SET status = 'paid', paid_at = NOW(), payment_period = %s, updated_at = NOW()
+        WHERE id = %s
+          AND status NOT IN ('paid', 'cancelled')
+        """,
+        [payment_period, commission_id],
+    )
+
+
+async def mark_installment_paid(installment_id: str) -> None:
+    """Mark one installment paid and close the parent when every sibling is paid.
+
+    The installment and its commission are locked for the transaction. A
+    cancelled row, pending_billing_data, or a null amount is 409. An
+    already-paid installment does not rewrite paid_at.
+    """
+    async with transaction():
+        rows = await query(
+            """
+            SELECT i.id, i.commission_id, i.status, i.amount_cents, i.payout_date,
+                   i.payout_period_label, i.installment_number,
+                   c.status AS commission_status
+            FROM commission_installments i
+            JOIN commissions c ON c.id = i.commission_id
+            WHERE i.id = %s
+            FOR UPDATE
+            """,
+            [installment_id],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Installment not found")
+        row = rows[0]
+        commission_id = row["commission_id"]
+        _reject_unpayable(
+            row,
+            cancelled_detail=_CANCELLED_PAID,
+            unknown_detail=_INSTALLMENT_NOT_PAYABLE,
+        )
+        if row.get("status") != "paid":
+            await execute(
+                """
+                UPDATE commission_installments
+                SET status = 'paid', paid_at = NOW(), updated_at = NOW()
+                WHERE id = %s
+                  AND status NOT IN ('paid', 'cancelled')
+                """,
+                [installment_id],
+            )
+        siblings = await query(
+            """
+            SELECT installment_number, status, payout_period_label, payout_date
+            FROM commission_installments
+            WHERE commission_id = %s
+            FOR UPDATE
+            """,
+            [commission_id],
+        )
+        await _close_if_all_paid(
+            commission_id,
+            row.get("commission_status") or "",
+            siblings,
+            _latest_dated_period(siblings),
+        )
+
+
+async def mark_commission_paid(commission_id: str, payment_period: Optional[str]) -> None:
+    """Mark the commission and its open installments paid.
+
+    The commission and its installments are locked for the transaction. 409
+    and no writes when the commission is cancelled or any installment is
+    pending_billing_data, cancelled, or has a null amount. Already-paid rows
+    keep paid_at. The installment update excludes cancelled rows. A missing
+    commission is 404. payment_period is stored on the commission.
+    """
+    async with transaction():
+        commission_rows = await query(
+            "SELECT id, status FROM commissions WHERE id = %s FOR UPDATE",
+            [commission_id],
+        )
+        if not commission_rows:
+            raise HTTPException(status_code=404, detail="Commission not found")
+        commission = commission_rows[0]
+        commission_status = commission.get("status") or ""
+        if commission_status == "cancelled":
+            raise HTTPException(status_code=409, detail=_CANCELLED_COMMISSION)
+        installments = await query(
+            """
+            SELECT id, status, amount_cents, installment_number, payout_period_label, payout_date
+            FROM commission_installments
+            WHERE commission_id = %s
+            FOR UPDATE
+            """,
+            [commission_id],
+        )
+        for row in installments:
+            _reject_unpayable(
+                row,
+                cancelled_detail=_COMMISSION_NOT_PAYABLE,
+                unknown_detail=_COMMISSION_NOT_PAYABLE,
+            )
+        await execute(
+            """
+            UPDATE commission_installments
+            SET status = 'paid', paid_at = NOW(), updated_at = NOW()
+            WHERE commission_id = %s
+              AND status NOT IN ('paid', 'cancelled')
+            """,
+            [commission_id],
+        )
+        for row in installments:
+            if row.get("status") not in ("paid", "cancelled"):
+                row["status"] = "paid"
+        await _close_if_all_paid(
+            commission_id,
+            commission_status,
+            installments or [{"status": "paid"}],
+            payment_period,
+        )

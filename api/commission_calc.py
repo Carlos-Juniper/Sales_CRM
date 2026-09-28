@@ -1,6 +1,6 @@
 """Commission dates, tiers, and cent math.
 
-Payout timing comes from the plan rule's payout_schedule. This module does
+Payout timing is one map from estimate type to schedule. This module does
 not read the database and does not shape API responses.
 
 maintenance_3_payment follows the maintenance program: payment 1 is 3% of 50%
@@ -42,11 +42,16 @@ _MONTHS = (
 STANDARD_PLAN_KEY = "standard"
 STANDARD_PLAN_NAME = "Standard Sales Commission"
 
-# Stored on commission_plan_rules.payout_schedule. Callers pass the value
-# through; this module does not pick a schedule on its own.
 MAINTENANCE_3_PAYMENT = "maintenance_3_payment"
 CONSTRUCTION_BILLING_QUARTERLY = "construction_billing_quarterly"
 PENDING_BILLING_DATA = "pending_billing_data"
+
+# One schedule per estimate type. Plan rules store rates, not a schedule
+# copied onto every tier row.
+PAYOUT_SCHEDULE_BY_ESTIMATE_TYPE = {
+    "maintenance": MAINTENANCE_3_PAYMENT,
+    "install": CONSTRUCTION_BILLING_QUARTERLY,
+}
 
 # Estimate types the standard plan can price. Enhancement is not one of them.
 PLAN_ESTIMATE_TYPES = frozenset({"maintenance", "install"})
@@ -62,6 +67,30 @@ class CommissionTier:
 def et_today() -> date:
     """Today's calendar date in America/New_York."""
     return datetime.now(ET).date()
+
+
+def payout_schedule_for(estimate_type: str) -> str:
+    """The payout schedule for an estimate type.
+
+    maintenance is maintenance_3_payment. install is
+    construction_billing_quarterly. Any other type has no schedule.
+    """
+    try:
+        return PAYOUT_SCHEDULE_BY_ESTIMATE_TYPE[estimate_type]
+    except KeyError:
+        raise ValueError(f"No payout schedule for estimate type {estimate_type!r}") from None
+
+
+def eastern_year_utc_bounds(year: int) -> tuple[datetime, datetime]:
+    """Half-open UTC timestamps for one America/New_York calendar year.
+
+    The results are naive UTC, matching stored close timestamps. The start
+    is Jan 1 00:00 Eastern, inclusive. The end is Jan 1 00:00 Eastern of
+    the next year, exclusive.
+    """
+    start = datetime(year, 1, 1, tzinfo=ET).astimezone(timezone.utc).replace(tzinfo=None)
+    end = datetime(year + 1, 1, 1, tzinfo=ET).astimezone(timezone.utc).replace(tzinfo=None)
+    return start, end
 
 
 def to_et(dt: datetime) -> datetime:
@@ -162,7 +191,7 @@ def build_installment_rows(
 ) -> list[dict]:
     """Installment dicts for one won commission.
 
-    `payout_schedule` is the plan rule value. Maintenance returns three rows.
+    `payout_schedule` comes from `payout_schedule_for`. Maintenance returns three rows.
     Payment 1 is scheduled on the last day of the quarter that contains
     `contract_start`, or the won date when the contract has no start date.
     Payments 2 and 3, and every construction payout, stay

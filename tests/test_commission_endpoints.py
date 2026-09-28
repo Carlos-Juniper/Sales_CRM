@@ -15,7 +15,7 @@ os.environ.setdefault("ENTRA_CLIENT_ID", "x")
 os.environ.setdefault("ENTRA_TENANT_ID", "x")
 
 from api.server import app, require_auth  # noqa: E402
-from api import commissions  # noqa: E402
+from api.commission_service import cancel_commission  # noqa: E402
 
 client = TestClient(app)
 
@@ -41,6 +41,16 @@ def as_role():
 
 
 class TestCommissionEndpoints:
+    @pytest.fixture(autouse=True)
+    def _noop_commission_transaction(self, monkeypatch):
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def tx():
+            yield None
+
+        monkeypatch.setattr("api.commission_service.transaction", tx)
+
     def test_summary_adds_next_payout_without_dropping_ytd(self, as_role, monkeypatch):
         as_role("sales", user_id="rep-1")
         monkeypatch.setattr("api.commissions.et_today", lambda: date(2026, 3, 15))
@@ -147,24 +157,24 @@ class TestCommissionEndpoints:
                 "commission_amount_cents": 100,
                 "commission_status": "approved",
                 "created_at": created,
-                "installment_id": "i1",
+                "id": "i1",
                 "installment_number": 1,
                 "payout_period_label": "April 2026",
                 "payout_date": date(2026, 4, 1),
                 "amount_cents": 50,
-                "installment_status": "scheduled",
+                "status": "scheduled",
             },
             {
                 "commission_id": "c1",
                 "commission_amount_cents": 100,
                 "commission_status": "approved",
                 "created_at": created,
-                "installment_id": "i2",
+                "id": "i2",
                 "installment_number": 2,
                 "payout_period_label": "July 2026",
                 "payout_date": date(2026, 7, 1),
                 "amount_cents": 50,
-                "installment_status": "scheduled",
+                "status": "scheduled",
             },
         ]
 
@@ -195,10 +205,11 @@ class TestCommissionEndpoints:
         assert allowed.json()["quarters"] == []
 
     def test_payout_schedule_period_uses_close_date_like_list(self, as_role, monkeypatch):
-        """start_date/end_date bound commissions.created_at, same as list.
+        """year is always a SQL range. start_date and end_date narrow it.
 
-        The default close-year clip does not also apply, so a period in
-        another year is not dropped. Rep scoping is unchanged.
+        A 2025 period without year=2025 does not return, because year
+        defaults to the current Eastern year. Sending year=2025 keeps both
+        the year window and the start/end bounds. Rep scoping is unchanged.
         """
         monkeypatch.setattr("api.commissions.et_today", lambda: date(2026, 9, 25))
         in_period = datetime(2025, 11, 2, 16, 0, tzinfo=timezone.utc)
@@ -207,12 +218,12 @@ class TestCommissionEndpoints:
             "commission_amount_cents": 40,
             "commission_status": "approved",
             "created_at": in_period,
-            "installment_id": "i-old",
+            "id": "i-old",
             "installment_number": 1,
             "payout_period_label": "December 2025",
             "payout_date": date(2025, 12, 31),
             "amount_cents": 40,
-            "installment_status": "scheduled",
+            "status": "scheduled",
         }]
 
         as_role("sales", user_id="rep-1")
@@ -229,7 +240,7 @@ class TestCommissionEndpoints:
         async def fake_query(sql, params=None):
             captured["sql"] = sql
             captured["params"] = list(params or [])
-            return rows
+            return []
 
         with patch("api.commissions.query", new=fake_query):
             resp = client.get(
@@ -237,17 +248,47 @@ class TestCommissionEndpoints:
             )
         assert resp.status_code == 200
         body = resp.json()
-        assert captured["params"] == ["rep-1", "2025-01-01", "2025-12-31"]
-        assert "c.created_at >= %s" in captured["sql"]
+        assert body["year"] == 2026
+        assert body["quarters"] == []
+        assert captured["params"][0] == "rep-1"
+        assert captured["params"][1] == datetime(2026, 1, 1, 5, 0)
+        assert captured["params"][2] == datetime(2027, 1, 1, 5, 0)
+        assert captured["params"][3] == "2025-01-01"
+        assert captured["params"][4] == "2025-12-31"
+        assert captured["sql"].count("c.created_at >= %s") == 2
+        assert "c.created_at < %s" in captured["sql"]
         assert "c.created_at <= %s" in captured["sql"]
-        assert "c.user_id = %s" in captured["sql"]
+
+        async def explicit_year(sql, params=None):
+            captured["sql"] = sql
+            captured["params"] = list(params or [])
+            return rows
+
+        with patch("api.commissions.query", new=explicit_year):
+            resp = client.get(
+                "/api/commissions/payout-schedule?year=2025"
+                "&start_date=2025-01-01&end_date=2025-12-31"
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["year"] == 2025
+        assert captured["params"][0] == "rep-1"
+        assert captured["params"][1] == datetime(2025, 1, 1, 5, 0)
+        assert captured["params"][2] == datetime(2026, 1, 1, 5, 0)
+        assert captured["params"][3] == "2025-01-01"
+        assert captured["params"][4] == "2025-12-31"
+        assert "c.created_at >= %s" in captured["sql"]
+        assert "c.created_at < %s" in captured["sql"]
+        assert "c.created_at <= %s" in captured["sql"]
         assert body["quarters"][0]["close_quarter"] == "2025-Q4"
         assert body["quarters"][0]["sales_count"] == 1
         assert body["by_payout_period"][0]["amount_cents"] == 40
 
         async def start_only(sql, params=None):
-            assert list(params) == ["rep-1", "2026-06-01"]
+            assert list(params)[0] == "rep-1"
+            assert list(params)[-1] == "2026-06-01"
             assert "c.created_at >= %s" in sql
+            assert "c.created_at < %s" in sql
             assert "c.created_at <= %s" not in sql
             return []
 
@@ -399,9 +440,10 @@ class TestCommissionEndpoints:
             assert whole.status_code == 403
 
         as_role("ceo")
-        with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
+        with patch("api.commission_service.query", new_callable=AsyncMock, return_value=[]) as missing_q:
             missing = client.post("/api/commissions/installments/nope/mark-paid")
         assert missing.status_code == 404
+        assert "FOR UPDATE" in missing_q.await_args.args[0]
 
     def test_mark_paid_updates_installments_and_keeps_auth(self, as_role):
         as_role("sales")
@@ -412,8 +454,8 @@ class TestCommissionEndpoints:
         assert denied.status_code == 403
 
         as_role("admin")
-        with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]), \
-             patch("api.commissions.execute", new_callable=AsyncMock, return_value=0) as missing:
+        with patch("api.commission_service.query", new_callable=AsyncMock, return_value=[]), \
+             patch("api.commission_service.execute", new_callable=AsyncMock, return_value=0) as missing:
             resp = client.post(
                 "/api/commissions/missing/mark-paid",
                 json={"payment_period": "April 2026"},
@@ -422,10 +464,10 @@ class TestCommissionEndpoints:
         missing.assert_not_awaited()
 
         with patch(
-            "api.commissions.query",
+            "api.commission_service.query",
             new_callable=AsyncMock,
             return_value=[{"status": "pending_billing_data", "amount_cents": None}],
-        ), patch("api.commissions.execute", new_callable=AsyncMock) as blocked:
+        ), patch("api.commission_service.execute", new_callable=AsyncMock) as blocked:
             resp = client.post(
                 "/api/commissions/c1/mark-paid",
                 json={"payment_period": "April 2026"},
@@ -434,10 +476,10 @@ class TestCommissionEndpoints:
         blocked.assert_not_awaited()
 
         with patch(
-            "api.commissions.query",
+            "api.commission_service.query",
             new_callable=AsyncMock,
             return_value=[{"status": "scheduled", "amount_cents": 100}],
-        ), patch("api.commissions.execute", new_callable=AsyncMock, return_value=1) as paid:
+        ), patch("api.commission_service.execute", new_callable=AsyncMock, return_value=1) as paid:
             resp = client.post(
                 "/api/commissions/c1/mark-paid",
                 json={"payment_period": "April 2026"},
@@ -445,11 +487,13 @@ class TestCommissionEndpoints:
         assert resp.status_code == 200
         assert resp.json() == {"success": True}
         sqls = [call.args[0] for call in paid.await_args_list]
-        assert "payment_period" in sqls[0]
+        assert "commission_installments" in sqls[0]
         assert "status NOT IN ('paid', 'cancelled')" in sqls[0]
-        assert "commission_installments" in sqls[1]
+        assert paid.await_args_list[0].args[1] == ["c1"]
+        assert "UPDATE commissions" in sqls[1]
+        assert "payment_period" in sqls[1]
         assert "status NOT IN ('paid', 'cancelled')" in sqls[1]
-        assert paid.await_args_list[1].args[1] == ["c1"]
+        assert paid.await_args_list[1].args[1] == ["April 2026", "c1"]
 
     def test_installment_mark_paid(self, as_role):
         as_role("sales")
@@ -457,9 +501,10 @@ class TestCommissionEndpoints:
         assert denied.status_code == 403
 
         as_role("vice_president")
-        with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
+        with patch("api.commission_service.query", new_callable=AsyncMock, return_value=[]) as missing_q:
             missing = client.post("/api/commissions/installments/nope/mark-paid")
         assert missing.status_code == 404
+        assert "FOR UPDATE" in missing_q.await_args.args[0]
 
         async def cancelled_query(sql, params=None):
             return [{
@@ -470,8 +515,8 @@ class TestCommissionEndpoints:
                 "commission_status": "cancelled",
             }]
 
-        with patch("api.commissions.query", new=cancelled_query), \
-             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+        with patch("api.commission_service.query", new=cancelled_query), \
+             patch("api.commission_service.execute", new_callable=AsyncMock) as exec_mock:
             blocked = client.post("/api/commissions/installments/i1/mark-paid")
         assert blocked.status_code == 409
         exec_mock.assert_not_awaited()
@@ -494,8 +539,8 @@ class TestCommissionEndpoints:
                 {"installment_number": 2, "status": "scheduled", "payout_period_label": "July 2026"},
             ]
 
-        with patch("api.commissions.query", new=one_open), \
-             patch("api.commissions.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
+        with patch("api.commission_service.query", new=one_open), \
+             patch("api.commission_service.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
             partial = client.post("/api/commissions/installments/i1/mark-paid")
         assert partial.status_code == 200
         assert exec_mock.await_count == 1
@@ -525,8 +570,8 @@ class TestCommissionEndpoints:
                 },
             ]
 
-        with patch("api.commissions.query", new=both_paid), \
-             patch("api.commissions.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
+        with patch("api.commission_service.query", new=both_paid), \
+             patch("api.commission_service.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
             done = client.post("/api/commissions/installments/i2/mark-paid")
         assert done.status_code == 200
         assert exec_mock.await_count == 2
@@ -555,8 +600,8 @@ class TestCommissionEndpoints:
                 },
             ]
 
-        with patch("api.commissions.query", new=single_paid), \
-             patch("api.commissions.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
+        with patch("api.commission_service.query", new=single_paid), \
+             patch("api.commission_service.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
             done = client.post("/api/commissions/installments/i1/mark-paid")
         assert done.status_code == 200
         assert exec_mock.await_count == 2
@@ -584,8 +629,8 @@ class TestCommissionEndpoints:
                 {"installment_number": 3, "status": "pending_billing_data", "payout_period_label": None},
             ]
 
-        with patch("api.commissions.query", new=third_still_pending), \
-             patch("api.commissions.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
+        with patch("api.commission_service.query", new=third_still_pending), \
+             patch("api.commission_service.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
             waiting = client.post("/api/commissions/installments/i2/mark-paid")
         assert waiting.status_code == 200
         assert exec_mock.await_count == 1
@@ -602,8 +647,8 @@ class TestCommissionEndpoints:
                 "commission_status": "approved",
             }]
 
-        with patch("api.commissions.query", new=pending_or_null), \
-             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+        with patch("api.commission_service.query", new=pending_or_null), \
+             patch("api.commission_service.execute", new_callable=AsyncMock) as exec_mock:
             blocked = client.post("/api/commissions/installments/i3/mark-paid")
         assert blocked.status_code == 409
         exec_mock.assert_not_awaited()
@@ -618,8 +663,8 @@ class TestCommissionEndpoints:
                 "commission_status": "approved",
             }]
 
-        with patch("api.commissions.query", new=null_amount), \
-             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+        with patch("api.commission_service.query", new=null_amount), \
+             patch("api.commission_service.execute", new_callable=AsyncMock) as exec_mock:
             blocked = client.post("/api/commissions/installments/i1/mark-paid")
         assert blocked.status_code == 409
         exec_mock.assert_not_awaited()
@@ -648,8 +693,8 @@ class TestCommissionEndpoints:
                 },
             ]
 
-        with patch("api.commissions.query", new=latest_dated), \
-             patch("api.commissions.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
+        with patch("api.commission_service.query", new=latest_dated), \
+             patch("api.commission_service.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
             done = client.post("/api/commissions/installments/i2/mark-paid")
         assert done.status_code == 200
         assert exec_mock.await_count == 2
@@ -671,8 +716,8 @@ class TestCommissionEndpoints:
                 return [{"id": "c1", "status": "cancelled"}]
             raise AssertionError(sql)
 
-        with patch("api.commissions.query", new=cancelled_commission), \
-             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+        with patch("api.commission_service.query", new=cancelled_commission), \
+             patch("api.commission_service.execute", new_callable=AsyncMock) as exec_mock:
             resp = client.post(
                 "/api/commissions/c1/mark-paid",
                 json={"payment_period": "April 2026"},
@@ -689,8 +734,8 @@ class TestCommissionEndpoints:
                 return [{"id": "c1", "status": "approved"}]
             return [{"id": "i2", "status": "cancelled", "amount_cents": 10}]
 
-        with patch("api.commissions.query", new=cancelled_installment), \
-             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+        with patch("api.commission_service.query", new=cancelled_installment), \
+             patch("api.commission_service.execute", new_callable=AsyncMock) as exec_mock:
             resp = client.post(
                 "/api/commissions/c1/mark-paid",
                 json={"payment_period": "April 2026"},
@@ -704,8 +749,8 @@ class TestCommissionEndpoints:
                 return [{"id": "c1", "status": "approved"}]
             return [{"id": "i1", "status": "scheduled", "amount_cents": None}]
 
-        with patch("api.commissions.query", new=null_amount), \
-             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+        with patch("api.commission_service.query", new=null_amount), \
+             patch("api.commission_service.execute", new_callable=AsyncMock) as exec_mock:
             resp = client.post(
                 "/api/commissions/c1/mark-paid",
                 json={"payment_period": "April 2026"},
@@ -731,8 +776,8 @@ class TestCommissionEndpoints:
                 "payout_date": date(2026, 4, 1),
             }]
 
-        with patch("api.commissions.query", new=already_paid_installment), \
-             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+        with patch("api.commission_service.query", new=already_paid_installment), \
+             patch("api.commission_service.execute", new_callable=AsyncMock) as exec_mock:
             resp = client.post("/api/commissions/installments/i1/mark-paid")
         assert resp.status_code == 200
         exec_mock.assert_not_awaited()
@@ -746,8 +791,8 @@ class TestCommissionEndpoints:
                 "commission_status": "cancelled",
             }]
 
-        with patch("api.commissions.query", new=parent_cancelled), \
-             patch("api.commissions.execute", new_callable=AsyncMock) as exec_mock:
+        with patch("api.commission_service.query", new=parent_cancelled), \
+             patch("api.commission_service.execute", new_callable=AsyncMock) as exec_mock:
             resp = client.post("/api/commissions/installments/i1/mark-paid")
         assert resp.status_code == 409
         assert resp.json()["detail"] == "Cancelled installment cannot be marked paid"
@@ -763,8 +808,8 @@ class TestCommissionEndpoints:
                 "installment_number": 1,
             }]
 
-        with patch("api.commissions.query", new=already_paid_commission), \
-             patch("api.commissions.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
+        with patch("api.commission_service.query", new=already_paid_commission), \
+             patch("api.commission_service.execute", new_callable=AsyncMock, return_value=1) as exec_mock:
             resp = client.post(
                 "/api/commissions/c1/mark-paid",
                 json={"payment_period": "April 2026"},
@@ -794,7 +839,7 @@ class TestCommissionEndpoints:
 
         with patch("api.commission_service.transaction", new=tx), \
              patch("api.commission_service.execute", new_callable=AsyncMock) as exec_mock:
-            await commissions.cancel_commission("c1")
+            await cancel_commission("c1")
         sqls = [call.args[0] for call in exec_mock.await_args_list]
         assert seen == ["begin", "commit"]
         assert "UPDATE commissions" in sqls[0]

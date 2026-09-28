@@ -22,8 +22,11 @@ import hashlib
 import os
 import re
 import sys
+import uuid
 from pathlib import Path
 from typing import Optional
+
+from api.commission_calc import build_installment_rows, payout_schedule_for
 
 import pymysql
 import pymysql.cursors
@@ -80,6 +83,12 @@ def _fetch_one(conn, sql: str, params=()) -> Optional[dict]:
     with conn.cursor() as cur:
         _run(cur, sql, params)
         return cur.fetchone()
+
+
+def _fetch_all(conn, sql: str, params=()) -> list:
+    with conn.cursor() as cur:
+        _run(cur, sql, params)
+        return list(cur.fetchall())
 
 
 def _execute(conn, sql: str, params=()) -> None:
@@ -802,70 +811,17 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
-def check_065_gate(conn) -> int:
-    """Count installments that already carry billing or payment data.
-
-    A re-run of 065 is unsafe once any installment has collected_amount_cents,
-    billing_installment_number, or paid_at set: the backfill INSERT IGNORE
-    must not run again over those rows. Returns 0 when the installment table
-    or those columns are not there yet, so a first apply is not blocked.
-
-    detect_065 does not look at commissions that have zero installments.
-    A commission created later must not flip detection and re-execute this file.
-    """
-    if not table_exists(conn, "commission_installments"):
-        return 0
-    needed = (
-        "collected_amount_cents",
-        "billing_installment_number",
-        "paid_at",
-    )
-    if not all(column_exists(conn, "commission_installments", column) for column in needed):
-        return 0
-    row = _fetch_one(
-        conn,
-        "SELECT COUNT(*) AS cnt FROM commission_installments "
-        "WHERE collected_amount_cents IS NOT NULL "
-        "OR billing_installment_number IS NOT NULL "
-        "OR paid_at IS NOT NULL",
-    )
-    return int(row["cnt"]) if row else 0
-
-
-def _ensure_current_plan_view(conn, path: Path) -> None:
-    """Create v_current_commission_plans when its tables exist and it does not.
-
-    CREATE OR REPLACE VIEW is safe to repeat. The rest of 065 is not: plain
-    ALTER TABLE and the installment backfill must not re-run once billing
-    data exists. A database that applied 065 before the view was added, or
-    a bootstrap that stopped after the tables, still needs this view.
-    """
-    if view_exists(conn, "v_current_commission_plans"):
-        return
-    if not table_exists(conn, "commission_plans") or not table_exists(conn, "user_commission_plans"):
-        return
-    stmts = [
-        stmt for stmt in split_statements(path.read_text(encoding="utf-8"))
-        if stmt.lstrip().upper().startswith("CREATE OR REPLACE VIEW")
-        and "v_current_commission_plans" in stmt
-    ]
-    if len(stmts) != 1:
-        raise RuntimeError(
-            "065 CREATE VIEW v_current_commission_plans was not parsed as one statement"
-        )
-    exec_statements(conn, stmts)
-
-
 def detect_065(conn) -> bool:
     """065 applied ↔ plan tables, the current-plan view, and the seed rows.
 
     Keys on this migration's own schema and seeds: the plan tables, the empty
     commission_billing_events ledger, v_current_commission_plans,
-    payout_schedule, contract_start_date, the installment basis columns,
-    both snapshot columns, both unique indexes, and the standard maintenance
-    and new-client install seed rows. A commission with zero installments
-    does not flip this to false. Re-apply safety for rows that already have
-    billing or payment data is check_065_gate, which blocks in _step.
+    contract_start_date, the installment basis columns, both snapshot columns,
+    both unique indexes, and the standard maintenance and new-client install
+    seed rows. A commission with zero installments does not flip this.
+    Payout timing is not a column. The three commission ALTERs are guarded,
+    so a partial re-apply of the file is safe. Installment backfill skips
+    rows that already exist and does not rewrite a paid installment.
     """
     schema_ok = (
         table_exists(conn, "commission_plans")
@@ -873,7 +829,6 @@ def detect_065(conn) -> bool:
         and table_exists(conn, "user_commission_plans")
         and table_exists(conn, "commission_installments")
         and table_exists(conn, "commission_billing_events")
-        and column_exists(conn, "commission_plan_rules", "payout_schedule")
         and column_exists(conn, "commissions", "plan_key")
         and column_exists(conn, "commissions", "client_type")
         and column_exists(conn, "commissions", "contract_start_date")
@@ -895,33 +850,96 @@ def detect_065(conn) -> bool:
 _SEED_MAINT_065 = (
     "SELECT COUNT(*) AS cnt FROM commission_plan_rules "
     "WHERE plan_key = 'standard' AND estimate_type = 'maintenance' "
-    "AND basis = 'first_year_revenue' AND rate = 0.03000 "
-    "AND payout_schedule = 'maintenance_3_payment'"
+    "AND basis = 'first_year_revenue' AND rate = 0.03000"
 )
 _SEED_INSTALL_065 = (
     "SELECT COUNT(*) AS cnt FROM commission_plan_rules "
     "WHERE plan_key = 'standard' AND estimate_type = 'install' "
-    "AND client_type = 'new' AND rate = 0.01200 "
-    "AND payout_schedule = 'construction_billing_quarterly'"
+    "AND client_type = 'new' AND rate = 0.01200"
 )
-_MARKER_066 = "066_assign_standard_commission_plan"
 
 
-def detect_066(conn) -> bool:
-    """066 applied ↔ the migration marker row exists.
+def _backfill_installment_status(commission: dict, row: dict) -> tuple[str, object]:
+    """Parent paid/cancelled overlaid on a helper row. Existing rows are not updated."""
+    parent = commission.get("status")
+    if parent == "cancelled":
+        return "cancelled", None
+    if parent == "paid" and int(row["installment_number"]) == 1 and (
+        commission.get("estimate_type") == "install" or row["status"] == "scheduled"
+    ):
+        return "paid", commission.get("paid_at")
+    return row["status"], None
 
-    This does not look at who currently has a plan. A rep hired after the
-    migration must not receive a backdated standard-plan row from a re-run.
+
+def backfill_065_installments(conn, verbose: bool = False) -> None:
+    """Insert missing installments with commission_calc. Leave existing rows alone.
+
+    maintenance and install are the only estimate types with a schedule.
+    A second call does not rewrite a paid installment.
     """
-    if not table_exists(conn, "commission_migration_markers"):
-        return False
-    row = _fetch_one(
+    commissions = _fetch_all(
         conn,
-        "SELECT COUNT(*) AS cnt FROM commission_migration_markers "
-        "WHERE migration_id = %s",
-        (_MARKER_066,),
+        """
+        SELECT c.id, c.commission_amount_cents, c.status, c.paid_at, c.created_at,
+               c.contract_start_date, e.estimate_type
+        FROM commissions c
+        LEFT JOIN estimates e ON e.id = c.estimate_id
+        """,
     )
-    return bool(row and int(row["cnt"]) == 1)
+    existing = _fetch_all(
+        conn,
+        "SELECT commission_id, installment_number FROM commission_installments",
+    )
+    have = {(row["commission_id"], int(row["installment_number"])) for row in existing}
+    for commission in commissions:
+        estimate_type = commission.get("estimate_type") or ""
+        try:
+            schedule = payout_schedule_for(estimate_type)
+        except ValueError:
+            continue
+        rows = build_installment_rows(
+            commission["created_at"],
+            int(commission["commission_amount_cents"]),
+            schedule,
+            commission.get("contract_start_date"),
+        )
+        for row in rows:
+            key = (commission["id"], int(row["installment_number"]))
+            if key in have:
+                continue
+            status, paid_at = _backfill_installment_status(commission, row)
+            payout = row.get("payout_date")
+            if verbose:
+                print(f"    » backfill installment {commission['id']} #{row['installment_number']}")
+            _execute(
+                conn,
+                """
+                INSERT INTO commission_installments
+                    (id, commission_id, installment_number, payout_period_label,
+                     payout_date, amount_cents, status, billing_installment_number,
+                     collected_amount_cents, paid_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    commission["id"],
+                    row["installment_number"],
+                    row.get("payout_period"),
+                    None if payout is None else payout.isoformat(),
+                    row.get("amount_cents"),
+                    status,
+                    row.get("billing_installment_number"),
+                    row.get("collected_amount_cents"),
+                    paid_at,
+                ),
+            )
+            have.add(key)
+
+
+def apply_065(conn, path: Path, verbose: bool = False) -> None:
+    """Run 065's SQL, then backfill installments with the calc helpers."""
+    exec_file(conn, path, verbose)
+    backfill_065_installments(conn, verbose)
 
 
 def detect_064(conn) -> bool:
@@ -1023,7 +1041,6 @@ _DETECT: dict = {
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
     "065_commission_cadence_and_plans":           detect_065,
-    "066_assign_standard_commission_plan":        detect_066,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
@@ -1070,10 +1087,7 @@ def _step(
 
     # ── already tracked ───────────────────────────────────────────────────────
     tracked = get_tracked(conn, migration_id)
-    # 065 is handled below even when a tracking row exists. The view was added
-    # to the file after the tables, and a checksum mismatch only warns. An
-    # already-tracked 065 must still create v_current_commission_plans.
-    if tracked and migration_id != "065_commission_cadence_and_plans":
+    if tracked:
         if tracked["checksum"] != checksum:
             print(
                 f"  WARNING: {migration_id} checksum mismatch — file edited after apply "
@@ -1130,68 +1144,18 @@ def _step(
                          apply_fn=lambda: apply_004(conn, path, verbose, branch=branch),
                          suffix=_BRANCH_LABEL.get(branch, ""))
 
-    # ── 065: block a re-run once installments carry billing or payment data ──
-    if migration_id == "065_commission_cadence_and_plans":
-        if not dry_run:
-            _ensure_current_plan_view(conn, path)
-        if detect_065(conn):
-            if tracked and tracked["checksum"] != checksum:
-                print(
-                    f"  WARNING: {migration_id} checksum mismatch — file edited after apply "
-                    f"(recorded={tracked['checksum'][:12]}… current={checksum[:12]}…)",
-                    file=sys.stderr,
-                )
-            if not tracked and not dry_run:
-                record_migration(conn, migration_id, checksum, detected=True)
-            return "ok", "already-applied (detected — schema present, no tracking row)"
-        if tracked:
-            if tracked["checksum"] != checksum:
-                print(
-                    f"  WARNING: {migration_id} checksum mismatch — file edited after apply "
-                    f"(recorded={tracked['checksum'][:12]}… current={checksum[:12]}…)",
-                    file=sys.stderr,
-                )
-            kind = "detected" if tracked["detected"] else "applied"
-            return "ok", f"already-applied ({kind})"
-        live = check_065_gate(conn)
-        if live != 0:
-            return (
-                "blocked",
-                f"BLOCKED — {live} commission installment(s) already have "
-                f"collected_amount_cents, billing_installment_number, or paid_at set. "
-                f"065 must not re-run over billing or payment data.",
-            )
-        return _do_apply(conn, migration_id, path, checksum, dry_run, verbose)
-
-    # ── 066: name-count abort is a hard block, not a warning ────────────────
-    # The exclusion rule lives only in the SQL file. A count mismatch makes
-    # that file insert into 066_abort_cady_N_leon_M. _step turns that failure
-    # into blocked so the runner stops instead of warning and continuing.
-    if migration_id == "066_assign_standard_commission_plan":
-        if detect_066(conn):
-            if not dry_run:
-                record_migration(conn, migration_id, checksum, detected=True)
-            return "ok", "already-applied (detected — schema present, no tracking row)"
-        if dry_run:
-            return _do_apply(conn, migration_id, path, checksum, dry_run, verbose)
-        try:
-            return _do_apply(conn, migration_id, path, checksum, dry_run, verbose)
-        except Exception as exc:
-            if "066_abort_cady_" in str(exc):
-                return (
-                    "blocked",
-                    "BLOCKED — Michelle Cady and Rodrigo Leon must each match "
-                    f"exactly one user before 066 assigns the standard plan. {exc}",
-                )
-            raise
-
-    # ── standard detection (005–012) ──────────────────────────────────────────
+    # ── standard detection ────────────────────────────────────────────────────
     detect_fn = _DETECT.get(migration_id)
     if detect_fn and detect_fn(conn):
         if not dry_run:
             record_migration(conn, migration_id, checksum, detected=True)
         return "ok", "already-applied (detected — schema present, no tracking row)"
 
+    if migration_id == "065_commission_cadence_and_plans":
+        return _do_apply(
+            conn, migration_id, path, checksum, dry_run, verbose,
+            apply_fn=lambda: apply_065(conn, path, verbose),
+        )
     return _do_apply(conn, migration_id, path, checksum, dry_run, verbose)
 
 

@@ -226,6 +226,8 @@ class TestSalesWorkspace:
 
         async def fake_query(sql, params=None):
             captured.append(list(params or []))
+            if "commission_installments" in sql or "v_current_commission_plans" in sql:
+                return []
             return [{"scheduled_ytd_cents": 0, "paid_ytd_cents": 0}]
 
         with patch("api.commissions.query", new=AsyncMock(side_effect=fake_query)):
@@ -243,6 +245,8 @@ class TestSalesWorkspace:
 
         async def fake_query(sql, params=None):
             captured.append(list(params or []))
+            if "commission_installments" in sql or "v_current_commission_plans" in sql:
+                return []
             return [{"scheduled_ytd_cents": 0, "paid_ytd_cents": 0}]
 
         with patch("api.commissions.query", new=AsyncMock(side_effect=fake_query)):

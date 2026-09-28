@@ -5,11 +5,10 @@ entered manually by administrators. Commissions are inserted by
 api/commission_service.py (create_on_won) when an estimate transitions to
 'won', and cancelled by cancel_for_estimate when it transitions to 'lost'.
 
-Payout cadence is the plan rule's payout_schedule. Maintenance has three
-installments: the first is scheduled at the end of the contract-start quarter,
-and the other two wait on billing. Construction payouts stay
-pending_billing_data until collections exist. Due vs upcoming is derived at
-read time from America/New_York today and is not stored.
+Payout cadence is the estimate type: maintenance is three installments and
+install waits on billing. Due vs upcoming is derived at read time from
+America/New_York today and is not stored. Mark-paid writes live in
+api/commission_service.py.
 
 Backs the Commissions page in the inside-sales studio. Mirrors the module
 pattern used by api/estimating.py and api/proposals.py.
@@ -24,18 +23,14 @@ from typing import Any, Optional
 from fastapi import Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from db import query, execute
+from db import query
 from api import authz
-from api.commission_calc import calendar_date, close_quarter_label, et_today
+from api import commission_service
+from api.commission_calc import close_quarter_label, eastern_year_utc_bounds, et_today
 from api.commission_schedule import (
     build_payout_schedule,
     public_installment,
     summarize_open_installments,
-)
-from api.commission_service import (  # noqa: F401  (re-exported for estimating)
-    cancel_commission,
-    cancel_for_estimate,
-    create_on_won,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,150 +98,6 @@ async def _current_rep_plan(user_id: str) -> tuple[Optional[str], Optional[str]]
     return plan_key, plan_name
 
 
-def _latest_dated_period(siblings: list[dict]) -> Optional[str]:
-    """payment_period from the latest payout_date, then installment_number.
-
-    An undated row, including a higher installment number with a null date,
-    does not win over a dated row.
-    """
-    dated = [row for row in siblings if row.get("payout_date") is not None]
-    if not dated:
-        return None
-    chosen = max(
-        dated,
-        key=lambda row: (row["payout_date"], int(row.get("installment_number") or 0)),
-    )
-    return chosen.get("payout_period_label")
-
-
-_CANCELLED_PAID = "Cancelled installment cannot be marked paid"
-_CANCELLED_COMMISSION = "Cancelled commission cannot be marked paid"
-_INSTALLMENT_NOT_PAYABLE = (
-    "Installment is not payable until its amount and billing data are known"
-)
-_COMMISSION_NOT_PAYABLE = "Commission has installments that are not payable"
-
-
-def _reject_unpayable(row: dict, *, cancelled_detail: str, unknown_detail: str) -> None:
-    """409 when a row is cancelled, pending billing data, or has a null amount."""
-    if row.get("status") == "cancelled" or row.get("commission_status") == "cancelled":
-        raise HTTPException(status_code=409, detail=cancelled_detail)
-    if row.get("status") == "pending_billing_data" or row.get("amount_cents") is None:
-        raise HTTPException(status_code=409, detail=unknown_detail)
-
-
-async def _apply_paid(
-    commission_id: str,
-    installment_id: Optional[str] = None,
-    payment_period: Optional[str] = None,
-) -> None:
-    """Mark one installment, or every open installment on a commission, paid.
-
-    One guard, then one cascade, for both mark-paid routes. A cancelled
-    commission or installment is 409. pending_billing_data and a null amount
-    are 409. An already-paid row is left alone, including paid_at. The
-    installment update never matches a cancelled row.
-    """
-    if installment_id is not None:
-        rows = await query(
-            """
-            SELECT i.id, i.commission_id, i.status, i.amount_cents, i.payout_date,
-                   i.payout_period_label, i.installment_number,
-                   c.status AS commission_status
-            FROM commission_installments i
-            JOIN commissions c ON c.id = i.commission_id
-            WHERE i.id = %s
-            """,
-            [installment_id],
-        )
-        if not rows:
-            raise HTTPException(status_code=404, detail="Installment not found")
-        row = rows[0]
-        commission_id = row["commission_id"]
-        _reject_unpayable(
-            row,
-            cancelled_detail=_CANCELLED_PAID,
-            unknown_detail=_INSTALLMENT_NOT_PAYABLE,
-        )
-        if row.get("status") != "paid":
-            await execute(
-                """
-                UPDATE commission_installments
-                SET status = 'paid', paid_at = NOW(), updated_at = NOW()
-                WHERE id = %s
-                  AND status NOT IN ('paid', 'cancelled')
-                """,
-                [installment_id],
-            )
-        siblings = await query(
-            """
-            SELECT installment_number, status, payout_period_label, payout_date
-            FROM commission_installments
-            WHERE commission_id = %s
-            """,
-            [commission_id],
-        )
-        if row.get("commission_status") == "paid":
-            return
-        if siblings and all(sibling.get("status") == "paid" for sibling in siblings):
-            await execute(
-                """
-                UPDATE commissions
-                SET status = 'paid', paid_at = NOW(), payment_period = %s, updated_at = NOW()
-                WHERE id = %s
-                  AND status NOT IN ('paid', 'cancelled')
-                """,
-                [
-                    payment_period if payment_period is not None else _latest_dated_period(siblings),
-                    commission_id,
-                ],
-            )
-        return
-
-    commission_rows = await query(
-        "SELECT id, status FROM commissions WHERE id = %s",
-        [commission_id],
-    )
-    if not commission_rows:
-        raise HTTPException(status_code=404, detail="Commission not found")
-    commission = commission_rows[0]
-    if commission.get("status") == "cancelled":
-        raise HTTPException(status_code=409, detail=_CANCELLED_COMMISSION)
-    installments = await query(
-        """
-        SELECT id, status, amount_cents, installment_number, payout_period_label, payout_date
-        FROM commission_installments
-        WHERE commission_id = %s
-        """,
-        [commission_id],
-    )
-    for row in installments:
-        _reject_unpayable(
-            row,
-            cancelled_detail=_COMMISSION_NOT_PAYABLE,
-            unknown_detail=_COMMISSION_NOT_PAYABLE,
-        )
-    if commission.get("status") != "paid":
-        await execute(
-            """
-            UPDATE commissions
-            SET status = 'paid', paid_at = NOW(), payment_period = %s, updated_at = NOW()
-            WHERE id = %s
-              AND status NOT IN ('paid', 'cancelled')
-            """,
-            [payment_period, commission_id],
-        )
-    await execute(
-        """
-        UPDATE commission_installments
-        SET status = 'paid', paid_at = NOW(), updated_at = NOW()
-        WHERE commission_id = %s
-          AND status NOT IN ('paid', 'cancelled')
-        """,
-        [commission_id],
-    )
-
-
 def register(app, require_auth) -> None:
     """Attach all commission routes to the FastAPI app with the shared auth dep."""
 
@@ -307,7 +158,7 @@ def register(app, require_auth) -> None:
             [target_user_id],
         )
         public = [
-            public_installment(row, row.get("commission_status") or "approved", today)
+            public_installment(row, row["commission_status"], today)
             for row in inst_rows
         ]
         open_money = summarize_open_installments(public)
@@ -396,13 +247,13 @@ def register(app, require_auth) -> None:
                 ids,
             )
             today = et_today()
-            status_by_id = {row["id"]: row.get("status") or "approved" for row in rows if row.get("id")}
+            status_by_id = {row["id"]: row["status"] for row in rows if row.get("id")}
             for inst in inst_rows:
                 cid = inst.get("commission_id")
                 if not cid or cid not in inst_by:
                     continue
                 inst_by[cid].append(
-                    public_installment(inst, status_by_id.get(cid, "approved"), today)
+                    public_installment(inst, status_by_id[cid], today)
                 )
         rep_plan_key, rep_plan_name = await _current_rep_plan(target_user_id)
         out = []
@@ -430,11 +281,12 @@ def register(app, require_auth) -> None:
     ) -> dict:
         """Closed quarters and the checks they hit.
 
-        start_date and end_date select deals by close date, the same bounds
-        list and summary use on commissions.created_at. Either bound may be
-        omitted. When neither is sent, `year` is the Eastern close year
-        (defaulting to this year). A period bound replaces that year clip so
-        the page period is the filter.
+        `year` is the Eastern close year, defaulting to this year. It is always
+        a half-open UTC range on commissions.created_at: Jan 1 00:00 Eastern
+        through Jan 1 00:00 Eastern of the next year. start_date and end_date
+        are extra close-date bounds and do not replace that year. A deal must
+        fall inside the year and inside any bound that was sent. Pass `year`
+        to load a different calendar year.
 
         amount_cents is null when every installment in the group has no
         amount. amount_partial is true when the total omits unknown amounts.
@@ -445,11 +297,15 @@ def register(app, require_auth) -> None:
         target_user_id = user_id or user["id"]
         _require_own_or_viewer(user, target_user_id)
         close_year = year if year is not None else et_today().year
-        # Same truthiness as list: an empty query value is not a bound.
-        period_bounds = bool(start_date) or bool(end_date)
+        year_start, year_end = eastern_year_utc_bounds(close_year)
         today = et_today()
-        conditions = ["c.user_id = %s", "c.status != 'cancelled'"]
-        params: list[Any] = [target_user_id]
+        conditions = [
+            "c.user_id = %s",
+            "c.status != 'cancelled'",
+            "c.created_at >= %s",
+            "c.created_at < %s",
+        ]
+        params: list[Any] = [target_user_id, year_start, year_end]
         if start_date:
             conditions.append("c.created_at >= %s")
             params.append(start_date)
@@ -464,12 +320,12 @@ def register(app, require_auth) -> None:
                 c.commission_amount_cents,
                 c.status AS commission_status,
                 c.created_at,
-                i.id AS installment_id,
+                i.id,
                 i.installment_number,
                 i.payout_period_label,
                 i.payout_date,
                 i.amount_cents,
-                i.status AS installment_status,
+                i.status,
                 i.billing_installment_number,
                 i.collected_amount_cents
             FROM commissions c
@@ -483,8 +339,6 @@ def register(app, require_auth) -> None:
         for row in rows:
             if row.get("created_at") is None or row.get("commission_id") is None:
                 continue
-            if not period_bounds and calendar_date(row["created_at"]).year != close_year:
-                continue
             deal = deals_by_id.get(row["commission_id"])
             if deal is None:
                 deal = {
@@ -493,12 +347,9 @@ def register(app, require_auth) -> None:
                     "installments": [],
                 }
                 deals_by_id[row["commission_id"]] = deal
-            if row.get("installment_id"):
-                shaped = dict(row)
-                shaped["id"] = row["installment_id"]
-                shaped["status"] = row.get("installment_status") or "scheduled"
+            if row.get("id"):
                 deal["installments"].append(
-                    public_installment(shaped, row.get("commission_status") or "approved", today)
+                    public_installment(row, row["commission_status"], today)
                 )
         schedule = build_payout_schedule(list(deals_by_id.values()))
         return {
@@ -513,9 +364,9 @@ def register(app, require_auth) -> None:
         installment_id: str,
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Mark one installment paid. See `_apply_paid` for the guard and cascade."""
+        """Mark one installment paid. See commission_service.mark_installment_paid."""
         _require_mark_paid(user)
-        await _apply_paid("", installment_id=installment_id)
+        await commission_service.mark_installment_paid(installment_id)
         return {"success": True}
 
     @app.post("/api/commissions/{commission_id}/mark-paid")
@@ -526,14 +377,14 @@ def register(app, require_auth) -> None:
     ) -> dict:
         """Mark the commission and its open installments paid.
 
-        `_apply_paid` returns 409 and writes nothing when the commission is
-        cancelled or any installment is pending_billing_data, cancelled, or
-        has a null amount. Already-paid rows keep paid_at. The installment
-        update excludes cancelled rows. A missing commission is 404. The
-        request body's payment_period is stored on the commission.
+        mark_commission_paid returns 409 and writes nothing when the
+        commission is cancelled or any installment is pending_billing_data,
+        cancelled, or has a null amount. Already-paid rows keep paid_at.
+        The installment update excludes cancelled rows. A missing commission
+        is 404. The request body's payment_period is stored on the commission.
         """
         _require_mark_paid(user)
-        await _apply_paid(commission_id, payment_period=body.payment_period)
+        await commission_service.mark_commission_paid(commission_id, body.payment_period)
         return {"success": True}
 
     @app.get("/api/commissions/reps")

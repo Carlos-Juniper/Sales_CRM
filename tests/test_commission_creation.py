@@ -17,7 +17,7 @@ os.environ.setdefault("ENTRA_TENANT_ID", "x")
 
 from api.server import app, require_auth  # noqa: E402
 from api.commission_calc import calendar_date  # noqa: E402
-from api.commission_service import create_on_won  # noqa: E402
+from api.commission_service import cancel_for_estimate, create_on_won  # noqa: E402
 import db  # noqa: E402
 
 client = TestClient(app)
@@ -148,8 +148,7 @@ class TestCreateCommissionOnWon:
             if "FROM users" in sql:
                 return [{"role": "sales"}]
             if "payout_schedule" in sql:
-                assert list(params) == ["standard", "install"]
-                return [{"payout_schedule": "construction_billing_quarterly"}]
+                raise AssertionError("schedule comes from the estimate type, not a rule lookup")
             raise AssertionError(sql)
 
         execs = []
@@ -190,8 +189,7 @@ class TestCreateCommissionOnWon:
             if "FROM users" in sql:
                 return [{"role": "maintenance_sales"}]
             if "payout_schedule" in sql:
-                assert list(params) == ["standard", "maintenance"]
-                return [{"payout_schedule": "maintenance_3_payment"}]
+                raise AssertionError("schedule comes from the estimate type, not a rule lookup")
             raise AssertionError(sql)
 
         execs = []
@@ -210,11 +208,11 @@ class TestCreateCommissionOnWon:
         assert "2026-04-01" not in installment
         assert installment.count("pending_billing_data") == 2
 
-    async def test_missing_schedule_inserts_pending_installment_one(self):
-        """A missing schedule still writes installment 1 in the same transaction.
+    async def test_install_schedule_comes_from_estimate_type(self):
+        """Install writes the construction row. There is no schedule lookup.
 
-        The row is pending_billing_data with a null amount. A commission is
-        not committed with zero installments.
+        The row is pending_billing_data with a null amount. The commission
+        insert and the installment insert share one transaction.
         """
         events = []
 
@@ -239,7 +237,7 @@ class TestCreateCommissionOnWon:
             if "FROM users" in sql:
                 return [{"role": "sales"}]
             if "payout_schedule" in sql:
-                return []
+                raise AssertionError("schedule comes from the estimate type, not a rule lookup")
             raise AssertionError(sql)
 
         execs = []
@@ -284,7 +282,6 @@ class TestCreateCommissionOnWon:
                     "tier_max_cents": None,
                     "rate": Decimal("0.10000"),
                     "basis": "first_year_revenue",
-                    "payout_schedule": "maintenance_3_payment",
                 }]
             raise AssertionError(sql)
 
@@ -509,6 +506,7 @@ class TestCreateCommissionOnWon:
              patch("api.estimating._load_estimate", new_callable=AsyncMock) as loaded, \
              patch("api.estimating._sync_status_bg", new_callable=AsyncMock), \
              patch("api.estimating._push_takeoff_qtys_bg", new_callable=AsyncMock), \
+             patch("api.estimating.cancel_for_estimate", new=cancel_for_estimate), \
              patch("api.commission_service.query", new=fake_service_query), \
              patch("api.commission_service.execute", new=fake_service_exec), \
              patch("api.commission_service.transaction", new=tx):

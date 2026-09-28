@@ -1,12 +1,14 @@
 -- ---------------------------------------------------------------------------
 -- Migration 065 — commission payout installments and standard plan rules.
 --
--- Payout cadence is data on commission_plan_rules.payout_schedule:
---   maintenance_3_payment — three installments. Payment 1 is half of the
---     annual commission at the end of the quarter the contract starts in.
---     Payment 2 is the other half and waits on the 6th billing installment.
---     Payment 3 waits on additional revenue through the 12th installment.
---   construction_billing_quarterly — one row, pending billing and collections.
+-- Payout cadence is not a column. The application maps estimate type once:
+--   maintenance → maintenance_3_payment (three installments; payment 1 is
+--     half of the annual commission at the end of the start quarter;
+--     payment 2 waits on the 6th billing installment; payment 3 waits on
+--     additional revenue through the 12th installment).
+--   install → construction_billing_quarterly (one row, pending billing).
+-- Existing commissions are backfilled by scripts/migrate.py apply_065,
+-- which calls the same commission_calc helpers as a won estimate.
 -- commission_billing_events is an empty ledger for a later Aspire backfill.
 -- This file does not insert billing rows and does not invent collection dates.
 -- No per-user plan rows are inserted. commission_rates rows are not modified.
@@ -18,12 +20,12 @@
 -- over 5000 dollars at 50 percent gross profit or higher, and 1.5 percent
 -- on amounts over 10000 dollars at 45 percent gross profit or higher.
 --
--- commissions already exists (migration 054). The three ALTERs below add
--- plan_key, client_type, and contract_start_date. Tables created in this
--- file are not altered again here.
+-- commissions already exists (migration 054). The three guarded ALTERs add
+-- plan_key, client_type, and contract_start_date. Each ADD is skipped when
+-- the column is already there, so a partial re-apply is safe. Tables
+-- created in this file are not altered again here.
 --
--- Backfill INSERTs are INSERT IGNORE against uq_commission_installment so a
--- partial re-apply does not rewrite a paid installment. There is no DELETE.
+-- There is no DELETE and no installment INSERT in this file.
 --
 -- Backfill treats created_at as UTC when converting to Eastern, matching the
 -- application (naive timestamps are UTC). If the named time zone is not
@@ -49,7 +51,6 @@ CREATE TABLE IF NOT EXISTS commission_plan_rules (
   tier_max_cents BIGINT NULL,
   rate DECIMAL(6,5) NOT NULL,
   basis VARCHAR(80) NOT NULL,
-  payout_schedule VARCHAR(40) NOT NULL,
   effective_date DATE NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -129,9 +130,41 @@ CREATE TABLE IF NOT EXISTS commission_billing_events (
     FOREIGN KEY (commission_id) REFERENCES commissions (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-ALTER TABLE commissions ADD COLUMN plan_key VARCHAR(64) NULL;
-ALTER TABLE commissions ADD COLUMN client_type VARCHAR(32) NULL;
-ALTER TABLE commissions ADD COLUMN contract_start_date DATE NULL;
+SET @add_commissions_plan_key = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = 'commissions'
+       AND column_name = 'plan_key') > 0,
+    'SELECT 1',
+    'ALTER TABLE commissions ADD COLUMN plan_key VARCHAR(64) NULL'
+);
+PREPARE stmt_add_commissions_plan_key FROM @add_commissions_plan_key;
+EXECUTE stmt_add_commissions_plan_key;
+DEALLOCATE PREPARE stmt_add_commissions_plan_key;
+
+SET @add_commissions_client_type = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = 'commissions'
+       AND column_name = 'client_type') > 0,
+    'SELECT 1',
+    'ALTER TABLE commissions ADD COLUMN client_type VARCHAR(32) NULL'
+);
+PREPARE stmt_add_commissions_client_type FROM @add_commissions_client_type;
+EXECUTE stmt_add_commissions_client_type;
+DEALLOCATE PREPARE stmt_add_commissions_client_type;
+
+SET @add_commissions_contract_start = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = 'commissions'
+       AND column_name = 'contract_start_date') > 0,
+    'SELECT 1',
+    'ALTER TABLE commissions ADD COLUMN contract_start_date DATE NULL'
+);
+PREPARE stmt_add_commissions_contract_start FROM @add_commissions_contract_start;
+EXECUTE stmt_add_commissions_contract_start;
+DEALLOCATE PREPARE stmt_add_commissions_contract_start;
 
 INSERT INTO commission_plans (plan_key, name, description, active) VALUES (
   'standard',
@@ -146,123 +179,25 @@ ON DUPLICATE KEY UPDATE
 -- Rates are data. tier_max_cents is exclusive. Dollars converted to cents:
 -- $1M = 100000000, $2M = 200000000, $3M = 300000000.
 INSERT INTO commission_plan_rules
-  (id, plan_key, estimate_type, client_type, tier_min_cents, tier_max_cents, rate, basis, payout_schedule, effective_date)
+  (id, plan_key, estimate_type, client_type, tier_min_cents, tier_max_cents, rate, basis, effective_date)
 VALUES
-  ('rule-standard-maint', 'standard', 'maintenance', NULL, 0, NULL, 0.03000, 'first_year_revenue', 'maintenance_3_payment', '2024-03-13'),
-  ('rule-standard-install-new-0', 'standard', 'install', 'new', 0, 100000000, 0.00400, 'calendar_year_cumulative_revenue', 'construction_billing_quarterly', '2024-03-13'),
-  ('rule-standard-install-new-1m', 'standard', 'install', 'new', 100000000, 200000000, 0.00800, 'calendar_year_cumulative_revenue', 'construction_billing_quarterly', '2024-03-13'),
-  ('rule-standard-install-new-2m', 'standard', 'install', 'new', 200000000, NULL, 0.01200, 'calendar_year_cumulative_revenue', 'construction_billing_quarterly', '2024-03-13'),
-  ('rule-standard-install-existing-0', 'standard', 'install', 'existing', 0, 300000000, 0.00000, 'calendar_year_cumulative_revenue', 'construction_billing_quarterly', '2024-03-13'),
-  ('rule-standard-install-existing-3m', 'standard', 'install', 'existing', 300000000, NULL, 0.00400, 'calendar_year_cumulative_revenue', 'construction_billing_quarterly', '2024-03-13')
+  ('rule-standard-maint', 'standard', 'maintenance', NULL, 0, NULL, 0.03000, 'first_year_revenue', '2024-03-13'),
+  ('rule-standard-install-new-0', 'standard', 'install', 'new', 0, 100000000, 0.00400, 'calendar_year_cumulative_revenue', '2024-03-13'),
+  ('rule-standard-install-new-1m', 'standard', 'install', 'new', 100000000, 200000000, 0.00800, 'calendar_year_cumulative_revenue', '2024-03-13'),
+  ('rule-standard-install-new-2m', 'standard', 'install', 'new', 200000000, NULL, 0.01200, 'calendar_year_cumulative_revenue', '2024-03-13'),
+  ('rule-standard-install-existing-0', 'standard', 'install', 'existing', 0, 300000000, 0.00000, 'calendar_year_cumulative_revenue', '2024-03-13'),
+  ('rule-standard-install-existing-3m', 'standard', 'install', 'existing', 300000000, NULL, 0.00400, 'calendar_year_cumulative_revenue', '2024-03-13')
 ON DUPLICATE KEY UPDATE
-  payout_schedule = VALUES(payout_schedule);
+  rate = VALUES(rate),
+  basis = VALUES(basis),
+  tier_min_cents = VALUES(tier_min_cents),
+  tier_max_cents = VALUES(tier_max_cents);
 
 UPDATE commissions c
 JOIN estimates e ON e.id = c.estimate_id
 SET c.contract_start_date = e.service_start_date
 WHERE c.contract_start_date IS NULL
   AND e.service_start_date IS NOT NULL;
-
--- Maintenance: three rows. Payment 1 is dated at the end of the start quarter.
--- Payments 2 and 3 wait on billing installments 6 and 12.
--- INSERT IGNORE leaves an existing (commission_id, installment_number) alone,
--- including a row that has already been marked paid.
-INSERT IGNORE INTO commission_installments
-  (id, commission_id, installment_number, payout_period_label, payout_date, amount_cents, status, billing_installment_number, collected_amount_cents, paid_at)
-SELECT
-  UUID(),
-  src.id,
-  src.installment_number,
-  CASE
-    WHEN src.payout_date IS NULL THEN NULL
-    ELSE CONCAT(
-      ELT(MONTH(src.payout_date),
-        'January', 'February', 'March', 'April', 'May', 'June',
-        'July', 'August', 'September', 'October', 'November', 'December'),
-      ' ',
-      YEAR(src.payout_date)
-    )
-  END,
-  src.payout_date,
-  src.amount_cents,
-  src.installment_status,
-  src.billing_installment_number,
-  NULL,
-  src.paid_at
-FROM (
-  SELECT
-    c.id,
-    n.installment_number,
-    CASE
-      WHEN n.installment_number = 1 THEN CAST(ROUND(c.commission_amount_cents / 2) AS SIGNED)
-      WHEN n.installment_number = 2 THEN c.commission_amount_cents - CAST(ROUND(c.commission_amount_cents / 2) AS SIGNED)
-      ELSE NULL
-    END AS amount_cents,
-    CASE
-      WHEN n.installment_number <> 1 THEN NULL
-      WHEN QUARTER(d.anchor) = 1 THEN DATE(CONCAT(YEAR(d.anchor), '-03-31'))
-      WHEN QUARTER(d.anchor) = 2 THEN DATE(CONCAT(YEAR(d.anchor), '-06-30'))
-      WHEN QUARTER(d.anchor) = 3 THEN DATE(CONCAT(YEAR(d.anchor), '-09-30'))
-      ELSE DATE(CONCAT(YEAR(d.anchor), '-12-31'))
-    END AS payout_date,
-    CASE n.installment_number
-      WHEN 2 THEN 6
-      WHEN 3 THEN 12
-      ELSE NULL
-    END AS billing_installment_number,
-    CASE
-      WHEN c.status = 'cancelled' THEN 'cancelled'
-      WHEN c.status = 'paid' AND n.installment_number = 1 THEN 'paid'
-      WHEN n.installment_number = 1 THEN 'scheduled'
-      ELSE 'pending_billing_data'
-    END AS installment_status,
-    CASE
-      WHEN c.status = 'paid' AND n.installment_number = 1 THEN c.paid_at
-      ELSE NULL
-    END AS paid_at
-  FROM commissions c
-  LEFT JOIN estimates e ON e.id = c.estimate_id
-  JOIN (
-    SELECT
-      id,
-      COALESCE(
-        contract_start_date,
-        DATE(COALESCE(CONVERT_TZ(created_at, '+00:00', 'America/New_York'), created_at))
-      ) AS anchor
-    FROM commissions
-  ) d ON d.id = c.id
-  JOIN (
-    SELECT 1 AS installment_number
-    UNION ALL
-    SELECT 2
-    UNION ALL
-    SELECT 3
-  ) n
-  WHERE COALESCE(e.estimate_type, '') = 'maintenance'
-) src;
-
--- Install and any other non-maintenance commission: one payout row with a
--- null date and a null amount until collections exist.
-INSERT IGNORE INTO commission_installments
-  (id, commission_id, installment_number, payout_period_label, payout_date, amount_cents, status, billing_installment_number, collected_amount_cents, paid_at)
-SELECT
-  UUID(),
-  c.id,
-  1,
-  NULL,
-  NULL,
-  NULL,
-  CASE
-    WHEN c.status = 'cancelled' THEN 'cancelled'
-    WHEN c.status = 'paid' THEN 'paid'
-    ELSE 'pending_billing_data'
-  END,
-  NULL,
-  NULL,
-  CASE WHEN c.status = 'paid' THEN c.paid_at ELSE NULL END
-FROM commissions c
-LEFT JOIN estimates e ON e.id = c.estimate_id
-WHERE COALESCE(e.estimate_type, '') <> 'maintenance';
 
 -- One current plan row per user. Mirrors v_current_commission_rates (054):
 -- effective on or before today, and not expired. ROW_NUMBER keeps the latest

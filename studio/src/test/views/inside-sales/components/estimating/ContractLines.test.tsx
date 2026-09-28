@@ -95,9 +95,10 @@ describe('ContractLines', () => {
     expect(cellsIn('Included flowers')).toEqual(['Included flowers', '1', '$0.00', '$0.00'])
   })
 
-  it('prints Coral Bay recurring and optional lines that together equal the approved value', () => {
+  it('prints each Coral Bay line at its own calculated price', () => {
     // Same sections, quantities, rates, and square footage as
-    // scripts/seed_contract_estimate.py, whose stored contract value is $48,000.
+    // scripts/seed_contract_estimate.py. contractValueCents is $48,000 and
+    // is not applied to these prices.
     const coralBay = {
       id: 'est-coral-bay',
       estimateType: 'maintenance',
@@ -170,10 +171,9 @@ describe('ContractLines', () => {
 
     expect(lineCents).toHaveLength(7)
     expect(lineCents.reduce((sum, value) => sum + value, 0)).toBe(maintenanceCents)
-    expect(optionalCents).toHaveLength(2)
+    expect(maintenanceCents).toBe(4_001_400)
+    expect(optionalCents.map((row) => row.annual)).toEqual([11_970_000, 24_510_000])
     expect(optionalCents.every((row) => row.each === row.annual)).toBe(true)
-    expect(maintenanceCents + optionalSum).toBe(4_800_000)
-    expect(maintenanceCents).toBe(474_457)
-    expect(optionalSum).toBe(4_325_543)
+    expect(maintenanceCents + optionalSum).toBe(40_481_400)
   })
 })

@@ -109,128 +109,48 @@ export function buildContractTotals(rows: ContractRow[]): ContractTotals {
 }
 
 /**
- * Scale every priced row by `targetCents / contractTotal`.
- *
- * `contractValueCents` is the approved price of the whole estimate: recurring
- * maintenance and optional one-time services. The caller passes every contract
- * row. Their extended-price total is `contractTotal` (the same rollup as
- * `contractTotal()` in lib/estimating/calc). Largest-remainder rounding, ties
- * broken by earlier row, makes the scaled extended prices sum exactly to the
- * approved value. Recurring and optional subtotals are then
- * `buildContractTotals` of each group — they are not the approved value by
- * themselves.
- *
- * A missing target, a target already equal to the line sum, or a zero
- * contract total returns the rows unchanged. A zero total cannot be divided,
- * and the agreement prints the unscaled lines.
- */
-export function scaleRowsToContractValue(
-  rows: ContractRow[],
-  targetCents: number | null,
-): ContractRow[] {
-  if (targetCents == null) return rows
-  const lineSum = buildContractTotals(rows).extPriceCents
-  if (lineSum === 0 || lineSum === targetCents) return rows
-
-  const weights = rows.map((row) => (row.hasUnitPrice ? row.extPriceCents : 0))
-  const target = BigInt(targetCents)
-  const sum = BigInt(lineSum)
-  const floors = weights.map((weight) =>
-    weight === 0 ? 0 : Number((target * BigInt(weight)) / sum),
-  )
-  const remainders = weights.map((weight) =>
-    weight === 0 ? 0n : (target * BigInt(weight)) % sum,
-  )
-  let leftover = targetCents - floors.reduce((acc, floor) => acc + floor, 0)
-
-  // Only positive-weight rows take a remainder cent. A stored $0.00 and a
-  // blank unpriced row both have weight 0, so neither absorbs leftover.
-  const order = weights
-    .map((_, index) => index)
-    .filter((index) => weights[index] !== 0)
-    .sort((a, b) => {
-      if (remainders[a] === remainders[b]) return a - b
-      return remainders[a] > remainders[b] ? -1 : 1
-    })
-
-  const extras = new Array<number>(rows.length).fill(0)
-  for (let i = 0; i < order.length && leftover > 0; i += 1) {
-    extras[order[i]] = 1
-    leftover -= 1
-  }
-
-  return rows.map((row, index) => {
-    if (!row.hasUnitPrice || weights[index] === 0) return row
-    const extPriceCents = floors[index] + extras[index]
-    const oldExt = row.extPriceCents
-    // Keep Cost per Occ. on the same ratio as this line's extended price.
-    // A one-time row (qty 1) has price-each equal to extended price, so both
-    // printed columns stay equal after the cent is assigned.
-    const priceEachCents =
-      oldExt === 0
-        ? row.priceEachCents
-        : Number((BigInt(row.priceEachCents) * BigInt(extPriceCents)) / BigInt(oldExt))
-    return {
-      ...row,
-      priceEachCents,
-      extPriceCents,
-      totalPriceCents: extPriceCents + row.salesTaxCents,
-    }
-  })
-}
-
-const MONTH_NAMES = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-]
-
-/**
- * Split an annual cent total across 12 months.
- * Remainder is distributed: the first `rem` months get `per + 1`.
- */
-function distributeAcrossMonths(
-  baseCents: number,
-  serviceStartDate: Date | null,
-): PaymentScheduleMonth[] {
-  const per = Math.floor(baseCents / 12)
-  const rem = baseCents - per * 12
-
-  // Use getUTCMonth() — service dates are ISO date strings (YYYY-MM-DD), which
-  // JS parses as UTC midnight. getMonth() would shift one day back in US timezones.
-  const startMonth = serviceStartDate ? serviceStartDate.getUTCMonth() : 0
-
-  const schedule: PaymentScheduleMonth[] = []
-  for (let i = 0; i < 12; i++) {
-    const monthIndex = (startMonth + i) % 12
-    const amountCents = i < rem ? per + 1 : per
-    schedule.push({
-      month: MONTH_NAMES[monthIndex],
-      amountCents,
-    })
-  }
-
-  return schedule
-}
-
-/**
  * Build 12-month payment schedule from contract rows and service start date.
- * Base is the sum of extPriceCents for recurring rows — which is every row
- * except those explicitly marked one-time.
+ * Base is buildContractTotals of the recurring rows — every row except those
+ * explicitly marked one-time. That is the Annual Maintenance Price.
+ * Remainder is distributed: the first `rem` months get `per + 1`.
  */
 export function buildPaymentSchedule(
   rows: ContractRow[],
   serviceStartDate: Date | null,
 ): PaymentScheduleMonth[] {
   const base = buildContractTotals(rows.filter((row) => row.isRecurring)).extPriceCents
-  return distributeAcrossMonths(base, serviceStartDate)
+
+  const per = Math.floor(base / 12)
+  const rem = base - per * 12
+
+  // Use getUTCMonth() — service dates are ISO date strings (YYYY-MM-DD), which
+  // JS parses as UTC midnight. getMonth() would shift one day back in US timezones.
+  const startMonth = serviceStartDate ? serviceStartDate.getUTCMonth() : 0
+
+  const monthNames = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ]
+
+  const schedule: PaymentScheduleMonth[] = []
+  for (let i = 0; i < 12; i++) {
+    const monthIndex = (startMonth + i) % 12
+    const amountCents = i < rem ? per + 1 : per
+    schedule.push({
+      month: monthNames[monthIndex],
+      amountCents,
+    })
+  }
+
+  return schedule
 }

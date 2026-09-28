@@ -5,24 +5,15 @@
 // Matches the reference (business docs/Pointe Jupiter Yacht Club.pdf, p.42):
 // one row per month (Schedule / Price / Sales Tax / Total Price) starting
 // from the service start date, with a totals row. The annual base is the
-// scaled recurring subtotal (buildContractTotals), the same number as the
-// Annual Maintenance Price.
+// recurring maintenance total from buildContractTotals.
 // ---------------------------------------------------------------------------
 
-import {
-  buildContractRows,
-  buildContractTotals,
-  buildPaymentSchedule,
-  scaleRowsToContractValue,
-} from '@/lib/proposal/contract'
+import { buildContractRows, buildContractTotals, buildPaymentSchedule } from '@/lib/proposal/contract'
 import { formatCents } from '@/lib/proposal/formatCents'
 import type { Estimate } from '@/types/estimating'
 
 export function PaymentSchedule({ estimate }: { estimate: Estimate }) {
-  const rows = scaleRowsToContractValue(
-    buildContractRows(estimate),
-    estimate.contractValueCents ?? null,
-  )
+  const rows = buildContractRows(estimate)
 
   // Parse serviceStartDate from ISO string to Date
   const serviceStartDate = estimate.serviceStartDate

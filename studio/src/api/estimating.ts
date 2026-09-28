@@ -486,9 +486,8 @@ export const estimatingApi = {
     apiClient.post<LifecycleTransitionResult>(`/estimating/estimates/${id}/lifecycle`, { to }),
 }
 
-/** Filters for GET /api/estimating/service-kits. */
+/** Filters for GET /api/estimating/service-kits. The API does not filter by branch. */
 export interface ListServiceKitsParams {
-  branch?: string
   kitType?: KitType
   active?: boolean
 }
@@ -512,7 +511,6 @@ export const estimatingConfigApi = {
     apiClient.get<BranchOption[]>(`/estimating/config/branches?kind=${kind}`),
   serviceKits: (params?: ListServiceKitsParams) => {
     const qs = new URLSearchParams()
-    if (params?.branch) qs.set('branch', params.branch)
     if (params?.kitType) qs.set('kit_type', params.kitType)
     if (params?.active !== undefined) qs.set('active', String(params.active))
     const q = qs.toString()

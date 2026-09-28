@@ -307,15 +307,17 @@ function notesForCreate(raw: unknown): { ok: true; notes: string | null } | { ok
   return { ok: true, notes: trimmed.length > 0 ? trimmed : null }
 }
 
-/** Priced service kits. GET /api/estimating/service-kits. */
+/**
+ * Priced service kits. GET /api/estimating/service-kits.
+ * kit_type and active match the API. A `branch` query param is ignored:
+ * Slice 14 removed that filter after migration 022 dropped the column.
+ */
 async function listServiceKits({ request }: { request: Request }) {
   await delay(50)
   const url = new URL(request.url)
-  const branch = url.searchParams.get('branch')
   const kitType = url.searchParams.get('kit_type')
   const active = url.searchParams.get('active')
   let rows = SERVICE_KIT_SEED
-  if (branch) rows = rows.filter((r) => r.branch === branch)
   if (kitType) rows = rows.filter((r) => r.kitType === kitType)
   if (active !== null) rows = rows.filter((r) => r.active === (active === 'true' || active === '1'))
   return HttpResponse.json(rows)
@@ -766,7 +768,7 @@ const allHandlers = [
   ),
 
   // GET /api/estimating/service-kits — priced kits (seeded from
-  // the workbook rows; mirrors the backend's branch/kit_type/active filters).
+  // the workbook rows; mirrors the backend's kit_type/active filters).
   http.get(`${API}/estimating/service-kits`, listServiceKits),
 
   // ---------------------------------------------------------------------

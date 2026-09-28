@@ -1013,71 +1013,7 @@ def register(app, require_auth) -> None:
         is distinguishable from the DB schema alone).
         """
         await _require_branch_write_scope(user, aspire_branch_id)
-
-        # ── crew rate ─────────────────────────────────────────────────────────
-        bs_rows = await query(
-            "SELECT * FROM branch_settings WHERE aspire_branch_id = %s",
-            [aspire_branch_id],
-        )
-        crew_rate = bs_rows[0].get("crew_rate_cents_per_hour") if bs_rows else None
-
-        # ── material factors — effective set (override | inherited) ───────────
-        # 1. Load all branch override rows.
-        branch_factor_rows = await query(
-            """SELECT material_key, factors, aspire_branch_id
-                 FROM material_calcs
-                WHERE aspire_branch_id = %s""",
-            [aspire_branch_id],
-        )
-        # 2. Load company-wide rows (aspire_branch_id IS NULL).
-        company_factor_rows = await query(
-            """SELECT material_key, factors, aspire_branch_id
-                 FROM material_calcs
-                WHERE aspire_branch_id IS NULL""",
-        )
-
-        # Build effective set: branch overrides win; company-wide fills the rest.
-        overridden_keys: set[str] = {r["material_key"] for r in branch_factor_rows}
-        effective_factors: list[dict] = []
-        for r in branch_factor_rows:
-            effective_factors.append({
-                "materialKey": r["material_key"],
-                "factors": _parse_factors(r.get("factors")),
-                "source": "override",
-            })
-        for r in company_factor_rows:
-            if r["material_key"] not in overridden_keys:
-                effective_factors.append({
-                    "materialKey": r["material_key"],
-                    "factors": _parse_factors(r.get("factors")),
-                    "source": "inherited",
-                })
-
-        # ── production rates — service_kits (company-wide; no per-branch table)
-        # All items are flagged source='inherited': service_kits.production_rate
-        # is the single company-wide value; per-branch overrides are not stored
-        # in a separate column so the distinction doesn't apply here.
-        catalog_rows = await query(
-            """SELECT id, description, production_rate
-                 FROM service_kits
-                WHERE active = 1 AND production_rate IS NOT NULL""",
-        )
-        production_rates: list[dict] = [
-            {
-                "serviceKitId": r["id"],
-                "description": r.get("description"),
-                "productionRate": float(r["production_rate"]),
-                "source": "inherited",
-            }
-            for r in catalog_rows
-        ]
-
-        return {
-            "aspireBranchId": aspire_branch_id,
-            "crewRateCentsPerHour": None if crew_rate is None else int(crew_rate),
-            "materialFactors": effective_factors,
-            "productionRates": production_rates,
-        }
+        return await get_branch_settings_payload(aspire_branch_id)
 
     @app.patch("/api/settings/branch/{aspire_branch_id}")
     async def patch_branch_settings(
@@ -1408,11 +1344,10 @@ def register(app, require_auth) -> None:
         return {"id": user_id, "aspire_rep_id": resolved}
 
     async def get_branch_settings_payload(aspire_branch_id: int) -> dict:
-        """Return the enriched branch settings payload after a PATCH.
+        """Crew rate, material factors, and production rates for one branch.
 
-        Reuses the same enrichment logic as GET /api/settings/branch/{id}: crew
-        rate, materialFactors (override/inherited), productionRates. The PATCH
-        return value and the GET response are therefore always in sync.
+        GET /api/settings/branch/{id} and the PATCH response both call this,
+        so the two payloads stay the same shape.
         """
         bs_rows = await query(
             "SELECT * FROM branch_settings WHERE aspire_branch_id = %s",

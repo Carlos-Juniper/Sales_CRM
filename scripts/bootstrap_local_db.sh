@@ -87,21 +87,30 @@ run_batch() {
   set -e
 
   unexpected=0
+  # mysql prints the offending statement between "--------------" markers
+  # before each ERROR line. Hold that context and emit it only when the
+  # error is unexpected, so a fresh load does not look like it failed.
+  context=()
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       *"ERROR "[0-9]*)
         if [ "$mode" = "tolerate-duplicates" ] && is_benign_duplicate "$line"; then
           echo "==> [bootstrap] ignoring benign duplicate: $line"
         else
+          if [ "${#context[@]}" -gt 0 ]; then
+            printf '%s\n' "${context[@]}" >&2
+          fi
           echo "$line" >&2
           unexpected=1
         fi
+        context=()
         ;;
-      "")
+      *"Warning"*)
+        echo "$line" >&2
+        context+=("$line")
         ;;
       *)
-        # Keep client warnings (including MYSQL_PWD deprecation) visible.
-        echo "$line" >&2
+        context+=("$line")
         ;;
     esac
   done <"$out"

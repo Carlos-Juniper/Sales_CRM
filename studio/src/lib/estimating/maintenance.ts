@@ -120,12 +120,15 @@ export function sellRateCentsPer1000Sf(
  * Adapts maintenance_hours CatalogItems to the editor's catalog-row shape,
  * keeping the sq-ft-only basis rule: only ACTIVE, sq-ft, production-rated
  * kits are addable (a line seeded from one always passes the save guard).
- * The MAINTENANCE_SERVICE_CATALOG literal survives ONLY as the offline
- * fallback (API unreachable / not yet loaded ⇒ empty list).
+ *
+ * A kit with its own unit sell is a catalog price and does not need a crew
+ * rate. A kit with no unit sell is priced from the crew rate; with no rate
+ * that kit is omitted. An empty API catalog stays empty — the literal
+ * MAINTENANCE_SERVICE_CATALOG is not a price fallback.
  */
 export function maintenanceCatalogFromItems(
   items: CatalogItem[],
-  crewRateCents: number,
+  crewRateCents: number | null,
 ): MaintenanceCatalogService[] {
   const kits = items.filter(
     (k) =>
@@ -135,18 +138,22 @@ export function maintenanceCatalogFromItems(
       k.productionRate > 0 &&
       /sq/i.test(k.uom),
   )
-  if (kits.length === 0) return MAINTENANCE_SERVICE_CATALOG
-  return kits.map((k) => ({
-    key: k.id,
-    label: k.description,
-    uom: '/yr',
-    basis: 'sqft',
-    rateCentsPer1000Sf:
-      k.unitSellCents > 0
+  const rows: MaintenanceCatalogService[] = []
+  for (const k of kits) {
+    const catalogPrice = k.unitSellCents > 0
+    if (!catalogPrice && crewRateCents == null) continue
+    rows.push({
+      key: k.id,
+      label: k.description,
+      uom: '/yr',
+      basis: 'sqft',
+      rateCentsPer1000Sf: catalogPrice
         ? k.unitSellCents
-        : sellRateCentsPer1000Sf(k.productionRate as number, k.targetGm, crewRateCents),
-    defaultQty: 1,
-  }))
+        : sellRateCentsPer1000Sf(k.productionRate as number, k.targetGm, crewRateCents as number),
+      defaultQty: 1,
+    })
+  }
+  return rows
 }
 
 /**
@@ -236,15 +243,15 @@ export function catalogToService(
 }
 
 /**
- * Default new section, seeded with the core region-template services.
- * `catalog` comes from GET /catalog-items; the literal is the
- * offline fallback. API catalogs (whose keys are kit ids, not the literal
- * seed keys) seed the first three rows.
+ * Default new section, seeded from the catalog the editor already resolved.
+ * An omitted catalog seeds nothing — there is no offline price list.
+ * API catalogs (whose keys are kit ids, not the literal seed keys) seed the
+ * first three rows.
  */
 export function buildDefaultSection(
   estimateId: string,
   sortOrder: number,
-  catalog: MaintenanceCatalogService[] = MAINTENANCE_SERVICE_CATALOG,
+  catalog: MaintenanceCatalogService[] = [],
 ): EstimateSection {
   const id = newId('sec')
   const seedKeys = ['mow', 'trim', 'fert']

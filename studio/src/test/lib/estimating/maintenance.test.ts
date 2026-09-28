@@ -90,8 +90,8 @@ describe('section operations', () => {
     expect(svc.sortOrder).toBe(3)
   })
 
-  it('buildDefaultSection seeds the catalog defaults', () => {
-    const sec = buildDefaultSection('est-1', 2)
+  it('buildDefaultSection seeds the catalog it is given', () => {
+    const sec = buildDefaultSection('est-1', 2, MAINTENANCE_SERVICE_CATALOG)
     expect(sec.estimateId).toBe('est-1')
     expect(sec.name).toBe('New region')
     expect(sec.sortOrder).toBe(2)
@@ -99,6 +99,11 @@ describe('section operations', () => {
     expect(sec.services.map((s) => s.sectionId)).toEqual(
       sec.services.map(() => sec.id),
     )
+  })
+
+  it('buildDefaultSection does not seed offline catalog prices', () => {
+    const sec = buildDefaultSection('est-1', 0)
+    expect(sec.services).toEqual([])
   })
 
   it('duplicateSection deep-clones, appends " (copy)", inserts after source', () => {
@@ -212,8 +217,9 @@ describe('display reads', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The editor reads kits from GET /catalog-items; the literal is
-// only the offline fallback. Plus the client half of the save guard.
+// The editor reads kits from GET /catalog-items. An empty catalog does not
+// fall back to MAINTENANCE_SERVICE_CATALOG prices. Plus the client half of
+// the save guard.
 // ---------------------------------------------------------------------------
 
 const kit = (over: Partial<CatalogItem> & Pick<CatalogItem, 'id' | 'description'>): CatalogItem => ({
@@ -233,8 +239,17 @@ describe('maintenanceCatalogFromItems (API catalog adapter)', () => {
   const rated = kit({ id: 'kit-1', description: 'Standard Production Mowing', productionRate: 67650 })
   const branchRate = 22_500
 
-  it('falls back to the literal when the API returned no usable kits', () => {
-    expect(maintenanceCatalogFromItems([], branchRate)).toBe(MAINTENANCE_SERVICE_CATALOG)
+  it('does not fall back to the literal catalog when the API returned no usable kits', () => {
+    expect(maintenanceCatalogFromItems([], branchRate)).toEqual([])
+    expect(maintenanceCatalogFromItems([], null)).toEqual([])
+  })
+
+  it('keeps a catalog price when there is no crew rate and omits a derived price', () => {
+    const derived = kit({ id: 'kit-derived', description: 'Derived Mowing', productionRate: 67650, unitSellCents: 0 })
+    const priced = kit({ id: 'kit-priced', description: 'Catalog Fertilizer', productionRate: 5000, unitSellCents: 450 })
+    const rows = maintenanceCatalogFromItems([derived, priced], null)
+    expect(rows.map((r) => r.key)).toEqual(['kit-priced'])
+    expect(rows[0].rateCentsPer1000Sf).toBe(450)
   })
 
   it('adapts rated sq-ft maintenance kits to editor catalog rows (kit id = key)', () => {

@@ -12,8 +12,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Info, Plus, RotateCcw, Save, Settings2, TriangleAlert } from 'lucide-react'
+import { Info, Plus, RotateCcw, Save, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -43,27 +42,21 @@ import {
 } from '@/lib/estimating/maintenance'
 import { OCCURRENCE_COUNT_FIELDS } from '@/lib/estimating/occurrences'
 import { persistEstimateTree } from '@/lib/estimating/persistTree'
+import {
+  type CrewRateBlockedLine,
+  isCrewRateBlockedLine,
+  messageForErrorCode,
+  parseCrewRateRequiredError,
+} from '@/lib/estimating/crewRateError'
 import { useToast } from './useToast'
 import { useEstimatingShell } from './useEstimatingShell'
+import { CrewRateProvenance, NoCrewRateState } from './CrewRateNotice'
 import { SectionCard } from './SectionCard'
 import { IntakeAttachmentsPanel } from './IntakeAttachmentsPanel'
 import { RushBadge } from './RushIndicators'
 import { cn } from '@/lib/utils'
 
 const TARGET_MARGIN_DEFAULT = 0.22
-
-/**
- * Same sentence the API returns as a 422 when a priced maintenance line is
- * saved without a crew rate. The editor blocks first; the server is the backstop.
- */
-export const MAINTENANCE_CREW_RATE_REQUIRED =
-  'Maintenance pricing is blocked: no crew rate is set for this estimate\'s branch. Set it in Settings → Branch → Crew rate before saving priced maintenance lines.'
-
-function draftHasPricedLines(estimate: MaintenanceEstimate): boolean {
-  return estimate.sections.some((section) =>
-    section.services.some((svc) => (svc.unitSellCents ?? 0) !== 0),
-  )
-}
 
 function scopeNotesFromIntake(rows: { payload: Record<string, unknown> }[]): string | null {
   let found: string | null = null
@@ -140,11 +133,10 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   const toast = useToast()
   // Actor identity for the lifecycle audit comes from the JWT server-side —
   // the client no longer sends or records it.
-  // approval_tiers + catalog_items come from the API-fetched config;
-  // the config.ts / maintenance.ts literals are only the offline fallback.
+  // approval_tiers + catalog_items come from the API-fetched config.
   const { approvalTiers, catalogItems } = useEstimatingConfig()
   // Same resolution as Margin Analysis: frozen snapshot, else the live branch
-  // rate from GET /api/settings/branch/{id}. Null blocks pricing — never $180.
+  // rate from GET /api/settings/branch/{id}. Null never invents $180.
   const crew = useResolvedCrewRate(estimate)
 
   const [draft, setDraft] = useState<MaintenanceEstimate>(estimate)
@@ -152,6 +144,8 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   const savedRef = useRef<MaintenanceEstimate>(estimate)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  /** Lines the last save response refused because they need a crew rate. */
+  const [blockedLines, setBlockedLines] = useState<CrewRateBlockedLine[]>([])
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null)
   /** UI-only kit granularity picks (I-9.7); persistence is a kit-config open item. */
   const [granularity, setGranularity] = useState<Record<string, string>>({})
@@ -162,15 +156,11 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     () => tiersForType(approvalTiers, 'maintenance'),
     [approvalTiers],
   )
-  // Kits come from GET /catalog-items; literal = offline fallback.
-  // Derived $/1,000 SF uses the resolved crew rate. No rate → no catalog
-  // prices (the offline literal is priced too, so it stays hidden).
-  const pricingBlocked = !crew.isLoading && crew.crewRateCents == null
+  // Kits come from GET /catalog-items. Catalog prices stay available with no
+  // crew rate; kits priced from the rate are omitted until a rate resolves.
+  const rateMissing = !crew.isLoading && crew.crewRateCents == null
   const maintCatalog = useMemo(
-    () =>
-      crew.crewRateCents == null
-        ? []
-        : maintenanceCatalogFromItems(catalogItems, crew.crewRateCents),
+    () => maintenanceCatalogFromItems(catalogItems, crew.crewRateCents),
     [catalogItems, crew.crewRateCents],
   )
   const tier = tierForValue(contractCents, maintenanceTiers)
@@ -220,21 +210,16 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   function handleReset() {
     setDraft({ ...savedRef.current, targetMargin: TARGET_MARGIN_DEFAULT })
     setSaveError(null)
+    setBlockedLines([])
     toast.show('Reset — margin to target, sections to saved state')
   }
 
   async function handleSave() {
-    if (crew.isLoading) return
-    // Priced lines need the branch crew rate. The server rejects the same
-    // case with a 422; block here so the message shows before the request.
-    if (crew.crewRateCents == null && draftHasPricedLines(draft)) {
-      setSaveError(MAINTENANCE_CREW_RATE_REQUIRED)
-      return
-    }
     // Save guard (client half — the server enforces it with a 422):
     // every maintenance line must resolve a production rate (kit) or hours.
     const unresolved = unresolvedProductionRateLabels(draft.sections, catalogItems)
     if (unresolved.length > 0) {
+      setBlockedLines([])
       setSaveError(
         `No production rate resolves for ${unresolved.map((l) => `“${l}”`).join(', ')}. ` +
           'Pick a kit with a production rate or enter hours — the line can’t be saved without one.',
@@ -243,6 +228,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     }
     setSaving(true)
     setSaveError(null)
+    setBlockedLines([])
     const toSave: MaintenanceEstimate = { ...draft, contractValueCents: contractTotal(draft) }
     try {
       // Persist the FULL tree (diff-and-apply against the last
@@ -269,9 +255,15 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
       setOpenEstimate(fresh)
       toast.show('Estimate saved')
     } catch (err) {
-      // A 422 is the server-side production-rate guard — surface its message
-      // (it names the offending line) instead of the generic connection copy.
-      if (err instanceof ApiError && err.status === 422) {
+      const crewRateError = parseCrewRateRequiredError(err)
+      if (crewRateError) {
+        // The server names the crew-rate-derived lines. Catalog prices and
+        // hand-entered prices are not in that list, so they stay editable.
+        setBlockedLines(crewRateError.blockedLines)
+        setSaveError(messageForErrorCode(crewRateError.code))
+      } else if (err instanceof ApiError && err.status === 422) {
+        // A 422 is the server-side production-rate guard — surface its message
+        // (it names the offending line) instead of the generic connection copy.
         setSaveError(err.message)
       } else {
         setSaveError('The estimate couldn’t be saved. Check your connection and retry.')
@@ -353,7 +345,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
           <Button
             size="sm"
             onClick={handleSave}
-            disabled={saving || crew.isLoading || (pricingBlocked && draftHasPricedLines(draft))}
+            disabled={saving}
           >
             <Save className="h-3.5 w-3.5" />
             {saving ? 'Saving…' : 'Save'}
@@ -375,47 +367,15 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
       <MaintenanceScopeSummary estimate={draft} />
 
       {crew.crewRateCents != null && (
-        <p
-          data-testid="maintenance-crew-rate"
-          data-source={crew.source}
-          className="m-0 text-[11px] text-[hsl(var(--muted-fg))]"
-        >
-          Sell price per 1,000 SF uses {formatCents(crew.crewRateCents)}/hr
-          {draft.branchCity ? ` — ${draft.branchCity}` : ''}
-          {crew.source === 'snapshot' ? ' (frozen at submission)' : ' (branch crew rate)'}.
-        </p>
+        <CrewRateProvenance
+          crewRateCents={crew.crewRateCents}
+          source={crew.source}
+          branchCity={draft.branchCity}
+        />
       )}
 
-      {pricingBlocked && (
-        <div
-          data-testid="maintenance-no-crew-rate"
-          className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-900"
-        >
-          <div className="flex items-start gap-2">
-            <TriangleAlert className="h-4 w-4 flex-shrink-0 text-amber-600 mt-0.5" />
-            <div>
-              <p className="m-0 font-semibold">
-                No crew rate configured{draft.branchCity ? ` for ${draft.branchCity}` : ''}
-              </p>
-              <p className="m-0 mt-1">{MAINTENANCE_CREW_RATE_REQUIRED}</p>
-            </div>
-          </div>
-          {draft.aspireBranchId != null ? (
-            <Link
-              data-testid="crew-rate-settings-link"
-              to={`/settings/branch/${draft.aspireBranchId}/crew-rate`}
-              className="inline-flex w-fit items-center gap-1.5 rounded-md border border-amber-400 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
-            >
-              <Settings2 className="h-3.5 w-3.5" />
-              Set the crew rate in Settings → Branch → Crew rate
-            </Link>
-          ) : (
-            <p className="m-0 pl-6">
-              This estimate has no branch yet. Open Settings → Branch → Crew rate, choose the
-              branch, and set the crew rate.
-            </p>
-          )}
-        </div>
+      {(rateMissing || blockedLines.length > 0) && (
+        <NoCrewRateState branchCity={draft.branchCity} aspireBranchId={draft.aspireBranchId} />
       )}
 
       {/* ---- Save error (design-added state) ---- */}
@@ -487,6 +447,13 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
             onSqftChange={(squareFeet) => patchSection(section.id, { squareFeet })}
             onServiceChange={(serviceId, patch) => patchService(section.id, serviceId, patch)}
             catalog={maintCatalog}
+            blockedServiceIds={
+              new Set(
+                section.services
+                  .filter((svc) => isCrewRateBlockedLine(section.id, svc.id, blockedLines))
+                  .map((svc) => svc.id),
+              )
+            }
             onAddLineItem={(catalogKey) => {
               const row = maintCatalog.find((r) => r.key === catalogKey)
               if (!row) return

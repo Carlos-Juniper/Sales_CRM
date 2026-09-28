@@ -14,20 +14,31 @@ class ApiError extends Error {
   status: number
   /** FastAPI/Pydantic issues when `detail` is an array. Empty otherwise. */
   issues: ApiValidationIssue[]
-  constructor(status: number, message: string, issues: ApiValidationIssue[] = []) {
+  /**
+   * Raw FastAPI `detail`. A string for most errors, a validation array for
+   * Pydantic, or an object when the API returns a structured error code.
+   */
+  detail: unknown
+  constructor(
+    status: number,
+    message: string,
+    issues: ApiValidationIssue[] = [],
+    detail: unknown = undefined,
+  ) {
     super(message)
     this.status = status
     this.name = 'ApiError'
     this.issues = issues
+    this.detail = detail
   }
 }
 
 function apiErrorFromBody(
   body: { detail?: unknown; error?: unknown },
   statusText: string,
-): { message: string; issues: ApiValidationIssue[] } {
+): { message: string; issues: ApiValidationIssue[]; detail: unknown } {
   const { detail, error } = body
-  if (typeof detail === 'string') return { message: detail, issues: [] }
+  if (typeof detail === 'string') return { message: detail, issues: [], detail }
   if (Array.isArray(detail)) {
     const issues: ApiValidationIssue[] = []
     for (const item of detail) {
@@ -40,10 +51,14 @@ function apiErrorFromBody(
       issues.push({ loc, msg: rec.msg })
     }
     const message = issues.map((issue) => issue.msg).join('; ')
-    return { message: message || statusText, issues }
+    return { message: message || statusText, issues, detail }
   }
-  if (typeof error === 'string') return { message: error, issues: [] }
-  return { message: statusText, issues: [] }
+  if (detail && typeof detail === 'object') {
+    // Structured error (code + payload). Wording stays in the frontend map.
+    return { message: statusText, issues: [], detail }
+  }
+  if (typeof error === 'string') return { message: error, issues: [], detail: undefined }
+  return { message: statusText, issues: [], detail: undefined }
 }
 
 async function send(path: string, options: RequestInit = {}, skipContentType = false): Promise<Response> {
@@ -71,8 +86,8 @@ async function send(path: string, options: RequestInit = {}, skipContentType = f
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }))
-    const { message, issues } = apiErrorFromBody(body, res.statusText)
-    throw new ApiError(res.status, message, issues)
+    const { message, issues, detail } = apiErrorFromBody(body, res.statusText)
+    throw new ApiError(res.status, message, issues, detail)
   }
   return res
 }

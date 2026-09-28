@@ -207,7 +207,7 @@ export function EstimateQueue({
   return (
     <div className="flex flex-col gap-4 h-full">
       {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-md:gap-2">
         <StatCard testId="stat-total-queue" label="Total Queue" value={String(stats.total)} sub="estimates pending" />
         <StatCard
           testId="stat-sla-at-risk"

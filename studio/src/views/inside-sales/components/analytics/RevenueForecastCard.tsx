@@ -37,14 +37,14 @@ export function RevenueForecastCard() {
   return (
     <Card className="h-full">
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between max-md:flex-col max-md:items-start max-md:gap-2">
           <div className="flex items-center gap-2">
             <div className="h-7 w-7 rounded-md bg-[hsl(var(--muted))] flex items-center justify-center">
               <DollarSign className="h-4 w-4 text-[hsl(var(--muted-fg))]" />
             </div>
             <CardTitle className="text-sm font-semibold">Revenue Forecast</CardTitle>
           </div>
-          <div className="flex gap-4 text-right">
+          <div className="flex gap-4 text-right max-md:gap-3 max-md:w-full max-md:justify-between">
             <div>
               <p className="text-[10px] text-[hsl(var(--muted-fg))] uppercase tracking-wide">YTD Won</p>
               <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(wonTotal)}</p>

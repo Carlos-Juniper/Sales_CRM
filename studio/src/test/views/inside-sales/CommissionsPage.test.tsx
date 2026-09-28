@@ -126,7 +126,8 @@ describe('CommissionsPage rep picker', () => {
 
     expect(screen.getByText('Test User')).toBeInTheDocument()
     expect(screen.getByText('Standard Sales Commission')).toBeInTheDocument()
-    expect(screen.getByText(/Not period-filtered/)).toBeInTheDocument()
+    expect(screen.getByText(/Pending billing data is not included/)).toBeInTheDocument()
+    expect(screen.queryByText(/Not period-filtered/)).not.toBeInTheDocument()
     expect(screen.queryByText(/this schedule/i)).not.toBeInTheDocument()
   })
 
@@ -141,8 +142,9 @@ describe('CommissionsPage rep picker', () => {
     const schedule = calls.find((url) => url.startsWith('/api/commissions/payout-schedule'))
     expect(schedule).toContain('start_date=2026-01-01')
     expect(schedule).toContain('end_date=2026-09-25')
-    expect(schedule).not.toContain('year=')
+    expect(schedule).toContain('year=2026')
     expect(screen.getByText('$625.00')).toBeInTheDocument()
+    expect(screen.getAllByText('Unscheduled').length).toBeGreaterThan(0)
     expect(screen.queryByText(/this schedule/i)).not.toBeInTheDocument()
 
     const periodPicker = (label: string) => {
@@ -154,36 +156,35 @@ describe('CommissionsPage rep picker', () => {
     await user.click(periodPicker('This Year'))
     await user.click(await screen.findByRole('option', { name: 'This Month' }))
     await waitFor(() => {
-      expect(screen.getByText('No closed deals in this period')).toBeInTheDocument()
+      expect(
+        calls.some(
+          (url) =>
+            url.startsWith('/api/commissions/payout-schedule')
+            && url.includes('start_date=2026-09-01')
+            && url.includes('end_date=2026-09-25')
+            && url.includes('year=2026'),
+        ),
+      ).toBe(true)
     })
-    expect(screen.getByText('No checks in this period')).toBeInTheDocument()
-    expect(screen.queryByText('$625.00')).not.toBeInTheDocument()
-    expect(
-      calls.some(
-        (url) =>
-          url.startsWith('/api/commissions/payout-schedule')
-          && url.includes('start_date=2026-09-01')
-          && url.includes('end_date=2026-09-25')
-          && !url.includes('year='),
-      ),
-    ).toBe(true)
+    expect(screen.getByText('$625.00')).toBeInTheDocument()
+    expect(screen.queryByText('No closed deals in this period')).not.toBeInTheDocument()
 
     await user.click(periodPicker('This Month'))
     await user.click(await screen.findByRole('option', { name: 'Last Month' }))
-    expect(await screen.findByText('Q3 2026')).toBeInTheDocument()
-    expect(screen.getByText('1 deal · $150.00 recorded at close')).toBeInTheDocument()
-    expect(screen.queryByText('Q1 2026')).not.toBeInTheDocument()
-    expect(screen.queryByText('Q2 2026')).not.toBeInTheDocument()
-    expect(screen.queryByText('$625.00')).not.toBeInTheDocument()
-    expect(
-      calls.some(
-        (url) =>
-          url.startsWith('/api/commissions/payout-schedule')
-          && url.includes('start_date=2026-08-01')
-          && url.includes('end_date=2026-08-31')
-          && !url.includes('year='),
-      ),
-    ).toBe(true)
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (url) =>
+            url.startsWith('/api/commissions/payout-schedule')
+            && url.includes('start_date=2026-08-01')
+            && url.includes('end_date=2026-08-31')
+            && url.includes('year=2026'),
+        ),
+      ).toBe(true)
+    })
+    expect(screen.getByText('Q1 2026')).toBeInTheDocument()
+    expect(screen.getByText('Q3 2026')).toBeInTheDocument()
+    expect(screen.getByText('$625.00')).toBeInTheDocument()
   })
 
   it('shows the legacy rate chip when the selected rep has no plan', async () => {

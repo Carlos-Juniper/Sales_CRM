@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  describePayout,
   formatCloseQuarter,
   getCommissionPeriodDates,
   getPeriodDates,
+  payoutAmountLabel,
+  scheduleCloseYear,
   type Period,
 } from '@/lib/commissions'
 
@@ -51,45 +52,22 @@ describe('formatCloseQuarter', () => {
   })
 })
 
-describe('describePayout', () => {
-  it('uses the month label for a dated amount', () => {
-    expect(describePayout({
-      bucket: 'dated',
-      payout_period: 'June 2026',
-      payout_date: '2026-06-30',
-      amount_cents: 15_000,
-    })).toEqual({ label: 'June 2026', amount: 15_000 })
+describe('scheduleCloseYear', () => {
+  it('uses the year of the period end date, including a window in the previous year', () => {
+    expect(scheduleCloseYear(getCommissionPeriodDates('this_year', SEP_25).end_date)).toBe(2026)
+    expect(scheduleCloseYear(getCommissionPeriodDates('last_quarter', FEB_15).end_date)).toBe(2025)
+    expect(scheduleCloseYear(getCommissionPeriodDates('last_month', JAN_15).end_date)).toBe(2025)
+    expect(scheduleCloseYear(getCommissionPeriodDates('all_time', SEP_25).end_date)).toBe(2026)
+  })
+})
+
+describe('payoutAmountLabel', () => {
+  it('formats a known amount and a partial sum', () => {
+    expect(payoutAmountLabel({ amount_cents: 15_000 })).toBe('$150.00')
+    expect(payoutAmountLabel({ amount_cents: 15_000, amount_partial: true })).toBe('$150.00 + pending')
   })
 
-  it('builds the month from the payout date when the period label is blank', () => {
-    expect(describePayout({
-      bucket: 'dated',
-      payout_period: null,
-      payout_date: '2026-06-30',
-      amount_cents: 100,
-    })).toEqual({ label: 'June 2026', amount: 100 })
-  })
-
-  it('labels a known undated amount as unscheduled', () => {
-    expect(describePayout({
-      bucket: 'unscheduled',
-      payout_period: 'Unscheduled',
-      payout_date: null,
-      amount_cents: 15_000,
-    })).toEqual({ label: 'Unscheduled (amount known)', amount: 15_000 })
-    expect(describePayout({
-      payout_period: null,
-      payout_date: null,
-      amount_cents: 100,
-    })).toEqual({ label: 'Unscheduled (amount known)', amount: 100 })
-  })
-
-  it('uses the pending label and a null amount when the cents are unknown', () => {
-    expect(describePayout({
-      bucket: 'pending_billing_data',
-      payout_period: null,
-      payout_date: null,
-      amount_cents: null,
-    })).toEqual({ label: 'Pending billing data', amount: null })
+  it('does not invent dollars when the amount is null', () => {
+    expect(payoutAmountLabel({ amount_cents: null })).toBe('Pending billing data')
   })
 })

@@ -26,36 +26,46 @@
     "close_quarter": "2026-Q3",
     "rep_plan_key": "standard",
     "plan_name": "Standard Sales Commission",
+    "payable": false,
     "installments": [
       {
         "id": "f59af090-b91d-11f1-8921-822b383dbcd0",
         "installment_number": 1,
         "payout_period": "September 2026",
+        "payout_period_label": "September 2026",
         "payout_date": "2026-09-30",
         "amount_cents": 7500,
         "status": "upcoming",
         "billing_installment_number": null,
-        "collected_amount_cents": null
+        "collected_amount_cents": null,
+        "bucket": "dated",
+        "payable": true
       },
       {
         "id": "f59af0fb-b91d-11f1-8921-822b383dbcd0",
         "installment_number": 2,
-        "payout_period": null,
+        "payout_period": "Unscheduled",
+        "payout_period_label": "Unscheduled",
         "payout_date": null,
         "amount_cents": 7500,
         "status": "pending_billing_data",
         "billing_installment_number": 6,
-        "collected_amount_cents": null
+        "collected_amount_cents": null,
+        "bucket": "unscheduled",
+        "payable": false
       },
       {
         "id": "f59af138-b91d-11f1-8921-822b383dbcd0",
         "installment_number": 3,
-        "payout_period": null,
+        "payout_period": "Pending billing data",
+        "payout_period_label": "Pending billing data",
         "payout_date": null,
         "amount_cents": null,
         "status": "pending_billing_data",
         "billing_installment_number": 12,
-        "collected_amount_cents": null
+        "collected_amount_cents": null,
+        "bucket": "pending_billing_data",
+        "payable": false
       }
     ]
   },
@@ -86,36 +96,46 @@
     "close_quarter": "2026-Q2",
     "rep_plan_key": "standard",
     "plan_name": "Standard Sales Commission",
+    "payable": false,
     "installments": [
       {
         "id": "f59aecde-b91d-11f1-8921-822b383dbcd0",
         "installment_number": 1,
         "payout_period": "June 2026",
+        "payout_period_label": "June 2026",
         "payout_date": "2026-06-30",
         "amount_cents": 15000,
         "status": "due",
         "billing_installment_number": null,
-        "collected_amount_cents": null
+        "collected_amount_cents": null,
+        "bucket": "dated",
+        "payable": true
       },
       {
         "id": "f59aef7f-b91d-11f1-8921-822b383dbcd0",
         "installment_number": 2,
-        "payout_period": null,
+        "payout_period": "Unscheduled",
+        "payout_period_label": "Unscheduled",
         "payout_date": null,
         "amount_cents": 15000,
         "status": "pending_billing_data",
         "billing_installment_number": 6,
-        "collected_amount_cents": null
+        "collected_amount_cents": null,
+        "bucket": "unscheduled",
+        "payable": false
       },
       {
         "id": "f59af027-b91d-11f1-8921-822b383dbcd0",
         "installment_number": 3,
-        "payout_period": null,
+        "payout_period": "Pending billing data",
+        "payout_period_label": "Pending billing data",
         "payout_date": null,
         "amount_cents": null,
         "status": "pending_billing_data",
         "billing_installment_number": 12,
-        "collected_amount_cents": null
+        "collected_amount_cents": null,
+        "bucket": "pending_billing_data",
+        "payable": false
       }
     ]
   },
@@ -146,36 +166,46 @@
     "close_quarter": "2026-Q1",
     "rep_plan_key": "standard",
     "plan_name": "Standard Sales Commission",
+    "payable": false,
     "installments": [
       {
         "id": "f59af175-b91d-11f1-8921-822b383dbcd0",
         "installment_number": 1,
         "payout_period": "March 2026",
+        "payout_period_label": "March 2026",
         "payout_date": "2026-03-31",
         "amount_cents": 40000,
         "status": "paid",
         "billing_installment_number": null,
-        "collected_amount_cents": null
+        "collected_amount_cents": null,
+        "bucket": "dated",
+        "payable": false
       },
       {
         "id": "f59af20e-b91d-11f1-8921-822b383dbcd0",
         "installment_number": 2,
-        "payout_period": null,
+        "payout_period": "Unscheduled",
+        "payout_period_label": "Unscheduled",
         "payout_date": null,
         "amount_cents": 40000,
         "status": "paid",
         "billing_installment_number": 6,
-        "collected_amount_cents": null
+        "collected_amount_cents": null,
+        "bucket": "unscheduled",
+        "payable": false
       },
       {
         "id": "f59af273-b91d-11f1-8921-822b383dbcd0",
         "installment_number": 3,
-        "payout_period": null,
+        "payout_period": "Pending billing data",
+        "payout_period_label": "Pending billing data",
         "payout_date": null,
         "amount_cents": null,
         "status": "paid",
         "billing_installment_number": 12,
-        "collected_amount_cents": null
+        "collected_amount_cents": null,
+        "bucket": "pending_billing_data",
+        "payable": false
       }
     ]
   }

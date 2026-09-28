@@ -20,7 +20,7 @@ describe('CommissionOpenCheckCards', () => {
     expect(screen.getByText('Due')).toBeInTheDocument()
     expect(screen.getByText('Upcoming')).toBeInTheDocument()
     expect(screen.getByText(/Pending billing data is not included/)).toBeInTheDocument()
-    expect(screen.getByText(/Not period-filtered/)).toBeInTheDocument()
+    expect(screen.queryByText(/Not period-filtered/)).not.toBeInTheDocument()
   })
 
   it('does not invent a date or amount when there is no next payout', () => {

@@ -15,6 +15,7 @@ const schedule: CommissionPayoutSchedule = {
         {
           installment_number: 1,
           payout_period: 'June 2026',
+          payout_period_label: 'June 2026',
           payout_date: '2026-06-30',
           amount_cents: 15_000,
           amount_partial: false,
@@ -24,6 +25,7 @@ const schedule: CommissionPayoutSchedule = {
         {
           installment_number: 2,
           payout_period: 'Unscheduled',
+          payout_period_label: 'Unscheduled',
           payout_date: null,
           amount_cents: 15_000,
           amount_partial: false,
@@ -32,7 +34,8 @@ const schedule: CommissionPayoutSchedule = {
         },
         {
           installment_number: 3,
-          payout_period: null,
+          payout_period: 'Pending billing data',
+          payout_period_label: 'Pending billing data',
           payout_date: null,
           amount_cents: null,
           amount_partial: false,
@@ -42,6 +45,7 @@ const schedule: CommissionPayoutSchedule = {
         {
           installment_number: 1,
           payout_period: 'April 2026',
+          payout_period_label: 'April 2026',
           payout_date: '2026-04-30',
           amount_cents: 15_000,
           amount_partial: true,
@@ -76,7 +80,8 @@ describe('CommissionPayoutScheduleCard', () => {
     )
 
     const knownAmount = screen.getByTestId('quarter-2026-Q2-payment-2-unscheduled-none')
-    expect(knownAmount).toHaveTextContent('Unscheduled (amount known)')
+    expect(knownAmount).toHaveTextContent('Unscheduled')
+    expect(knownAmount).not.toHaveTextContent('Unscheduled (amount known)')
     expect(knownAmount).toHaveTextContent('Pending billing data')
     expect(knownAmount).toHaveTextContent('$150.00')
     expect(knownAmount).not.toHaveTextContent('2026')

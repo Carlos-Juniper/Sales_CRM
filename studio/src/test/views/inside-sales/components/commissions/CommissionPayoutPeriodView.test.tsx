@@ -5,7 +5,8 @@ import type { CommissionPayoutPeriod } from '@/types/commissions'
 
 const periods: CommissionPayoutPeriod[] = [
   {
-    payout_period: null,
+    payout_period: 'Pending billing data',
+    payout_period_label: 'Pending billing data',
     payout_date: null,
     amount_cents: null,
     amount_partial: false,
@@ -14,6 +15,7 @@ const periods: CommissionPayoutPeriod[] = [
   },
   {
     payout_period: 'Unscheduled',
+    payout_period_label: 'Unscheduled',
     payout_date: null,
     amount_cents: 22_500,
     amount_partial: false,
@@ -22,6 +24,7 @@ const periods: CommissionPayoutPeriod[] = [
   },
   {
     payout_period: 'September 2026',
+    payout_period_label: 'September 2026',
     payout_date: '2026-09-30',
     amount_cents: 7_500,
     amount_partial: false,
@@ -30,6 +33,7 @@ const periods: CommissionPayoutPeriod[] = [
   },
   {
     payout_period: 'June 2026',
+    payout_period_label: 'June 2026',
     payout_date: '2026-06-30',
     amount_cents: 15_000,
     amount_partial: false,
@@ -62,7 +66,8 @@ describe('CommissionPayoutPeriodView', () => {
     expect(september).toHaveTextContent('Upcoming')
 
     const unscheduled = screen.getByTestId('payout-period-unscheduled')
-    expect(unscheduled).toHaveTextContent('Unscheduled (amount known)')
+    expect(unscheduled).toHaveTextContent('Unscheduled')
+    expect(unscheduled).not.toHaveTextContent('Unscheduled (amount known)')
     expect(unscheduled).toHaveTextContent('$225.00')
     expect(unscheduled).not.toHaveTextContent('2026')
 
@@ -75,7 +80,7 @@ describe('CommissionPayoutPeriodView', () => {
     const items = screen.getAllByRole('listitem')
     expect(items[0]).toHaveTextContent('June 2026')
     expect(items[1]).toHaveTextContent('September 2026')
-    expect(items[2]).toHaveTextContent('Unscheduled (amount known)')
+    expect(items[2]).toHaveTextContent('Unscheduled')
     expect(items[3]).toHaveTextContent('Pending billing data')
   })
 
@@ -91,6 +96,7 @@ describe('CommissionPayoutPeriodView', () => {
   it('marks a mixed check as known dollars plus pending', () => {
     const mixed: CommissionPayoutPeriod = {
       payout_period: 'June 2026',
+      payout_period_label: 'June 2026',
       payout_date: '2026-06-30',
       amount_cents: 15_000,
       amount_partial: true,

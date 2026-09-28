@@ -10,17 +10,24 @@ import type { Commission, CommissionFilters, CommissionInstallment } from '@/typ
 function installment(overrides: Partial<CommissionInstallment> & Pick<CommissionInstallment, 'id'>): CommissionInstallment {
   return {
     installment_number: 1,
-    payout_period: null,
+    payout_period: 'Pending billing data',
+    payout_period_label: 'Pending billing data',
     payout_date: null,
     amount_cents: null,
     status: 'pending_billing_data',
     billing_installment_number: null,
     collected_amount_cents: null,
+    bucket: 'pending_billing_data',
+    payable: false,
     ...overrides,
   }
 }
 
-function makeCommission(installments: CommissionInstallment[], status: Commission['status'] = 'approved'): Commission {
+function makeCommission(
+  installments: CommissionInstallment[],
+  status: Commission['status'] = 'approved',
+  payable = false,
+): Commission {
   return {
     id: 'comm-dobson',
     estimate_id: 'est-dobson',
@@ -37,16 +44,18 @@ function makeCommission(installments: CommissionInstallment[], status: Commissio
     created_at: '2026-04-08T15:00:00Z',
     updated_at: '2026-04-08T15:00:00Z',
     property_name: 'Dobson Ranch HOA',
+    rep_name: 'Alex Rivera',
+    rep_email: 'alex.rivera@example.com',
     estimate_number: 1108,
     aspire_number: 'ASP-1108',
     estimate_type: 'maintenance',
-    rep_name: 'Alex Rivera',
     close_quarter: '2026-Q2',
     plan_key: 'standard',
     rep_plan_key: 'standard',
     plan_name: 'Standard Sales Commission',
     client_type: null,
     contract_start_date: '2026-04-01',
+    payable,
     installments,
   }
 }
@@ -56,16 +65,23 @@ const rows = [
     id: 'dob-1',
     installment_number: 1,
     payout_period: 'June 2026',
+    payout_period_label: 'June 2026',
     payout_date: '2026-06-30',
     amount_cents: 15_000,
     status: 'due',
+    bucket: 'dated',
+    payable: true,
   }),
   installment({
     id: 'dob-2',
     installment_number: 2,
+    payout_period: 'Unscheduled',
+    payout_period_label: 'Unscheduled',
     amount_cents: 15_000,
     status: 'pending_billing_data',
     billing_installment_number: 6,
+    bucket: 'unscheduled',
+    payable: false,
   }),
   installment({
     id: 'dob-3',
@@ -77,10 +93,10 @@ const rows = [
 
 const filters: CommissionFilters = {}
 
-function renderTable(isAdmin: boolean, status: Commission['status'] = 'approved') {
+function renderTable(isAdmin: boolean, status: Commission['status'] = 'approved', payable = false) {
   return render(
     <CommissionDetailTable
-      commissions={[makeCommission(rows, status)]}
+      commissions={[makeCommission(rows, status, payable)]}
       isLoading={false}
       filters={filters}
       onFiltersChange={() => {}}
@@ -94,7 +110,8 @@ describe('CommissionDetailTable installments', () => {
     renderTable(false)
 
     const pendingAmount = screen.getByTestId('installment-dob-2')
-    expect(pendingAmount).toHaveTextContent('Unscheduled (amount known)')
+    expect(pendingAmount).toHaveTextContent('Unscheduled')
+    expect(pendingAmount).not.toHaveTextContent('Unscheduled (amount known)')
     expect(pendingAmount).toHaveTextContent('Pending billing data')
     expect(pendingAmount).toHaveTextContent('$150.00')
     expect(pendingAmount).toHaveTextContent('Billing installment 6')
@@ -121,15 +138,15 @@ describe('CommissionDetailTable installments', () => {
       }),
     )
     const user = userEvent.setup()
-    renderTable(true)
+    renderTable(true, 'approved', true)
 
     expect(screen.getByRole('button', { name: 'Mark Paid' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Mark payment 2 on Dobson Ranch HOA paid' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Mark payment 3 on Dobson Ranch HOA paid' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Mark payment 2 on Dobson Ranch HOA paid' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Mark payment 3 on Dobson Ranch HOA paid' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Mark payment 1 on Dobson Ranch HOA paid' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Mark payment 3 on Dobson Ranch HOA paid' }))
-    await waitFor(() => expect(calls.some((call) => call.url.includes('/installments/dob-3/mark-paid'))).toBe(true))
+    await user.click(screen.getByRole('button', { name: 'Mark payment 1 on Dobson Ranch HOA paid' }))
+    await waitFor(() => expect(calls.some((call) => call.url.includes('/installments/dob-1/mark-paid'))).toBe(true))
 
     await user.click(screen.getByRole('button', { name: 'Mark Paid' }))
     await waitFor(() => expect(calls.some((call) => call.url.includes('/commissions/comm-dobson/mark-paid'))).toBe(true))
@@ -138,8 +155,14 @@ describe('CommissionDetailTable installments', () => {
   })
 
   it('hides mark-paid actions when the role cannot mark commissions paid', () => {
-    renderTable(false)
+    renderTable(false, 'approved', true)
     expect(screen.queryByRole('button', { name: 'Mark Paid' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Mark payment/ })).not.toBeInTheDocument()
+  })
+
+  it('hides the commission mark-paid button when the row is not payable', () => {
+    renderTable(true, 'approved', false)
+    expect(screen.queryByRole('button', { name: 'Mark Paid' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Mark payment 1 on Dobson Ranch HOA paid' })).toBeInTheDocument()
   })
 })

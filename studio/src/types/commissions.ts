@@ -18,12 +18,15 @@ export type CommissionPayoutBucket = 'dated' | 'unscheduled' | 'pending_billing_
 export interface CommissionInstallment {
   id: string
   installment_number: number
-  payout_period: string | null
+  payout_period: string
+  payout_period_label: string
   payout_date: string | null
   amount_cents: number | null
   status: CommissionInstallmentStatus
   billing_installment_number: number | null
   collected_amount_cents: number | null
+  bucket: CommissionPayoutBucket
+  payable: boolean
 }
 
 export interface Commission {
@@ -42,16 +45,14 @@ export interface Commission {
   created_at: string
   updated_at: string
 
-  // Joined fields from API
-  rep_name?: string
-  rep_email?: string
-  property_name?: string
-  estimate_number?: number
-  aspire_number?: string
-  /** estimates.estimate_type is ENUM('maintenance','install'). Not a plan-rule type. */
-  estimate_type?: 'maintenance' | 'install'
+  // Joined fields from API. estimates.estimate_type is ENUM('maintenance','install').
+  rep_name: string | null
+  rep_email: string | null
+  property_name: string | null
+  estimate_number: number | null
+  aspire_number: string | null
+  estimate_type: 'maintenance' | 'install' | null
 
-  // Cadence + plan snapshot (added; existing fields above are unchanged).
   // plan_key is the plan stored on this commission. plan_name and
   // rep_plan_key are the rep's current assignment (null if none).
   close_quarter: string | null
@@ -60,6 +61,7 @@ export interface Commission {
   plan_name: string | null
   client_type: string | null
   contract_start_date: string | null
+  payable: boolean
   installments: CommissionInstallment[]
 }
 
@@ -75,9 +77,6 @@ export interface CommissionSummary {
   next_payout: CommissionNextPayout | null
   upcoming_cents: number
   due_cents: number
-  // next_payout, upcoming_cents, and due_cents are as of today. The API
-  // always sends false. The open-check label does not branch on this field.
-  balances_period_filtered: false
   // Current user_commission_plans row for the requested rep. Null when the
   // rep has no assignment (legacy commission_rates still apply).
   plan_key: string | null
@@ -95,7 +94,8 @@ export interface CommissionRep {
 }
 
 export interface CommissionPayoutRow {
-  payout_period: string | null
+  payout_period: string
+  payout_period_label: string
   payout_date: string | null
   amount_cents: number | null
   amount_partial: boolean

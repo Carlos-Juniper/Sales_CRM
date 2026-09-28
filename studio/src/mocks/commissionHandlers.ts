@@ -1,8 +1,6 @@
 import { http, HttpResponse } from 'msw'
 import type {
   Commission,
-  CommissionCloseQuarter,
-  CommissionPayoutPeriod,
   CommissionPayoutSchedule,
   CommissionRep,
   CommissionSummary,
@@ -16,12 +14,10 @@ import scheduleAlexJson from './fixtures/commissions/schedule-alex.json' with { 
 import scheduleCadyJson from './fixtures/commissions/schedule-cady.json' with { type: 'json' }
 
 /**
- * Static responses captured from the local API on 2026-09-25 after migrations
- * 065 and 066 ran against a seeded crm database. The handlers do not recompute
- * payout buckets or totals. Mark-paid only flips status fields on these objects.
- * Summary and list ignore date query params so a later calendar year still shows
- * this snapshot. The payout schedule keeps the captured groups and drops quarters
- * whose seeded close date falls outside start_date/end_date.
+ * Static responses. Each handler returns the fixture for the requested rep.
+ * Query params are ignored: these handlers do not filter, bucket, or decide
+ * whether a row is payable. Mark-paid flips status on the in-memory copy and
+ * leaves `payable` as it was captured.
  */
 const API = '/api'
 const CADY_ID = 'rep-cady'
@@ -33,50 +29,6 @@ const listAlex = structuredClone(listAlexJson) as Commission[]
 const listCady = structuredClone(listCadyJson) as Commission[]
 const scheduleAlex = scheduleAlexJson as CommissionPayoutSchedule
 const scheduleCady = scheduleCadyJson as CommissionPayoutSchedule
-
-/** Close date of each captured quarter, in the same order as the seeded deals. */
-const quarterCloseDate = new Map<string, string>(
-  scheduleAlex.quarters.map((quarter, index) => {
-    const closeDate = [...listAlex]
-      .filter((deal) => deal.status !== 'cancelled')
-      .map((deal) => deal.created_at.slice(0, 10))
-      .sort()[index]
-    return [quarter.close_quarter, closeDate ?? '']
-  }),
-)
-
-function quarterInWindow(quarter: CommissionCloseQuarter, start: string | null, end: string | null): boolean {
-  const closeDate = quarterCloseDate.get(quarter.close_quarter) ?? ''
-  if (!closeDate) return false
-  if (start && closeDate < start) return false
-  if (end && closeDate > end) return false
-  return true
-}
-
-function periodsFromQuarters(quarters: CommissionCloseQuarter[]): CommissionPayoutPeriod[] {
-  return quarters.flatMap((quarter) =>
-    quarter.installments.map((row) => ({
-      payout_period: row.payout_period,
-      payout_date: row.payout_date,
-      amount_cents: row.amount_cents,
-      amount_partial: row.amount_partial,
-      status: row.status,
-      bucket: row.bucket,
-    })),
-  )
-}
-
-function scheduleFor(userId: string | null, start: string | null, end: string | null): CommissionPayoutSchedule {
-  if (userId === CADY_ID) return scheduleCady
-  const quarters = scheduleAlex.quarters.filter((quarter) => quarterInWindow(quarter, start, end))
-  if (quarters.length === scheduleAlex.quarters.length) return scheduleAlex
-  return {
-    user_id: scheduleAlex.user_id,
-    year: scheduleAlex.year,
-    quarters,
-    by_payout_period: periodsFromQuarters(quarters),
-  }
-}
 
 function dealsFor(userId: string | null): Commission[] {
   return userId === CADY_ID ? listCady : listAlex
@@ -101,23 +53,12 @@ export const commissionHandlers = [
     return HttpResponse.json(userId === CADY_ID ? summaryCady : summaryAlex)
   }),
   http.get(`${API}/commissions/list`, ({ request }) => {
-    const url = new URL(request.url)
-    const status = url.searchParams.get('status')
-    const estimateType = url.searchParams.get('estimate_type')
-    const rows = dealsFor(url.searchParams.get('user_id')).filter((deal) => {
-      if (status && deal.status !== status) return false
-      if (estimateType && deal.estimate_type !== estimateType) return false
-      return true
-    })
-    return HttpResponse.json(rows)
+    const userId = new URL(request.url).searchParams.get('user_id')
+    return HttpResponse.json(dealsFor(userId))
   }),
   http.get(`${API}/commissions/payout-schedule`, ({ request }) => {
-    const url = new URL(request.url)
-    return HttpResponse.json(scheduleFor(
-      url.searchParams.get('user_id'),
-      url.searchParams.get('start_date'),
-      url.searchParams.get('end_date'),
-    ))
+    const userId = new URL(request.url).searchParams.get('user_id')
+    return HttpResponse.json(userId === CADY_ID ? scheduleCady : scheduleAlex)
   }),
   http.post(`${API}/commissions/installments/:installmentId/mark-paid`, ({ params }) => {
     const found = findInstallment(String(params.installmentId))

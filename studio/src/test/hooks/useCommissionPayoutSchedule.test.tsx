@@ -23,6 +23,7 @@ const schedule: CommissionPayoutSchedule = {
         {
           installment_number: 1,
           payout_period: 'June 2026',
+          payout_period_label: 'June 2026',
           payout_date: '2026-06-30',
           amount_cents: 15_000,
           amount_partial: false,
@@ -35,6 +36,7 @@ const schedule: CommissionPayoutSchedule = {
   by_payout_period: [
     {
       payout_period: 'June 2026',
+      payout_period_label: 'June 2026',
       payout_date: '2026-06-30',
       amount_cents: 15_000,
       amount_partial: false,
@@ -50,7 +52,6 @@ const summary: CommissionSummary = {
   next_payout: { payout_period: 'June 2026', payout_date: '2026-06-30', amount_cents: 15_000 },
   due_cents: 15_000,
   upcoming_cents: 7_500,
-  balances_period_filtered: false,
   plan_key: 'standard',
   plan_name: 'Standard Sales Commission',
 }
@@ -68,6 +69,7 @@ describe('useCommissionPayoutSchedule', () => {
     const { result } = renderHook(
       () => useCommissionPayoutSchedule({
         user_id: 'rep-1',
+        year: 2026,
         start_date: '2026-01-01',
         end_date: '2026-09-25',
       }),
@@ -80,7 +82,7 @@ describe('useCommissionPayoutSchedule', () => {
     expect(urls[0]).toContain('user_id=rep-1')
     expect(urls[0]).toContain('start_date=2026-01-01')
     expect(urls[0]).toContain('end_date=2026-09-25')
-    expect(urls[0]).not.toContain('year=')
+    expect(urls[0]).toContain('year=2026')
   })
 
   it('refetches list, summary, and the payout schedule after marking an installment paid', async () => {
@@ -111,6 +113,7 @@ describe('useCommissionPayoutSchedule', () => {
       () => ({
         schedule: useCommissionPayoutSchedule({
           user_id: 'rep-1',
+          year: 2026,
           start_date: '2026-01-01',
           end_date: '2026-09-25',
         }),

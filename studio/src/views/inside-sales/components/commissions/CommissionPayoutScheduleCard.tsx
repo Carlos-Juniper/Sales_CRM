@@ -2,7 +2,7 @@ import { CalendarClock } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { formatCents } from '@/lib/estimating/maintenance'
-import { describePayout, formatCloseQuarter } from '@/lib/commissions'
+import { formatCloseQuarter } from '@/lib/commissions'
 import type { CommissionPayoutSchedule } from '@/types/commissions'
 import { InstallmentStatusBadge } from './InstallmentStatusBadge'
 import { PayoutLine } from './PayoutLine'
@@ -73,7 +73,8 @@ export function CommissionPayoutScheduleCard({
                         Payment {installment.installment_number}
                       </span>
                       <PayoutLine
-                        payout={describePayout(installment)}
+                        label={installment.payout_period_label}
+                        amountCents={installment.amount_cents}
                         amountPartial={installment.amount_partial}
                         labelClassName="text-[hsl(var(--fg))]"
                         amountClassName="font-mono text-[hsl(var(--fg))]"

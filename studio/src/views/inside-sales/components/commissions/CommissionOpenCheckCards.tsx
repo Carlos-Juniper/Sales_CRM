@@ -25,7 +25,7 @@ export function CommissionOpenCheckCards({
   return (
     <div className="space-y-2">
       <p className="text-xs text-[hsl(var(--muted-fg))]">
-        Open checks with a payout date. Pending billing data is not included. Not period-filtered.
+        Open checks with a payout date. Pending billing data is not included.
       </p>
       {isLoading ? (
         <div className="flex gap-4 flex-wrap">

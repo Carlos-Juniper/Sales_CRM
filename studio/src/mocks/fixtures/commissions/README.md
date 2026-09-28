@@ -1,8 +1,10 @@
 # Commission fixtures
 
-Static JSON captured from `GET /api/commissions/*` on 2026-09-25 after migrations 065 and 066. The MSW handlers serve these files. They do not recompute payout buckets.
+Static JSON for the MSW commission handlers. The handlers return these files as-is. They do not filter by date, status, or estimate type, and they do not recompute buckets or `payable`.
 
-`summary-*.json` and `list-*.json` are returned as captured, including when the page sends a later year's dates. That keeps Closed this year at $1,250.00 in tests. `schedule-alex.json` is the full 2026 schedule. The payout-schedule handler drops quarters whose seeded close date falls outside `start_date` / `end_date`.
+The amounts, dates, and check labels were captured from `GET /api/commissions/*` on 2026-09-25 after migrations 065 and 066. `payable`, `bucket` on list installments, and non-null `payout_period` / `payout_period_label` were filled in by hand so the fixtures match the commission response contract. The API branch this UI tracks does not emit those fields yet, so `capture.sh` would drop them.
+
+`balances_period_filtered` is not part of the summary fixture.
 
 ## Regenerate
 
@@ -12,4 +14,4 @@ Run the API from `cursor/commission-cadence-structure-610e` against the seeded d
 BASE_URL=http://127.0.0.1:8000 COOKIE='session=...' ./capture.sh
 ```
 
-`COOKIE` is the `session` cookie for an admin user. The script writes the seven JSON files in this directory. Capture `schedule-alex.json` with a window that includes every 2026 Alex deal (the script uses 2026-01-01 through 2026-12-31) so the mock can slice that snapshot.
+`COOKIE` is the `session` cookie for an admin user. The script writes the seven JSON files in this directory. After a capture, put `payable`, `bucket`, and `payout_period_label` back on each installment and commission row, and drop `balances_period_filtered`, until the API response includes them.

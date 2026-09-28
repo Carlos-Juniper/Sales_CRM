@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react'
 import { payoutAmountLabel } from '@/lib/commissions'
-import type { PayoutDescription } from '@/lib/commissions'
 
 interface PayoutLineProps {
-  payout: PayoutDescription
+  label: string
+  amountCents: number | null
   amountPartial?: boolean
   labelClassName?: string
   amountClassName?: string
@@ -11,7 +11,8 @@ interface PayoutLineProps {
 }
 
 export function PayoutLine({
-  payout,
+  label,
+  amountCents,
   amountPartial,
   labelClassName,
   amountClassName,
@@ -19,11 +20,11 @@ export function PayoutLine({
 }: PayoutLineProps) {
   return (
     <>
-      <span className={labelClassName}>{payout.label}</span>
+      <span className={labelClassName}>{label}</span>
       {children}
-      {payout.amount != null && (
+      {amountCents != null && (
         <span className={amountClassName}>
-          {payoutAmountLabel({ amount_cents: payout.amount, amount_partial: amountPartial })}
+          {payoutAmountLabel({ amount_cents: amountCents, amount_partial: amountPartial })}
         </span>
       )}
     </>

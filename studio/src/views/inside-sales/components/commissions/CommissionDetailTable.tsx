@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { TableRowSkeleton } from '@/components/shared/LoadingSkeleton'
 import { useMarkCommissionPaid, useMarkInstallmentPaid } from '@/hooks/useCommissions'
 import { formatCents } from '@/lib/estimating/maintenance'
-import { describePayout, formatRate, formatPaymentPeriod, formatContractNumber } from '@/lib/commissions'
+import { formatRate, formatPaymentPeriod, formatContractNumber } from '@/lib/commissions'
 import type { Commission, CommissionFilters, CommissionInstallment } from '@/types/commissions'
 import { InstallmentStatusBadge } from './InstallmentStatusBadge'
 import { PayoutLine } from './PayoutLine'
@@ -47,21 +47,19 @@ function SortIcon({
 function InstallmentLines({
   installments,
   propertyName,
-  canMark,
+  isAdmin,
   pendingId,
   onMarkPaid,
 }: {
   installments: CommissionInstallment[]
   propertyName: string
-  canMark: boolean
+  isAdmin: boolean
   pendingId: string | undefined
   onMarkPaid: (installmentId: string) => void
 }) {
   return (
     <ul className="space-y-1.5" data-testid="commission-installments">
       {installments.map((installment) => {
-        const payout = describePayout(installment)
-        const canPay = canMark && installment.status !== 'paid' && installment.status !== 'cancelled'
         const marking = pendingId === installment.id
         return (
           <li
@@ -71,7 +69,8 @@ function InstallmentLines({
           >
             <span className="text-[hsl(var(--muted-fg))] w-20">Payment {installment.installment_number}</span>
             <PayoutLine
-              payout={payout}
+              label={installment.payout_period_label}
+              amountCents={installment.amount_cents}
               labelClassName="text-[hsl(var(--fg))]"
               amountClassName="font-mono text-[hsl(var(--fg))]"
             />
@@ -86,7 +85,7 @@ function InstallmentLines({
                 Collected {formatCents(installment.collected_amount_cents)}
               </span>
             )}
-            {canPay && (
+            {isAdmin && installment.payable && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -263,8 +262,7 @@ export function CommissionDetailTable({
             {!isLoading && sortedCommissions.map((commission) => {
               const badge = STATUS_BADGE[commission.status]
               const typeBadge = commission.estimate_type ? TYPE_BADGE[commission.estimate_type] : undefined
-              const installments = commission.installments ?? []
-              const canMarkInstallment = isAdmin && commission.status === 'approved'
+              const installments = commission.installments
               return (
                 <Fragment key={commission.id}>
                   <tr
@@ -312,7 +310,7 @@ export function CommissionDetailTable({
                     )}
                     {isAdmin && (
                       <td className="px-4 py-3 text-right">
-                        {commission.status === 'approved' && (
+                        {commission.payable && (
                           <Button
                             size="sm"
                             variant="ghost"
@@ -338,7 +336,7 @@ export function CommissionDetailTable({
                         <InstallmentLines
                           installments={installments}
                           propertyName={commission.property_name ?? 'this deal'}
-                          canMark={canMarkInstallment}
+                          isAdmin={isAdmin}
                           pendingId={markInstallmentPaid.isPending ? markInstallmentPaid.variables : undefined}
                           onMarkPaid={(installmentId) => markInstallmentPaid.mutate(installmentId)}
                         />

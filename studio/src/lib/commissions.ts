@@ -3,13 +3,9 @@
  * Currency formatting uses formatCents from the estimating module.
  */
 import { formatCents } from '@/lib/estimating/maintenance'
-import type { CommissionPayoutBucket } from '@/types/commissions'
 
-/** Shown wherever a payout amount is still unknown. Never a guessed value. */
+/** Shown when a payout amount is still unknown. Never a guessed value. */
 export const PENDING_BILLING_DATA_LABEL = 'Pending billing data'
-
-/** Known dollars with no payout date. Kept apart from unknown amounts. */
-export const UNSCHEDULED_AMOUNT_KNOWN_LABEL = 'Unscheduled (amount known)'
 
 export type Period = 'this_year' | 'this_quarter' | 'last_quarter' | 'this_month' | 'last_month' | 'all_time'
 
@@ -78,11 +74,20 @@ export function getPeriodDates(period: Period, now = new Date()): { start_date?:
  * Month and quarter values still bound deal close dates (`created_at`),
  * not the month a check is paid.
  */
-export function getCommissionPeriodDates(period: Period, now = new Date()): { start_date?: string; end_date?: string } {
+export function getCommissionPeriodDates(period: Period, now = new Date()): { start_date: string; end_date: string } {
   if (period === 'all_time') {
     return { start_date: '1970-01-01', end_date: now.toISOString().slice(0, 10) }
   }
-  return getPeriodDates(period, now)
+  const { start_date, end_date } = getPeriodDates(period, now)
+  if (start_date === undefined || end_date === undefined) {
+    throw new Error(`Missing commission period dates for ${period}`)
+  }
+  return { start_date, end_date }
+}
+
+/** Calendar year of a period end date. Sent as the payout-schedule `year`. */
+export function scheduleCloseYear(endDate: string): number {
+  return Number(endDate.slice(0, 4))
 }
 
 export function closedCommissionLabel(period: Period): string {
@@ -109,11 +114,6 @@ export function formatContractNumber(
   return aspireNumber ?? `JN-${estimateNumber}`
 }
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-] as const
-
 /** `2026-Q1` → `Q1 2026`. Unknown shapes are shown as the API sent them. */
 export function formatCloseQuarter(closeQuarter: string): string {
   const match = /^(\d{4})-Q([1-4])$/.exec(closeQuarter)
@@ -122,30 +122,10 @@ export function formatCloseQuarter(closeQuarter: string): string {
 }
 
 /**
- * Check month from the API label. A known payout date can supply the month
- * when the label is blank. A missing date stays pending — it is not inferred
- * from the installment number or the close quarter.
- */
-function payoutMonthLabel(row: {
-  payout_period: string | null
-  payout_date: string | null
-}): string {
-  const period = row.payout_period?.trim()
-  if (period) return period
-  const iso = row.payout_date?.slice(0, 10)
-  if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-    const monthIndex = Number(iso.slice(5, 7)) - 1
-    const year = iso.slice(0, 4)
-    const month = MONTHS[monthIndex]
-    if (month) return `${month} ${year}`
-  }
-  return PENDING_BILLING_DATA_LABEL
-}
-
-/**
  * Dollar amount only when the API sent one.
  * A null total means every contributing amount is unknown.
  * `amount_partial` means the figure is the known part of a mixed group.
+ * The check name is `payout_period_label` from the server, not this helper.
  */
 export function payoutAmountLabel(row: {
   amount_cents: number | null
@@ -155,42 +135,6 @@ export function payoutAmountLabel(row: {
   const money = formatCents(row.amount_cents)
   if (row.amount_partial) return `${money} + pending`
   return money
-}
-
-export type PayoutDescription = {
-  label: string
-  amount: number | null
-}
-
-/**
- * One description for a check or installment row.
- * A null amount uses the pending label. A known amount keeps its group label and cents.
- */
-export function describePayout(row: {
-  bucket?: CommissionPayoutBucket | null
-  payout_period: string | null
-  payout_date: string | null
-  amount_cents: number | null
-}): PayoutDescription {
-  if (row.amount_cents == null) return { label: PENDING_BILLING_DATA_LABEL, amount: null }
-  return { label: payoutGroupLabel(row), amount: row.amount_cents }
-}
-
-/**
- * Heading for a schedule or check row.
- * Undated buckets use their own labels. A single installment has no bucket:
- * a known amount with no date is unscheduled, and a null amount stays pending.
- */
-function payoutGroupLabel(row: {
-  bucket?: CommissionPayoutBucket | null
-  payout_period: string | null
-  payout_date: string | null
-  amount_cents: number | null
-}): string {
-  if (row.bucket === 'unscheduled') return UNSCHEDULED_AMOUNT_KNOWN_LABEL
-  if (row.bucket === 'pending_billing_data') return PENDING_BILLING_DATA_LABEL
-  if (row.bucket === 'dated' || row.payout_date || row.payout_period) return payoutMonthLabel(row)
-  return row.amount_cents == null ? PENDING_BILLING_DATA_LABEL : UNSCHEDULED_AMOUNT_KNOWN_LABEL
 }
 
 /** Calendar date for a known payout_date. Do not call this with null. */

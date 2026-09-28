@@ -14,7 +14,8 @@
           "amount_cents": 40000,
           "amount_partial": false,
           "status": "paid",
-          "bucket": "dated"
+          "bucket": "dated",
+          "payout_period_label": "March 2026"
         },
         {
           "installment_number": 2,
@@ -23,16 +24,18 @@
           "amount_cents": 40000,
           "amount_partial": false,
           "status": "paid",
-          "bucket": "unscheduled"
+          "bucket": "unscheduled",
+          "payout_period_label": "Unscheduled"
         },
         {
           "installment_number": 3,
-          "payout_period": null,
+          "payout_period": "Pending billing data",
           "payout_date": null,
           "amount_cents": null,
           "amount_partial": false,
           "status": "paid",
-          "bucket": "pending_billing_data"
+          "bucket": "pending_billing_data",
+          "payout_period_label": "Pending billing data"
         }
       ]
     },
@@ -48,7 +51,8 @@
           "amount_cents": 15000,
           "amount_partial": false,
           "status": "due",
-          "bucket": "dated"
+          "bucket": "dated",
+          "payout_period_label": "June 2026"
         },
         {
           "installment_number": 2,
@@ -57,16 +61,18 @@
           "amount_cents": 15000,
           "amount_partial": false,
           "status": "pending_billing_data",
-          "bucket": "unscheduled"
+          "bucket": "unscheduled",
+          "payout_period_label": "Unscheduled"
         },
         {
           "installment_number": 3,
-          "payout_period": null,
+          "payout_period": "Pending billing data",
           "payout_date": null,
           "amount_cents": null,
           "amount_partial": false,
           "status": "pending_billing_data",
-          "bucket": "pending_billing_data"
+          "bucket": "pending_billing_data",
+          "payout_period_label": "Pending billing data"
         }
       ]
     },
@@ -82,7 +88,8 @@
           "amount_cents": 7500,
           "amount_partial": false,
           "status": "upcoming",
-          "bucket": "dated"
+          "bucket": "dated",
+          "payout_period_label": "September 2026"
         },
         {
           "installment_number": 2,
@@ -91,16 +98,18 @@
           "amount_cents": 7500,
           "amount_partial": false,
           "status": "pending_billing_data",
-          "bucket": "unscheduled"
+          "bucket": "unscheduled",
+          "payout_period_label": "Unscheduled"
         },
         {
           "installment_number": 3,
-          "payout_period": null,
+          "payout_period": "Pending billing data",
           "payout_date": null,
           "amount_cents": null,
           "amount_partial": false,
           "status": "pending_billing_data",
-          "bucket": "pending_billing_data"
+          "bucket": "pending_billing_data",
+          "payout_period_label": "Pending billing data"
         }
       ]
     }
@@ -112,7 +121,8 @@
       "amount_cents": 40000,
       "amount_partial": false,
       "status": "paid",
-      "bucket": "dated"
+      "bucket": "dated",
+      "payout_period_label": "March 2026"
     },
     {
       "payout_period": "June 2026",
@@ -120,7 +130,8 @@
       "amount_cents": 15000,
       "amount_partial": false,
       "status": "due",
-      "bucket": "dated"
+      "bucket": "dated",
+      "payout_period_label": "June 2026"
     },
     {
       "payout_period": "September 2026",
@@ -128,7 +139,8 @@
       "amount_cents": 7500,
       "amount_partial": false,
       "status": "upcoming",
-      "bucket": "dated"
+      "bucket": "dated",
+      "payout_period_label": "September 2026"
     },
     {
       "payout_period": "Unscheduled",
@@ -136,15 +148,17 @@
       "amount_cents": 62500,
       "amount_partial": false,
       "status": "pending_billing_data",
-      "bucket": "unscheduled"
+      "bucket": "unscheduled",
+      "payout_period_label": "Unscheduled"
     },
     {
-      "payout_period": null,
+      "payout_period": "Pending billing data",
       "payout_date": null,
       "amount_cents": null,
       "amount_partial": false,
       "status": "pending_billing_data",
-      "bucket": "pending_billing_data"
+      "bucket": "pending_billing_data",
+      "payout_period_label": "Pending billing data"
     }
   ]
 }

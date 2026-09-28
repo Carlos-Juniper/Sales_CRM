@@ -1,7 +1,7 @@
 import { Receipt } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
-import { describePayout, formatPayoutDate } from '@/lib/commissions'
+import { formatPayoutDate } from '@/lib/commissions'
 import type { CommissionPayoutPeriod } from '@/types/commissions'
 import { InstallmentStatusBadge } from './InstallmentStatusBadge'
 import { PayoutLine } from './PayoutLine'
@@ -29,7 +29,7 @@ export function CommissionPayoutPeriodView({ periods, isLoading }: CommissionPay
             <h2 className="text-sm font-semibold text-[hsl(var(--fg))]">What hits each check</h2>
           </div>
           <p className="text-xs text-[hsl(var(--muted-fg))] mt-1">
-            Dated checks come first. Unscheduled (amount known) and pending billing data stay in separate groups.
+            Dated checks come first. Unscheduled and pending billing data stay in separate groups.
           </p>
           {hasUndated && !isLoading && (
             <p className="text-xs text-[hsl(var(--muted-fg))] mt-1">
@@ -62,7 +62,8 @@ export function CommissionPayoutPeriodView({ periods, isLoading }: CommissionPay
                   data-testid={`payout-period-${key}`}
                 >
                   <PayoutLine
-                    payout={describePayout(period)}
+                    label={period.payout_period_label}
+                    amountCents={period.amount_cents}
                     amountPartial={period.amount_partial}
                     labelClassName="min-w-[140px] font-medium text-[hsl(var(--fg))]"
                     amountClassName="ml-auto font-mono text-xs text-[hsl(var(--fg))]"

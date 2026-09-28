@@ -36,15 +36,23 @@ export const commissionsApi = {
   markInstallmentPaid: (installmentId: string) =>
     apiClient.post<{ success: boolean }>(`/commissions/installments/${installmentId}/mark-paid`, {}),
 
-  // start_date/end_date select deals by close date. When either is set, the
-  // API skips the close-year clip, so this client does not send year.
-  getPayoutSchedule: (params?: { user_id?: string; start_date?: string; end_date?: string }) => {
+  // The server always applies `year`, including when start_date and end_date
+  // are set. An omitted year is the current Eastern year, so a window that
+  // ends in the previous calendar year would come back empty. `year` is the
+  // calendar year of that window's end_date.
+  getPayoutSchedule: (params: {
+    user_id?: string
+    year: number
+    start_date?: string
+    end_date?: string
+  }) => {
     const qs = new URLSearchParams()
-    if (params?.user_id) qs.set('user_id', params.user_id)
-    if (params?.start_date) qs.set('start_date', params.start_date)
-    if (params?.end_date) qs.set('end_date', params.end_date)
+    if (params.user_id) qs.set('user_id', params.user_id)
+    qs.set('year', String(params.year))
+    if (params.start_date) qs.set('start_date', params.start_date)
+    if (params.end_date) qs.set('end_date', params.end_date)
     const q = qs.toString()
-    return apiClient.get<CommissionPayoutSchedule>(`/commissions/payout-schedule${q ? `?${q}` : ''}`)
+    return apiClient.get<CommissionPayoutSchedule>(`/commissions/payout-schedule?${q}`)
   },
 
   getReps: () => apiClient.get<CommissionRep[]>('/commissions/reps'),

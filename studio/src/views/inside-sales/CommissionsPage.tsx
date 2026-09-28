@@ -19,6 +19,7 @@ import {
   formatPayoutDate,
   formatRate,
   getCommissionPeriodDates,
+  scheduleCloseYear,
 } from '@/lib/commissions'
 import type { Period } from '@/lib/commissions'
 import type { CommissionFilters } from '@/types/commissions'
@@ -49,9 +50,10 @@ export default function CommissionsPage() {
     estimate_type: undefined,
   })
 
+  const periodDates = getCommissionPeriodDates(period)
   const queryFilters: CommissionFilters = {
     ...filters,
-    ...getCommissionPeriodDates(period),
+    ...periodDates,
     user_id: canViewRepSelector ? selectedUserId : undefined,
   }
   const { data: summary, isLoading: summaryLoading } = useCommissionSummary(queryFilters)
@@ -59,8 +61,9 @@ export default function CommissionsPage() {
   const { data: reps } = useCommissionReps()
   const { data: schedule, isLoading: scheduleLoading } = useCommissionPayoutSchedule({
     user_id: queryFilters.user_id,
-    start_date: queryFilters.start_date,
-    end_date: queryFilters.end_date,
+    year: scheduleCloseYear(periodDates.end_date),
+    start_date: periodDates.start_date,
+    end_date: periodDates.end_date,
   })
 
   const approvedCount = (commissions ?? []).filter(c => c.status === 'approved').length

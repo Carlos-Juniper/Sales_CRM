@@ -5,6 +5,7 @@ import type {
   CommissionRep,
   CommissionFilters,
   CommissionPayoutSchedule,
+  MarkPaidResponse,
 } from '@/types/commissions'
 
 export const commissionsApi = {
@@ -29,12 +30,12 @@ export const commissionsApi = {
   },
 
   markPaid: (commissionId: string, paymentPeriod: string) =>
-    apiClient.post<{ success: boolean }>(`/commissions/${commissionId}/mark-paid`, {
+    apiClient.post<MarkPaidResponse>(`/commissions/${commissionId}/mark-paid`, {
       payment_period: paymentPeriod,
     }),
 
   markInstallmentPaid: (installmentId: string) =>
-    apiClient.post<{ success: boolean }>(`/commissions/installments/${installmentId}/mark-paid`, {}),
+    apiClient.post<MarkPaidResponse>(`/commissions/installments/${installmentId}/mark-paid`, {}),
 
   // Both close-date bounds and no year: the server uses that range alone and
   // returns year: null. A December-to-January window is not clipped to one year.

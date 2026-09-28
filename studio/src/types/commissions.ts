@@ -6,6 +6,8 @@
  * unused commission types must not remove these.
  */
 
+export type CommissionStatus = 'approved' | 'paid' | 'cancelled'
+
 export type CommissionInstallmentStatus =
   | 'paid'
   | 'due'
@@ -14,6 +16,8 @@ export type CommissionInstallmentStatus =
   | 'pending_billing_data'
 
 export type CommissionPayoutBucket = 'dated' | 'unscheduled' | 'pending_billing_data'
+
+export type CommissionEstimateType = 'maintenance' | 'install'
 
 export interface CommissionInstallment {
   id: string
@@ -37,7 +41,7 @@ export interface Commission {
   contract_value_cents: number
   commission_rate: number  // Decimal (0.05 = 5%)
   commission_amount_cents: number
-  status: 'approved' | 'paid' | 'cancelled'
+  status: CommissionStatus
   approved_at: string | null
   paid_at: string | null
   payment_period: string | null
@@ -45,13 +49,15 @@ export interface Commission {
   created_at: string
   updated_at: string
 
-  // Joined fields from API. estimates.estimate_type is ENUM('maintenance','install').
-  rep_name: string | null
-  rep_email: string | null
-  property_name: string | null
+  // Joined fields. users.name, users.email, and leads.property_name are NOT NULL.
+  // estimates.estimate_type is ENUM('maintenance','install') NOT NULL.
+  // estimates.estimate_number and aspire_number are nullable.
+  rep_name: string
+  rep_email: string
+  property_name: string
   estimate_number: number | null
   aspire_number: string | null
-  estimate_type: 'maintenance' | 'install' | null
+  estimate_type: CommissionEstimateType
 
   // plan_key is the plan stored on this commission. plan_name and
   // rep_plan_key are the rep's current assignment (null if none).
@@ -72,7 +78,7 @@ export interface CommissionNextPayout {
   payout_period_label: string
   payout_date: string
   amount_cents: number
-  bucket: CommissionPayoutBucket
+  bucket: 'dated'
 }
 
 export interface CommissionSummary {
@@ -91,10 +97,14 @@ export interface CommissionRep {
   id: string
   name: string
   email: string
-  commission_rate?: number   // null/undefined = no active rate on file
-  effective_date?: string
+  commission_rate: number | null
+  effective_date: string | null
   plan_key: string | null
   plan_name: string | null
+}
+
+export interface MarkPaidResponse {
+  success: boolean
 }
 
 export interface CommissionPayoutRow {
@@ -129,8 +139,8 @@ export interface CommissionPayoutSchedule {
 
 export interface CommissionFilters {
   user_id?: string
-  status?: 'approved' | 'paid' | 'cancelled'
-  estimate_type?: 'maintenance' | 'install'
+  status?: CommissionStatus
+  estimate_type?: CommissionEstimateType
   start_date?: string
   end_date?: string
 }

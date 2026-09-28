@@ -14,4 +14,4 @@ Run the API from `cursor/commission-cadence-structure-610e` against the seeded d
 BASE_URL=http://127.0.0.1:8000 COOKIE='session=...' ./capture.sh
 ```
 
-`COOKIE` is the `session` cookie for an admin user. The script writes the seven JSON files in this directory. After a capture, put `payable`, `bucket`, and `payout_period_label` back on each installment and commission row, and drop `balances_period_filtered`, until the API response includes them.
+`COOKIE` is the `session` cookie for an admin user. The script writes the seven JSON files in this directory. `da580a6` already returns `payable`, `bucket`, `payout_period`, and `payout_period_label`, and it omits `balances_period_filtered`. A capture from that API replaces these files with those shapes.

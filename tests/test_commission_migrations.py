@@ -397,20 +397,31 @@ class TestCommissionMigrationsOnMysql:
             assert int(row["billing_installment_number"]) == 99
             assert str(row["paid_at"]).startswith("2026-08-01 15:00:00")
 
-        preview = assign(conn, dry_run=True)
-        assert [row["name"] for row in preview] == ["Alex Sales", "Michelle Cady", "Rodrigo Leon"]
+        preview = assign(
+            conn, dry_run=True, exclude_user_ids=["u-cady", "u-leon"],
+        )
+        assert [row["name"] for row in preview.assigned] == ["Alex Sales"]
+        assert [(row["id"], row["name"], row["role"]) for row in preview.excluded] == [
+            ("u-cady", "Michelle Cady", "sales"),
+            ("u-leon", "Rodrigo Leon", "vp_sales"),
+        ]
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) AS cnt FROM user_commission_plans")
             assert int(cur.fetchone()["cnt"]) == 0
-        assigned = assign(conn, dry_run=False)
-        assert [row["name"] for row in assigned] == ["Alex Sales", "Michelle Cady", "Rodrigo Leon"]
-        again = assign(conn, dry_run=False)
-        assert again == []
+        assigned = assign(
+            conn, dry_run=False, exclude_user_ids=["u-cady", "u-leon"],
+        )
+        assert [row["name"] for row in assigned.assigned] == ["Alex Sales"]
+        assert [row["id"] for row in assigned.excluded] == ["u-cady", "u-leon"]
+        again = assign(
+            conn, dry_run=False, exclude_user_ids=["u-cady", "u-leon"],
+        )
+        assert again.assigned == []
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT u.name FROM user_commission_plans p "
                 "JOIN users u ON u.id = p.user_id ORDER BY u.name"
             )
             names = [row["name"] for row in cur.fetchall()]
-        assert names == ["Alex Sales", "Michelle Cady", "Rodrigo Leon"]
+        assert names == ["Alex Sales"]
 

@@ -8,16 +8,18 @@ import { estimatingConfigApi } from '@/api/estimating'
 import type { ServiceKit, MaterialCalcRow } from '@/types/estimating'
 import { useUIStore } from '@/store/uiStore'
 
-// Query keys — the crew-rate read is per-branch (the branch endpoint), while the
-// material-factor / production-rate reads come from the company-wide estimating
-// config endpoints (the branch GET does not carry them — a Slice 5 shape gap).
+// Query keys — crew rate and production rates come from the branch settings
+// payload. SERVICE_KITS_KEY is GET /api/estimating/service-kits, which is not
+// filtered by branch. Material-factor rows are read from material-calcs.
 export const BRANCH_SETTINGS_KEY = 'branch-settings'
 export const MATERIAL_CALCS_KEY = 'branch-material-calcs'
-export const SERVICE_KITS_KEY = 'branch-service-kits'
+/** GET /api/estimating/service-kits. Not scoped to a branch. */
+export const SERVICE_KITS_KEY = 'service-kits'
 
 /**
- * One branch's settings (crew rate). Keyed by branch so switching the picker
- * re-reads the right branch. A 403 (out-of-scope BM) surfaces as `isError`.
+ * One branch's settings (crew rate and production rates). Keyed by branch so
+ * switching the picker re-reads the right branch. A 403 (out-of-scope BM)
+ * surfaces as `isError`.
  */
 export function useBranchSettings(aspireBranchId: number | undefined) {
   return useQuery<BranchSettings>({
@@ -53,10 +55,10 @@ export function useServiceKits() {
 }
 
 /**
- * Patch the selected branch. Framework-native optimistic update for the crew
- * rate (onMutate snapshots + merges, onError rolls back); production-rate and
- * material-factor writes invalidate their config reads on settle so they
- * re-read authoritative (the PATCH return only echoes the crew rate).
+ * Patch the selected branch. The optimistic update merges the crew rate;
+ * onError rolls it back. The PATCH body returns the same payload as GET,
+ * including productionRates, and onSettled invalidates this cache. A
+ * production-rate write also invalidates SERVICE_KITS_KEY.
  */
 export function useUpdateBranchSettings(aspireBranchId: number | undefined) {
   const qc = useQueryClient()
@@ -67,8 +69,8 @@ export function useUpdateBranchSettings(aspireBranchId: number | undefined) {
     mutationFn: (body: BranchSettingsPatch) =>
       settingsApi.updateBranchSettings(aspireBranchId as number, body),
     onMutate: async (body) => {
-      // Only the crew rate lives in this cache; production/material writes are
-      // reconciled via invalidation on settle.
+      // Optimistic merge is crew-rate only. Production-rate writes are
+      // reconciled when onSettled invalidates this cache.
       if (body.crewRateCentsPerHour === undefined) return { previous: undefined }
       await qc.cancelQueries({ queryKey: key })
       const previous = qc.getQueryData<BranchSettings>(key)

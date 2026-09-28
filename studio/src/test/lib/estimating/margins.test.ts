@@ -52,7 +52,7 @@ const MOWING_KIT: ServiceKit = {
   targetGm: 0.22,
   kitType: 'maintenance_hours',
   productionRate: 60_000, // sq ft per labor hour
-  branch: 'All Branches',
+  aspireBranchId: null,
   active: true,
   serviceType: 'Turf Area',
 }

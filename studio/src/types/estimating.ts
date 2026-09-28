@@ -335,10 +335,10 @@ export interface SectionService {
   scopeText?: string | null
   /**
    * Per-line override of the contract's recurring/one-time split. `null`
-   * derives it from the catalog item's `billingType`; a hand-entered line has
-   * no catalog item, so without an explicit value here it resolves to null and
-   * drops out of the contract's 12-month payment-schedule base. Same override
-   * shape as `discipline`.
+   * derives it from the service kit's `billingType` when the estimate load
+   * joins `service_kits`; a hand-entered line has no kit, so without an
+   * explicit value here it resolves to null and drops out of the contract's
+   * 12-month payment-schedule base. Same override shape as `discipline`.
    */
   billingType?: 'recurring' | 'one_time' | null
   /** Install kit breakdown (expandable rows). Empty for maintenance. */
@@ -365,8 +365,10 @@ export interface SectionServiceComponent {
 export type KitType = 'maintenance_hours' | 'install_quantity'
 
 /**
- * Priced service kit (`service_kits`, renamed from catalog_items in migration 069).
- * Not a material SKU.
+ * Priced service kit from GET /api/estimating/service-kits
+ * (`service_kits`, renamed from catalog_items in migration 069).
+ * `scopeText` and `billingType` are not on this list; estimate loads copy
+ * them onto the section service.
  */
 export interface ServiceKit {
   id: string
@@ -378,7 +380,8 @@ export interface ServiceKit {
   kitType: KitType
   /** Maintenance: units per labor hour. Null for install kits. */
   productionRate: number | null
-  branch: string
+  /** `service_kits.aspire_branch_id`. Null means company-wide. */
+  aspireBranchId: number | null
   active: boolean
   serviceType: string
 }

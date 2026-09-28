@@ -66,7 +66,7 @@ const RATED_KIT: ServiceKit = {
   targetGm: 0.22,
   kitType: 'maintenance_hours',
   productionRate: 67650,
-  branch: 'All Branches',
+  aspireBranchId: null,
   active: true,
   serviceType: 'Turf Area',
 }

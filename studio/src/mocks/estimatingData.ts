@@ -698,7 +698,7 @@ const maintKit = (over: Partial<ServiceKit> & Pick<ServiceKit, 'id' | 'descripti
   targetGm: 0.22,
   kitType: 'maintenance_hours',
   productionRate: null,
-  branch: 'All Branches',
+  aspireBranchId: null,
   active: true,
   serviceType: '',
   ...over,

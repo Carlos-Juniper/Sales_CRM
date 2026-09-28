@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useAuthStore } from '@/store/authStore'
-import { useRole, normalizeRole } from '@/hooks/useRole'
+import { useRole } from '@/hooks/useRole'
 import {
   ESTIMATOR_ROLES,
   ESTIMATING_ONLY_ROLES,
@@ -20,11 +20,20 @@ import {
   CROSS_BRANCH_ROLES,
   ANALYTICS_NAV_ROLES,
   FULL_ACCESS_ROLES,
+  LEGACY_ROLE_MAP,
+  LINE_ITEM_EDIT_ROLES,
   REP_SELECTOR_ROLES,
+  RETIRED_SALES_ROLES,
   ROSTER_REP_PICKER_ROLES,
+  ROSTER_REP_ROLES,
+  SALES_REP_ROLES,
   defaultRouteForRole,
+  hasRole,
+  isRetiredSalesRole,
+  normalizeRole,
 } from '@/lib/roles'
 import { CANONICAL_ROLES } from '@/types'
+import { canUserEditField } from '@/lib/estimating/maintenance'
 import { makeUser } from '@/test/utils'
 
 function withRole(role: string) {
@@ -39,8 +48,14 @@ beforeEach(() => {
 // Pin the role constants so any drift from api/authz.py is immediately visible.
 // When you change either side, update both this snapshot AND the Python frozensets.
 describe('roles.ts — canonical role constants (mirrors api/authz.py)', () => {
-  it('ESTIMATOR_ROLES: estimators + manager-tier (LINE_ITEM_EDIT_ROLES in authz.py)', () => {
+  it('ESTIMATOR_ROLES mirrors api/authz.py ESTIMATOR_ROLES (disciplines + admin-equivalent)', () => {
     expect([...ESTIMATOR_ROLES].sort()).toEqual(
+      ['admin', 'install_estimating', 'maintenance_estimating', 'vp_sales'].sort(),
+    )
+  })
+
+  it('LINE_ITEM_EDIT_ROLES is ESTIMATOR_ROLES plus the approver ladder', () => {
+    expect([...LINE_ITEM_EDIT_ROLES].sort()).toEqual(
       ['admin', 'ceo', 'install_estimating', 'maintenance_estimating', 'manager', 'regional_director', 'vice_president', 'vp_sales'].sort(),
     )
   })
@@ -129,6 +144,36 @@ describe('canonical role set', () => {
     expect(normalizeRole('inside_sales')).toBe('inside_sales')
     expect(normalizeRole('manager')).toBe('manager')
   })
+
+  it('ROSTER_REP_ROLES is the sales-rep picker minus the outside_sales alias', () => {
+    expect([...ROSTER_REP_ROLES]).toEqual([
+      'inside_sales',
+      'maintenance_sales',
+      'install_sales',
+      'vp_sales',
+      'sales',
+    ])
+    expect(ROSTER_REP_ROLES).not.toContain('outside_sales')
+    expect([...ROSTER_REP_ROLES].sort()).toEqual(
+      SALES_REP_ROLES.filter((role) => !(role in LEGACY_ROLE_MAP)).sort(),
+    )
+  })
+
+  it('isRetiredSalesRole matches sales and outside_sales only', () => {
+    expect([...RETIRED_SALES_ROLES]).toEqual(['sales', 'outside_sales'])
+    expect(isRetiredSalesRole('sales')).toBe(true)
+    expect(isRetiredSalesRole('outside_sales')).toBe(true)
+    expect(isRetiredSalesRole('maintenance_sales')).toBe(false)
+    expect(isRetiredSalesRole('vp_sales')).toBe(false)
+  })
+
+  it('hasRole narrows membership without a string cast', () => {
+    expect(hasRole(ESTIMATOR_ROLES, 'admin')).toBe(true)
+    expect(hasRole(ESTIMATOR_ROLES, 'manager')).toBe(false)
+    expect(hasRole(LINE_ITEM_EDIT_ROLES, 'manager')).toBe(true)
+    expect(hasRole(ROSTER_REP_ROLES, 'outside_sales')).toBe(false)
+    expect(hasRole(ROSTER_REP_ROLES, 'sales')).toBe(true)
+  })
 })
 
 describe('useRole', () => {
@@ -183,7 +228,7 @@ describe('useRole', () => {
   })
 
   it('maps estimating roles: line-item edit set vs approvers (mirrors api/authz.py)', () => {
-    // Manager-tier roles added to ESTIMATOR_ROLES (line-item edit set).
+    // isEstimator follows LINE_ITEM_EDIT_ROLES, including the manager ladder.
     expect(withRole('maintenance_estimating').isEstimator).toBe(true)
     expect(withRole('install_estimating').isEstimator).toBe(true)
     expect(withRole('admin').isEstimator).toBe(true)
@@ -201,6 +246,13 @@ describe('useRole', () => {
     expect(withRole('admin').isApprover).toBe(true)
     expect(withRole('maintenance_estimating').isApprover).toBe(false)
     expect(withRole('sales').isApprover).toBe(false)
+  })
+
+  it('isEstimator agrees with canUserEditField for line items', () => {
+    for (const role of CANONICAL_ROLES) {
+      expect(withRole(role).isEstimator).toBe(canUserEditField(role, 'qty'))
+    }
+    expect(withRole('outside_sales').isEstimator).toBe(canUserEditField('outside_sales', 'qty'))
   })
 
   it('cross-branch visibility: admin/vice_president/ceo see all branches', () => {

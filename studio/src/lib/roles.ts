@@ -18,12 +18,30 @@ export function normalizeRole(role: UserRole | LegacyUserRole | string): UserRol
   return LEGACY_ROLE_MAP[role] ?? (role as UserRole)
 }
 
+/** Membership check that accepts a stored role string and narrows it. */
+export function hasRole<T extends string>(roles: readonly T[], role: string): role is T {
+  return roles.some((candidate) => candidate === role)
+}
+
+/**
+ * Stored roles that are no longer assignable. Mirrors api/authz.py
+ * RETIRED_SALES_ROLES. `sales` is still a UserRole; `outside_sales` is the
+ * legacy alias.
+ */
+export const RETIRED_SALES_ROLES = ['sales', 'outside_sales'] as const
+
+export type RetiredSalesRole = (typeof RETIRED_SALES_ROLES)[number]
+
+export function isRetiredSalesRole(role: string): role is RetiredSalesRole {
+  return hasRole(RETIRED_SALES_ROLES, role)
+}
+
 /**
  * Roles an admin may assign. Mirrors api/authz.py ASSIGNABLE_ROLES
  * (CANONICAL_ROLES minus retired sales). `outside_sales` is not a UserRole.
  */
 export const ASSIGNABLE_ROLES: readonly UserRole[] = CANONICAL_ROLES.filter(
-  (role) => role !== 'sales',
+  (role) => !isRetiredSalesRole(role),
 )
 
 /**
@@ -40,10 +58,18 @@ export const SALES_REP_ROLES: readonly string[] = [
 ]
 
 /**
- * Roles that can own a client-reference or team-roster row. Same members as
- * the sales-rep picker. Mirrors api/authz.py ROSTER_REP_ROLES.
+ * Roster ownership after normalizeRole. The legacy alias is not a member:
+ * is_roster_rep maps outside_sales to sales before the check. `sales` stays
+ * so an un-migrated row still owns a roster. Mirrors api/authz.py
+ * ROSTER_REP_ROLES (SALES_REP_DB_ROLES minus LEGACY_ROLE_MAP).
  */
-export const ROSTER_REP_ROLES: readonly string[] = SALES_REP_ROLES
+export const ROSTER_REP_ROLES: readonly UserRole[] = [
+  'inside_sales',
+  'maintenance_sales',
+  'install_sales',
+  'vp_sales',
+  'sales',
+]
 
 /**
  * Admin and VP of Sales share every admin grant. Mirrors api/authz.py
@@ -55,21 +81,21 @@ export const ADMIN_EQUIVALENT_ROLES: readonly UserRole[] = [
   'vp_sales',
 ]
 
-/** Roles that may edit line items, sections, and takeoff. */
+/**
+ * Python ESTIMATOR_ROLES: the two estimating disciplines plus admin-equivalent
+ * roles. Not the line-item edit set — managers edit lines via
+ * LINE_ITEM_EDIT_ROLES.
+ */
 export const ESTIMATOR_ROLES: readonly UserRole[] = [
   'maintenance_estimating',
   'install_estimating',
   ...ADMIN_EQUIVALENT_ROLES,
-  'manager',
-  'regional_director',
-  'vice_president',
-  'ceo',
 ]
 
 /**
  * The two estimating disciplines only. They are refused on leads and proposals
- * (api/authz.py ESTIMATING_ONLY_ROLES). Admin and management stay in
- * ESTIMATOR_ROLES for line-item edits, but they are not in this set.
+ * (api/authz.py ESTIMATING_ONLY_ROLES). Admin-equivalent roles edit line items
+ * through LINE_ITEM_EDIT_ROLES and are not in this set.
  */
 export const ESTIMATING_ONLY_ROLES: readonly UserRole[] = [
   'maintenance_estimating',
@@ -83,6 +109,16 @@ export const APPROVER_ROLES: readonly UserRole[] = [
   'vice_president',
   'ceo',
   ...ADMIN_EQUIVALENT_ROLES,
+]
+
+/**
+ * Who may mutate line items, sections, and takeoff. Mirrors api/authz.py
+ * LINE_ITEM_EDIT_ROLES (ESTIMATOR_ROLES | APPROVER_ROLES). The approval
+ * ceiling is a separate check. useRole().isEstimator and canUserEditField
+ * both read this set.
+ */
+export const LINE_ITEM_EDIT_ROLES: readonly UserRole[] = [
+  ...new Set<UserRole>([...ESTIMATOR_ROLES, ...APPROVER_ROLES]),
 ]
 
 /** Roles with cross-branch visibility (BRD I-9.5). */
@@ -175,7 +211,7 @@ export const ESTIMATING_NAV_ROLES: readonly UserRole[] = [
 
 /** Aspire ContactID is required for the same roles that stamp SalesRepID. */
 export function requiresAspireSalesRep(role: string): boolean {
-  return (FIELD_SALES_ROLES as readonly string[]).includes(normalizeRole(role))
+  return hasRole(FIELD_SALES_ROLES, normalizeRole(role))
 }
 
 /**
@@ -189,7 +225,7 @@ export function defaultRouteForRole(role: UserRole | null): string {
   // Field sales (maintenance_sales, install_sales, and legacy sales) share
   // the sales workspace but not Analytics. Pipeline is a page they can open,
   // so a denied visit to /inside-sales does not bounce back onto itself.
-  if (role !== null && (FIELD_SALES_ROLES as readonly string[]).includes(role)) {
+  if (role !== null && hasRole(FIELD_SALES_ROLES, role)) {
     return '/inside-sales/pipeline'
   }
   // Management and admin-equivalent roles (admin, vp_sales) land on

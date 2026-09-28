@@ -230,6 +230,19 @@ describe('tierForValue', () => {
     const shuffled = [tiers[3], tiers[1], tiers[0], tiers[2]]
     expect(tierForValue(5_000_000, shuffled)?.roleKey).toBe('manager')
   })
+
+  it('does not let equal-order admin and vp_sales rows steal a lower band', () => {
+    const ceiling: ApprovalTier[] = [
+      { id: 'vp', roleKey: 'vp_sales', label: 'VP of Sales', minValueCents: 0, maxValueCents: null, order: 5, estimateType: 'maintenance' },
+      { id: 'admin', roleKey: 'admin', label: 'Admin', minValueCents: 0, maxValueCents: null, order: 5, estimateType: 'maintenance' },
+    ]
+    const withLadder = [...ceiling, ...tiers]
+    expect(tierForValue(5_000_000, withLadder)?.roleKey).toBe('manager')
+    expect(tierForValue(500_000_000, withLadder)?.roleKey).toBe('ceo')
+    // Same order and both unbounded: canonical role rank, not input order.
+    expect(tierForValue(1, ceiling)?.roleKey).toBe('admin')
+    expect(tierForValue(1, [...ceiling].reverse())?.roleKey).toBe('admin')
+  })
 })
 
 describe('marginBand', () => {

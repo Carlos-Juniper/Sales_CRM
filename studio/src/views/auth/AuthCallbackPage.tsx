@@ -4,8 +4,7 @@ import { Leaf } from 'lucide-react'
 import { consumePkce } from '@/lib/azureAuth'
 import { entraComplete } from '@/api/auth'
 import { useAuthStore } from '@/store/authStore'
-import { normalizeRole } from '@/hooks/useRole'
-import { defaultRouteForRole } from '@/lib/roles'
+import { defaultRouteForRole, normalizeRole } from '@/lib/roles'
 
 function roleDefaultRoute(role: string) {
   const canonical = normalizeRole(role)

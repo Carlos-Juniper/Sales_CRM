@@ -1,8 +1,15 @@
 import { useState } from 'react'
 import { useApprovalTiers, useUpdateApprovalTier } from '@/hooks/useCompanySettings'
+import { groupApprovalTiersByRole } from '@/lib/estimating/approvalOrder'
+import { ROLE_LABELS } from '@/lib/roleLabels'
 import type { ApprovalTier } from '@/types/estimating'
 import { FormStatus, SettingsFormShell } from './formStatus'
 import { SaveButton } from './SlaForm'
+
+function tierLabel(tier: ApprovalTier): string {
+  const label = tier.label.trim()
+  return label || ROLE_LABELS[tier.roleKey]
+}
 
 /** Cents → whole/decimal dollars for the input value ('' when unbounded). */
 function centsToDollars(cents: number | null): string {
@@ -41,14 +48,7 @@ export function ApprovalTiersForm() {
     )
   }
 
-  // Group by roleKey: each group contains all rows for that role (maintenance +
-  // install). Preserve insertion order — the API returns rows sorted by `order`.
-  const byRole = new Map<string, ApprovalTier[]>()
-  for (const tier of data) {
-    const group = byRole.get(tier.roleKey) ?? []
-    group.push(tier)
-    byRole.set(tier.roleKey, group)
-  }
+  const groups = groupApprovalTiersByRole(data)
 
   return (
     <SettingsFormShell
@@ -57,9 +57,7 @@ export function ApprovalTiersForm() {
       description="Editing a ceiling moves the real approval boundary. Amounts in dollars."
     >
       <ul className="space-y-4">
-        {Array.from(byRole.values()).map((tiers) => (
-          // Use the first tier's id as the key — stable since there are exactly
-          // 2 rows per role and both share the same roleKey.
+        {groups.map((tiers) => (
           <li key={tiers[0].roleKey}>
             <TierRow tiers={tiers} />
           </li>
@@ -78,6 +76,7 @@ function TierRow({ tiers }: { tiers: ApprovalTier[] }) {
   // All tiers in a role group share the same ceiling (mirrored), so read from
   // the first row. The label is also shared.
   const representative = tiers[0]
+  const label = tierLabel(representative)
   const [ceiling, setCeiling] = useState(centsToDollars(representative.maxValueCents))
   const update = useUpdateApprovalTier()
 
@@ -86,9 +85,10 @@ function TierRow({ tiers }: { tiers: ApprovalTier[] }) {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (unbounded) return // unbounded (top) tier has no ceiling to write
+    // Blank keeps an unbounded ceiling (admin, vp_sales, and the top band).
+    // A typed amount writes that ceiling, including onto a row that was null.
+    if (unbounded) return
     const nextCents = dollarsToCents(ceiling)
-    // Skip if all rows already have this value.
     if (tiers.every((t) => t.maxValueCents === nextCents)) return
 
     // PATCH every tier id for this role so maintenance and install stay mirrored.
@@ -99,14 +99,14 @@ function TierRow({ tiers }: { tiers: ApprovalTier[] }) {
 
   return (
     <form onSubmit={onSubmit} className="rounded-md border border-[var(--border)] p-3">
-      <p className="text-sm font-medium text-[var(--fg)]">{representative.label}</p>
+      <p className="text-sm font-medium text-[var(--fg)]">{label}</p>
       <div className="mt-2 flex items-end gap-3">
         <div>
           <label
             htmlFor={inputId}
             className="block text-xs font-medium text-[var(--fg)] opacity-70 mb-1"
           >
-            {representative.label} ceiling ($)
+            {label} ceiling ($)
           </label>
           <input
             id={inputId}
@@ -119,7 +119,7 @@ function TierRow({ tiers }: { tiers: ApprovalTier[] }) {
             className="w-40 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
           />
         </div>
-        <SaveButton pending={update.isPending}>Save {representative.label}</SaveButton>
+        <SaveButton pending={update.isPending}>Save {label}</SaveButton>
       </div>
       <FormStatus isSuccess={update.isSuccess} isError={update.isError} />
     </form>

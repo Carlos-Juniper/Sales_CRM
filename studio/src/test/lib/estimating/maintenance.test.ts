@@ -167,15 +167,23 @@ describe('field ownership (estimator vs approver) — logic-level enforcement', 
 })
 
 describe('canonical auth role → estimating role mapping', () => {
-  it('estimators are the estimating disciplines only', () => {
-    expect(estimatingRolesForUser('maintenance_estimating')).toContain('estimator')
-    expect(estimatingRolesForUser('install_estimating')).toContain('estimator')
-    expect(estimatingRolesForUser('admin')).not.toContain('estimator')
-    expect(estimatingRolesForUser('vp_sales')).not.toContain('estimator')
-    expect(estimatingRolesForUser('regional_director')).not.toContain('estimator')
-    expect(estimatingRolesForUser('vice_president')).not.toContain('estimator')
-    expect(estimatingRolesForUser('manager')).not.toContain('estimator')
+  const lineItemEditors = [
+    'maintenance_estimating',
+    'install_estimating',
+    'admin',
+    'vp_sales',
+    'manager',
+    'regional_director',
+    'vice_president',
+    'ceo',
+  ] as const
+
+  it('line-item editors follow LINE_ITEM_EDIT_ROLES, including admin', () => {
+    for (const role of lineItemEditors) {
+      expect(estimatingRolesForUser(role)).toContain('estimator')
+    }
     expect(estimatingRolesForUser('sales')).not.toContain('estimator')
+    expect(estimatingRolesForUser('procurement')).not.toContain('estimator')
   })
 
   it('approvers = manager/RD/VP/CEO (+ admin)', () => {
@@ -195,9 +203,10 @@ describe('canonical auth role → estimating role mapping', () => {
     expect(canUserEditField('maintenance_estimating', 'qty')).toBe(true)
     expect(canUserEditField('maintenance_estimating', 'margin')).toBe(false)
     expect(canUserEditField('manager', 'margin')).toBe(true)
-    expect(canUserEditField('manager', 'qty')).toBe(false)
-    expect(canUserEditField('admin', 'qty')).toBe(false)
+    expect(canUserEditField('manager', 'qty')).toBe(true)
+    expect(canUserEditField('admin', 'qty')).toBe(true)
     expect(canUserEditField('admin', 'margin')).toBe(true)
+    expect(canUserEditField('vp_sales', 'qty')).toBe(true)
     expect(canUserEditField('vp_sales', 'margin')).toBe(true)
     expect(canUserEditField('sales', 'qty')).toBe(false)
   })

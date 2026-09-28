@@ -46,19 +46,21 @@ import { ApproverReviewDrawer } from './ApproverReviewDrawer'
  * Demo approver identities per role (design fixture). In production this is
  * the signed-in approver resolved from the user/role table.
  */
-const APPROVER_DIRECTORY: Record<ApprovalRoleKey, { name: string; initials: string }> = {
+const ROLE_TABS = [
+  { key: 'manager', label: 'MGR' },
+  { key: 'regional_director', label: 'RD' },
+  { key: 'vice_president', label: 'VP' },
+  { key: 'ceo', label: 'CEO' },
+] as const satisfies readonly { key: ApprovalRoleKey; label: string }[]
+
+type QueueRole = (typeof ROLE_TABS)[number]['key']
+
+const APPROVER_DIRECTORY: Record<QueueRole, { name: string; initials: string }> = {
   manager: { name: 'Robert Chen', initials: 'RC' },
   regional_director: { name: 'Amanda Torres', initials: 'AT' },
   vice_president: { name: 'Marcus Webb', initials: 'MW' },
   ceo: { name: 'Diane Voss', initials: 'DV' },
 }
-
-const ROLE_TABS: { key: ApprovalRoleKey; label: string }[] = [
-  { key: 'manager', label: 'MGR' },
-  { key: 'regional_director', label: 'RD' },
-  { key: 'vice_president', label: 'VP' },
-  { key: 'ceo', label: 'CEO' },
-]
 
 const SEVERITY_COLOR: Record<ReturnType<typeof waitSeverity>, string> = {
   normal: 'text-[hsl(var(--fg))]',
@@ -98,7 +100,7 @@ export function ApprovalQueue({ tiers: tiersProp, estimates }: ApprovalQueueProp
   const user = useAuthStore((s) => s.user)
 
   const { findUser } = useUsers()
-  const [role, setRole] = useState<ApprovalRoleKey>('manager')
+  const [role, setRole] = useState<QueueRole>('manager')
   const [items, setItems] = useState<Estimate[]>(estimates ?? [])
   const [selected, setSelected] = useState<{ id: string; sendBack: boolean } | null>(null)
   const [busy, setBusy] = useState(false)

@@ -1,4 +1,5 @@
-import type { UserRole } from '@/types'
+import { CANONICAL_ROLES, type UserRole } from '@/types'
+import { hasRole, isRetiredSalesRole } from '@/lib/roles'
 
 /** Shown for stored `sales` and `outside_sales` rows. Not an assignable option. */
 export const LEGACY_SALES_LABEL = 'Legacy: Sales (reassign)'
@@ -23,7 +24,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 
 /** Human label for a stored role. Unknown values title-case the slug. */
 export function roleLabel(role: string): string {
-  if (role === 'sales' || role === 'outside_sales') return LEGACY_SALES_LABEL
-  if (role in ROLE_LABELS) return ROLE_LABELS[role as UserRole]
+  if (isRetiredSalesRole(role)) return LEGACY_SALES_LABEL
+  if (hasRole(CANONICAL_ROLES, role)) return ROLE_LABELS[role]
   return role.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }

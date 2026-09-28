@@ -7,7 +7,7 @@ import { useAllLeads } from '@/hooks/useLeads'
 import { useUsers } from '@/hooks/useBids'
 import { formatCurrency } from '@/lib/utils'
 import { roleLabel } from '@/lib/roleLabels'
-import { SALES_REP_ROLES } from '@/lib/roles'
+import { SALES_REP_ROLES, hasRole } from '@/lib/roles'
 import type { User } from '@/types'
 
 interface RepMetrics {
@@ -28,7 +28,7 @@ export function TeamPerformanceCard() {
   const repMetrics = useMemo((): RepMetrics[] => {
     const leads = leadsData?.data ?? []
     const salesReps = (users ?? []).filter((u) =>
-      (SALES_REP_ROLES as readonly string[]).includes(u.role),
+      hasRole(SALES_REP_ROLES, u.role),
     )
 
     return salesReps.map((user) => {

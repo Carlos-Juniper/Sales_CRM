@@ -1,5 +1,6 @@
 import { http, HttpResponse } from 'msw'
-import { ADMIN_EQUIVALENT_ROLES, FIELD_SALES_ROLES, ROSTER_REP_ROLES, normalizeRole } from '@/lib/roles'
+import type { UserRole } from '@/types'
+import { ADMIN_EQUIVALENT_ROLES, FIELD_SALES_ROLES, ROSTER_REP_ROLES, hasRole, normalizeRole } from '@/lib/roles'
 import { useAuthStore } from '@/store/authStore'
 import { mockUsers } from './data'
 import { MOCK_CLIENT_REFERENCES, MOCK_TEAM_MEMBERS, rosterHttpResponse } from './proposalRoster'
@@ -37,16 +38,13 @@ function callerId(): string | null {
 }
 
 function isMarketingOrAdminEquivalent(role: string | null): boolean {
-  return (
-    role === 'marketing' ||
-    (role !== null && (ADMIN_EQUIVALENT_ROLES as readonly string[]).includes(role))
-  )
+  return role === 'marketing' || (role !== null && hasRole(ADMIN_EQUIVALENT_ROLES, role))
 }
 
-const ROSTER_REP_ROLE_SET = new Set<string>(ROSTER_REP_ROLES)
+const ROSTER_REP_ROLE_SET = new Set<UserRole>(ROSTER_REP_ROLES)
 
 function isFieldSales(role: string | null): boolean {
-  return role !== null && (FIELD_SALES_ROLES as readonly string[]).includes(role)
+  return role !== null && hasRole(FIELD_SALES_ROLES, role)
 }
 
 function salesDirectory(id: string): 'ok' | 'missing' | 'not-sales' {

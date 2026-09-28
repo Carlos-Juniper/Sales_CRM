@@ -332,6 +332,49 @@ describe('ApprovalTiersForm', () => {
     expect(patchedIds).toContain('tier-bm-m')
     expect(patchedIds).toContain('tier-bm-i')
   })
+
+  it('orders admin and vp_sales after the ladder and lets an unbounded ceiling be set', async () => {
+    server.use(
+      http.get('*/api/estimating/config/approval-tiers', () =>
+        HttpResponse.json([
+          { id: 'tier-vp-i', roleKey: 'vp_sales', label: 'VP of Sales', minValueCents: 0, maxValueCents: null, order: 5, estimateType: 'install' },
+          { id: 'tier-admin-m', roleKey: 'admin', label: '', minValueCents: 0, maxValueCents: null, order: 5, estimateType: 'maintenance' },
+          { id: 'tier-ceo-m', roleKey: 'ceo', label: 'CEO', minValueCents: 25_000_000, maxValueCents: null, order: 4, estimateType: 'maintenance' },
+          { id: 'tier-bm-i', roleKey: 'manager', label: 'Branch Manager', minValueCents: 0, maxValueCents: 5_000_000, order: 1, estimateType: 'install' },
+          { id: 'tier-admin-i', roleKey: 'admin', label: 'Admin', minValueCents: 0, maxValueCents: null, order: 5, estimateType: 'install' },
+          { id: 'tier-bm-m', roleKey: 'manager', label: 'Branch Manager', minValueCents: 0, maxValueCents: 5_000_000, order: 1, estimateType: 'maintenance' },
+          { id: 'tier-vp-m', roleKey: 'vp_sales', label: 'VP of Sales', minValueCents: 0, maxValueCents: null, order: 5, estimateType: 'maintenance' },
+        ]),
+      ),
+    )
+    const patched: { id: string; body: Record<string, unknown> }[] = []
+    server.use(
+      http.patch('*/api/settings/company/approval-tiers/:id', async ({ params, request }) => {
+        patched.push({
+          id: params.id as string,
+          body: (await request.json()) as Record<string, unknown>,
+        })
+        return HttpResponse.json({ id: params.id })
+      }),
+    )
+    renderComp(<ApprovalTiersForm />)
+    const saves = await screen.findAllByRole('button', { name: /save /i })
+    expect(saves.map((button) => button.textContent)).toEqual([
+      'Save Branch Manager',
+      'Save CEO',
+      'Save Admin',
+      'Save VP of Sales',
+    ])
+    expect(screen.getAllByText('Admin')).toHaveLength(1)
+
+    const ceiling = screen.getByLabelText(/admin ceiling/i) as HTMLInputElement
+    expect(ceiling.value).toBe('')
+    fireEvent.change(ceiling, { target: { value: '250000' } })
+    fireEvent.click(screen.getByRole('button', { name: /save admin/i }))
+    await waitFor(() => expect(patched).toHaveLength(2))
+    expect(patched.map((row) => row.id).sort()).toEqual(['tier-admin-i', 'tier-admin-m'])
+    expect(patched[0].body).toEqual({ max_value_cents: 25_000_000 })
+  })
 })
 
 // ── Margin bands ─────────────────────────────────────────────────────────────

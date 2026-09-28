@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { AdminUser, ManageableBranch } from '@/api/settings'
-import type { UserRole } from '@/types'
+import type { LegacyUserRole, UserRole } from '@/types'
 import { useLinkAspireRep, useUpdateUser } from '@/hooks/useUserAdmin'
-import { ASSIGNABLE_ROLES, requiresAspireSalesRep } from '@/lib/roles'
+import { ASSIGNABLE_ROLES, hasRole, isRetiredSalesRole, requiresAspireSalesRep } from '@/lib/roles'
 import { roleLabel } from '@/lib/roleLabels'
 import { RoleSelect } from './RoleSelect'
 import { BranchMultiSelect } from './BranchMultiSelect'
@@ -79,12 +79,10 @@ export function UserRow({ user, branches }: { user: AdminUser; branches: Managea
   )
 }
 
-function isEditorRole(role: string): role is UserRole | 'outside_sales' {
-  return (
-    role === 'sales' ||
-    role === 'outside_sales' ||
-    (ASSIGNABLE_ROLES as readonly string[]).includes(role)
-  )
+function storedEditorRole(role: string): UserRole | LegacyUserRole {
+  if (isRetiredSalesRole(role)) return role
+  if (hasRole(ASSIGNABLE_ROLES, role)) return role
+  return 'maintenance_sales'
 }
 
 function UserRowEditor({
@@ -97,21 +95,15 @@ function UserRowEditor({
 }: {
   user: AdminUser
   branches: ManageableBranch[]
-  onSave: (body: { role: UserRole | 'outside_sales'; branches: number[] }) => void
+  onSave: (body: { role: UserRole | LegacyUserRole; branches: number[] }) => void
   pending: boolean
   onLinkAspire: () => void
   linkPending: boolean
 }) {
-  // Legacy sales stays selected so a branch edit does not assign a new role.
+  // Retired sales stays selected so a branch edit does not assign a new role.
   // The option is disabled. Any other unknown value starts on
   // maintenance_sales, an assignable field-sales role.
-  const initialRole: UserRole | 'outside_sales' =
-    user.role === 'sales' || user.role === 'outside_sales'
-      ? user.role
-      : (ASSIGNABLE_ROLES as readonly string[]).includes(user.role)
-        ? (user.role as UserRole)
-        : 'maintenance_sales'
-  const [role, setRole] = useState<UserRole | 'outside_sales'>(initialRole)
+  const [role, setRole] = useState<UserRole | LegacyUserRole>(storedEditorRole(user.role))
   const [selected, setSelected] = useState<number[]>(user.branches ?? [])
 
   function toggleBranch(id: number) {
@@ -134,9 +126,7 @@ function UserRowEditor({
           testId={`edit-role-${user.id}`}
           value={role}
           currentRole={user.role}
-          onChange={(next) => {
-            if (isEditorRole(next)) setRole(next)
-          }}
+          onChange={setRole}
         />
       </div>
 

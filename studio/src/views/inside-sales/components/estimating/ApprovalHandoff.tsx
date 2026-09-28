@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { estimatingApi } from '@/api/estimating'
+import { compareApprovalTiers } from '@/lib/estimating/approvalOrder'
 import { tierForValue } from '@/lib/estimating/calc'
 import { tiersForType } from '@/lib/estimating/config'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
@@ -62,11 +63,13 @@ function tierRange(tier: ApprovalTier): string {
   return `${compact(tier.minValueCents)}–${compact(tier.maxValueCents)}`
 }
 
-const TIER_ICONS: Record<ApprovalRoleKey, React.ElementType> = {
+const TIER_ICONS: Partial<Record<ApprovalRoleKey, React.ElementType>> = {
   manager: UserCheck,
   regional_director: Users,
   vice_president: Briefcase,
   ceo: Building2,
+  admin: ShieldCheck,
+  vp_sales: ShieldCheck,
 }
 
 export interface ApprovalHandoffProps {
@@ -159,7 +162,7 @@ export function ApprovalHandoff({ tiers: tiersProp }: ApprovalHandoffProps) {
 
         <div className="flex flex-col gap-2">
           {[...ladder]
-            .sort((a, b) => a.order - b.order)
+            .sort(compareApprovalTiers)
             .map((tier) => {
               const Icon = TIER_ICONS[tier.roleKey] ?? ShieldCheck
               const active = tier.id === requiredTier?.id

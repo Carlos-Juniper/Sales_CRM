@@ -573,8 +573,9 @@ def _service_out(
     """Serialize one section_service row.
 
     `catalog_data` is the joined catalog_items row (service_type, scope_text,
-    billing_type) that the contract generator reads to split recurring from
-    one-time services and print each service's scope paragraph. Only
+    billing_type, uom) that the contract generator reads to split recurring from
+    one-time services and print each service's scope paragraph. `uom` is also
+    the pricing signal for flat vs per-1,000-sf lines. Only
     _load_estimate has it in hand; the single-row routes below pass nothing and
     the derived fields serialize as None, matching the optional fields on the
     SectionService TS interface.
@@ -592,6 +593,10 @@ def _service_out(
         "label": r["label"],
         "qty": _num(r["qty"]),
         "uom": r["uom"],
+        # Catalog unit, not the line's own uom. Line pricing reads this to
+        # tell a flat unit (EA, CT, …) from a per-1,000-sf rate. The line uom
+        # is not that signal — the contract seed stores '/yr' on flat lines.
+        "catalogUom": (catalog_data or {}).get("uom"),
         "complexityPct": _num(r["complexity_pct"]),
         "unitSellCents": None if r["unit_sell_cents"] is None else int(r["unit_sell_cents"]),
         "embeddedCostCents": None if r["embedded_cost_cents"] is None else int(r["embedded_cost_cents"]),
@@ -764,7 +769,7 @@ async def _load_estimate(
     if catalog_item_ids:
         placeholders = ", ".join(["%s"] * len(catalog_item_ids))
         catalog_rows = await query(
-            f"SELECT id, service_type, scope_text, billing_type FROM catalog_items WHERE id IN ({placeholders})",
+            f"SELECT id, service_type, scope_text, billing_type, uom FROM catalog_items WHERE id IN ({placeholders})",
             list(catalog_item_ids),
         )
         catalog_data_by_id = {r["id"]: r for r in catalog_rows}
@@ -1333,6 +1338,50 @@ def _line_discipline(discipline_override: Optional[str], service_type: Optional[
     return "irrigation" if service_type in IRRIGATION_SERVICE_TYPES else "landscape"
 
 
+# Square-foot catalog units, after stripping spaces and periods. Paired with
+# studio/src/lib/estimating/calc.ts AREA_CATALOG_UOMS / isFlatCatalogUom.
+_AREA_CATALOG_UOMS = frozenset({"sqft", "sf"})
+
+
+def _normalize_catalog_uom(uom: Optional[str]) -> str:
+    if not uom:
+        return ""
+    # Same reduction as studio normalizeCatalogUom: lowercase, drop whitespace and periods.
+    return "".join(ch for ch in uom.lower() if not ch.isspace() and ch != ".")
+
+
+def _is_flat_catalog_uom(uom: Optional[str]) -> bool:
+    """Flat unit price when the catalog UOM is present and is not square feet.
+
+    A missing catalog UOM is not flat. The line's own uom is never consulted —
+    the contract seed stores '/yr' on flat-priced lines.
+    """
+    normalized = _normalize_catalog_uom(uom)
+    if not normalized:
+        return False
+    return normalized not in _AREA_CATALOG_UOMS
+
+
+def _line_sell_cents(
+    est_type: str,
+    qty: float,
+    unit_sell: float,
+    square_feet: float,
+    complexity: float,
+    catalog_uom: Optional[str],
+) -> int:
+    """Sell price of one line, integer cents. The only backend line-pricing decision.
+
+    Paired with studio/src/lib/estimating/calc.ts `lineSellCents`. Install is
+    always qty × unit sell. Maintenance uses the per-1,000-sf engine for a
+    square-foot catalog UOM (and when the line has no catalog UOM). Any other
+    catalog UOM is qty × unit sell, with no area multiplier and no complexity.
+    """
+    if est_type != "maintenance" or _is_flat_catalog_uom(catalog_uom):
+        return round(qty * unit_sell)
+    return round((square_feet / 1000) * unit_sell * qty * (1 + complexity))
+
+
 async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int) -> tuple[int, int]:
     """Derive (est_ls_cents, est_ir_cents) from an estimate's PERSISTED line
     items. Each is summed directly from its classified lines
@@ -1346,9 +1395,8 @@ async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int
     section/service endpoints, so this must reflect current persisted state to
     mean anything (see _recompute_itb_split, called from those endpoints).
 
-    Line sell math mirrors studio/src/lib/estimating/calc.ts exactly (the one
-    other place this formula lives) — install: qty * unitSellCents; maintenance:
-    (squareFeet / 1000) * unitSellCents * qty * (1 + complexityPct).
+    Line sell math is `_line_sell_cents`, paired with
+    studio/src/lib/estimating/calc.ts `lineSellCents`.
     """
     sections = await query(
         "SELECT id, square_feet FROM estimate_sections WHERE estimate_id = %s", [estimate_id]
@@ -1373,14 +1421,25 @@ async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int
                 catalog_item_ids.add(cid)
     if not lines:
         return total_cents, 0
+    # Discipline derivation only needs the catalog when the line has no
+    # override. Maintenance pricing always needs the catalog UOM, including
+    # lines whose discipline is already set.
+    fetch_ids: set[str] = set(catalog_item_ids)
+    if est_type == "maintenance":
+        for sv in lines:
+            cid = sv.get("catalog_item_id")
+            if cid:
+                fetch_ids.add(cid)
     service_types: dict[str, str] = {}
-    if catalog_item_ids:
-        ids = list(catalog_item_ids)
+    catalog_uoms: dict[str, Optional[str]] = {}
+    if fetch_ids:
+        ids = list(fetch_ids)
         placeholders = ", ".join(["%s"] * len(ids))
         rows = await query(
-            f"SELECT id, service_type FROM catalog_items WHERE id IN ({placeholders})", ids
+            f"SELECT id, service_type, uom FROM catalog_items WHERE id IN ({placeholders})", ids
         )
         service_types = {r["id"]: r["service_type"] for r in rows}
+        catalog_uoms = {r["id"]: r.get("uom") for r in rows}
     # Sum LS and IR independently from the lines themselves (rather than
     # `total_cents - ir_cents`) so the split can never go negative: total_cents
     # is a snapshot from estimate creation and can drift stale as lines are
@@ -1389,14 +1448,14 @@ async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int
     ls_cents = 0
     ir_cents = 0
     for sv in lines:
-        qty = float(sv.get("qty") or 0)
-        unit_sell = float(sv.get("unit_sell_cents") or 0)
-        if est_type == "maintenance":
-            square_feet = float(sv.get("square_feet") or 0)
-            complexity = float(sv.get("complexity_pct") or 0)
-            sell = round((square_feet / 1000) * unit_sell * qty * (1 + complexity))
-        else:
-            sell = round(qty * unit_sell)
+        sell = _line_sell_cents(
+            est_type,
+            float(sv.get("qty") or 0),
+            float(sv.get("unit_sell_cents") or 0),
+            float(sv.get("square_feet") or 0),
+            float(sv.get("complexity_pct") or 0),
+            catalog_uoms.get(sv.get("catalog_item_id")),
+        )
         discipline = _line_discipline(sv.get("discipline"), service_types.get(sv.get("catalog_item_id")))
         if discipline == "irrigation":
             ir_cents += sell

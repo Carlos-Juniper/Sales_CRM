@@ -7,7 +7,7 @@
 // without coupling to component lifecycle.
 // ---------------------------------------------------------------------------
 
-import { priceEachCents, maintServiceLine } from '@/lib/estimating/calc'
+import { lineSellCents } from '@/lib/estimating/calc'
 import type { Estimate } from '@/types/estimating'
 
 export interface ContractRow {
@@ -23,7 +23,7 @@ export interface ContractRow {
    * for the extended price, so a missing price adds nothing to the total.
    */
   hasUnitPrice: boolean
-  /** Extended price in cents (qty × priceEach, computed from maintServiceLine) */
+  /** Extended price in cents, from lineSellCents (not priceEach × qty) */
   extPriceCents: number
   /** Sales tax in cents (always 0 for v1) */
   salesTaxCents: number
@@ -75,12 +75,17 @@ export function buildContractRows(estimate: Estimate): ContractRow[] {
       // still counting it in the contract total.
       const isRecurring = svc.billingType !== 'one_time'
 
-      // priceEachCents = maintServiceLine(..., qty=1, ...)
-      const priceEach = priceEachCents(section.squareFeet, rate, complexity)
-
-      // extPriceCents must come from maintServiceLine directly (with full qty),
-      // never as priceEach × qty, to avoid rounding drift.
-      const extPrice = maintServiceLine(section.squareFeet, rate, svc.qty, complexity)
+      // Price each is the same line formula at qty=1, computed independently
+      // of the extended price so a fractional qty cannot drift.
+      const priceEach = lineSellCents('maintenance', section.squareFeet, rate, 1, complexity, svc.catalogUom)
+      const extPrice = lineSellCents(
+        'maintenance',
+        section.squareFeet,
+        rate,
+        svc.qty,
+        complexity,
+        svc.catalogUom,
+      )
 
       rows.push({
         label: svc.label,

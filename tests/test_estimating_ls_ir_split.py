@@ -263,8 +263,63 @@ class TestAutoSplitOnCreate:
         assert resp.status_code == 201
         params = _itb_insert_params(mock_exec)
         # sell = (2000/1000) * 2000 * 1 * 1.1 = 4400 -> all irrigation
+        # No catalog uom on the row, so the line stays on the area engine.
         assert 4400 in params
         assert 0 in params
+
+    @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
+    @patch("api.estimating._load_estimate", new_callable=AsyncMock)
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_flat_catalog_uom_is_not_multiplied_by_section_area(
+        self, mock_query, mock_exec, mock_load, mock_bg, authed
+    ):
+        # Coral Bay mulch: Mulch Per Yard is EA, unit sell 420,000 cents,
+        # qty 1, on the 28,500 sq ft entrance section.
+        mock_query.side_effect = _query_rows([
+            [{"id": "sec-1", "square_feet": 28500}],
+            [{"section_id": "sec-1", "qty": 1, "unit_sell_cents": 420000,
+              "complexity_pct": 0, "discipline": None,
+              "catalog_item_id": "kit-maint-5533"}],
+            [{"id": "kit-maint-5533", "service_type": "Mulch - Shrub Beds", "uom": "EA"}],
+            _scope_id_rows(),
+        ])
+        mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
+        resp = client.post("/api/estimating/estimates", json=_create_body(
+            estimateType="maintenance", contractValueCents=11970000,
+        ))
+        assert resp.status_code == 201
+        params = _itb_insert_params(mock_exec)
+        # qty × unit sell. The old path was 28.5 × 420,000 = 11,970,000.
+        assert 420000 in params
+        assert 11970000 not in params
+
+    @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
+    @patch("api.estimating._load_estimate", new_callable=AsyncMock)
+    @patch("api.estimating.execute", new_callable=AsyncMock)
+    @patch("api.estimating.query", new_callable=AsyncMock)
+    def test_square_foot_catalog_uom_stays_on_the_area_engine(
+        self, mock_query, mock_exec, mock_load, mock_bg, authed
+    ):
+        # Coral Bay shrub trimming: Prune Medium is Sq. Ft., rate 1400,
+        # qty 6, on 28,500 sq ft.
+        mock_query.side_effect = _query_rows([
+            [{"id": "sec-1", "square_feet": 28500}],
+            [{"section_id": "sec-1", "qty": 6, "unit_sell_cents": 1400,
+              "complexity_pct": 0, "discipline": None,
+              "catalog_item_id": "kit-maint-3434"}],
+            [{"id": "kit-maint-3434", "service_type": "Bed Area", "uom": "Sq. Ft."}],
+            _scope_id_rows(),
+        ])
+        mock_load.return_value = {"id": "est-1", "estimateType": "maintenance"}
+        resp = client.post("/api/estimating/estimates", json=_create_body(
+            estimateType="maintenance", contractValueCents=1,
+        ))
+        assert resp.status_code == 201
+        params = _itb_insert_params(mock_exec)
+        # (28500/1000) * 1400 * 6 = 239,400. Flat would have been 6 * 1400 = 8,400.
+        assert 239400 in params
+        assert 8400 not in params
 
     @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)

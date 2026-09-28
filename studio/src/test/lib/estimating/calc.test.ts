@@ -3,6 +3,8 @@ import {
   acresFromSqft,
   maintServiceLine,
   installLineTotal,
+  isFlatCatalogUom,
+  lineSellCents,
   componentCost,
   sectionTotal,
   contractTotal,
@@ -54,6 +56,50 @@ describe('maintServiceLine', () => {
   })
   it('returns 0 for zero sqft', () => {
     expect(maintServiceLine(0, 450, 42, 0.1)).toBe(0)
+  })
+})
+
+describe('isFlatCatalogUom', () => {
+  it('treats square-foot catalog units as area-priced', () => {
+    expect(isFlatCatalogUom('Sq. Ft.')).toBe(false)
+    expect(isFlatCatalogUom('sq ft')).toBe(false)
+    expect(isFlatCatalogUom('SF')).toBe(false)
+  })
+
+  it('treats non-area catalog units as flat', () => {
+    expect(isFlatCatalogUom('EA')).toBe(true)
+    expect(isFlatCatalogUom('CT')).toBe(true)
+    expect(isFlatCatalogUom('LF')).toBe(true)
+    expect(isFlatCatalogUom('3CF Bag')).toBe(true)
+  })
+
+  it('does not treat a missing catalog unit as flat', () => {
+    expect(isFlatCatalogUom(null)).toBe(false)
+    expect(isFlatCatalogUom(undefined)).toBe(false)
+    expect(isFlatCatalogUom('')).toBe(false)
+  })
+})
+
+describe('lineSellCents', () => {
+  it('prices a flat catalog unit as qty × unit sell, ignoring area and complexity', () => {
+    // Coral Bay mulch: EA, 420,000 cents, qty 1, on 28,500 sq ft.
+    expect(lineSellCents('maintenance', 28_500, 420_000, 1, 0.1, 'EA')).toBe(420_000)
+    // Flowers: CT.
+    expect(lineSellCents('maintenance', 28_500, 860_000, 1, 0, 'CT')).toBe(860_000)
+  })
+
+  it('keeps a square-foot catalog unit on the per-1,000-sf engine', () => {
+    // Prune Medium on the Coral Bay entrance, plus a complexity adder.
+    expect(lineSellCents('maintenance', 28_500, 1400, 6, 0, 'Sq. Ft.')).toBe(239_400)
+    expect(lineSellCents('maintenance', 28_500, 1400, 6, 0.1, 'Sq. Ft.')).toBe(263_340)
+  })
+
+  it('ignores the line uom — a missing catalog unit stays area-priced', () => {
+    // The seed stores uom '/yr' on these lines. Without catalogUom the
+    // historical per-1,000 path still applies, even if someone labeled the
+    // line EA.
+    expect(lineSellCents('maintenance', 28_500, 420_000, 1, 0, null)).toBe(11_970_000)
+    expect(lineSellCents('maintenance', 28_500, 420_000, 1, 0, undefined)).toBe(11_970_000)
   })
 })
 
@@ -152,6 +198,64 @@ describe('contractTotal', () => {
     const asInstallSections = maint.sections.reduce(
       (sum, s) => sum + sectionTotal(s, 'install'), 0)
     expect(contractTotal(maint)).not.toBe(asInstallSections)
+  })
+})
+
+describe('Coral Bay seeded section totals', () => {
+  // scripts/seed_contract_estimate.py + catalog UOMs from
+  // sql/migrations/009_seed_catalog_items.sql. Line uom is '/yr' on every row.
+  function svc(
+    label: string,
+    qty: number,
+    unitSellCents: number,
+    catalogUom: string,
+    sortOrder: number,
+  ): EstimateSection['services'][number] {
+    return {
+      id: label,
+      sectionId: 's',
+      catalogItemId: label,
+      label,
+      qty,
+      uom: '/yr',
+      catalogUom,
+      complexityPct: 0,
+      unitSellCents,
+      embeddedCostCents: null,
+      targetGm: null,
+      hours: null,
+      sortOrder,
+      components: [],
+    }
+  }
+
+  it('prices flat catalog units as qty × unit sell and leaves Sq. Ft. lines on the area engine', () => {
+    const main = section({
+      squareFeet: 342_000,
+      services: [
+        svc('Mowing & Edging', 12, 350, 'Sq. Ft.', 0),
+        svc('Landscape Bed Maintenance', 12, 200, 'Sq. Ft.', 1),
+        svc('Fertilization', 4, 300, 'Sq. Ft.', 2),
+        svc('Weed Control', 6, 200, 'LF', 3),
+        svc('Tree Canopy Trimming', 4, 250, 'CT', 4),
+      ],
+    })
+    const entrance = section({
+      id: 's2',
+      squareFeet: 28_500,
+      services: [
+        svc('Shrub & Hedge Trimming', 6, 1400, 'Sq. Ft.', 0),
+        svc('Irrigation System Maint.', 12, 1000, 'CT', 1),
+        svc('Mulch Application', 1, 420_000, 'EA', 2),
+        svc('Annual Flower Installation', 1, 860_000, 'CT', 3),
+      ],
+    })
+    expect(sectionTotal(main, 'maintenance')).toBe(2_669_800)
+    expect(sectionTotal(entrance, 'maintenance')).toBe(1_531_400)
+    const mulch = entrance.services.find((s) => s.label === 'Mulch Application')!
+    const flowers = entrance.services.find((s) => s.label === 'Annual Flower Installation')!
+    expect(lineSellCents('maintenance', entrance.squareFeet, mulch.unitSellCents ?? 0, mulch.qty, 0, mulch.catalogUom)).toBe(420_000)
+    expect(lineSellCents('maintenance', entrance.squareFeet, flowers.unitSellCents ?? 0, flowers.qty, 0, flowers.catalogUom)).toBe(860_000)
   })
 })
 

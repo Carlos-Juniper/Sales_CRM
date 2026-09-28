@@ -94,3 +94,17 @@ class TestBillingTypeResolution:
         )
         assert out["scopeText"] == "Juniper will mow…"
         assert out["serviceType"] == "Turf Area"
+
+    def test_catalog_uom_is_separate_from_the_line_uom(self):
+        """Pricing reads catalog_items.uom. The seed stores '/yr' on the line."""
+        out = _service_out(
+            make_row(uom="/yr"),
+            [],
+            {"uom": "EA", "billing_type": "one_time"},
+        )
+        assert out["uom"] == "/yr"
+        assert out["catalogUom"] == "EA"
+
+    def test_missing_catalog_item_has_no_catalog_uom(self):
+        out = _service_out(make_row(catalog_item_id=None), [], None)
+        assert out["catalogUom"] is None

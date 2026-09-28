@@ -16,7 +16,7 @@ import { BillingTypeSelect } from './BillingTypeSelect'
 import type { EstimateSection, SectionService } from '@/types/estimating'
 import {
   acresFromSqft,
-  maintServiceLine,
+  lineSellCents,
   per1000SfRead,
   sectionTotal,
 } from '@/lib/estimating/calc'
@@ -68,11 +68,13 @@ function ServiceRow({
   granularity: Record<string, string>
   onGranularityChange: SectionCardProps['onGranularityChange']
 }) {
-  const lineCents = maintServiceLine(
+  const lineCents = lineSellCents(
+    'maintenance',
     section.squareFeet,
     svc.unitSellCents ?? 0,
     svc.qty,
     svc.complexityPct,
+    svc.catalogUom,
   )
   const overridden = isComplexityOverridden(svc.complexityPct)
   const gran = granularityFor(svc.label)

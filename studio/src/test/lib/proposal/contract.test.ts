@@ -11,6 +11,7 @@ import {
   buildContractTotals,
   buildPaymentSchedule,
 } from '@/lib/proposal/contract'
+import { contractTotal } from '@/lib/estimating/calc'
 import type { Estimate } from '@/types/estimating'
 
 // Helper to create a minimal maintenance estimate
@@ -23,6 +24,8 @@ function makeEstimate(
       unitSellCents: number | null
       complexityPct: number
       billingType?: 'recurring' | 'one_time' | null
+      /** catalog_items.uom. The line uom stays '/yr', matching the seed. */
+      catalogUom?: string | null
     }>
   }>,
   serviceStartDate?: string | null,
@@ -68,6 +71,7 @@ function makeEstimate(
         label: svc.label,
         qty: svc.qty,
         uom: '/yr',
+        catalogUom: svc.catalogUom,
         complexityPct: svc.complexityPct,
         unitSellCents: svc.unitSellCents,
         embeddedCostCents: null,
@@ -408,5 +412,64 @@ describe('buildPaymentSchedule', () => {
       expect(rows.find((r) => r.label === 'Mulch')?.isRecurring).toBe(false)
       expect(scheduled).toBeLessThan(totals.extPriceCents)
     })
+  })
+})
+
+// Seeded by scripts/seed_contract_estimate.py against catalog UOMs in
+// sql/migrations/009_seed_catalog_items.sql. Every line uom is '/yr'.
+// Flat unit sells come from ONE_TIME_UNIT_PRICES.
+describe('Coral Bay seeded contract', () => {
+  const estimate = makeEstimate([
+    {
+      squareFeet: 342_000,
+      services: [
+        { label: 'Mowing & Edging', qty: 12, unitSellCents: 350, complexityPct: 0, catalogUom: 'Sq. Ft.' },
+        { label: 'Landscape Bed Maintenance', qty: 12, unitSellCents: 200, complexityPct: 0, catalogUom: 'Sq. Ft.' },
+        { label: 'Fertilization', qty: 4, unitSellCents: 300, complexityPct: 0, catalogUom: 'Sq. Ft.' },
+        { label: 'Weed Control', qty: 6, unitSellCents: 200, complexityPct: 0, catalogUom: 'LF' },
+        { label: 'Tree Canopy Trimming', qty: 4, unitSellCents: 250, complexityPct: 0, catalogUom: 'CT' },
+      ],
+    },
+    {
+      squareFeet: 28_500,
+      services: [
+        { label: 'Shrub & Hedge Trimming', qty: 6, unitSellCents: 1400, complexityPct: 0, catalogUom: 'Sq. Ft.' },
+        { label: 'Irrigation System Maint.', qty: 12, unitSellCents: 1000, complexityPct: 0, catalogUom: 'CT' },
+        { label: 'Mulch Application', qty: 1, unitSellCents: 420_000, complexityPct: 0, billingType: 'one_time', catalogUom: 'EA' },
+        { label: 'Annual Flower Installation', qty: 1, unitSellCents: 860_000, complexityPct: 0, billingType: 'one_time', catalogUom: 'CT' },
+      ],
+    },
+  ])
+
+  it('prints mulch and flowers as qty × unit sell on the 28,500 sq ft section', () => {
+    const rows = buildContractRows(estimate)
+    const mulch = rows.find((r) => r.label === 'Mulch Application')
+    const flowers = rows.find((r) => r.label === 'Annual Flower Installation')
+    // Old per-1,000 path: 28.5 × 420,000 = $119,700 and 28.5 × 860,000 = $245,100.
+    expect(mulch?.priceEachCents).toBe(420_000)
+    expect(mulch?.extPriceCents).toBe(420_000)
+    expect(flowers?.priceEachCents).toBe(860_000)
+    expect(flowers?.extPriceCents).toBe(860_000)
+    expect(mulch?.isRecurring).toBe(false)
+    expect(flowers?.isRecurring).toBe(false)
+  })
+
+  it('leaves the square-foot services on the per-1,000-sf engine', () => {
+    const rows = buildContractRows(estimate)
+    const shrub = rows.find((r) => r.label === 'Shrub & Hedge Trimming')
+    const mowing = rows.find((r) => r.label === 'Mowing & Edging')
+    expect(shrub?.extPriceCents).toBe(239_400)
+    expect(shrub?.priceEachCents).toBe(39_900)
+    expect(mowing?.extPriceCents).toBe(1_436_400)
+  })
+
+  it('prices the other non-area catalog units as flat and matches the contract total', () => {
+    const rows = buildContractRows(estimate)
+    expect(rows.find((r) => r.label === 'Weed Control')?.extPriceCents).toBe(1_200)
+    expect(rows.find((r) => r.label === 'Tree Canopy Trimming')?.extPriceCents).toBe(1_000)
+    expect(rows.find((r) => r.label === 'Irrigation System Maint.')?.extPriceCents).toBe(12_000)
+    // Was $404,814.00 when every line went through the per-1,000 path.
+    expect(buildContractTotals(rows).totalPriceCents).toBe(4_201_200)
+    expect(contractTotal(estimate)).toBe(4_201_200)
   })
 })

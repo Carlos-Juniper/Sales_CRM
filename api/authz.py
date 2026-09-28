@@ -470,10 +470,9 @@ async def approval_ceiling_cents(role: Optional[str]) -> Optional[int]:
 
     The maintenance and install ladders carry the same $ bands per role, so
     keying on role_key alone is unambiguous. A role with no tier rows yields
-    0 — it can approve nothing. admin and vp_sales have unbounded rows
-    (max_value_cents NULL), seeded by migration 068, so their ceiling is
-    unlimited. require_approver still admits them because they sit in
-    APPROVER_ROLES.
+    0 — it can approve nothing. Migration 068 seeds admin and vp_sales with
+    a NULL max, which is unlimited until someone edits those rows in
+    Settings. A later finite max_value_cents is the ceiling.
     """
     rows = await query(
         "SELECT max_value_cents FROM approval_tiers WHERE role_key = %s",

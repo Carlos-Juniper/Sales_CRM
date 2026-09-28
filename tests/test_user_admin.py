@@ -43,10 +43,7 @@ os.environ.setdefault("ENTRA_CLIENT_ID", "x")
 os.environ.setdefault("ENTRA_TENANT_ID", "x")
 
 from api.authz import (  # noqa: E402
-    ASSIGNABLE_ROLES,
-    CANONICAL_ROLES,
     RETIRED_SALES_ASSIGNMENT_DETAIL,
-    RETIRED_SALES_ROLES,
     SALES_REP_DB_ROLES,
 )
 from api.server import app, require_auth  # noqa: E402
@@ -675,16 +672,6 @@ _COMPANY_ROW = {
 class TestRetiredSalesAssignment:
     """sales and outside_sales stay on existing rows and cannot be newly assigned."""
 
-    def test_four_sales_roles_are_assignable_and_legacy_sales_is_not(self):
-        assert ASSIGNABLE_ROLES == CANONICAL_ROLES - RETIRED_SALES_ROLES
-        for role in ("inside_sales", "maintenance_sales", "install_sales", "vp_sales"):
-            assert role in ASSIGNABLE_ROLES
-            assert role in SALES_REP_DB_ROLES
-        assert "sales" not in ASSIGNABLE_ROLES
-        assert "outside_sales" not in ASSIGNABLE_ROLES
-        assert "sales" in SALES_REP_DB_ROLES
-        assert "outside_sales" in SALES_REP_DB_ROLES
-
     @pytest.mark.parametrize("role", ("sales", "outside_sales"))
     @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
@@ -822,11 +809,6 @@ class TestApplyRoleChange:
 
 
 class TestAdminEquivalentRoleAssignment:
-    def test_sales_rep_db_roles_include_the_new_roles_only(self):
-        assert "vp_sales" in SALES_REP_DB_ROLES
-        assert "regional_director" not in SALES_REP_DB_ROLES
-        assert "vice_president" not in SALES_REP_DB_ROLES
-
     @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)

@@ -1257,13 +1257,20 @@ def _attachment_out(r: dict) -> dict:
 # changing a ladder/band/scope/formula is a row edit, never a code deploy.
 
 def _approval_tier_out(r: dict) -> dict:
+    """CamelCase one approval_tiers row.
+
+    A NULL max stays null. admin and vp_sales (migration 068) are ordinary
+    rows: Settings edits their ceiling, and this mapper does not replace a
+    null max with an unlimited constant.
+    """
+    max_cents = r["max_value_cents"]
     return {
         "id": r["id"],
         "roleKey": r["role_key"],
         "label": r["label"],
         "minValueCents": int(r["min_value_cents"]),
-        "maxValueCents": None if r["max_value_cents"] is None else int(r["max_value_cents"]),
-        "order": r["tier_order"],
+        "maxValueCents": None if max_cents is None else int(max_cents),
+        "order": int(r["tier_order"]),
         "estimateType": r["estimate_type"],
     }
 
@@ -3359,6 +3366,12 @@ def register(app, require_auth) -> None:
         estimate_type: Optional[str] = Query(default=None),
         _user: dict = Depends(require_auth),
     ) -> list:
+        """Every approval_tiers row, ordered by tier_order.
+
+        Includes the admin and vp_sales rows seeded by migration 068. roleKey
+        is the stored value, and a NULL max_value_cents is null in the JSON
+        so the Settings form can show and edit that ceiling.
+        """
         if estimate_type is not None and estimate_type not in ("maintenance", "install"):
             raise HTTPException(
                 status_code=400, detail="estimate_type must be maintenance or install"

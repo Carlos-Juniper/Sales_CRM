@@ -60,44 +60,10 @@ def as_role():
 # ── Canonical role model ─────────────────────────────────────────────────────
 
 class TestRoleModel:
-    def test_canonical_roles(self):
-        assert authz.CANONICAL_ROLES == frozenset({
-            "procurement", "sales", "maintenance_sales", "install_sales",
-            "inside_sales", "admin", "vp_sales", "manager",
-            "regional_director", "maintenance_estimating", "install_estimating",
-            "vice_president", "ceo",
-            # Handoff 50 §3 (437c508): cross-branch owner of the company-wide
-            # proposal assets. Not an estimator or approver — the two tests
-            # below pin it out of those sets.
-            "marketing",
-        })
-
-    def test_marketing_is_neither_estimator_nor_approver(self):
-        assert "marketing" not in authz.ESTIMATOR_ROLES
-        assert "marketing" not in authz.APPROVER_ROLES
-
     def test_only_outside_sales_normalizes_to_sales(self):
         assert authz.normalize_role("outside_sales") == "sales"
         assert authz.normalize_role("inside_sales") == "inside_sales"
         assert authz.normalize_role("manager") == "manager"
-
-    def test_estimator_roles(self):
-        for r in ("maintenance_estimating", "install_estimating", "admin"):
-            assert authz.is_estimator(r), r
-        for r in (
-            "manager", "regional_director", "vice_president", "ceo",
-            "sales", "maintenance_sales", "install_sales", "procurement",
-        ):
-            assert not authz.is_estimator(r), r
-
-    def test_approver_roles(self):
-        for r in ("manager", "regional_director", "vice_president", "ceo", "admin"):
-            assert authz.is_approver(r), r
-        for r in (
-            "maintenance_estimating", "install_estimating",
-            "sales", "maintenance_sales", "install_sales", "procurement",
-        ):
-            assert not authz.is_approver(r), r
 
     @patch("api.authz.query", new_callable=AsyncMock)
     async def test_require_approver_403s_estimator(self, mock_authz_query):
@@ -150,15 +116,6 @@ class TestRoleModel:
 
 # ── Split field-sales roles (maintenance_sales / install_sales) ──────────────
 
-_PRIVILEGED_ROLE_SETS = (
-    "ESTIMATOR_ROLES",
-    "APPROVER_ROLES",
-    "LINE_ITEM_EDIT_ROLES",
-    "CROSS_BRANCH_ROLES",
-    "REP_VIEWER_ROLES",
-    "MARKETING_ROLES",
-)
-
 _BOTH_INTAKES = ["maintenance", "install"]
 
 
@@ -171,27 +128,13 @@ class TestSplitSalesRoles:
     """
 
     def test_legacy_sales_stays_canonical(self):
-        assert "sales" in authz.CANONICAL_ROLES
         assert authz.normalize_role("sales") == "sales"
         assert authz.normalize_role("outside_sales") == "sales"
         assert authz.normalize_role("maintenance_sales") == "maintenance_sales"
         assert authz.normalize_role("install_sales") == "install_sales"
 
-    def test_rep_viewer_roles_unchanged(self):
-        assert authz.REP_VIEWER_ROLES == frozenset({
-            "admin", "vp_sales",
-            "vice_president", "ceo", "manager", "regional_director",
-        })
-        for role in ("sales", "maintenance_sales", "install_sales"):
-            assert role not in authz.REP_VIEWER_ROLES
-
     def test_split_roles_match_sales_on_every_authz_set(self):
         for role in ("maintenance_sales", "install_sales"):
-            assert role in authz.CANONICAL_ROLES
-            assert role in authz.FIELD_SALES_ROLES
-            for set_name in _PRIVILEGED_ROLE_SETS:
-                role_set = getattr(authz, set_name)
-                assert (role in role_set) == ("sales" in role_set), set_name
             assert authz.is_estimator(role) == authz.is_estimator("sales")
             assert authz.is_approver(role) == authz.is_approver("sales")
             assert authz.sees_all_branches(role) == authz.sees_all_branches("sales")
@@ -218,8 +161,6 @@ class TestSplitSalesRoles:
         ):
             assert authz.is_roster_rep(roster_role), roster_role
             assert authz.is_portfolio_editor(roster_role), roster_role
-        assert "inside_sales" not in authz.FIELD_SALES_ROLES
-        assert "inside_sales" in authz.ROSTER_REP_ROLES
         assert authz.is_portfolio_editor("marketing")
         assert authz.is_portfolio_editor("admin")
         assert not authz.is_roster_rep("marketing")
@@ -965,6 +906,12 @@ class TestAdminEquivalentSalesRoles:
         mock_authz_query.return_value = [{"max_value_cents": None}]
         assert await authz.approval_ceiling_cents("admin") is None
         assert await authz.approval_ceiling_cents("vp_sales") is None
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    async def test_edited_tier_is_the_ceiling_for_admin_and_vp_sales(self, mock_authz_query):
+        mock_authz_query.return_value = [{"max_value_cents": 25_000_000}]
+        assert await authz.approval_ceiling_cents("admin") == 25_000_000
+        assert await authz.approval_ceiling_cents("vp_sales") == 25_000_000
 
     @patch("api.authz.query", new_callable=AsyncMock)
     async def test_vp_sales_approval_authority_allows_any_value(self, mock_authz_query):

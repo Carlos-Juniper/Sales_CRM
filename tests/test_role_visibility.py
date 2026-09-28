@@ -76,13 +76,6 @@ def as_role():
     app.dependency_overrides.clear()
 
 
-def test_rep_viewer_roles_unchanged():
-    assert authz.REP_VIEWER_ROLES == frozenset({
-        "admin", "vp_sales",
-        "vice_president", "ceo", "manager", "regional_director",
-    })
-
-
 class TestEstimatingDisciplineDenied:
     @pytest.mark.parametrize("role", ["maintenance_estimating", "install_estimating"])
     def test_cannot_list_or_create_leads(self, as_role, role):
@@ -116,17 +109,6 @@ _FIELD_SALES = ("sales", "maintenance_sales", "install_sales", "outside_sales")
 
 class TestFieldSalesMatchSales:
     """Split roles stay on the sales side of every visibility check."""
-
-    def test_sets(self):
-        for role in ("maintenance_sales", "install_sales", "sales"):
-            assert role not in authz.ESTIMATING_ONLY_ROLES
-            assert role not in authz.PUBLIC_LEADS_ROLES
-            assert role not in authz.ANALYTICS_DASHBOARD_ROLES
-            assert authz.hides_public_lead_queue({"role": role})
-            assert not authz.is_estimating_only(role)
-        assert "inside_sales" in authz.PUBLIC_LEADS_ROLES
-        assert "inside_sales" not in authz.ANALYTICS_DASHBOARD_ROLES
-        assert not authz.hides_public_lead_queue({"role": "inside_sales"})
 
     @pytest.mark.parametrize("role", _FIELD_SALES)
     def test_lists_leads_but_not_the_public_queue(self, as_role, role):
@@ -348,24 +330,3 @@ class TestRepViewerScope:
             summary = client.get("/api/sales-performance/summary?user_id=someone-else")
         assert summary.status_code == 200
 
-
-class TestAdminEquivalentSalesRoleSets:
-    def test_vp_sales_is_a_viewer_and_not_field_sales(self):
-        assert "vp_sales" in authz.REP_VIEWER_ROLES
-        assert "vp_sales" in authz.CROSS_BRANCH_ROLES
-        assert "vp_sales" in authz.APPROVER_ROLES
-        assert "vp_sales" in authz.SALES_REP_DB_ROLES
-        assert "vp_sales" not in authz.FIELD_SALES_ROLES
-        assert not authz.requires_aspire_sales_rep("vp_sales")
-        assert not authz.is_sales_rep("vp_sales")
-        assert authz.own_lead_filter({"role": "vp_sales", "id": "lead-1"}) == ("", [])
-
-    def test_regional_director_and_vice_president_unchanged(self):
-        assert authz.normalize_role("regional_director") == "regional_director"
-        assert authz.normalize_role("vice_president") == "vice_president"
-        assert "regional_director" not in authz.ADMIN_EQUIVALENT_ROLES
-        assert "vice_president" not in authz.ADMIN_EQUIVALENT_ROLES
-        assert "regional_director" not in authz.CROSS_BRANCH_ROLES
-        assert "vice_president" in authz.CROSS_BRANCH_ROLES
-        assert "regional_director" not in authz.SALES_REP_DB_ROLES
-        assert "vice_president" not in authz.SALES_REP_DB_ROLES

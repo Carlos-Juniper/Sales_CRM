@@ -1425,34 +1425,69 @@ class TestMigration063:
 
 
 class TestMigration067:
-    """067 only rewrites legacy sales roles to maintenance_sales."""
+    """067 rewrites stored sales and outside_sales rows to maintenance_sales."""
 
     PATH = REPO / "sql" / "migrations" / "067_legacy_sales_roles.sql"
 
-    def test_sql_does_not_grant_vp_sales(self):
-        text = self.PATH.read_text(encoding="utf-8")
-        stmts = M.split_statements(text)
-        assert len(stmts) == 1
-        stmt = stmts[0]
-        assert stmt.split()[0].upper() == "UPDATE"
-        assert "SET role = 'maintenance_sales'" in stmt
-        assert "role IN ('sales', 'outside_sales')" in stmt
-        upper = stmt.upper()
-        assert "VP_SALES" not in upper
-        assert "LIKE" not in upper
-        assert "REGEXP" not in upper
+    def test_apply_rewrites_legacy_sales_and_leaves_other_roles(self):
+        import sqlite3
+
+        raw = sqlite3.connect(":memory:")
+        raw.row_factory = sqlite3.Row
+        raw.execute(
+            "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, role TEXT NOT NULL)"
+        )
+        raw.executemany(
+            "INSERT INTO users (id, name, role) VALUES (?, ?, ?)",
+            [
+                ("u-michelle", "Michelle Cady", "sales"),
+                ("u-rodrigo", "Rodrigo Leon", "outside_sales"),
+                ("u-kept", "Already Maintenance", "maintenance_sales"),
+                ("u-vp", "Already VP", "vp_sales"),
+                ("u-admin", "Admin", "admin"),
+                ("u-mgr", "Manager", "manager"),
+            ],
+        )
+        raw.commit()
+
+        class _Cursor:
+            def __init__(self, cur):
+                self._cur = cur
+
+            def __enter__(self):
+                return self._cur
+
+            def __exit__(self, *_args):
+                self._cur.close()
+                return False
+
+        class _Conn:
+            def cursor(self):
+                return _Cursor(raw.cursor())
+
+        conn = _Conn()
+        M.exec_file(conn, self.PATH)
+        roles = {
+            row["id"]: row["role"]
+            for row in raw.execute("SELECT id, role FROM users ORDER BY id")
+        }
+        assert roles == {
+            "u-admin": "admin",
+            "u-kept": "maintenance_sales",
+            "u-mgr": "manager",
+            "u-michelle": "maintenance_sales",
+            "u-rodrigo": "maintenance_sales",
+            "u-vp": "vp_sales",
+        }
+        assert "vp_sales" not in {roles["u-michelle"], roles["u-rodrigo"]}
+
+        M.exec_file(conn, self.PATH)
+        again = {
+            row["id"]: row["role"]
+            for row in raw.execute("SELECT id, role FROM users ORDER BY id")
+        }
+        assert again == roles
         assert "067_legacy_sales_roles" not in M._DETECT
-        for name in (
-            "exact_first_last",
-            "matches_michelle_cady",
-            "michelle_match_error",
-            "plan_legacy_sales_migration",
-            "apply_067",
-            "detect_067",
-            "_select_legacy_sales_users",
-            "_VP_SALES_GRANT_SQL",
-        ):
-            assert not hasattr(M, name), name
 
 
 class TestMigration068:

@@ -197,6 +197,56 @@ class TestApprovalTiers:
             "estimateType": "install",
         }]
 
+    def test_admin_and_vp_sales_rows_round_trip_with_a_null_ceiling(self, authed):
+        """Migration 068's rows are editable data, not an unlimited constant.
+
+        A NULL max stays null. After Settings writes a finite max, that
+        number is what the form reads back.
+        """
+        seeded = [
+            _tier_row(id="tier-maint-admin", role_key="admin", label="Admin",
+                      min_value_cents=0, max_value_cents=None, tier_order=5),
+            _tier_row(id="tier-inst-admin", role_key="admin", label="Admin",
+                      min_value_cents=0, max_value_cents=None, tier_order=5,
+                      estimate_type="install"),
+            _tier_row(id="tier-maint-vp-sales", role_key="vp_sales", label="VP of Sales",
+                      min_value_cents=0, max_value_cents=None, tier_order=5),
+            _tier_row(id="tier-inst-vp-sales", role_key="vp_sales", label="VP of Sales",
+                      min_value_cents=0, max_value_cents=None, tier_order=5,
+                      estimate_type="install"),
+        ]
+        with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
+            mock_query.return_value = seeded
+            res = client.get("/api/estimating/config/approval-tiers")
+        assert res.status_code == 200
+        body = res.json()
+        assert [row["roleKey"] for row in body] == ["admin", "admin", "vp_sales", "vp_sales"]
+        assert [row["id"] for row in body] == [
+            "tier-maint-admin", "tier-inst-admin",
+            "tier-maint-vp-sales", "tier-inst-vp-sales",
+        ]
+        assert all(row["maxValueCents"] is None for row in body)
+        assert all(row["minValueCents"] == 0 for row in body)
+        assert {row["estimateType"] for row in body} == {"maintenance", "install"}
+
+        edited = _tier_row(
+            id="tier-maint-vp-sales", role_key="vp_sales", label="VP of Sales",
+            min_value_cents=0, max_value_cents=25_000_000, tier_order=5,
+        )
+        with patch("api.estimating.query", new_callable=AsyncMock) as mock_query:
+            mock_query.return_value = [edited]
+            res = client.get("/api/estimating/config/approval-tiers?estimate_type=maintenance")
+        assert res.status_code == 200
+        assert res.json() == [{
+            "id": "tier-maint-vp-sales",
+            "roleKey": "vp_sales",
+            "label": "VP of Sales",
+            "minValueCents": 0,
+            "maxValueCents": 25_000_000,
+            "order": 5,
+            "estimateType": "maintenance",
+        }]
+
 
 # ── GET /api/estimating/config/margin-bands ──────────────────────────────────
 

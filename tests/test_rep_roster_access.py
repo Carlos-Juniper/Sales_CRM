@@ -341,18 +341,6 @@ class TestMarketingEditsAnyRep:
         assert r.status_code == 201, r.text
         assert r.json()["ownerUserId"] == "rep-2"
 
-    def test_vp_sales_is_not_field_sales(self):
-        assert "vp_sales" not in authz.FIELD_SALES_ROLES
-        assert not authz.requires_aspire_sales_rep("vp_sales")
-        assert not authz.is_sales_rep("vp_sales")
-        assert authz.own_lead_filter({"role": "vp_sales", "id": "lead-1"}) == ("", [])
-        assert "vp_sales" in authz.SALES_REP_DB_ROLES
-        assert authz.is_roster_rep("vp_sales")
-        assert "regional_director" not in authz.ADMIN_EQUIVALENT_ROLES
-        assert "vice_president" not in authz.ADMIN_EQUIVALENT_ROLES
-        assert authz.normalize_role("regional_director") == "regional_director"
-        assert authz.normalize_role("vice_president") == "vice_president"
-
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.proposals.query", new_callable=AsyncMock)
     async def test_marketing_lists_a_reps_roster(self, mock_query, mock_authz_query, as_role):

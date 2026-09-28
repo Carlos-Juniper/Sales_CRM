@@ -19,10 +19,12 @@ Env vars (same as scripts/migrate.py), used only when not --dry-run:
     MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB
     MYSQL_SOCKET_PATH   — Cloud SQL Auth Proxy socket; overrides host/port
 
-``inventory_id`` must already be 10 digits. Short numeric ids are not
-zero-padded: in the Aspire export the only short id is ``101``, repeated
-for 21 different products, so padding would collapse them into one fake code.
-Those rows are skipped and written to the rejects CSV.
+``inventory_id`` is stored exactly as the sheet gives it, after trimming
+whitespace. It is never zero-padded and it does not have to be 10 digits.
+An empty id is skipped. An id longer than 64 characters is skipped. An id
+that maps to more than one distinct product is skipped (every row for that
+id). A Stock Items row replacing a different NONStock Items row is not a
+conflict: the stock row is the one stored.
 
 A third sheet, "Template Stock Items STENS", is not one of the two sheets
 this loader reads. Its ids are counted and left unloaded.
@@ -52,6 +54,11 @@ _PKG = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 SOURCE = "aspire_import"
 ENTERED_BY = "scripts/load_materials_catalog.py"
 BATCH = 400
+INVENTORY_ID_MAX = 64
+CONFLICT_REASONS = frozenset({
+    "conflicting_duplicate_inventory_id",
+    "stock_sheet_conflict",
+})
 
 # Schema limits. A value past these is rejected rather than clipped.
 _LIMITS = {
@@ -98,9 +105,15 @@ class MaterialItem:
 @dataclass(frozen=True)
 class Reject:
     sheet: str
+    row_number: int
     inventory_id: str
     reason: str
     description: str
+    item_class: str
+    aspire_category: str
+    uom: str
+    vendor: str
+    last_cost: str
 
 
 @dataclass
@@ -112,7 +125,6 @@ class LoadPlan:
     nonstock_rows: int = 0
     overlap: int = 0
     stock_overrides: int = 0
-    stock_override_conflicts: int = 0
     items: list[MaterialItem] = field(default_factory=list)
     rejects: list[Reject] = field(default_factory=list)
     zero_costs: int = 0
@@ -163,10 +175,12 @@ def _sheet_targets(z: zipfile.ZipFile) -> list[tuple[str, str]]:
     return out
 
 
-def _sheet_rows(z: zipfile.ZipFile, target: str, shared: list[str]) -> list[dict[str, str | None]]:
+def _sheet_rows(z: zipfile.ZipFile, target: str, shared: list[str]) -> list[tuple[int, dict[str, str | None]]]:
     root = ET.fromstring(z.read(target))
-    rows: list[dict[str, str | None]] = []
-    for row in root.iter(_M + "row"):
+    rows: list[tuple[int, dict[str, str | None]]] = []
+    for fallback, row in enumerate(root.iter(_M + "row"), start=1):
+        raw_number = row.get("r") or ""
+        number = int(raw_number) if raw_number.isdigit() else fallback
         vals: dict[str, str | None] = {}
         for cell in row:
             ref = cell.get("r") or ""
@@ -182,7 +196,7 @@ def _sheet_rows(z: zipfile.ZipFile, target: str, shared: list[str]) -> list[dict
             else:
                 text = value.text
             vals[col] = text
-        rows.append(vals)
+        rows.append((number, vals))
     return rows
 
 
@@ -190,9 +204,9 @@ def _norm_header(name: str) -> str:
     return " ".join(name.replace("\n", " ").split()).casefold()
 
 
-def _header_fields(rows: list[dict[str, str | None]]) -> tuple[int, dict[str, str]]:
+def _header_fields(rows: list[tuple[int, dict[str, str | None]]]) -> tuple[int, dict[str, str]]:
     """Return (header index, column letter → normalized header)."""
-    for i, row in enumerate(rows):
+    for i, (_number, row) in enumerate(rows):
         headers = {}
         seen: Counter[str] = Counter()
         for col, raw in row.items():
@@ -206,10 +220,10 @@ def _header_fields(rows: list[dict[str, str | None]]) -> tuple[int, dict[str, st
     raise ValueError("sheet has no Inventory ID header")
 
 
-def _records(rows: list[dict[str, str | None]]) -> list[dict[str, list[str | None]]]:
+def _records(rows: list[tuple[int, dict[str, str | None]]]) -> list[tuple[int, dict[str, list[str | None]]]]:
     header_at, headers = _header_fields(rows)
     out = []
-    for row in rows[header_at + 1 :]:
+    for number, row in rows[header_at + 1 :]:
         fields: dict[str, list[str | None]] = defaultdict(list)
         empty = True
         for col, key in headers.items():
@@ -220,7 +234,7 @@ def _records(rows: list[dict[str, str | None]]) -> list[dict[str, list[str | Non
             if value not in (None, ""):
                 empty = False
         if not empty:
-            out.append(fields)
+            out.append((number, fields))
     return out
 
 
@@ -235,7 +249,7 @@ def _sheet_kind(name: str) -> str | None:
     return None
 
 
-def _open_sheets(workbook: Path) -> tuple[str, str, list[tuple[str, list[dict[str, list[str | None]]]]], list[tuple[str, int]]]:
+def _open_sheets(workbook: Path) -> tuple[str, str, list[tuple[str, list[tuple[int, dict[str, list[str | None]]]]]], list[tuple[str, int]]]:
     with zipfile.ZipFile(workbook) as z:
         shared = _shared_strings(z)
         targets = _sheet_targets(z)
@@ -342,15 +356,69 @@ def _cost_uom(item_uoms: tuple[str | None, str | None, str | None]) -> str | Non
     return purchase or base or sales
 
 
-def _map_row(fields: dict[str, list[str | None]], *, is_stock: int, sheet: str) -> tuple[MaterialItem | None, Reject | None, str]:
-    inventory_id = _first(fields.get("inventory id")) or ""
+def _display_cost(raw: str | None) -> str:
+    """Sheet cost for the rejects file. Excel floats are shown to the cent."""
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    try:
+        amount = Decimal(text)
+    except InvalidOperation:
+        return text
+    return format(amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
+
+
+def _sheet_view(fields: dict[str, list[str | None]]) -> dict[str, str]:
+    """Sheet text for the rejects file. Item class follows the loader's column choice."""
+    classes = [str(v).strip() for v in (fields.get("item class") or []) if v and str(v).strip()]
+    item_class = classes[1] if len(classes) > 1 else (classes[0] if classes else "")
+    vendors = fields.get("preferred vendor - only for purchase items") or []
+    vendor_name = _first(vendors[:1]) or ""
+    vendor_id = _first(vendors[1:2]) if len(vendors) > 1 else ""
+    if vendor_name and vendor_id:
+        vendor = f"{vendor_name} ({vendor_id})"
+    else:
+        vendor = vendor_name or vendor_id or ""
+    purchase = _first(fields.get("purchase uom")) or ""
+    base = _first(fields.get("base uom")) or ""
+    sales = _first(fields.get("sales uom")) or ""
+    return {
+        "description": _first(fields.get("description")) or "",
+        "item_class": item_class,
+        "aspire_category": _first(fields.get("aspire catalog category")) or "",
+        "uom": purchase or base or sales,
+        "vendor": vendor,
+        "last_cost": _display_cost(_first(fields.get("last cost"))),
+    }
+
+
+def _reject(sheet: str, row_number: int, fields: dict[str, list[str | None]], inventory_id: str, reason: str) -> Reject:
+    view = _sheet_view(fields)
+    return Reject(
+        sheet=sheet,
+        row_number=row_number,
+        inventory_id=inventory_id,
+        reason=reason,
+        description=view["description"],
+        item_class=view["item_class"],
+        aspire_category=view["aspire_category"],
+        uom=view["uom"],
+        vendor=view["vendor"],
+        last_cost=view["last_cost"],
+    )
+
+
+def _map_row(
+    fields: dict[str, list[str | None]], *, row_number: int, is_stock: int, sheet: str,
+) -> tuple[MaterialItem | None, Reject | None, str]:
+    inventory_id = (_first(fields.get("inventory id")) or "").strip()
     description = _first(fields.get("description")) or ""
     if not inventory_id:
-        return None, Reject(sheet, "", "missing_inventory_id", description), "missing"
-    if not (inventory_id.isdigit() and len(inventory_id) == 10):
-        return None, Reject(sheet, inventory_id, "inventory_id_not_10_digits", description), "bad_id"
+        return None, _reject(sheet, row_number, fields, "", "missing_inventory_id"), "missing"
+    if len(inventory_id) > INVENTORY_ID_MAX:
+        return None, _reject(sheet, row_number, fields, inventory_id, "inventory_id_too_long"), "long_id"
     if not description:
-        return None, Reject(sheet, inventory_id, "missing_description", ""), "missing_desc"
+        return None, _reject(sheet, row_number, fields, inventory_id, "missing_description"), "missing_desc"
 
     classes = [v for v in (fields.get("item class") or []) if v and str(v).strip()]
     # The stock sheet has two Item Class columns. The second is the current
@@ -381,7 +449,7 @@ def _map_row(fields: dict[str, list[str | None]], *, is_stock: int, sheet: str) 
         if over:
             too_long.append(key)
     if too_long:
-        return None, Reject(sheet, inventory_id, "value_too_long:" + ",".join(too_long), description), "long"
+        return None, _reject(sheet, row_number, fields, inventory_id, "value_too_long:" + ",".join(too_long)), "long"
 
     cents, cost_status = _cost_cents(fields)
     uom = _cost_uom((texts["purchase_uom"], texts["base_uom"], texts["sales_uom"]))
@@ -429,48 +497,48 @@ def _signature(item: MaterialItem) -> tuple:
     )
 
 
+# A kept row plus the sheet fields needed if it is later rejected.
+_Kept = tuple[MaterialItem, str, int, dict[str, list[str | None]]]
+
+
 def _collapse(
-    sheet: str, rows: list[dict[str, list[str | None]]], *, is_stock: int,
-) -> tuple[dict[str, tuple[MaterialItem, str]], list[Reject], Counter]:
-    """One item per inventory id. Conflicting duplicates are all rejected."""
-    grouped: dict[str, list[tuple[MaterialItem, str]]] = defaultdict(list)
+    sheet: str, rows: list[tuple[int, dict[str, list[str | None]]]], *, is_stock: int,
+) -> tuple[dict[str, _Kept], list[Reject], Counter]:
+    """One item per inventory id. An id with more than one distinct product is rejected."""
+    grouped: dict[str, list[_Kept]] = defaultdict(list)
     rejects: list[Reject] = []
     notes: Counter = Counter()
-    for fields in rows:
-        item, reject, _cost_status = _map_row(fields, is_stock=is_stock, sheet=sheet)
+    for row_number, fields in rows:
+        item, reject, cost_status = _map_row(fields, row_number=row_number, is_stock=is_stock, sheet=sheet)
         if reject is not None:
             rejects.append(reject)
             notes[reject.reason.split(":", 1)[0]] += 1
             continue
         assert item is not None
-        grouped[item.inventory_id].append((item, _cost_status))
+        grouped[item.inventory_id].append((item, cost_status, row_number, fields))
 
-    kept: dict[str, tuple[MaterialItem, str]] = {}
+    kept: dict[str, _Kept] = {}
     for inventory_id, pairs in grouped.items():
-        first, cost_status = pairs[0]
-        if all(_signature(other) == _signature(first) for other, _ in pairs[1:]):
-            kept[inventory_id] = (first, cost_status)
+        first = pairs[0]
+        if all(_signature(other[0]) == _signature(first[0]) for other in pairs[1:]):
+            kept[inventory_id] = first
             if len(pairs) > 1:
                 notes["identical_duplicates_collapsed"] += len(pairs) - 1
             continue
         notes["conflicting_duplicate_inventory_id"] += len(pairs)
-        for item, _ in pairs:
-            rejects.append(Reject(
-                sheet, inventory_id, "conflicting_duplicate_inventory_id", item.description,
+        for _item, _status, row_number, fields in pairs:
+            rejects.append(_reject(
+                sheet, row_number, fields, inventory_id, "conflicting_duplicate_inventory_id",
             ))
     return kept, rejects, notes
 
 
-def _ten_digit_ids(kept: dict[str, tuple[MaterialItem, str]], rejects: list[Reject]) -> set[str]:
+def _ids_of(kept: dict[str, _Kept], rejects: list[Reject]) -> set[str]:
     ids = set(kept)
     for rej in rejects:
-        if rej.inventory_id.isdigit() and len(rej.inventory_id) == 10:
+        if rej.inventory_id:
             ids.add(rej.inventory_id)
     return ids
-
-
-def _overrides(stock: MaterialItem, other: MaterialItem) -> bool:
-    return _signature(stock) != _signature(other)
 
 
 def build_plan(workbook: Path) -> LoadPlan:
@@ -485,28 +553,22 @@ def build_plan(workbook: Path) -> LoadPlan:
         for rej in stock_rejects
         if rej.reason == "conflicting_duplicate_inventory_id"
     }
-    non_ids = _ten_digit_ids(non, non_rejects)
+    non_ids = _ids_of(non, non_rejects)
     items: list[MaterialItem] = []
     statuses: dict[str, str] = {}
     rejects = list(stock_rejects)
     overrides = 0
-    conflicts = 0
-    for inventory_id, (item, _status) in stock.items():
-        if inventory_id not in non_ids:
-            continue
-        overrides += 1
-        other = non.get(inventory_id)
-        # No single non-stock row (its copies disagree, or it was rejected)
-        # means the sheets do not carry the same item.
-        if other is None or _overrides(item, other[0]):
-            conflicts += 1
-    for inventory_id, (item, status) in non.items():
+    for inventory_id in stock:
+        if inventory_id in non_ids:
+            overrides += 1
+    for inventory_id, (item, status, row_number, fields) in non.items():
         if inventory_id in blocked:
-            rejects.append(Reject(
-                non_name, inventory_id, "stock_sheet_conflict", item.description,
-            ))
+            # The stock sheet already disagrees with itself, so the non-stock
+            # row is not a fallback.
+            rejects.append(_reject(non_name, row_number, fields, inventory_id, "stock_sheet_conflict"))
             continue
         if inventory_id in stock:
+            # Stock wins. A different non-stock row is not a conflict.
             continue
         items.append(item)
         statuses[inventory_id] = status
@@ -516,7 +578,7 @@ def build_plan(workbook: Path) -> LoadPlan:
             continue
         rejects.append(rej)
 
-    for inventory_id, (item, status) in stock.items():
+    for inventory_id, (item, status, _row_number, _fields) in stock.items():
         items.append(item)
         statuses[inventory_id] = status
     items.sort(key=lambda item: item.inventory_id)
@@ -526,9 +588,8 @@ def build_plan(workbook: Path) -> LoadPlan:
         ignored_sheets=ignored,
         stock_rows=len(stock_rows),
         nonstock_rows=len(non_rows),
-        overlap=len(_ten_digit_ids(stock, stock_rejects) & non_ids),
+        overlap=len(_ids_of(stock, stock_rejects) & non_ids),
         stock_overrides=overrides,
-        stock_override_conflicts=conflicts,
         items=items,
         rejects=rejects,
         zero_costs=sum(1 for status in statuses.values() if status == "zero"),
@@ -543,7 +604,8 @@ def build_plan(workbook: Path) -> LoadPlan:
 
 def format_summary(plan: LoadPlan, *, dry_run: bool, rejects_path: Path, apply: ApplyResult | None = None) -> str:
     reasons = Counter(rej.reason for rej in plan.rejects)
-    short = sorted({rej.inventory_id for rej in plan.rejects if rej.reason == "inventory_id_not_10_digits" and rej.inventory_id.isdigit()})
+    conflict_rows = [rej for rej in plan.rejects if rej.reason in CONFLICT_REASONS]
+    conflict_ids = {rej.inventory_id for rej in conflict_rows}
     lines = [
         f"materials catalog load ({'dry-run' if dry_run else 'write'})",
         f"  stock sheet: {plan.stock_sheet} rows={plan.stock_rows}",
@@ -554,7 +616,6 @@ def format_summary(plan: LoadPlan, *, dry_run: bool, rejects_path: Path, apply: 
     lines.extend([
         f"  overlap inventory ids: {plan.overlap}",
         f"  stock overrides: {plan.stock_overrides}",
-        f"  stock override conflicts: {plan.stock_override_conflicts}",
         f"  unique items: {len(plan.items)}",
         f"  stock items: {sum(1 for item in plan.items if item.is_stock_item)}",
         f"  nonstock items: {sum(1 for item in plan.items if not item.is_stock_item)}",
@@ -563,19 +624,12 @@ def format_summary(plan: LoadPlan, *, dry_run: bool, rejects_path: Path, apply: 
         f"  zero costs (no price row): {plan.zero_costs}",
         f"  bad costs (item kept, no price row): {plan.bad_costs}",
         f"  identical duplicate rows collapsed: {plan.identical_duplicates}",
+        f"  conflict inventory ids: {len(conflict_ids)}",
+        f"  conflict rows: {len(conflict_rows)}",
         f"  rejects: {len(plan.rejects)}",
     ])
     for reason, count in sorted(reasons.items()):
         lines.append(f"    {reason}: {count}")
-    if short:
-        lines.append(
-            "  short numeric ids not zero-padded: "
-            + ", ".join(f"{value} x{sum(1 for rej in plan.rejects if rej.inventory_id == value)}" for value in short)
-        )
-        lines.append(
-            "  zero-pad decision: no. A short id is only padded when it is a truncated Aspire code."
-            " These values are placeholders shared by different products."
-        )
     lines.append(f"  rejects csv: {rejects_path}")
     if apply is not None:
         lines.extend([
@@ -589,11 +643,65 @@ def format_summary(plan: LoadPlan, *, dry_run: bool, rejects_path: Path, apply: 
 
 def write_rejects(path: Path, rejects: list[Reject]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(rejects, key=lambda rej: (rej.sheet, rej.row_number, rej.inventory_id))
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["sheet", "inventory_id", "reason", "description"])
-        for rej in rejects:
-            writer.writerow([rej.sheet, rej.inventory_id, rej.reason, rej.description])
+        writer.writerow([
+            "reason", "sheet", "row_number", "inventory_id", "description",
+            "item_class", "aspire_category", "uom", "vendor", "last_cost",
+        ])
+        for rej in ordered:
+            writer.writerow([
+                rej.reason, rej.sheet, rej.row_number, rej.inventory_id, rej.description,
+                rej.item_class, rej.aspire_category, rej.uom, rej.vendor, rej.last_cost,
+            ])
+
+
+def _md_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def _id_sort_key(inventory_id: str) -> tuple:
+    if inventory_id.isdigit():
+        return (0, int(inventory_id), inventory_id)
+    return (1, inventory_id)
+
+
+def format_conflict_brief(plan: LoadPlan) -> str:
+    """Markdown a procurement contact can read: one section per conflicting id."""
+    groups: dict[str, list[Reject]] = defaultdict(list)
+    for rej in plan.rejects:
+        if rej.reason in CONFLICT_REASONS:
+            groups[rej.inventory_id].append(rej)
+    lines = [
+        "# Inventory IDs used for more than one product",
+        "",
+        "These inventory IDs were not loaded. Each one appears on the Aspire item workbook as more than one distinct product, so there is no single item to store.",
+        "A Stock Items row that replaces a NONStock Items row is not a conflict and is not listed.",
+        "Rows with a blank inventory ID were skipped separately and are not listed.",
+        "",
+        f"{len(groups)} inventory IDs, {sum(len(rows) for rows in groups.values())} sheet rows.",
+        "",
+    ]
+    for inventory_id in sorted(groups, key=_id_sort_key):
+        rows = sorted(groups[inventory_id], key=lambda rej: (rej.sheet, rej.row_number))
+        lines.append(f"## {inventory_id}")
+        lines.append("")
+        lines.append(f"{len(rows)} rows.")
+        lines.append("")
+        lines.append("| Sheet | Row | Description | Item class | Aspire category | UOM | Vendor | Last cost |")
+        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
+        for rej in rows:
+            lines.append(
+                "| "
+                + " | ".join(_md_cell(part) for part in (
+                    rej.sheet, str(rej.row_number), rej.description, rej.item_class,
+                    rej.aspire_category, rej.uom, rej.vendor, rej.last_cost,
+                ))
+                + " |"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 # ── database ──────────────────────────────────────────────────────────────────
@@ -746,11 +854,19 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="CSV of skipped rows (default: <workbook stem>.rejects.csv in the current directory)",
     )
+    parser.add_argument(
+        "--conflicts",
+        type=Path,
+        help="Markdown brief of inventory ids that map to more than one product",
+    )
     args = parser.parse_args(argv)
     rejects_path = args.rejects or Path.cwd() / f"{args.workbook.stem}.rejects.csv"
 
     plan = build_plan(args.workbook)
     write_rejects(rejects_path, plan.rejects)
+    if args.conflicts is not None:
+        args.conflicts.parent.mkdir(parents=True, exist_ok=True)
+        args.conflicts.write_text(format_conflict_brief(plan), encoding="utf-8")
     if args.dry_run:
         print(format_summary(plan, dry_run=True, rejects_path=rejects_path))
         return 0

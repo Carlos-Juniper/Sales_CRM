@@ -298,14 +298,16 @@ DEALLOCATE PREPARE stmt_add_fk_takeoff;
 
 -- ── 6. Materials item master (the new catalog_items) ───────────────────────
 -- Item master only. Cost lives in catalog_prices. There is no sell price
--- and no margin. inventory_id is the Aspire item code and the upsert key.
--- aspire_catalog_item_id is reserved for Aspire's numeric CatalogItemID,
--- which the spreadsheet does not contain.
+-- and no margin. inventory_id is the Aspire item code exactly as it appears
+-- on the sheet (trimmed, never zero-padded) and the upsert key. Any
+-- non-empty string up to 64 characters is allowed. The primary key keeps it
+-- unique. aspire_catalog_item_id is reserved for Aspire's numeric
+-- CatalogItemID, which the spreadsheet does not contain.
 --
 -- No kit-component table: materials do not roll up into service kits.
 
 CREATE TABLE IF NOT EXISTS catalog_items (
-    inventory_id            VARCHAR(10)  NOT NULL,
+    inventory_id            VARCHAR(64)  NOT NULL,
     aspire_catalog_item_id  BIGINT       DEFAULT NULL,
     description             VARCHAR(255) NOT NULL,
     alternate_name          VARCHAR(255) DEFAULT NULL,
@@ -333,7 +335,7 @@ CREATE TABLE IF NOT EXISTS catalog_items (
     KEY idx_catalog_items_vendor (preferred_vendor_id, vendor_sku),
     KEY idx_catalog_items_manufacturer (manufacturer),
     CONSTRAINT chk_catalog_items_inventory_id
-        CHECK (inventory_id REGEXP '^[0-9]{10}$')
+        CHECK (inventory_id <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ── 7. Cost history ────────────────────────────────────────────────────────
@@ -352,7 +354,7 @@ CREATE TABLE IF NOT EXISTS catalog_items (
 
 CREATE TABLE IF NOT EXISTS catalog_prices (
     id                   VARCHAR(36)  NOT NULL,
-    inventory_id         VARCHAR(10)  NOT NULL,
+    inventory_id         VARCHAR(64)  NOT NULL,
     unit_cost_cents      BIGINT       NOT NULL,
     uom                  VARCHAR(32)  NOT NULL,
     vendor_id            VARCHAR(64)  DEFAULT NULL,
@@ -360,7 +362,7 @@ CREATE TABLE IF NOT EXISTS catalog_prices (
     effective_from       DATE         NOT NULL,
     effective_to         DATE         DEFAULT NULL,
     is_current           TINYINT(1)   NOT NULL DEFAULT 0,
-    current_inventory_id VARCHAR(10)  DEFAULT NULL,
+    current_inventory_id VARCHAR(64)  DEFAULT NULL,
     source               VARCHAR(32)  NOT NULL,
     estimate_id          VARCHAR(36)  DEFAULT NULL,
     entered_by           VARCHAR(255) DEFAULT NULL,
@@ -399,3 +401,118 @@ CREATE TRIGGER trg_catalog_prices_bu
 BEFORE UPDATE ON catalog_prices
 FOR EACH ROW
 SET NEW.current_inventory_id = IF(NEW.is_current = 1, NEW.inventory_id, NULL);
+
+-- ── 8. Widen an inventory id that an earlier draft of this file limited ──
+-- to 10 digits. CREATE TABLE IF NOT EXISTS does not alter an existing
+-- column, and detect_065 stays false until the columns are VARCHAR(64)
+-- and the 10-digit check is gone. Fresh databases already match, so each
+-- statement is a no-op there.
+
+SET @id_len = (
+    SELECT CHARACTER_MAXIMUM_LENGTH
+      FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'catalog_items'
+       AND COLUMN_NAME = 'inventory_id'
+);
+SET @price_len = (
+    SELECT CHARACTER_MAXIMUM_LENGTH
+      FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'catalog_prices'
+       AND COLUMN_NAME = 'inventory_id'
+);
+SET @current_len = (
+    SELECT CHARACTER_MAXIMUM_LENGTH
+      FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'catalog_prices'
+       AND COLUMN_NAME = 'current_inventory_id'
+);
+SET @check_clause = (
+    SELECT CHECK_CLAUSE
+      FROM information_schema.CHECK_CONSTRAINTS
+     WHERE CONSTRAINT_SCHEMA = DATABASE()
+       AND CONSTRAINT_NAME = 'chk_catalog_items_inventory_id'
+);
+
+SET @drop_price_fk = IF(
+    (
+        (@id_len IS NOT NULL AND @id_len < 64)
+        OR (@price_len IS NOT NULL AND @price_len < 64)
+    ) AND (
+        SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'catalog_prices'
+           AND CONSTRAINT_NAME = 'fk_catalog_prices_item'
+           AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+    ) > 0,
+    'ALTER TABLE catalog_prices DROP FOREIGN KEY fk_catalog_prices_item',
+    'SELECT 1'
+);
+PREPARE stmt_drop_price_fk FROM @drop_price_fk;
+EXECUTE stmt_drop_price_fk;
+DEALLOCATE PREPARE stmt_drop_price_fk;
+
+SET @widen_items = IF(
+    @id_len IS NULL OR @id_len >= 64,
+    'SELECT 1',
+    'ALTER TABLE catalog_items MODIFY inventory_id VARCHAR(64) NOT NULL'
+);
+PREPARE stmt_widen_items FROM @widen_items;
+EXECUTE stmt_widen_items;
+DEALLOCATE PREPARE stmt_widen_items;
+
+SET @widen_prices = IF(
+    @price_len IS NULL OR @price_len >= 64,
+    'SELECT 1',
+    'ALTER TABLE catalog_prices MODIFY inventory_id VARCHAR(64) NOT NULL'
+);
+PREPARE stmt_widen_prices FROM @widen_prices;
+EXECUTE stmt_widen_prices;
+DEALLOCATE PREPARE stmt_widen_prices;
+
+SET @widen_current = IF(
+    @current_len IS NULL OR @current_len >= 64,
+    'SELECT 1',
+    'ALTER TABLE catalog_prices MODIFY current_inventory_id VARCHAR(64) DEFAULT NULL'
+);
+PREPARE stmt_widen_current FROM @widen_current;
+EXECUTE stmt_widen_current;
+DEALLOCATE PREPARE stmt_widen_current;
+
+SET @drop_old_check = IF(
+    @check_clause IS NULL OR @check_clause NOT LIKE '%[0-9]{10}%',
+    'SELECT 1',
+    'ALTER TABLE catalog_items DROP CONSTRAINT chk_catalog_items_inventory_id'
+);
+PREPARE stmt_drop_old_check FROM @drop_old_check;
+EXECUTE stmt_drop_old_check;
+DEALLOCATE PREPARE stmt_drop_old_check;
+
+SET @add_id_check = IF(
+    @check_clause IS NULL OR @check_clause NOT LIKE '%[0-9]{10}%',
+    'SELECT 1',
+    'ALTER TABLE catalog_items ADD CONSTRAINT chk_catalog_items_inventory_id CHECK (inventory_id <> '''')'
+);
+PREPARE stmt_add_id_check FROM @add_id_check;
+EXECUTE stmt_add_id_check;
+DEALLOCATE PREPARE stmt_add_id_check;
+
+SET @add_price_fk = IF(
+    (SELECT COUNT(*) FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'catalog_prices') = 0,
+    'SELECT 1',
+    IF(
+        (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'catalog_prices'
+            AND CONSTRAINT_NAME = 'fk_catalog_prices_item'
+            AND CONSTRAINT_TYPE = 'FOREIGN KEY') > 0,
+        'SELECT 1',
+        'ALTER TABLE catalog_prices ADD CONSTRAINT fk_catalog_prices_item FOREIGN KEY (inventory_id) REFERENCES catalog_items (inventory_id) ON DELETE RESTRICT ON UPDATE CASCADE'
+    )
+);
+PREPARE stmt_add_price_fk FROM @add_price_fk;
+EXECUTE stmt_add_price_fk;
+DEALLOCATE PREPARE stmt_add_price_fk;

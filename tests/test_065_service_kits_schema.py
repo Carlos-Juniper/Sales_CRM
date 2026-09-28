@@ -71,6 +71,9 @@ class TestMigration065File:
         assert "available_to_bid" in create
         assert "is_stock_item" in create
         assert "chk_catalog_items_inventory_id" in create
+        assert "VARCHAR(64)" in create
+        assert "inventory_id <> ''" in create
+        assert "[0-9]{10}" not in create
 
     def test_prices_hold_cost_history_without_sell_price(self):
         sql = _executable()
@@ -88,6 +91,8 @@ class TestMigration065File:
         assert "unit_sell" not in prices
         assert "target_gm" not in prices
         assert "fk_catalog_prices_item" in prices
+        assert "current_inventory_id VARCHAR(64)" in prices
+        assert "inventory_id         VARCHAR(64)" in prices
         # Materials are not a kit bill of materials.
         assert "catalog_item_components" not in sql
         assert "material_id" not in sql
@@ -124,6 +129,17 @@ def _flags(**on: bool):
     return table_exists, column_exists, index_exists, foreign_key_exists, trigger_exists
 
 
+def _install_detect(monkeypatch, flags, *, id_len: int = 64, open_id: bool = True):
+    table_exists, column_exists, index_exists, foreign_key_exists, trigger_exists = _flags(**flags)
+    monkeypatch.setattr(M, "table_exists", table_exists)
+    monkeypatch.setattr(M, "column_exists", column_exists)
+    monkeypatch.setattr(M, "index_exists", index_exists)
+    monkeypatch.setattr(M, "foreign_key_exists", foreign_key_exists)
+    monkeypatch.setattr(M, "trigger_exists", trigger_exists)
+    monkeypatch.setattr(M, "column_char_length", lambda _conn, _table, _column: id_len)
+    monkeypatch.setattr(M, "inventory_id_accepts_any_nonempty", lambda _conn: open_id)
+
+
 def _applied_flags() -> dict:
     return {
         "table:service_kits": True,
@@ -146,30 +162,22 @@ def _applied_flags() -> dict:
 
 class TestDetect065:
     def test_false_on_the_pre_migration_kit_table(self, monkeypatch):
-        table_exists, column_exists, index_exists, foreign_key_exists, trigger_exists = _flags(
-            **{
-                "table:catalog_items": True,
-                "column:catalog_items.kit_type": True,
-                "column:catalog_items.unit_cost_cents": True,
-                "column:section_services.catalog_item_id": True,
-                "column:takeoff_lines.catalog_item_id": True,
-            }
-        )
-        monkeypatch.setattr(M, "table_exists", table_exists)
-        monkeypatch.setattr(M, "column_exists", column_exists)
-        monkeypatch.setattr(M, "index_exists", index_exists)
-        monkeypatch.setattr(M, "foreign_key_exists", foreign_key_exists)
-        monkeypatch.setattr(M, "trigger_exists", trigger_exists)
+        _install_detect(monkeypatch, {
+            "table:catalog_items": True,
+            "column:catalog_items.kit_type": True,
+            "column:catalog_items.unit_cost_cents": True,
+            "column:section_services.catalog_item_id": True,
+            "column:takeoff_lines.catalog_item_id": True,
+        }, id_len=0, open_id=False)
         assert M.detect_065(None) is False
 
     def test_true_only_when_every_effect_landed(self, monkeypatch):
-        table_exists, column_exists, index_exists, foreign_key_exists, trigger_exists = _flags(**_applied_flags())
-        monkeypatch.setattr(M, "table_exists", table_exists)
-        monkeypatch.setattr(M, "column_exists", column_exists)
-        monkeypatch.setattr(M, "index_exists", index_exists)
-        monkeypatch.setattr(M, "foreign_key_exists", foreign_key_exists)
-        monkeypatch.setattr(M, "trigger_exists", trigger_exists)
+        _install_detect(monkeypatch, _applied_flags())
         assert M.detect_065(None) is True
+
+    def test_false_while_inventory_id_is_still_ten_digits(self, monkeypatch):
+        _install_detect(monkeypatch, _applied_flags(), id_len=10, open_id=False)
+        assert M.detect_065(None) is False
 
     @pytest.mark.parametrize(
         "missing",
@@ -184,21 +192,11 @@ class TestDetect065:
     def test_partial_apply_is_not_detected(self, monkeypatch, missing):
         flags = _applied_flags()
         flags.pop(missing)
-        table_exists, column_exists, index_exists, foreign_key_exists, trigger_exists = _flags(**flags)
-        monkeypatch.setattr(M, "table_exists", table_exists)
-        monkeypatch.setattr(M, "column_exists", column_exists)
-        monkeypatch.setattr(M, "index_exists", index_exists)
-        monkeypatch.setattr(M, "foreign_key_exists", foreign_key_exists)
-        monkeypatch.setattr(M, "trigger_exists", trigger_exists)
+        _install_detect(monkeypatch, flags)
         assert M.detect_065(None) is False
 
     def test_false_if_materials_table_still_has_kit_columns(self, monkeypatch):
         flags = _applied_flags()
         flags["column:catalog_items.kit_type"] = True
-        table_exists, column_exists, index_exists, foreign_key_exists, trigger_exists = _flags(**flags)
-        monkeypatch.setattr(M, "table_exists", table_exists)
-        monkeypatch.setattr(M, "column_exists", column_exists)
-        monkeypatch.setattr(M, "index_exists", index_exists)
-        monkeypatch.setattr(M, "foreign_key_exists", foreign_key_exists)
-        monkeypatch.setattr(M, "trigger_exists", trigger_exists)
+        _install_detect(monkeypatch, flags)
         assert M.detect_065(None) is False

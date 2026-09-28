@@ -251,7 +251,7 @@ class TestPlan:
         assert only.unit_cost_cents is None
         assert plan.overlap == 1
         assert plan.stock_overrides == 1
-        assert plan.stock_override_conflicts == 1
+        assert plan.rejects == []
         assert plan.zero_costs == 1
         assert plan.with_cost == 1
         assert plan.without_cost == 1
@@ -276,33 +276,71 @@ class TestPlan:
         assert item.preferred_vendor_id == "HERILAND26"
         assert item.unit_cost_cents == 350
 
-    def test_rejects_short_ids_without_zero_padding(self, tmp_path: Path):
+    def test_short_id_loads_as_given(self, tmp_path: Path):
         path = _workbook(
-            tmp_path / "rejects.xlsx",
+            tmp_path / "short.xlsx",
             stock=[
-                _row(**{"Inventory ID": "101", "Description": "Avenue South 2.5 GAL", "Last Cost": "4"}),
-                _row(**{"Inventory ID": "101", "Description": "Barricade 50LB", "Last Cost": "5"}),
+                _row(**{"Inventory ID": "  101  ", "Description": "Single product", "Base UOM": "EA", "Last Cost": "4.00"}),
                 _row(**{"Inventory ID": "123456789", "Description": "Nine digits", "Base UOM": "EA"}),
                 _row(**{"Inventory ID": "ABC1234567", "Description": "Not numeric", "Base UOM": "EA"}),
                 _row(**{"Inventory ID": "2000000001", "Description": "Kept", "Base UOM": "EA", "Last Cost": "1.005"}),
+                _row(**{"Inventory ID": "1" * 65, "Description": "Too long", "Base UOM": "EA"}),
             ],
             nonstock=[
                 _row(**{"Inventory ID": "", "Description": "No id"}),
+                _row(**{"Inventory ID": "101", "Description": "Nonstock name", "Base UOM": "FT", "Last Cost": "9"}),
             ],
         )
         plan = loader.build_plan(path)
-        assert [item.inventory_id for item in plan.items] == ["2000000001"]
-        assert plan.items[0].unit_cost_cents == 101  # 1.005 → 101 cents, half up
+        assert _by_id(plan)["101"].description == "Single product"
+        assert _by_id(plan)["101"].inventory_id == "101"
+        assert _by_id(plan)["101"].is_stock_item == 1
+        assert _by_id(plan)["101"].unit_cost_cents == 400
+        assert "123456789" in _by_id(plan)
+        assert "ABC1234567" in _by_id(plan)
+        assert _by_id(plan)["2000000001"].unit_cost_cents == 101  # 1.005 → 101 cents, half up
+        assert "0" * 7 + "101" not in _by_id(plan)
         reasons = sorted((rej.inventory_id, rej.reason) for rej in plan.rejects)
-        assert ("101", "inventory_id_not_10_digits") in reasons
-        assert reasons.count(("101", "inventory_id_not_10_digits")) == 2
-        assert ("123456789", "inventory_id_not_10_digits") in reasons
-        assert ("ABC1234567", "inventory_id_not_10_digits") in reasons
         assert ("", "missing_inventory_id") in reasons
-        assert "0000000101" not in _by_id(plan)
-        summary = loader.format_summary(plan, dry_run=True, rejects_path=tmp_path / "rejects.csv")
-        assert "zero-pad decision: no" in summary
-        assert "101 x2" in summary
+        assert ("1" * 65, "inventory_id_too_long") in reasons
+        assert not any(reason == "inventory_id_not_10_digits" for _id, reason in reasons)
+        assert not any(reason in loader.CONFLICT_REASONS for _id, reason in reasons)
+        missing = next(rej for rej in plan.rejects if rej.reason == "missing_inventory_id")
+        assert missing.row_number == 2
+        assert missing.description == "No id"
+
+    def test_same_short_id_on_two_products_is_rejected(self, tmp_path: Path):
+        path = _workbook(
+            tmp_path / "dup-101.xlsx",
+            stock=[
+                _row(**{
+                    "Inventory ID": "101",
+                    "Description": "Avenue South 2.5 GAL",
+                    "Item Class": "Herbicide",
+                    "Base UOM": "EA",
+                    "Last Cost": "4",
+                    "Preferred Vendor - Only for purchase items": "SITEONE",
+                }),
+                _row(**{
+                    "Inventory ID": "101",
+                    "Description": "Barricade 50LB",
+                    "Item Class": "Herbicide",
+                    "Base UOM": "EA",
+                    "Last Cost": "5",
+                }),
+            ],
+            nonstock=[],
+        )
+        plan = loader.build_plan(path)
+        assert plan.items == []
+        assert [rej.row_number for rej in plan.rejects] == [2, 3]
+        assert {rej.reason for rej in plan.rejects} == {"conflicting_duplicate_inventory_id"}
+        assert {rej.description for rej in plan.rejects} == {"Avenue South 2.5 GAL", "Barricade 50LB"}
+        brief = loader.format_conflict_brief(plan)
+        assert "## 101" in brief
+        assert "2 rows." in brief
+        assert "Avenue South 2.5 GAL" in brief
+        assert "Barricade 50LB" in brief
 
     def test_conflicting_stock_duplicate_blocks_nonstock_fallback(self, tmp_path: Path):
         path = _workbook(
@@ -337,15 +375,20 @@ class TestPlan:
     def test_dry_run_writes_rejects_and_does_not_connect(self, tmp_path: Path, monkeypatch):
         path = _workbook(
             tmp_path / "dry.xlsx",
-            stock=[_row(**{"Inventory ID": "101", "Description": "Short"})],
-            nonstock=[_row(**{"Inventory ID": "5000000001", "Description": "Ok", "Base UOM": "EA"})],
+            stock=[_row(**{"Inventory ID": "101", "Description": "Short", "Base UOM": "EA"})],
+            nonstock=[_row(**{"Inventory ID": "", "Description": "Missing"})],
         )
         monkeypatch.setattr(loader, "connect", lambda: (_ for _ in ()).throw(AssertionError("connect")))
         rejects = tmp_path / "out.csv"
-        assert loader.main([str(path), "--dry-run", "--rejects", str(rejects)]) == 0
+        brief = tmp_path / "conflicts.md"
+        assert loader.main([
+            str(path), "--dry-run", "--rejects", str(rejects), "--conflicts", str(brief),
+        ]) == 0
         text = rejects.read_text(encoding="utf-8")
-        assert "inventory_id_not_10_digits" in text
-        assert "101" in text
+        assert text.splitlines()[0] == "reason,sheet,row_number,inventory_id,description,item_class,aspire_category,uom,vendor,last_cost"
+        assert "missing_inventory_id" in text
+        assert "101" not in text
+        assert "Inventory IDs used for more than one product" in brief.read_text(encoding="utf-8")
 
 
 PRE_065 = """
@@ -506,6 +549,32 @@ class TestApply:
         assert current[0]["effective_to"] is None
         assert int(current[0]["unit_cost_cents"]) == 1250
         assert current[0]["uom"] == "EA"
+
+    def test_short_inventory_id_is_stored_as_given(self, db, tmp_path: Path):
+        path = _workbook(
+            tmp_path / "id101.xlsx",
+            stock=[_row(**{
+                "Inventory ID": "101",
+                "Description": "Single herbicide",
+                "Base UOM": "EA",
+                "Last Cost": "4.50",
+            })],
+            nonstock=[],
+        )
+        plan = loader.build_plan(path)
+        assert plan.items[0].inventory_id == "101"
+        result = loader.apply_plan(db, plan, today=TODAY)
+        db.commit()
+        assert result.prices_inserted == 1
+        with db.cursor() as cur:
+            cur.execute("SELECT inventory_id, description FROM catalog_items")
+            row = cur.fetchone()
+        assert row["inventory_id"] == "101"
+        assert row["description"] == "Single herbicide"
+        prices = _price_rows(db, "101")
+        assert len(prices) == 1
+        assert prices[0]["current_inventory_id"] == "101"
+        assert int(prices[0]["unit_cost_cents"]) == 450
 
     def test_blank_cost_does_not_clear_an_existing_price(self, db, tmp_path: Path):
         path = _workbook(

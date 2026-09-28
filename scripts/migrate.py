@@ -215,6 +215,39 @@ def column_exists(conn, table: str, column: str) -> bool:
     return bool(row and row["cnt"])
 
 
+def column_char_length(conn, table: str, column: str) -> int:
+    """CHARACTER_MAXIMUM_LENGTH, or 0 when the column is absent."""
+    row = _fetch_one(
+        conn,
+        "SELECT CHARACTER_MAXIMUM_LENGTH AS char_length FROM INFORMATION_SCHEMA.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+        (table, column),
+    )
+    if not row or row.get("char_length") is None:
+        return 0
+    return int(row["char_length"])
+
+
+def inventory_id_accepts_any_nonempty(conn) -> bool:
+    """True when chk_catalog_items_inventory_id allows any non-empty string.
+
+    An earlier draft of 065 required exactly 10 digits. That check contains
+    a digit-class regexp. The shipped check is ``inventory_id <> ''``.
+    """
+    row = _fetch_one(
+        conn,
+        "SELECT CHECK_CLAUSE AS clause FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = %s",
+        ("chk_catalog_items_inventory_id",),
+    )
+    if not row or not row.get("clause"):
+        return False
+    clause = str(row["clause"]).lower()
+    if "0-9" in clause or "regexp" in clause:
+        return False
+    return "<>" in clause or "!=" in clause
+
+
 def column_nullable(conn, table: str, column: str) -> bool:
     """True only when the column exists and IS_NULLABLE = 'YES'.
 
@@ -846,10 +879,11 @@ def detect_065(conn) -> bool:
 
     True only when every effect is present: service_kits still has kit_type,
     both child columns are service_kit_id, the new catalog_items table is the
-    item master (inventory_id, and not the kit columns), catalog_prices has
-    its one-current unique key and both marker triggers, and the three FKs
-    this file adds are in place. A partial apply stays False so the guarded
-    statements run again.
+    item master (inventory_id, and not the kit columns), that id is a
+    non-empty string up to 64 characters (not a 10-digit code), catalog_prices
+    mirrors the width, catalog_prices has its one-current unique key and both
+    marker triggers, and the three FKs this file adds are in place. A partial
+    apply stays False so the guarded statements run again.
     """
     return (
         _service_kit_table(conn) == "service_kits"
@@ -858,6 +892,10 @@ def detect_065(conn) -> bool:
         and column_exists(conn, "takeoff_lines", "service_kit_id")
         and not column_exists(conn, "takeoff_lines", "catalog_item_id")
         and column_exists(conn, "catalog_items", "inventory_id")
+        and column_char_length(conn, "catalog_items", "inventory_id") >= 64
+        and column_char_length(conn, "catalog_prices", "inventory_id") >= 64
+        and column_char_length(conn, "catalog_prices", "current_inventory_id") >= 64
+        and inventory_id_accepts_any_nonempty(conn)
         and not column_exists(conn, "catalog_items", "kit_type")
         and not column_exists(conn, "catalog_items", "unit_cost_cents")
         and not column_exists(conn, "catalog_items", "unit_sell_cents")

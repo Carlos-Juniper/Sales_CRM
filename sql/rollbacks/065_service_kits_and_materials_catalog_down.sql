@@ -10,6 +10,11 @@
 -- run it after the spreadsheet import. Kit rows in service_kits are renamed
 -- back to catalog_items; they are not deleted.
 --
+-- The materials inventory_id dropped here is VARCHAR(64), a non-empty string
+-- stored exactly as it was given (not a 10-digit code). catalog_prices
+-- .inventory_id and current_inventory_id are the same width and go with the
+-- DROP TABLE.
+--
 -- After rollback, both dev and prod have fk_services_catalog_item and
 -- fk_takeoff_catalog_item. Prod had the takeoff FK before 065; dev did not.
 -- Rollback does not recreate that drift.

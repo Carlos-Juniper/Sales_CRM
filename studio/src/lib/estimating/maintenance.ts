@@ -20,7 +20,7 @@ import type {
   SectionService,
 } from '@/types/estimating'
 import type { LegacyUserRole, UserRole } from '@/types'
-import { normalizeRole } from '@/hooks/useRole'
+import { APPROVER_ROLES, LINE_ITEM_EDIT_ROLES, hasRole, normalizeRole } from '@/lib/roles'
 import { per1000SfRead } from './calc'
 
 /**
@@ -340,21 +340,19 @@ export function assertCanEdit(role: EstimatingRole, field: OwnedField): void {
 }
 
 /**
- * Map the canonical auth roles (mirrors api/authz.py) onto the
- * estimating ownership roles. `admin` holds BOTH scopes. This mapping is
- * advisory for the UI — the server enforces it on every mutation.
+ * Map the canonical auth roles onto the estimating ownership roles.
+ * Estimator scope is LINE_ITEM_EDIT_ROLES (the same set useRole().isEstimator
+ * reads). Approver scope is APPROVER_ROLES. A role in both — admin, vp_sales,
+ * and the manager ladder — may edit line items and margin. This mapping is
+ * advisory for the UI; the server enforces mutations with the same sets.
  */
 export function estimatingRolesForUser(
   userRole: UserRole | LegacyUserRole,
 ): EstimatingRole[] {
   const role = normalizeRole(userRole)
   const roles: EstimatingRole[] = []
-  if (['maintenance_estimating', 'install_estimating', 'admin'].includes(role)) {
-    roles.push('estimator')
-  }
-  if (['manager', 'regional_director', 'vice_president', 'ceo', 'admin'].includes(role)) {
-    roles.push('approver')
-  }
+  if (hasRole(LINE_ITEM_EDIT_ROLES, role)) roles.push('estimator')
+  if (hasRole(APPROVER_ROLES, role)) roles.push('approver')
   return roles
 }
 

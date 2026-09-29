@@ -27,7 +27,7 @@ import {
 } from 'lucide-react'
 import type { EstimateType } from '@/types/estimating'
 import type { UserRole } from '@/types'
-import { ESTIMATOR_ROLES, ESTIMATING_NAV_ROLES } from '@/lib/roles'
+import { ESTIMATING_NAV_ROLES, LINE_ITEM_EDIT_ROLES } from '@/lib/roles'
 
 export type EstimatingTabKey =
   | 'queue' // Estimate Queue
@@ -64,10 +64,10 @@ export interface EstimatingTabConfig {
 const BOTH: EstimateType[] = ['maintenance', 'install']
 
 // The estimating personas: both estimator disciplines plus the manager-tier
-// approvers who may also edit (Handoff 28), and admin. Reuses the canonical
-// ESTIMATOR_ROLES from lib/roles.ts (mirrors the backend LINE_ITEM_EDIT_ROLES
-// set that gates the estimate-detail surface).
-const ESTIMATING_ROLES = ESTIMATOR_ROLES
+// approvers who may also edit, and admin-equivalent roles. Reuses
+// LINE_ITEM_EDIT_ROLES from lib/roles.ts (api/authz.py), the set that gates
+// the estimate-detail surface.
+const ESTIMATING_ROLES = LINE_ITEM_EDIT_ROLES
 
 // Everyone who can reach the Estimating page (ESTIMATING_NAV_ROLES) sees at
 // least the queue. This structurally eliminates the empty-tabs fallback bug:

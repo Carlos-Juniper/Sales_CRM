@@ -465,8 +465,15 @@ export interface TakeoffLine {
 /**
  * Tier role keys equal the canonical auth roles, so
  * the JWT role checks directly against the routed tier.
+ * admin and vp_sales are ceiling rows (migration 068), not extra ladder bands.
  */
-export type ApprovalRoleKey = 'manager' | 'regional_director' | 'vice_president' | 'ceo'
+export type ApprovalRoleKey =
+  | 'manager'
+  | 'regional_director'
+  | 'vice_president'
+  | 'ceo'
+  | 'admin'
+  | 'vp_sales'
 
 export interface ApprovalTier {
   id: string

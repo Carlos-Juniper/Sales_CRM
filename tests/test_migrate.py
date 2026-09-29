@@ -351,8 +351,15 @@ class TestMigrationFiles:
             "003_drop_leads_hoa_property_id",
             "004_users_and_branches",
         }
+        # 067 is one idempotent UPDATE with no schema signal. A detector that
+        # treated "no sales rows" as applied would skip a database that never
+        # ran it. schema_migrations, checked before the detector, is the
+        # applied record.
+        idempotent_data = {"067_legacy_sales_roles"}
         for mid, _ in M.migration_files():
-            assert mid in M._DETECT or mid in inline, f"{mid} has no detection path"
+            assert mid in M._DETECT or mid in inline or mid in idempotent_data, (
+                f"{mid} has no detection path"
+            )
 
     def test_ids_match_stem_of_path(self):
         for mid, path in M.migration_files():
@@ -1461,3 +1468,107 @@ class TestMigration063:
             assert first in ("SET", "PREPARE", "EXECUTE", "DEALLOCATE"), (
                 f"063 must be all guarded dynamic SQL — found bare: {stmt[:80]}"
             )
+
+
+class TestMigration067:
+    """067 rewrites stored sales and outside_sales rows to maintenance_sales."""
+
+    PATH = REPO / "sql" / "migrations" / "067_legacy_sales_roles.sql"
+
+    def test_apply_rewrites_legacy_sales_and_leaves_other_roles(self):
+        import sqlite3
+
+        raw = sqlite3.connect(":memory:")
+        raw.row_factory = sqlite3.Row
+        raw.execute(
+            "CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, role TEXT NOT NULL)"
+        )
+        raw.executemany(
+            "INSERT INTO users (id, name, role) VALUES (?, ?, ?)",
+            [
+                ("u-michelle", "Michelle Cady", "sales"),
+                ("u-rodrigo", "Rodrigo Leon", "outside_sales"),
+                ("u-kept", "Already Maintenance", "maintenance_sales"),
+                ("u-vp", "Already VP", "vp_sales"),
+                ("u-admin", "Admin", "admin"),
+                ("u-mgr", "Manager", "manager"),
+            ],
+        )
+        raw.commit()
+
+        class _Cursor:
+            def __init__(self, cur):
+                self._cur = cur
+
+            def __enter__(self):
+                return self._cur
+
+            def __exit__(self, *_args):
+                self._cur.close()
+                return False
+
+        class _Conn:
+            def cursor(self):
+                return _Cursor(raw.cursor())
+
+        conn = _Conn()
+        M.exec_file(conn, self.PATH)
+        roles = {
+            row["id"]: row["role"]
+            for row in raw.execute("SELECT id, role FROM users ORDER BY id")
+        }
+        assert roles == {
+            "u-admin": "admin",
+            "u-kept": "maintenance_sales",
+            "u-mgr": "manager",
+            "u-michelle": "maintenance_sales",
+            "u-rodrigo": "maintenance_sales",
+            "u-vp": "vp_sales",
+        }
+        assert "vp_sales" not in {roles["u-michelle"], roles["u-rodrigo"]}
+
+        M.exec_file(conn, self.PATH)
+        again = {
+            row["id"]: row["role"]
+            for row in raw.execute("SELECT id, role FROM users ORDER BY id")
+        }
+        assert again == roles
+        assert "067_legacy_sales_roles" not in M._DETECT
+
+
+class TestMigration068:
+    """068 gives admin and vp_sales an unbounded approval ceiling."""
+
+    PATH = REPO / "sql" / "migrations" / "068_admin_equivalent_approval_tiers.sql"
+    MID = "068_admin_equivalent_approval_tiers"
+
+    def test_registered_and_seeds_unbounded_rows(self):
+        assert self.MID in M._DETECT
+        assert M._DETECT[self.MID] is M.detect_068
+        text = self.PATH.read_text(encoding="utf-8")
+        assert "'admin'" in text and "'vp_sales'" in text
+        assert "NULL" in text
+        stmts = M.split_statements(text)
+        assert [s.split()[0].upper() for s in stmts] == ["ALTER", "INSERT"]
+        assert "max_value_cents" in stmts[1]
+        assert "ON DUPLICATE KEY UPDATE" in stmts[1].upper()
+
+    def test_detect_false_until_both_roles_are_unbounded(self, monkeypatch):
+        monkeypatch.setattr(
+            M, "enum_values",
+            lambda conn, t, c: {"manager", "regional_director", "vice_president", "ceo"},
+        )
+        assert M.detect_068(None) is False
+        monkeypatch.setattr(
+            M, "enum_values",
+            lambda conn, t, c: {
+                "manager", "regional_director", "vice_president", "ceo",
+                "admin", "vp_sales",
+            },
+        )
+        monkeypatch.setattr(M, "_fetch_one", lambda conn, sql, params=(): {"cnt": 1})
+        assert M.detect_068(None) is False
+        monkeypatch.setattr(M, "_fetch_one", lambda conn, sql, params=(): {"cnt": 2})
+        assert M.detect_068(None) is True
+
+

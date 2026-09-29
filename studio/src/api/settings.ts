@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import type { ApprovalTier, MarginBandRow } from '@/types/estimating'
-import type { UserRole } from '@/types'
+import type { LegacyUserRole, UserRole } from '@/types'
 
 /**
  * A branch the current user may MANAGE (the Settings branch-picker source).
@@ -139,7 +139,8 @@ export interface AuthorizeUserBody {
 
 /** Partial user edit: role / branches (replace-set) / active toggle. */
 export interface UserAdminPatch {
-  role?: UserRole
+  /** A retired sales role is only resent when the stored role is already that value. */
+  role?: UserRole | LegacyUserRole
   branches?: number[]
   active?: boolean
 }

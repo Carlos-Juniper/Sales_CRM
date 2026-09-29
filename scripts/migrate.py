@@ -1087,6 +1087,24 @@ def detect_070(conn) -> bool:
         and trigger_exists(conn, "trg_material_price_load_bi")
     )
 
+def detect_068(conn) -> bool:
+    """068 applied ↔ admin and vp_sales have an unbounded approval tier.
+
+    Widens approval_tiers.role_key and inserts a NULL max_value_cents row
+    for each of those roles. Keyed on that effect: the enum contains both
+    role keys and at least one unbounded row exists for each. A re-run is
+    safe (MODIFY to the same enum, INSERT … ON DUPLICATE KEY UPDATE).
+    """
+    values = enum_values(conn, "approval_tiers", "role_key")
+    if not {"admin", "vp_sales"}.issubset(values):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(DISTINCT role_key) AS cnt FROM approval_tiers "
+        "WHERE role_key IN ('admin', 'vp_sales') AND max_value_cents IS NULL",
+    )
+    return bool(row and int(row["cnt"]) >= 2)
+
 
 def detect_064(conn) -> bool:
     """064 applied ↔ estimates.irrigation_occurrences column exists.
@@ -1187,6 +1205,7 @@ _DETECT: dict = {
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
     "065_commission_cadence_and_plans":           detect_065,
+    "068_admin_equivalent_approval_tiers":        detect_068,
     "069_service_kits":                           detect_069,
     "070_materials_catalog":                      detect_070,
     "044_contract_generator":                     detect_044,

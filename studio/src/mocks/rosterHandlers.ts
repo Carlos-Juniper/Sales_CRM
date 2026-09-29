@@ -1,4 +1,6 @@
 import { http, HttpResponse } from 'msw'
+import type { UserRole } from '@/types'
+import { ADMIN_EQUIVALENT_ROLES, FIELD_SALES_ROLES, ROSTER_REP_ROLES, hasRole, normalizeRole } from '@/lib/roles'
 import { useAuthStore } from '@/store/authStore'
 import { mockUsers } from './data'
 import { MOCK_CLIENT_REFERENCES, MOCK_TEAM_MEMBERS, rosterHttpResponse } from './proposalRoster'
@@ -28,18 +30,27 @@ function detail(status: number, message: string): Denied {
 function callerRole(): string | null {
   const role = useAuthStore.getState().user?.role
   if (!role) return null
-  return role === 'outside_sales' ? 'sales' : role
+  return normalizeRole(role)
 }
 
 function callerId(): string | null {
   return useAuthStore.getState().user?.id ?? null
 }
 
+function isMarketingOrAdminEquivalent(role: string | null): boolean {
+  return role === 'marketing' || (role !== null && hasRole(ADMIN_EQUIVALENT_ROLES, role))
+}
+
+const ROSTER_REP_ROLE_SET = new Set<UserRole>(ROSTER_REP_ROLES)
+
+function isFieldSales(role: string | null): boolean {
+  return role !== null && hasRole(FIELD_SALES_ROLES, role)
+}
+
 function salesDirectory(id: string): 'ok' | 'missing' | 'not-sales' {
   const user = mockUsers.find((u) => u.id === id)
   if (!user) return 'missing'
-  const role = user.role === 'outside_sales' ? 'sales' : user.role
-  return role === 'sales' ? 'ok' : 'not-sales'
+  return ROSTER_REP_ROLE_SET.has(normalizeRole(user.role)) ? 'ok' : 'not-sales'
 }
 
 function coalesceRepId(request: Request, bodyRepId?: string | null): RepIdResult {
@@ -55,10 +66,10 @@ function authorizeRead(repId: string | null): Response | null {
   if (!repId) return null
   const role = callerRole()
   const id = callerId()
-  if (role === 'sales') {
+  if (isFieldSales(role)) {
     return repId === id ? null : detail(403, VIEW_OWN).response
   }
-  if (role === 'marketing' || role === 'admin') {
+  if (isMarketingOrAdminEquivalent(role)) {
     const found = salesDirectory(repId)
     if (found === 'missing') return detail(404, SALES_REP_NOT_FOUND).response
     if (found === 'not-sales') return detail(400, SALES_ROLE_REQUIRED).response
@@ -71,10 +82,10 @@ function authorizeRead(repId: string | null): Response | null {
 function authorizeWrite(repId: string | null): WriteAuth {
   const role = callerRole()
   const id = callerId()
-  if (role === 'sales' && (repId === null || repId === id)) {
+  if (isFieldSales(role) && (repId === null || repId === id)) {
     return { ok: true, ownerId: id }
   }
-  if (role === 'marketing' || role === 'admin') {
+  if (isMarketingOrAdminEquivalent(role)) {
     if (!repId) return { ok: true, ownerId: null }
     const found = salesDirectory(repId)
     if (found === 'missing') return detail(404, SALES_REP_NOT_FOUND)
@@ -89,7 +100,7 @@ function authorizeRow(ownerUserId: string | null, requestedRepId: string | null)
   const role = callerRole()
   const id = callerId()
   if (requestedRepId && ownerUserId !== requestedRepId) return detail(403, OTHER_REP).response
-  if (role === 'sales' || (role !== 'marketing' && role !== 'admin')) {
+  if (isFieldSales(role) || !isMarketingOrAdminEquivalent(role)) {
     if (ownerUserId && ownerUserId !== id) return detail(403, EDIT_OWN).response
   }
   return null

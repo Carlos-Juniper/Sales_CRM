@@ -5,10 +5,12 @@ import { useAuthStore } from '@/store/authStore'
 import { useRole } from '@/hooks/useRole'
 import {
   ANALYTICS_NAV_ROLES,
+  ASSIGNABLE_ROLES,
   ESTIMATING_NAV_ROLES,
   PUBLIC_LEADS_NAV_ROLES,
   REP_SELECTOR_ROLES,
   SALES_NAV_ROLES,
+  SALES_REP_ROLES,
   defaultRouteForRole,
   requiresAspireSalesRep,
 } from '@/lib/roles'
@@ -67,6 +69,9 @@ describe('split field-sales role gates', () => {
     expect(requiresAspireSalesRep('install_sales')).toBe(true)
     expect(requiresAspireSalesRep('inside_sales')).toBe(false)
     expect(requiresAspireSalesRep('manager')).toBe(false)
+    expect(requiresAspireSalesRep('vp_sales')).toBe(false)
+    expect(requiresAspireSalesRep('regional_director')).toBe(false)
+    expect(requiresAspireSalesRep('vice_president')).toBe(false)
   })
 
   it('gives the split roles the sales settings group', () => {
@@ -79,7 +84,12 @@ describe('split field-sales role gates', () => {
   it('labels the new roles for menus and badges', () => {
     expect(roleLabel('maintenance_sales')).toBe('Maintenance Sales')
     expect(roleLabel('install_sales')).toBe('Install Sales')
-    expect(roleLabel('sales')).toBe('Sales')
+    expect(roleLabel('inside_sales')).toBe('Inside Sales')
+    expect(roleLabel('sales')).toBe('Legacy: Sales (reassign)')
+    expect(roleLabel('outside_sales')).toBe('Legacy: Sales (reassign)')
+    expect(roleLabel('vp_sales')).toBe('VP of Sales')
+    expect(roleLabel('regional_director')).toBe('Regional Director')
+    expect(roleLabel('vice_president')).toBe('Vice President')
   })
 
   it('hides Analytics and Public Leads for a maintenance sales rep', () => {
@@ -97,5 +107,38 @@ describe('split field-sales role gates', () => {
     expect(screen.getByRole('link', { name: 'Estimating' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Sales Performance' })).toBeInTheDocument()
     expect(screen.getByText('Maintenance Sales')).toBeInTheDocument()
+  })
+})
+
+describe('admin-equivalent sales roles', () => {
+  it('lands on Analytics and is not field-sales scoped', () => {
+    expect(defaultRouteForRole('vp_sales')).toBe('/inside-sales')
+    expect(ANALYTICS_NAV_ROLES).toContain('vp_sales')
+    expect(PUBLIC_LEADS_NAV_ROLES).toContain('vp_sales')
+    expect(SALES_NAV_ROLES).toContain('vp_sales')
+    expect(REP_SELECTOR_ROLES).toContain('vp_sales')
+    expect(withRole('vp_sales').isAdmin).toBe(true)
+    expect(withRole('vp_sales').isSales).toBe(false)
+    expect(withRole('vp_sales').canAccess(ANALYTICS_NAV_ROLES)).toBe(true)
+    expect(defaultRouteForRole('regional_director')).toBe('/inside-sales')
+    expect(defaultRouteForRole('vice_president')).toBe('/inside-sales')
+    expect(withRole('regional_director').isAdmin).toBe(false)
+    expect(withRole('vice_president').isAdmin).toBe(false)
+  })
+
+  it('offers the four sales roles and keeps legacy sales working', () => {
+    for (const role of ['inside_sales', 'maintenance_sales', 'install_sales', 'vp_sales'] as const) {
+      expect(ASSIGNABLE_ROLES).toContain(role)
+      expect(SALES_REP_ROLES).toContain(role)
+    }
+    expect(ASSIGNABLE_ROLES).not.toContain('sales')
+    expect(withRole('sales').isSales).toBe(true)
+    expect(withRole('outside_sales').isSales).toBe(true)
+    expect(withRole('sales').canAccess(SALES_NAV_ROLES)).toBe(true)
+    expect(defaultRouteForRole('sales')).toBe('/inside-sales/pipeline')
+    expect(requiresAspireSalesRep('sales')).toBe(true)
+    expect(requiresAspireSalesRep('outside_sales')).toBe(true)
+    expect(requiresAspireSalesRep('inside_sales')).toBe(false)
+    expect(requiresAspireSalesRep('vp_sales')).toBe(false)
   })
 })

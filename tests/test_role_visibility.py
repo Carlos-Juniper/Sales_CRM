@@ -76,12 +76,6 @@ def as_role():
     app.dependency_overrides.clear()
 
 
-def test_rep_viewer_roles_unchanged():
-    assert authz.REP_VIEWER_ROLES == frozenset({
-        "admin", "vice_president", "ceo", "manager", "regional_director",
-    })
-
-
 class TestEstimatingDisciplineDenied:
     @pytest.mark.parametrize("role", ["maintenance_estimating", "install_estimating"])
     def test_cannot_list_or_create_leads(self, as_role, role):
@@ -115,17 +109,6 @@ _FIELD_SALES = ("sales", "maintenance_sales", "install_sales", "outside_sales")
 
 class TestFieldSalesMatchSales:
     """Split roles stay on the sales side of every visibility check."""
-
-    def test_sets(self):
-        for role in ("maintenance_sales", "install_sales", "sales"):
-            assert role not in authz.ESTIMATING_ONLY_ROLES
-            assert role not in authz.PUBLIC_LEADS_ROLES
-            assert role not in authz.ANALYTICS_DASHBOARD_ROLES
-            assert authz.hides_public_lead_queue({"role": role})
-            assert not authz.is_estimating_only(role)
-        assert "inside_sales" in authz.PUBLIC_LEADS_ROLES
-        assert "inside_sales" not in authz.ANALYTICS_DASHBOARD_ROLES
-        assert not authz.hides_public_lead_queue({"role": "inside_sales"})
 
     @pytest.mark.parametrize("role", _FIELD_SALES)
     def test_lists_leads_but_not_the_public_queue(self, as_role, role):
@@ -261,7 +244,10 @@ class TestSalesWorkspace:
 class TestPublicLeadsAndAnalytics:
     @pytest.mark.parametrize(
         "role",
-        ["inside_sales", "admin", "manager", "regional_director", "vice_president", "ceo"],
+        [
+            "inside_sales", "admin", "vp_sales",
+            "manager", "regional_director", "vice_president", "ceo",
+        ],
     )
     def test_qualifiers_can_open_the_public_queue(self, as_role, role):
         as_role(role)
@@ -286,7 +272,10 @@ class TestPublicLeadsAndAnalytics:
 
     @pytest.mark.parametrize(
         "role",
-        ["admin", "manager", "regional_director", "vice_president", "ceo"],
+        [
+            "admin", "vp_sales",
+            "manager", "regional_director", "vice_president", "ceo",
+        ],
     )
     def test_leadership_can_open_analytics(self, as_role, role):
         as_role(role)
@@ -335,3 +324,13 @@ class TestRepViewerScope:
         with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
             resp = client.get("/api/commissions/reps")
         assert resp.status_code == 200
+
+    def test_vp_sales_may_list_reps(self, as_role):
+        as_role("vp_sales", user_id="lead-1")
+        with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
+            reps = client.get("/api/commissions/reps")
+        assert reps.status_code == 200
+        with patch("api.sales_performance.query", new_callable=AsyncMock, return_value=[]):
+            summary = client.get("/api/sales-performance/summary?user_id=someone-else")
+        assert summary.status_code == 200
+

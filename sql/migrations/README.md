@@ -75,6 +75,7 @@ for at least one real deploy cycle.
 - **063** — nullable `estimates.homes_budget` / `common_area_budget`. Renumbered from 059 so it does not share a number with the branch-manager migration on `integrate/staging-proposals`.
 - **064** — yearly maintenance occurrence counts on `estimates`. Renumbered from 061 for the same reason.
 - **069** — renames kit table `catalog_items` to `service_kits` (and `catalog_item_id` to `service_kit_id` on `section_services` and `takeoff_lines`). Indexes become `idx_service_kits_kit_type`, `idx_service_kits_active`, and `idx_service_kits_aspire_branch`. Numbered 069 because 065 is the open commission-cadence migration and 067/068 are the open sales-role migrations. Rollback: `sql/rollbacks/069_service_kits_down.sql` (not run by the migrator). That file also deletes the `069_service_kits` row from `schema_migrations`.
+- **070** — creates `materials` (item master, no cost), `material_prices` (cost history, one current row per item), and `material_price_loads` (write buffer). `trg_material_price_load_bi` archives the previous current price and inserts the new one. Load with `scripts/load_materials_catalog.py`. Rollback: `sql/rollbacks/070_materials_catalog_down.sql` (not run by the migrator). That file drops the three tables and deletes the `070_materials_catalog` row from `schema_migrations`. It does not touch `service_kits`.
 
 ### Numbering history
 

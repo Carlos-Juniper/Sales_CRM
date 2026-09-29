@@ -253,6 +253,25 @@ class TestSplitStatements:
         assert len(stmts) == 1
         assert stmts[0].strip().startswith("INSERT")
 
+    def test_keeps_a_trigger_body_as_one_statement(self):
+        sql = (
+            "DROP TRIGGER IF EXISTS trg_example; "
+            "CREATE TRIGGER trg_example BEFORE INSERT ON t FOR EACH ROW "
+            "BEGIN "
+            "  IF NEW.flag = 1 THEN "
+            "    SET NEW.note = 'a;b'; "
+            "  END IF; "
+            "END; "
+            "ALTER TABLE t ADD COLUMN y INT"
+        )
+        stmts = M.split_statements(sql)
+        assert len(stmts) == 3
+        assert stmts[0].startswith("DROP TRIGGER")
+        assert stmts[1].startswith("CREATE TRIGGER")
+        assert "SET NEW.note = 'a;b'" in stmts[1]
+        assert stmts[1].rstrip().endswith("END")
+        assert stmts[2].startswith("ALTER TABLE")
+
     def test_keeps_update_statement(self):
         sql = "UPDATE leads SET status = 'estimating' WHERE status = 'handed_off'"
         stmts = M.split_statements(sql)

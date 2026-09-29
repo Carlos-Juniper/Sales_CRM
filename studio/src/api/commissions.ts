@@ -1,5 +1,12 @@
 import { apiClient } from './client'
-import type { Commission, CommissionSummary, CommissionRep, CommissionFilters } from '@/types/commissions'
+import type {
+  Commission,
+  CommissionSummary,
+  CommissionRep,
+  CommissionFilters,
+  CommissionPayoutSchedule,
+  MarkPaidResponse,
+} from '@/types/commissions'
 
 export const commissionsApi = {
   getSummary: (filters?: CommissionFilters) => {
@@ -23,9 +30,27 @@ export const commissionsApi = {
   },
 
   markPaid: (commissionId: string, paymentPeriod: string) =>
-    apiClient.post<{ success: boolean }>(`/commissions/${commissionId}/mark-paid`, {
+    apiClient.post<MarkPaidResponse>(`/commissions/${commissionId}/mark-paid`, {
       payment_period: paymentPeriod,
     }),
+
+  markInstallmentPaid: (installmentId: string) =>
+    apiClient.post<MarkPaidResponse>(`/commissions/installments/${installmentId}/mark-paid`, {}),
+
+  // Both close-date bounds and no year: the server uses that range alone and
+  // returns year: null. A December-to-January window is not clipped to one year.
+  getPayoutSchedule: (params?: {
+    user_id?: string
+    start_date?: string
+    end_date?: string
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.user_id) qs.set('user_id', params.user_id)
+    if (params?.start_date) qs.set('start_date', params.start_date)
+    if (params?.end_date) qs.set('end_date', params.end_date)
+    const q = qs.toString()
+    return apiClient.get<CommissionPayoutSchedule>(`/commissions/payout-schedule${q ? `?${q}` : ''}`)
+  },
 
   getReps: () => apiClient.get<CommissionRep[]>('/commissions/reps'),
 }

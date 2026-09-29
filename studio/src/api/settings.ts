@@ -17,16 +17,13 @@ export interface ManageableBranch {
 }
 
 /**
- * A branch's settings as returned by GET /api/settings/branch/{aspire_branch_id}
- * (Slice 5). NOTE (shape gap): this endpoint returns ONLY the crew rate — a
- * branch with no configured rate hands back `crewRateCentsPerHour: null` (the
- * §2.3 no-fallback contract: never an invented number). Material factors and
- * production rates are NOT on this payload; they are read from the estimating
- * config endpoints (material-calcs / catalog-items) and written back through
- * this endpoint's PATCH.
+ * A branch's settings as returned by GET /api/settings/branch/{aspire_branch_id}.
+ * `crewRateCentsPerHour` is null when the branch has no configured rate.
+ * `productionRates` are active rated `service_kits` rows (`serviceKitId`);
+ * the list is not filtered by this branch, and `source` is `inherited`.
  */
 export interface BranchProductionRate {
-  catalogItemId: string
+  serviceKitId: string
   description: string
   productionRate: number | null
   source: 'override' | 'inherited'
@@ -48,7 +45,7 @@ export interface BranchSettings {
 export interface BranchSettingsPatch {
   /** Crew rate in cents-per-hour (dollars converted client-side). */
   crewRateCentsPerHour?: number
-  /** {catalogItemId: productionRate} — one row per changed kit. */
+  /** {serviceKitId: productionRate} — one row per changed kit. */
   productionRates?: Record<string, number>
   /** {materialKey: {factorName: value}} — FACTOR columns only, never unit_cost/sell. */
   materialFactors?: Record<string, Record<string, number | Record<string, number>>>
@@ -162,7 +159,7 @@ export const settingsApi = {
   branches: () => apiClient.get<ManageableBranch[]>('/settings/branches'),
 
   /**
-   * Read one branch's settings (crew rate only — see BranchSettings). Scoped
+   * Read one branch's settings (crew rate and productionRates). Scoped
    * server-side; an out-of-scope branch 403s.
    */
   branchSettings: (aspireBranchId: number) =>

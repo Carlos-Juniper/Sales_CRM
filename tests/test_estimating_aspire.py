@@ -518,7 +518,7 @@ def _est_row_full(**over) -> dict:
 
 
 class TestSlice14BranchCutover:
-    """Slice 14: _estimate_out / _catalog_item_out no longer read estimates.branch
+    """Slice 14: _estimate_out / _service_kit_out no longer read estimates.branch
     or catalog_items.branch; branchCity comes from the branches JOIN alias."""
 
     # ── _estimate_out: branchCity from JOIN, not estimates.branch ────────────
@@ -551,10 +551,10 @@ class TestSlice14BranchCutover:
         out = est._estimate_out(row, sections=[])
         assert out["aspireBranchId"] == 3668
 
-    # ── _catalog_item_out: branch field dropped ───────────────────────────────
+    # ── _service_kit_out: branch field dropped ───────────────────────────────
 
-    def test_catalog_item_out_no_longer_exposes_branch_string(self):
-        """After Slice 14, _catalog_item_out does not include the legacy 'branch' city string.
+    def test_service_kit_out_no_longer_exposes_branch_string(self):
+        """After Slice 14, _service_kit_out does not include the legacy 'branch' city string.
         Identity is carried by aspire_branch_id (NULL = company-wide per §2.3)."""
         row = {
             "id": "kit-1", "description": "Tree Trimming", "uom": "EA",
@@ -564,11 +564,11 @@ class TestSlice14BranchCutover:
             "aspire_branch_id": 3668,
             # 'branch' intentionally absent — post-022 schema
         }
-        out = est._catalog_item_out(row)
+        out = est._service_kit_out(row)
         assert "branch" not in out
         assert out["aspireBranchId"] == 3668
 
-    def test_catalog_item_out_null_aspire_branch_id_is_company_wide(self):
+    def test_service_kit_out_null_aspire_branch_id_is_company_wide(self):
         """aspire_branch_id=NULL in the output means company-wide (§2.3 convention)."""
         row = {
             "id": "kit-2", "description": "Mow Trim", "uom": "SQ",
@@ -577,7 +577,7 @@ class TestSlice14BranchCutover:
             "production_rate": 0.5, "active": 1, "service_type": "Maintenance",
             "aspire_branch_id": None,
         }
-        out = est._catalog_item_out(row)
+        out = est._service_kit_out(row)
         assert out["aspireBranchId"] is None
 
     # ── create_estimate: branch write preserved (NOT NULL until 022 applied) ──

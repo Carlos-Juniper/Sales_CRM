@@ -168,7 +168,7 @@ class FakeDb:
         if table == "estimate_status_transitions":
             row.setdefault("at", datetime(2026, 8, 4, 12, 0, 0))
         if table == "takeoff_lines":
-            row.setdefault("catalog_item_id", None)
+            row.setdefault("service_kit_id", None)
         row.setdefault("created_at", datetime(2026, 8, 4, 12, 0, 0))
         row.setdefault("updated_at", datetime(2026, 8, 4, 12, 0, 0))
 

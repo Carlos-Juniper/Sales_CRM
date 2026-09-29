@@ -242,6 +242,40 @@ def index_exists(conn, table: str, index_name: str) -> bool:
     return bool(row and row["cnt"])
 
 
+def trigger_exists(conn, name: str) -> bool:
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.TRIGGERS "
+        "WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = %s",
+        (name,),
+    )
+    return bool(row and row["cnt"])
+
+
+def foreign_key_exists(conn, table: str, constraint: str) -> bool:
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s "
+        "AND CONSTRAINT_NAME = %s AND CONSTRAINT_TYPE = 'FOREIGN KEY'",
+        (table, constraint),
+    )
+    return bool(row and row["cnt"])
+
+
+def _service_kit_table(conn) -> Optional[str]:
+    """Priced kit catalog: service_kits after 069, catalog_items before it.
+
+    A catalog_items table without kit_type is not the kit catalog. Detectors
+    for the kit seed and scope_text must not query it.
+    """
+    if table_exists(conn, "service_kits") and column_exists(conn, "service_kits", "kit_type"):
+        return "service_kits"
+    if table_exists(conn, "catalog_items") and column_exists(conn, "catalog_items", "kit_type"):
+        return "catalog_items"
+    return None
+
+
 def table_row_count(conn, table: str) -> int:
     row = _fetch_one(conn, f"SELECT COUNT(*) AS cnt FROM `{table}`")
     return int(row["cnt"]) if row else 0
@@ -369,20 +403,30 @@ def detect_007(conn) -> bool:
 
 
 def detect_008(conn) -> bool:
-    """008 applied ↔ takeoff_lines.catalog_item_id column exists."""
-    return column_exists(conn, "takeoff_lines", "catalog_item_id")
+    """008 applied ↔ the takeoff kit-link column exists.
+
+    069 renames takeoff_lines.catalog_item_id to service_kit_id. Either name
+    means 008 already landed. Treating only the old name as applied would
+    re-run 008's bare ADD COLUMN after the rename.
+    """
+    return column_exists(conn, "takeoff_lines", "catalog_item_id") or column_exists(
+        conn, "takeoff_lines", "service_kit_id"
+    )
 
 
 def detect_009(conn) -> bool:
     """
-    009 applied ↔ at least one seeded catalog_items row with id='kit-maint-5388' exists.
-    Refreshing catalog_items from a newer kit workbook is an explicit, separate
-    operation (scripts/load_catalog_items.py); never triggered here.
+    009 applied ↔ at least one seeded kit row with id='kit-maint-5388' exists.
+
+    The row lives in service_kits after 069 and in catalog_items before it.
+    Refreshing kits from a newer workbook is an explicit, separate operation
+    (scripts/load_service_kits.py); never triggered here.
     """
-    if not table_exists(conn, "catalog_items"):
+    table = _service_kit_table(conn)
+    if table is None:
         return False
     row = _fetch_one(
-        conn, "SELECT COUNT(*) AS cnt FROM catalog_items WHERE id = 'kit-maint-5388'"
+        conn, f"SELECT COUNT(*) AS cnt FROM `{table}` WHERE id = 'kit-maint-5388'"
     )
     return bool(row and row["cnt"] >= 1)
 
@@ -504,13 +548,18 @@ def detect_055(conn) -> bool:
 
 
 def detect_044(conn) -> bool:
-    """044 applied ↔ catalog_items.scope_text column exists.
+    """044 applied ↔ the kit table's scope_text column exists.
 
     Keyed on scope_text (the first column added by the migration). The migration
-    also adds catalog_items.billing_type and estimates.estimate_number, but scope_text
-    is sufficient to detect whether the migration has been applied.
+    also adds billing_type and estimates.estimate_number, but scope_text is
+    sufficient. After 069 the column is on service_kits. Looking it up on a
+    catalog_items table that is no longer the kit catalog would miss it and
+    re-run the ALTER against the wrong table.
     """
-    return column_exists(conn, "catalog_items", "scope_text")
+    table = _service_kit_table(conn)
+    if table is None:
+        return False
+    return column_exists(conn, table, "scope_text")
 
 
 def detect_022(conn) -> bool:
@@ -791,6 +840,24 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
+def detect_069(conn) -> bool:
+    """069 applied ↔ the kit catalog was renamed to service_kits.
+
+    True when service_kits has kit_type, both child columns are service_kit_id
+    (the old catalog_item_id columns are gone), and both kit foreign keys are
+    in place. A partial apply stays False so the guarded statements run again.
+    """
+    return (
+        _service_kit_table(conn) == "service_kits"
+        and column_exists(conn, "section_services", "service_kit_id")
+        and not column_exists(conn, "section_services", "catalog_item_id")
+        and column_exists(conn, "takeoff_lines", "service_kit_id")
+        and not column_exists(conn, "takeoff_lines", "catalog_item_id")
+        and foreign_key_exists(conn, "section_services", "fk_services_service_kit")
+        and foreign_key_exists(conn, "takeoff_lines", "fk_takeoff_service_kit")
+    )
+
+
 def detect_064(conn) -> bool:
     """064 applied ↔ estimates.irrigation_occurrences column exists.
 
@@ -889,6 +956,7 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
+    "069_service_kits":                           detect_069,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

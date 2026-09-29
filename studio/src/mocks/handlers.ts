@@ -5,7 +5,7 @@ import { ANALYTICS_NAV_ROLES } from '@/lib/roles'
 import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockConnections, mockProposalPackages } from './data'
 import { MOCK_BRANCH_COVERAGE } from './proposalRoster'
 import { rosterHandlers } from './rosterHandlers'
-import { CATALOG_ITEM_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
+import { SERVICE_KIT_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid, UserRole } from '@/types'
 import type { ProposalPackageSummary } from '@/types/proposal'
@@ -305,6 +305,22 @@ function notesForCreate(raw: unknown): { ok: true; notes: string | null } | { ok
   if (raw.length > LEAD_NOTES_MAX_LENGTH) return { ok: false }
   const trimmed = raw.trim()
   return { ok: true, notes: trimmed.length > 0 ? trimmed : null }
+}
+
+/**
+ * Priced service kits. GET /api/estimating/service-kits.
+ * kit_type and active match the API. A `branch` query param is ignored:
+ * Slice 14 removed that filter after migration 022 dropped the column.
+ */
+async function listServiceKits({ request }: { request: Request }) {
+  await delay(50)
+  const url = new URL(request.url)
+  const kitType = url.searchParams.get('kit_type')
+  const active = url.searchParams.get('active')
+  let rows = SERVICE_KIT_SEED
+  if (kitType) rows = rows.filter((r) => r.kitType === kitType)
+  if (active !== null) rows = rows.filter((r) => r.active === (active === 'true' || active === '1'))
+  return HttpResponse.json(rows)
 }
 
 const allHandlers = [
@@ -751,20 +767,9 @@ const allHandlers = [
     },
   ),
 
-  // GET /api/estimating/catalog-items — kit catalog (seeded from
-  // the workbook rows; mirrors the backend's branch/kit_type/active filters).
-  http.get(`${API}/estimating/catalog-items`, async ({ request }) => {
-    await delay(50)
-    const url = new URL(request.url)
-    const branch = url.searchParams.get('branch')
-    const kitType = url.searchParams.get('kit_type')
-    const active = url.searchParams.get('active')
-    let rows = CATALOG_ITEM_SEED
-    if (branch) rows = rows.filter((r) => r.branch === branch)
-    if (kitType) rows = rows.filter((r) => r.kitType === kitType)
-    if (active !== null) rows = rows.filter((r) => r.active === (active === 'true' || active === '1'))
-    return HttpResponse.json(rows)
-  }),
+  // GET /api/estimating/service-kits — priced kits (seeded from
+  // the workbook rows; mirrors the backend's kit_type/active filters).
+  http.get(`${API}/estimating/service-kits`, listServiceKits),
 
   // ---------------------------------------------------------------------
   // Estimating — single-source estimate model
@@ -1330,7 +1335,7 @@ const allHandlers = [
       addPct: body.addPct ?? 0,
       measuredQty: body.measuredQty ?? 0,
       opportunityQty: body.opportunityQty ?? 0,
-      catalogItemId: body.catalogItemId ?? null,
+      serviceKitId: body.serviceKitId ?? null,
     }
     ensureTakeoffSeed(estimateId)
     takeoffLines.push(line)
@@ -1354,7 +1359,7 @@ const allHandlers = [
       if (body.addPct !== undefined) line.addPct = body.addPct
       if (body.measuredQty !== undefined) line.measuredQty = body.measuredQty
       if (body.opportunityQty !== undefined) line.opportunityQty = body.opportunityQty
-      if (body.catalogItemId !== undefined) line.catalogItemId = body.catalogItemId
+      if (body.serviceKitId !== undefined) line.serviceKitId = body.serviceKitId
       return HttpResponse.json(deriveTakeoffLine(line))
     },
   ),

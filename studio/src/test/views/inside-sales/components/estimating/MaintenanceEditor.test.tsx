@@ -19,7 +19,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
 import { render } from '@/test/utils'
-import type { CatalogItem, Estimate, MaintenanceEstimate } from '@/types/estimating'
+import type { ServiceKit, Estimate, MaintenanceEstimate } from '@/types/estimating'
 import { buildInstallEstimate, buildMaintenanceEstimate, mockEstimatesV2, toCreatePayload } from '@/mocks/estimatingData'
 import { estimatingApi } from '@/api/estimating'
 import { LineItemEditor } from '@/views/inside-sales/components/estimating/LineItemEditor'
@@ -53,11 +53,11 @@ beforeEach(() => {
   // These specs exercise the OFFLINE-FALLBACK catalog (the
   // maintenance.ts literal). The API-driven catalog + save-guard specs at the
   // bottom override this handler per test.
-  server.use(http.get('/api/estimating/catalog-items', () => HttpResponse.json([])))
+  server.use(http.get('/api/estimating/service-kits', () => HttpResponse.json([])))
 })
 
-/** A production-rated maintenance kit, as GET /catalog-items returns it. */
-const RATED_KIT: CatalogItem = {
+/** A production-rated maintenance kit, as GET /service-kits returns it. */
+const RATED_KIT: ServiceKit = {
   id: 'kit-maint-3422',
   description: 'Standard Production Mowing',
   uom: 'Sq. Ft.',
@@ -66,7 +66,7 @@ const RATED_KIT: CatalogItem = {
   targetGm: 0.22,
   kitType: 'maintenance_hours',
   productionRate: 67650,
-  branch: 'All Branches',
+  aspireBranchId: null,
   active: true,
   serviceType: 'Turf Area',
 }
@@ -521,14 +521,14 @@ describe('MaintenanceEditor — Reset / Save', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Kits come from GET /catalog-items; every maintenance line must
+// Kits come from GET /service-kits; every maintenance line must
 // resolve a production rate (or explicit hours) before Save.
 // ---------------------------------------------------------------------------
 
 describe('MaintenanceEditor — kit catalog + production-rate save guard', () => {
-  it('feeds the add-line dropdown from GET /catalog-items, not the literal', async () => {
+  it('feeds the add-line dropdown from GET /service-kits, not the literal', async () => {
     server.use(
-      http.get('/api/estimating/catalog-items', () => HttpResponse.json([RATED_KIT])),
+      http.get('/api/estimating/service-kits', () => HttpResponse.json([RATED_KIT])),
     )
     renderMaint()
     const s1 = sectionCard('Common Area')
@@ -560,7 +560,7 @@ describe('MaintenanceEditor — kit catalog + production-rate save guard', () =>
     est.sections[0].services[0] = {
       ...est.sections[0].services[0],
       hours: null,
-      catalogItemId: null,
+      serviceKitId: null,
     }
     renderMaint(est)
     await user.click(screen.getByRole('button', { name: /^save$/i }))
@@ -573,14 +573,14 @@ describe('MaintenanceEditor — kit catalog + production-rate save guard', () =>
   })
 
   it('a line pointing at an UNRATED kit is blocked once the catalog is loaded', async () => {
-    const unrated: CatalogItem = {
+    const unrated: ServiceKit = {
       ...RATED_KIT,
       id: 'kit-maint-3435',
       description: 'Prune Easy',
       productionRate: null,
     }
     server.use(
-      http.get('/api/estimating/catalog-items', () =>
+      http.get('/api/estimating/service-kits', () =>
         HttpResponse.json([RATED_KIT, unrated]),
       ),
     )
@@ -589,7 +589,7 @@ describe('MaintenanceEditor — kit catalog + production-rate save guard', () =>
     est.sections[0].services[0] = {
       ...est.sections[0].services[0],
       hours: null,
-      catalogItemId: unrated.id,
+      serviceKitId: unrated.id,
     }
     renderMaint(est)
     // wait for the catalog fetch so the client guard can resolve the kit

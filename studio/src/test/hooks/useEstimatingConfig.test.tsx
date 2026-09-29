@@ -40,7 +40,7 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
     expect(result.current.marginBands).toEqual(DEFAULT_MARGIN_BANDS)
     expect(result.current.materialCalcs).toEqual(MATERIAL_FORMULA_ROWS)
     expect(result.current.itbScopes).toEqual(ITB_SCOPE_SEED)
-    expect(result.current.catalogItems).toEqual([])
+    expect(result.current.serviceKits).toEqual([])
   })
 
   it('loads all five config sets from the API', async () => {
@@ -93,7 +93,7 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
       http.get('/api/estimating/config/margin-bands', fail),
       http.get('/api/estimating/config/material-calcs', fail),
       http.get('/api/estimating/config/itb-scopes', fail),
-      http.get('/api/estimating/catalog-items', fail),
+      http.get('/api/estimating/service-kits', fail),
     )
     const { wrapper } = createWrapper()
     const { result } = renderHook(() => useEstimatingConfig(), { wrapper })
@@ -102,7 +102,7 @@ describe('useEstimatingConfig — fetch with literal fallback', () => {
     expect(result.current.marginBands).toEqual(DEFAULT_MARGIN_BANDS)
     expect(result.current.materialCalcs).toEqual(MATERIAL_FORMULA_ROWS)
     expect(result.current.itbScopes).toEqual(ITB_SCOPE_SEED)
-    expect(result.current.catalogItems).toEqual([])
+    expect(result.current.serviceKits).toEqual([])
   })
 
   it('caches per query client — a second hook mount does not refetch', async () => {

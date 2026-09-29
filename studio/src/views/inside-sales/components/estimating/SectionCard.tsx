@@ -46,7 +46,7 @@ export interface SectionCardProps {
   onDuplicate: () => void
   onRemoveRequest: () => void
   /**
-   * The addable-service catalog, sourced from GET /catalog-items
+   * The addable-service catalog, sourced from GET /service-kits
    * by the parent editor. Defaults to the literal (offline fallback).
    */
   catalog?: MaintenanceCatalogService[]

@@ -302,11 +302,12 @@ export interface EstimateSection {
 export interface SectionService {
   id: string
   sectionId: string
-  catalogItemId: string | null
+  /** section_services.service_kit_id (service_kits.id). */
+  serviceKitId: string | null
   /**
    * Per-line LS/IR override for the ITB EST LS $ / EST IR $ split. `null`
-   * derives the discipline from the catalog item's `serviceType` (irrigation
-   * vs. landscape); a manual line with no catalog item defaults to landscape
+   * derives the discipline from the kit's `serviceType` (irrigation
+   * vs. landscape); a manual line with no kit defaults to landscape
    * unless set explicitly here.
    */
   discipline?: 'landscape' | 'irrigation' | null
@@ -329,15 +330,15 @@ export interface SectionService {
   /** Tracked for production planning; does NOT drive price. */
   hours: number | null
   sortOrder: number
-  /** Contract generator fields (from catalog_items, for approved/won maintenance estimates) */
+  /** Contract generator fields (from service_kits, for approved/won maintenance estimates) */
   serviceType?: string | null
   scopeText?: string | null
   /**
    * Per-line override of the contract's recurring/one-time split. `null`
-   * derives it from the catalog item's `billingType`; a hand-entered line has
-   * no catalog item, so without an explicit value here it resolves to null and
-   * drops out of the contract's 12-month payment-schedule base. Same override
-   * shape as `discipline`.
+   * derives it from the service kit's `billingType` when the estimate load
+   * joins `service_kits`; a hand-entered line has no kit, so without an
+   * explicit value here it resolves to null and drops out of the contract's
+   * 12-month payment-schedule base. Same override shape as `discipline`.
    */
   billingType?: 'recurring' | 'one_time' | null
   /** Install kit breakdown (expandable rows). Empty for maintenance. */
@@ -363,7 +364,12 @@ export interface SectionServiceComponent {
 
 export type KitType = 'maintenance_hours' | 'install_quantity'
 
-export interface CatalogItem {
+/**
+ * Priced service kit from GET /api/estimating/service-kits (`service_kits`).
+ * `scopeText` and `billingType` are not on this list; estimate loads copy
+ * them onto the section service.
+ */
+export interface ServiceKit {
   id: string
   description: string
   uom: string
@@ -373,7 +379,8 @@ export interface CatalogItem {
   kitType: KitType
   /** Maintenance: units per labor hour. Null for install kits. */
   productionRate: number | null
-  branch: string
+  /** `service_kits.aspire_branch_id`. Null means company-wide. */
+  aspireBranchId: number | null
   active: boolean
   serviceType: string
 }
@@ -446,11 +453,11 @@ export interface TakeoffLine {
    * LOCALLY-set, manually-editable opportunity qty (drives Δ vs Opp). Never
    * read from Aspire (locked decision); on estimate Save the
    * backend pushes it one-way to OpportunityServiceItem.ItemQuantity for
-   * lines that carry a catalogItemId.
+   * lines that carry a serviceKitId.
    */
   opportunityQty: number
-  /** Nullable kit link enabling the Aspire qty push. */
-  catalogItemId?: string | null
+  /** Nullable service_kits.id (column takeoff_lines.service_kit_id). */
+  serviceKitId?: string | null
 }
 
 // ----- Approval tiers (config-driven) ----------------------------------------

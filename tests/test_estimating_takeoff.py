@@ -5,13 +5,13 @@ tests/test_estimating_line_items.py) — no MySQL, no live Aspire. Contract:
 
   * GET/POST/PATCH/DELETE /api/estimating/estimates/{id}/takeoff-lines[/{lid}]
     persist estimator-owned takeoff rows; plan/add%/measured/opportunity qty
-    and catalog_item_id are all writable (opportunity_qty is a LOCAL value —
+    and service_kit_id are all writable (opportunity_qty is a LOCAL value —
     never read from Aspire).
   * Derived fields (bidQty/flagged/deltaVsOpp) are recomputed server-side —
     client-sent derived values are ignored. bidQty uses
     round (locked decision), not ceil.
   * On estimate Save (PATCH /estimates/{id}) the lines that carry a
-    catalog_item_id are pushed to Aspire ONCE as a batch, best-effort — an
+    service_kit_id are pushed to Aspire ONCE as a batch, best-effort — an
     Aspire failure never fails the Save.
   * Estimator-ownership RBAC on every mutation route.
 """
@@ -85,7 +85,7 @@ def _line_payload(**over) -> dict:
         "addPct": 0.1,
         "measuredQty": 115,
         "opportunityQty": 100,
-        "catalogItemId": "cat-1",
+        "serviceKitId": "cat-1",
     }
     base.update(over)
     return base
@@ -113,7 +113,7 @@ class TestTakeoffCrud:
         line = res.json()
         assert line["estimateId"] == eid
         assert line["description"] == "Irrigation lateral line"
-        assert line["catalogItemId"] == "cat-1"
+        assert line["serviceKitId"] == "cat-1"
         assert line["opportunityQty"] == 100
         # Derived, recomputed: round(100 × 1.1) = 110; |115−100|/100 = 15% > 10%.
         assert line["bidQty"] == 110
@@ -150,8 +150,8 @@ class TestTakeoffCrud:
         assert body["deltaVsOpp"] == 10
 
         # catalog link is settable and clearable.
-        body = client.patch(_url(eid, line["id"]), json={"catalogItemId": None}).json()
-        assert body["catalogItemId"] is None
+        body = client.patch(_url(eid, line["id"]), json={"serviceKitId": None}).json()
+        assert body["serviceKitId"] is None
 
     def test_patch_ignores_client_sent_derived_values(self, estimator, db):
         eid = _create_estimate()
@@ -221,11 +221,11 @@ class TestSavePushesTakeoffQtys:
         eid = _create_estimate()
         db.tables["estimates"][eid]["aspire_opportunity_id"] = 9001
         client.post(_url(eid), json=_line_payload(
-            description="Mahogany", uom="ea", opportunityQty=24, catalogItemId="501"))
+            description="Mahogany", uom="ea", opportunityQty=24, serviceKitId="501"))
         client.post(_url(eid), json=_line_payload(
-            description="Lateral", uom="FT", opportunityQty=1640, catalogItemId="502"))
+            description="Lateral", uom="FT", opportunityQty=1640, serviceKitId="502"))
         client.post(_url(eid), json=_line_payload(
-            description="Unlinked", uom="SF", opportunityQty=5, catalogItemId=None))
+            description="Unlinked", uom="SF", opportunityQty=5, serviceKitId=None))
         return eid
 
     def test_save_pushes_catalog_linked_lines_once_as_a_batch(self, estimator, db):
@@ -242,7 +242,7 @@ class TestSavePushesTakeoffQtys:
             push.assert_awaited_once()
             opp_id, items = push.await_args.args
             assert opp_id == 9001
-            assert [(i.catalog_item_id, i.qty, i.uom) for i in items] == [
+            assert [(i.service_kit_id, i.qty, i.uom) for i in items] == [
                 ("501", 24.0, "ea"),
                 ("502", 1640.0, "FT"),
             ]
@@ -260,7 +260,7 @@ class TestSavePushesTakeoffQtys:
 
     def test_save_without_catalog_lines_skips_push(self, estimator, db):
         eid = _create_estimate()
-        client.post(_url(eid), json=_line_payload(catalogItemId=None))
+        client.post(_url(eid), json=_line_payload(serviceKitId=None))
         with patch("api.estimating.aspire_sync.sync_enabled", return_value=True), \
              patch(
                  "api.estimating.aspire_sync.push_opportunity_service_item_qty",

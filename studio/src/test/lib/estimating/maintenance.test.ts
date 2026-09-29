@@ -25,11 +25,11 @@ import {
   MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
   formatCents,
   lineCentsPerSqft,
-  maintenanceCatalogFromItems,
+  maintenanceRowsFromServiceKits,
   sellRateCentsPer1000Sf,
   unresolvedProductionRateLabels,
 } from '@/lib/estimating/maintenance'
-import type { CatalogItem } from '@/types/estimating'
+import type { ServiceKit } from '@/types/estimating'
 import { buildMaintenanceEstimate } from '@/mocks/estimatingData'
 
 describe('maintenance service catalog (sq-ft basis, BRD I-6.5)', () => {
@@ -213,32 +213,32 @@ describe('display reads', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The editor reads kits from GET /catalog-items; the literal is
+// The editor reads kits from GET /service-kits; the literal is
 // only the offline fallback. Plus the client half of the save guard.
 // ---------------------------------------------------------------------------
 
-const kit = (over: Partial<CatalogItem> & Pick<CatalogItem, 'id' | 'description'>): CatalogItem => ({
+const kit = (over: Partial<ServiceKit> & Pick<ServiceKit, 'id' | 'description'>): ServiceKit => ({
   uom: 'Sq. Ft.',
   unitCostCents: 0,
   unitSellCents: 0,
   targetGm: 0.22,
   kitType: 'maintenance_hours',
   productionRate: null,
-  branch: 'All Branches',
+  aspireBranchId: null,
   active: true,
   serviceType: '',
   ...over,
 })
 
-describe('maintenanceCatalogFromItems (API catalog adapter)', () => {
+describe('maintenanceRowsFromServiceKits (API catalog adapter)', () => {
   const rated = kit({ id: 'kit-1', description: 'Standard Production Mowing', productionRate: 67650 })
 
   it('falls back to the literal when the API returned no usable kits', () => {
-    expect(maintenanceCatalogFromItems([])).toBe(MAINTENANCE_SERVICE_CATALOG)
+    expect(maintenanceRowsFromServiceKits([])).toBe(MAINTENANCE_SERVICE_CATALOG)
   })
 
   it('adapts rated sq-ft maintenance kits to editor catalog rows (kit id = key)', () => {
-    const rows = maintenanceCatalogFromItems([rated])
+    const rows = maintenanceRowsFromServiceKits([rated])
     expect(rows).toHaveLength(1)
     expect(rows[0].key).toBe('kit-1')
     expect(rows[0].label).toBe('Standard Production Mowing')
@@ -246,24 +246,24 @@ describe('maintenanceCatalogFromItems (API catalog adapter)', () => {
   })
 
   it('excludes unrated, inactive, non-sqft, and install kits (only guard-passing kits are addable)', () => {
-    const items: CatalogItem[] = [
+    const items: ServiceKit[] = [
       rated,
       kit({ id: 'kit-unrated', description: 'Prune Easy' }),
       kit({ id: 'kit-inactive', description: 'Old Kit', productionRate: 100, active: false }),
       kit({ id: 'kit-count', description: 'Tree Rings', productionRate: 10, uom: 'CT' }),
       kit({ id: 'kit-install', description: 'Mulch', productionRate: 5, kitType: 'install_quantity' }),
     ]
-    expect(maintenanceCatalogFromItems(items).map((r) => r.key)).toEqual(['kit-1'])
+    expect(maintenanceRowsFromServiceKits(items).map((r) => r.key)).toEqual(['kit-1'])
   })
 
   it('derives the sell rate from the production rate + crew rate + target GM when unit sell is 0', () => {
-    const rows = maintenanceCatalogFromItems([rated])
+    const rows = maintenanceRowsFromServiceKits([rated])
     expect(rows[0].rateCentsPer1000Sf).toBe(
       sellRateCentsPer1000Sf(67650, 0.22, MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
     )
     // and an explicit unit sell wins
     const priced = kit({ id: 'kit-2', description: 'Priced', productionRate: 5000, unitSellCents: 450 })
-    expect(maintenanceCatalogFromItems([priced])[0].rateCentsPer1000Sf).toBe(450)
+    expect(maintenanceRowsFromServiceKits([priced])[0].rateCentsPer1000Sf).toBe(450)
   })
 
   it('sellRateCentsPer1000Sf = (1000 ÷ rate) × crew rate ÷ (1 − GM)', () => {
@@ -288,28 +288,28 @@ describe('unresolvedProductionRateLabels (client save guard)', () => {
 
   it('flags a line with no hours and no kit — even with the catalog not loaded', () => {
     expect(
-      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: null }), []),
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, serviceKitId: null }), []),
     ).toEqual(['Mowing'])
   })
 
   it('resolves through a production-rated kit', () => {
     expect(
-      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-1' }), [rated]),
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, serviceKitId: 'kit-1' }), [rated]),
     ).toEqual([])
   })
 
   it('flags an unrated or unknown kit once the catalog is loaded', () => {
     expect(
-      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-2' }), [rated, unrated]),
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, serviceKitId: 'kit-2' }), [rated, unrated]),
     ).toEqual(['Mowing'])
     expect(
-      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-nope' }), [rated]),
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, serviceKitId: 'kit-nope' }), [rated]),
     ).toEqual(['Mowing'])
   })
 
   it('gives a kit-carrying line the benefit of the doubt while the catalog is unknown (server still enforces)', () => {
     expect(
-      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-2' }), []),
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, serviceKitId: 'kit-2' }), []),
     ).toEqual([])
   })
 })

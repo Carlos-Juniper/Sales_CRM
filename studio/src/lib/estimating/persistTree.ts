@@ -54,7 +54,7 @@ export type TreeOp =
 // Diffable scalar fields per level (ids/children handled structurally).
 const SECTION_FIELDS = ['name', 'squareFeet', 'sortOrder'] as const
 const SERVICE_FIELDS = [
-  'catalogItemId',
+  'serviceKitId',
   'discipline',
   'label',
   'qty',
@@ -177,7 +177,7 @@ function toComponentPayload(c: SectionServiceComponent): CreateComponentPayload 
 
 function toServicePayload(sv: SectionService): CreateServicePayload {
   return {
-    catalogItemId: sv.catalogItemId,
+    serviceKitId: sv.serviceKitId,
     label: sv.label,
     qty: sv.qty,
     uom: sv.uom,

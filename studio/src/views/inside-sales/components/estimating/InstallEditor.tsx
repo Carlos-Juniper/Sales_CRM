@@ -38,7 +38,7 @@ import { componentCost, marginBand } from '@/lib/estimating/calc'
 import { persistEstimateTree } from '@/lib/estimating/persistTree'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import {
-  type InstallCatalogKit,
+  type InstallServiceKit,
   buildComponent,
   coerceNum,
   estimateGm,
@@ -47,7 +47,7 @@ import {
   formatCents,
   formatGmPct,
   groupSameRateLabor,
-  installKitCatalogFromItems,
+  installServiceKitsFromItems,
   kitToService,
   sectionGm,
   sectionHours,
@@ -305,8 +305,8 @@ function GroupRows({
   onAddComponent: (serviceId: string, kind: ComponentKind) => void
   onGroupLabor: (serviceId: string) => void
   onAddKit: (kitId: string) => void
-  /** Kits from GET /catalog-items (literal = offline fallback). */
-  kits: InstallCatalogKit[]
+  /** Kits from GET /service-kits (literal = offline fallback). */
+  kits: InstallServiceKit[]
 }) {
   return (
     <>
@@ -365,7 +365,7 @@ function GroupRows({
           ))}
         </select>
         <span className="text-[10px] text-[hsl(var(--muted-fg))]">
-          Kit sell / cost / GM% come from catalog_items — cost basis averages live vendor prices.
+          Kit sell / cost / GM% come from the service kit catalog — cost basis averages live vendor prices.
         </span>
       </div>
     </>
@@ -379,8 +379,8 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
   const toast = useToast()
   // The ONE canonical margin-band set + kit catalog — API-fetched config;
   // the literals are only the offline fallback.
-  const { marginBands, catalogItems } = useEstimatingConfig()
-  const kitCatalog = useMemo(() => installKitCatalogFromItems(catalogItems), [catalogItems])
+  const { marginBands, serviceKits } = useEstimatingConfig()
+  const kitCatalog = useMemo(() => installServiceKitsFromItems(serviceKits), [serviceKits])
 
   const [draft, setDraft] = useState<InstallEstimate>(estimate)
   const savedRef = useRef<InstallEstimate>(estimate)

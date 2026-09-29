@@ -572,7 +572,7 @@ def _service_out(
 ) -> dict:
     """Serialize one section_service row.
 
-    `catalog_data` is the joined catalog_items row (service_type, scope_text,
+    `catalog_data` is the joined service_kits row (service_type, scope_text,
     billing_type) that the contract generator reads to split recurring from
     one-time services and print each service's scope paragraph. Only
     _load_estimate has it in hand; the single-row routes below pass nothing and
@@ -580,14 +580,16 @@ def _service_out(
     SectionService TS interface.
 
     billingType resolves the per-line override first (migration 046), falling
-    back to the catalog item. A hand-entered line has no catalog item, so
+    back to the kit. A hand-entered line has no kit, so
     without the override it would resolve to None and drop out of the
     contract's payment-schedule base. Mirrors the `discipline` override.
+
+    serviceKitId is the wire name of section_services.service_kit_id.
     """
     return {
         "id": r["id"],
         "sectionId": r["section_id"],
-        "catalogItemId": r["catalog_item_id"],
+        "serviceKitId": r["service_kit_id"],
         "discipline": r.get("discipline"),
         "label": r["label"],
         "qty": _num(r["qty"]),
@@ -758,20 +760,20 @@ async def _load_estimate(
     for c in component_rows:
         comps_by_service.setdefault(c["section_service_id"], []).append(_component_out(c))
 
-    # Fetch catalog_items data for contract generator fields (scope_text, billing_type, service_type)
+    # Fetch service_kits data for contract generator fields (scope_text, billing_type, service_type)
     catalog_data_by_id: dict[str, dict] = {}
-    catalog_item_ids = {sv["catalog_item_id"] for sv in service_rows if sv.get("catalog_item_id")}
-    if catalog_item_ids:
-        placeholders = ", ".join(["%s"] * len(catalog_item_ids))
+    service_kit_ids = {sv["service_kit_id"] for sv in service_rows if sv.get("service_kit_id")}
+    if service_kit_ids:
+        placeholders = ", ".join(["%s"] * len(service_kit_ids))
         catalog_rows = await query(
-            f"SELECT id, service_type, scope_text, billing_type FROM catalog_items WHERE id IN ({placeholders})",
-            list(catalog_item_ids),
+            f"SELECT id, service_type, scope_text, billing_type FROM service_kits WHERE id IN ({placeholders})",
+            list(service_kit_ids),
         )
         catalog_data_by_id = {r["id"]: r for r in catalog_rows}
 
     services_by_section: dict[str, list[dict]] = {}
     for sv in service_rows:
-        catalog_data = catalog_data_by_id.get(sv.get("catalog_item_id"))
+        catalog_data = catalog_data_by_id.get(sv.get("service_kit_id"))
         services_by_section.setdefault(sv["section_id"], []).append(
             _service_out(sv, comps_by_service.get(sv["id"], []), catalog_data)
         )
@@ -981,7 +983,7 @@ _TAKEOFF_COLS = {
     "addPct": "add_pct",
     "measuredQty": "measured_qty",
     "opportunityQty": "opportunity_qty",
-    "catalogItemId": "catalog_item_id",
+    "serviceKitId": "service_kit_id",
 }
 
 
@@ -1013,7 +1015,7 @@ def _takeoff_line_out(r: dict, threshold: float = DISCREPANCY_DEFAULT_THRESHOLD)
         "addPct": add,
         "measuredQty": measured,
         "opportunityQty": opp,
-        "catalogItemId": r.get("catalog_item_id"),
+        "serviceKitId": r.get("service_kit_id"),
         # Derived server-side at the config threshold (company_settings, §5.4) —
         # the UI's live slider re-derives client-side; these are never stored.
         "bidQty": _bid_qty(plan, add),
@@ -1025,7 +1027,7 @@ def _takeoff_line_out(r: dict, threshold: float = DISCREPANCY_DEFAULT_THRESHOLD)
 async def _push_takeoff_qtys_bg(estimate_id: str) -> None:
     """ONE batched, best-effort qty push on estimate Save.
 
-    Pushes every takeoff line that carries a catalog_item_id (a single pass,
+    Pushes every takeoff line that carries a service_kit_id (a single pass,
     not a call per edit) to OpportunityServiceItem.ItemQuantity via the
     aspire_sync port. Strictly non-blocking: any failure is logged, never
     raised — an Aspire outage must not fail the Save. (Separate from the
@@ -1040,13 +1042,13 @@ async def _push_takeoff_qtys_bg(estimate_id: str) -> None:
         if not rows:
             return
         line_rows = await query(
-            """SELECT catalog_item_id, opportunity_qty, uom FROM takeoff_lines
-                 WHERE estimate_id = %s AND catalog_item_id IS NOT NULL""",
+            """SELECT service_kit_id, opportunity_qty, uom FROM takeoff_lines
+                 WHERE estimate_id = %s AND service_kit_id IS NOT NULL""",
             [estimate_id],
         )
         lines = [
             aspire_sync.TakeoffQtyLine(
-                catalog_item_id=r["catalog_item_id"],
+                service_kit_id=r["service_kit_id"],
                 qty=float(_num(r["opportunity_qty"]) or 0),
                 uom=r.get("uom"),
             )
@@ -1315,7 +1317,7 @@ ITB_STATUS_CODES = frozenset({"P", "C", "S", "R", "U", "X", "-"})
 # 'P' Pending
 DEFAULT_ITB_STATUS = "P"
 
-# EST LS $ / EST IR $ auto-split. A line's catalog_items.service_type
+# EST LS $ / EST IR $ auto-split. A line's service_kits.service_type
 # in this set is classified as Irrigation; everything else is Landscape. A named
 # config set (not a hardcoded branch) so adding a service type is a data change.
 IRRIGATION_SERVICE_TYPES = frozenset({"Irrigation"})
@@ -1359,26 +1361,26 @@ async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int
     sqft_by_section = {s["id"]: s.get("square_feet") or 0 for s in sections}
     placeholders = ", ".join(["%s"] * len(section_ids))
     svc_rows = await query(
-        f"SELECT section_id, catalog_item_id, discipline, qty, unit_sell_cents, complexity_pct"
+        f"SELECT section_id, service_kit_id, discipline, qty, unit_sell_cents, complexity_pct"
         f" FROM section_services WHERE section_id IN ({placeholders})",
         section_ids,
     )
     lines: list[dict] = []
-    catalog_item_ids: set[str] = set()
+    service_kit_ids: set[str] = set()
     for sv in svc_rows:
         lines.append({**sv, "square_feet": sqft_by_section.get(sv["section_id"], 0)})
         if sv.get("discipline") not in ("landscape", "irrigation"):
-            cid = sv.get("catalog_item_id")
+            cid = sv.get("service_kit_id")
             if cid:
-                catalog_item_ids.add(cid)
+                service_kit_ids.add(cid)
     if not lines:
         return total_cents, 0
     service_types: dict[str, str] = {}
-    if catalog_item_ids:
-        ids = list(catalog_item_ids)
+    if service_kit_ids:
+        ids = list(service_kit_ids)
         placeholders = ", ".join(["%s"] * len(ids))
         rows = await query(
-            f"SELECT id, service_type FROM catalog_items WHERE id IN ({placeholders})", ids
+            f"SELECT id, service_type FROM service_kits WHERE id IN ({placeholders})", ids
         )
         service_types = {r["id"]: r["service_type"] for r in rows}
     # Sum LS and IR independently from the lines themselves (rather than
@@ -1397,7 +1399,7 @@ async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int
             sell = round((square_feet / 1000) * unit_sell * qty * (1 + complexity))
         else:
             sell = round(qty * unit_sell)
-        discipline = _line_discipline(sv.get("discipline"), service_types.get(sv.get("catalog_item_id")))
+        discipline = _line_discipline(sv.get("discipline"), service_types.get(sv.get("service_kit_id")))
         if discipline == "irrigation":
             ir_cents += sell
         else:
@@ -1541,7 +1543,7 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
     return project_id
 
 
-def _catalog_item_out(r: dict) -> dict:
+def _service_kit_out(r: dict) -> dict:
     # Slice 14: `branch` city string removed; identity carried by aspire_branch_id
     # (NULL = company-wide per §2.3 convention). The legacy `branch` key is NOT
     # passed through — once 022 is applied the column will not exist in the row.
@@ -1584,13 +1586,13 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
     service_id = _new_id("svc")
     await execute(
         """INSERT INTO section_services
-             (id, section_id, catalog_item_id, discipline, billing_type, label, qty, uom,
+             (id, section_id, service_kit_id, discipline, billing_type, label, qty, uom,
               complexity_pct, unit_sell_cents, embedded_cost_cents, target_gm, hours, sort_order)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
             service_id,
             section_id,
-            svc.get("catalogItemId"),
+            svc.get("serviceKitId"),
             svc.get("discipline"),
             svc.get("billingType"),
             svc["label"],
@@ -1631,7 +1633,7 @@ async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
 #
 # Production rates are REQUIRED: a maintenance service line cannot be saved
 # unless its hours are computable. A line resolves when it carries non-null
-# hours itself, OR its catalog_item has a non-null production_rate. Otherwise
+# hours itself, OR its service kit has a non-null production_rate. Otherwise
 # the write is rejected 422 BEFORE anything persists (the frontend shows its
 # own guard, but the server never trusts the client). Install estimates are
 # untouched — install kits are quantity-driven and carry no production rate.
@@ -1639,24 +1641,24 @@ async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
 async def _require_resolvable_maintenance_lines(services: list[dict]) -> None:
     """Reject (422) any maintenance line whose hours cannot be resolved.
 
-    `services` are camelCase line dicts carrying label / hours / catalogItemId.
+    `services` are camelCase line dicts carrying label / hours / serviceKitId.
     Kits are fetched in one batched query; a missing kit id counts as
-    unresolvable (a dangling catalog_item_id can never produce hours).
+    unresolvable (a dangling service_kit_id can never produce hours).
     """
     pending = [svc for svc in services if svc.get("hours") is None]
     if not pending:
         return
-    kit_ids = {svc.get("catalogItemId") for svc in pending if svc.get("catalogItemId")}
+    kit_ids = {svc.get("serviceKitId") for svc in pending if svc.get("serviceKitId")}
     rates: dict[str, Any] = {}
     if kit_ids:
         placeholders = ", ".join(["%s"] * len(kit_ids))
         rows = await query(
-            f"SELECT id, production_rate FROM catalog_items WHERE id IN ({placeholders})",
+            f"SELECT id, production_rate FROM service_kits WHERE id IN ({placeholders})",
             list(kit_ids),
         )
         rates = {r["id"]: r.get("production_rate") for r in rows}
     for svc in pending:
-        kit_id = svc.get("catalogItemId")
+        kit_id = svc.get("serviceKitId")
         if kit_id is None or rates.get(kit_id) is None:
             label = svc.get("label") or "(unnamed line)"
             raise HTTPException(
@@ -2250,7 +2252,7 @@ def register(app, require_auth) -> None:
             background.add_task(_create_commission_on_won, estimate_id)
 
         # Estimate Save triggers ONE batched, best-effort
-        # push of the takeoff quantities that carry a catalog_item_id. Never
+        # push of the takeoff quantities that carry a service_kit_id. Never
         # blocks the Save; failures are logged inside the task.
         background.add_task(_push_takeoff_qtys_bg, estimate_id)
 
@@ -2546,13 +2548,13 @@ def register(app, require_auth) -> None:
             merged = {
                 "label": body.get("label", current.get("label")),
                 "hours": body["hours"] if "hours" in body else current.get("hours"),
-                "catalogItemId": body["catalogItemId"]
-                if "catalogItemId" in body
-                else current.get("catalog_item_id"),
+                "serviceKitId": body["serviceKitId"]
+                if "serviceKitId" in body
+                else current.get("service_kit_id"),
             }
             await _require_resolvable_maintenance_lines([merged])
         cols = {
-            "catalogItemId": "catalog_item_id",
+            "serviceKitId": "service_kit_id",
             "discipline": "discipline",
             "billingType": "billing_type",
             "label": "label",
@@ -2783,7 +2785,7 @@ def register(app, require_auth) -> None:
         await execute(
             """INSERT INTO takeoff_lines
                  (id, estimate_id, description, uom, plan_qty, add_pct,
-                  measured_qty, opportunity_qty, catalog_item_id)
+                  measured_qty, opportunity_qty, service_kit_id)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 line_id,
@@ -2794,7 +2796,7 @@ def register(app, require_auth) -> None:
                 body.get("addPct", 0),
                 body.get("measuredQty", 0),
                 body.get("opportunityQty", 0),
-                body.get("catalogItemId"),
+                body.get("serviceKitId"),
             ],
         )
         await execute(
@@ -3489,8 +3491,8 @@ def register(app, require_auth) -> None:
         )
         return {"projectId": project_id, "scopeId": scope_id, "statusCode": code}
 
-    @app.get("/api/estimating/catalog-items")
-    async def list_catalog_items(
+    @app.get("/api/estimating/service-kits")
+    async def list_service_kits(
         # Slice 14: the `branch` city-string filter is removed; callers should
         # filter by aspireBranchId (int) once that param is wired (follow-up).
         kit_type: Optional[str] = Query(default=None),
@@ -3515,6 +3517,6 @@ def register(app, require_auth) -> None:
             params.append(flag)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         rows = await query(
-            f"SELECT * FROM catalog_items {where} ORDER BY description", params
+            f"SELECT * FROM service_kits {where} ORDER BY description", params
         )
-        return [_catalog_item_out(r) for r in rows]
+        return [_service_kit_out(r) for r in rows]

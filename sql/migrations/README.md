@@ -57,7 +57,7 @@ for at least one real deploy cycle.
 - **006** — adds `itb_projects.estimate_id` (Handoff 21).
 - **007** — renames `approval_tiers.role_key` to canonical auth roles, adds the install approval ladder (Handoff 19).
 - **008** — adds `takeoff_lines.catalog_item_id` and `takeoff_lines.created_at` (Handoff 20).
-- **009** — seeds `catalog_items` from the Aspire kit workbook (Handoff 22). Idempotent (`INSERT … ON DUPLICATE KEY UPDATE`). Refreshing from a newer workbook is a separate manual operation via `scripts/load_catalog_items.py`.
+- **009** — seeds `catalog_items` from the Aspire kit workbook (Handoff 22). Idempotent (`INSERT … ON DUPLICATE KEY UPDATE`). Refreshing from a newer workbook is a separate manual operation via `scripts/load_service_kits.py`.
 - **010** — adds `estimates.lead_id` (pipeline kanban redesign).
 - **011** — renames `leads.status = 'handed_off'` → `'estimating'` (data-only; idempotent `UPDATE WHERE`). Run before deploying the renamed frontend/backend code.
 - **012** — adds `estimates.turf_area_acres`, `estimates.curb_miles`, and wires takeoff-scan attachments (Handoff 27).
@@ -74,6 +74,7 @@ for at least one real deploy cycle.
 - **062** — adds `owner_user_id` to `team_members` and `client_references` (guarded). Not the same change as 058.
 - **063** — nullable `estimates.homes_budget` / `common_area_budget`. Renumbered from 059 so it does not share a number with the branch-manager migration on `integrate/staging-proposals`.
 - **064** — yearly maintenance occurrence counts on `estimates`. Renumbered from 061 for the same reason.
+- **069** — renames kit table `catalog_items` to `service_kits` (and `catalog_item_id` to `service_kit_id` on `section_services` and `takeoff_lines`). Indexes become `idx_service_kits_kit_type`, `idx_service_kits_active`, and `idx_service_kits_aspire_branch`. Numbered 069 because 065 is the open commission-cadence migration and 067/068 are the open sales-role migrations. Rollback: `sql/rollbacks/069_service_kits_down.sql` (not run by the migrator). That file also deletes the `069_service_kits` row from `schema_migrations`.
 
 ### Numbering history
 

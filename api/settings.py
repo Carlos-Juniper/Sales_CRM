@@ -472,11 +472,11 @@ class BranchSettingsPatch(BaseModel):
     `aspire_branch_id` may appear in the body for wire compatibility but is
     IGNORED for authorization — scope comes from user_branches, never the body
     (critical AC). crew_rate_cents_per_hour writes branch_settings; production
-    rate writes catalog_items; material factors write material_calcs.factors.
+    rate writes service_kits; material factors write material_calcs.factors.
     """
     aspire_branch_id: Optional[int] = None
     crew_rate_cents_per_hour: Optional[int] = None
-    # {catalog_item_id: production_rate}
+    # {service kit id: production_rate}
     production_rates: Optional[dict[str, float]] = None
     # {material_key: {factor_name: value, ...}} — factor columns only, never
     # unit_cost/unit_sell.
@@ -1006,78 +1006,14 @@ def register(app, require_auth) -> None:
         rows take precedence; for any material_key not overridden the company-wide
         row is returned flagged inherited.
 
-        productionRates: catalog_items production_rate values. No per-branch
-        production-rate table exists (catalog_items.production_rate is a single
+        productionRates: service_kits production_rate values. No per-branch
+        production-rate table exists (service_kits.production_rate is a single
         company-wide value written by PATCH /api/settings/branch/{id}), so all
         items are returned flagged source='inherited' (no branch-level override
         is distinguishable from the DB schema alone).
         """
         await _require_branch_write_scope(user, aspire_branch_id)
-
-        # ── crew rate ─────────────────────────────────────────────────────────
-        bs_rows = await query(
-            "SELECT * FROM branch_settings WHERE aspire_branch_id = %s",
-            [aspire_branch_id],
-        )
-        crew_rate = bs_rows[0].get("crew_rate_cents_per_hour") if bs_rows else None
-
-        # ── material factors — effective set (override | inherited) ───────────
-        # 1. Load all branch override rows.
-        branch_factor_rows = await query(
-            """SELECT material_key, factors, aspire_branch_id
-                 FROM material_calcs
-                WHERE aspire_branch_id = %s""",
-            [aspire_branch_id],
-        )
-        # 2. Load company-wide rows (aspire_branch_id IS NULL).
-        company_factor_rows = await query(
-            """SELECT material_key, factors, aspire_branch_id
-                 FROM material_calcs
-                WHERE aspire_branch_id IS NULL""",
-        )
-
-        # Build effective set: branch overrides win; company-wide fills the rest.
-        overridden_keys: set[str] = {r["material_key"] for r in branch_factor_rows}
-        effective_factors: list[dict] = []
-        for r in branch_factor_rows:
-            effective_factors.append({
-                "materialKey": r["material_key"],
-                "factors": _parse_factors(r.get("factors")),
-                "source": "override",
-            })
-        for r in company_factor_rows:
-            if r["material_key"] not in overridden_keys:
-                effective_factors.append({
-                    "materialKey": r["material_key"],
-                    "factors": _parse_factors(r.get("factors")),
-                    "source": "inherited",
-                })
-
-        # ── production rates — catalog_items (company-wide; no per-branch table)
-        # All items are flagged source='inherited': catalog_items.production_rate
-        # is the single company-wide value; per-branch overrides are not stored
-        # in a separate column so the distinction doesn't apply here.
-        catalog_rows = await query(
-            """SELECT id, description, production_rate
-                 FROM catalog_items
-                WHERE active = 1 AND production_rate IS NOT NULL""",
-        )
-        production_rates: list[dict] = [
-            {
-                "catalogItemId": r["id"],
-                "description": r.get("description"),
-                "productionRate": float(r["production_rate"]),
-                "source": "inherited",
-            }
-            for r in catalog_rows
-        ]
-
-        return {
-            "aspireBranchId": aspire_branch_id,
-            "crewRateCentsPerHour": None if crew_rate is None else int(crew_rate),
-            "materialFactors": effective_factors,
-            "productionRates": production_rates,
-        }
+        return await get_branch_settings_payload(aspire_branch_id)
 
     @app.patch("/api/settings/branch/{aspire_branch_id}")
     async def patch_branch_settings(
@@ -1122,26 +1058,26 @@ def register(app, require_auth) -> None:
             )
             changed += 1
 
-        # ── production rates → catalog_items.production_rate ─────────────────
-        for catalog_item_id, rate in (body.production_rates or {}).items():
+        # ── production rates → service_kits.production_rate ──────────────────
+        for service_kit_id, rate in (body.production_rates or {}).items():
             rows = await query(
-                "SELECT production_rate FROM catalog_items WHERE id = %s",
-                [catalog_item_id],
+                "SELECT production_rate FROM service_kits WHERE id = %s",
+                [service_kit_id],
             )
             if not rows:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Catalog item {catalog_item_id} not found",
+                    detail=f"Service kit {service_kit_id} not found",
                 )
             prior = rows[0].get("production_rate")
             await execute(
-                "UPDATE catalog_items SET production_rate = %s WHERE id = %s",
-                [rate, catalog_item_id],
+                "UPDATE service_kits SET production_rate = %s WHERE id = %s",
+                [rate, service_kit_id],
             )
             await _audit(
                 scope_type="branch",
                 scope_id=scope_id,
-                setting_key=f"production_rate.{catalog_item_id}",
+                setting_key=f"production_rate.{service_kit_id}",
                 from_value=prior,
                 to_value=rate,
                 actor=actor,
@@ -1408,11 +1344,10 @@ def register(app, require_auth) -> None:
         return {"id": user_id, "aspire_rep_id": resolved}
 
     async def get_branch_settings_payload(aspire_branch_id: int) -> dict:
-        """Return the enriched branch settings payload after a PATCH.
+        """Crew rate, material factors, and production rates for one branch.
 
-        Reuses the same enrichment logic as GET /api/settings/branch/{id}: crew
-        rate, materialFactors (override/inherited), productionRates. The PATCH
-        return value and the GET response are therefore always in sync.
+        GET /api/settings/branch/{id} and the PATCH response both call this,
+        so the two payloads stay the same shape.
         """
         bs_rows = await query(
             "SELECT * FROM branch_settings WHERE aspire_branch_id = %s",
@@ -1444,11 +1379,11 @@ def register(app, require_auth) -> None:
                 })
 
         catalog_rows = await query(
-            "SELECT id, description, production_rate FROM catalog_items WHERE active = 1 AND production_rate IS NOT NULL",
+            "SELECT id, description, production_rate FROM service_kits WHERE active = 1 AND production_rate IS NOT NULL",
         )
         production_rates: list[dict] = [
             {
-                "catalogItemId": r["id"],
+                "serviceKitId": r["id"],
                 "description": r.get("description"),
                 "productionRate": float(r["production_rate"]),
                 "source": "inherited",

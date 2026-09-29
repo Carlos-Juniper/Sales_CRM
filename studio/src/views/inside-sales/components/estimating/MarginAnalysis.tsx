@@ -26,7 +26,7 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { CatalogItem, Estimate, MarginBandLabel, MarginBands } from '@/types/estimating'
+import type { ServiceKit, Estimate, MarginBandLabel, MarginBands } from '@/types/estimating'
 import { contractTotal, groupMargin, marginBand } from '@/lib/estimating/calc'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import { useResolvedCrewRate } from '@/hooks/useResolvedCrewRate'
@@ -153,11 +153,11 @@ interface BenchCard {
 
 function buildBenchCards(
   estimate: Estimate,
-  catalogItems: CatalogItem[],
+  serviceKits: ServiceKit[],
 ): { verdict: BenchmarkStatus; perAcre: number; cards: BenchCard[] } {
   const perAcre = perAcreCents(estimate)
   const contract = contractTotal(estimate)
-  const mowingOcc = mowingPerOccurrenceCents(estimate, catalogItems)
+  const mowingOcc = mowingPerOccurrenceCents(estimate, serviceKits)
   const cards: BenchCard[] = [
     {
       testId: 'bench-card-per-acre',
@@ -244,7 +244,7 @@ function NoCrewRateState({
 export function MarginAnalysis() {
   const { openEstimate } = useEstimatingShell()
   // The ONE canonical band set — API-fetched; literal = fallback.
-  const { marginBands, catalogItems } = useEstimatingConfig()
+  const { marginBands, serviceKits } = useEstimatingConfig()
   // Crew rate: frozen snapshot (review+) → live branch rate → null. NEVER an
   // invented default — a null rate refuses a maintenance margin (§2.3 / §2.6).
   const crew = useResolvedCrewRate(openEstimate)
@@ -279,7 +279,7 @@ export function MarginAnalysis() {
 
   // Non-null (or install → 0, unused by materials-basis cost).
   const crewRateCents = crew.crewRateCents ?? 0
-  const groups = serviceGroupMargins(estimate, crewRateCents, catalogItems)
+  const groups = serviceGroupMargins(estimate, crewRateCents, serviceKits)
   const contract = contractTotal(estimate)
   const totalCost = groups.reduce((s, g) => s + g.costCents, 0)
   const overall = groupMargin(contract, totalCost)
@@ -288,7 +288,7 @@ export function MarginAnalysis() {
   const deltaPts = (overall - estimate.targetMargin) * 100
   const aboveTarget = deltaPts >= 0
 
-  const bench = buildBenchCards(estimate, catalogItems)
+  const bench = buildBenchCards(estimate, serviceKits)
   const verdictMeta = STATUS_META[bench.verdict]
   const treeSorted = [...MARGIN_BENCHMARKS.treeWorkSaleCents].sort((a, b) => a - b)
   const treeMedian = medianCents(MARGIN_BENCHMARKS.treeWorkSaleCents)

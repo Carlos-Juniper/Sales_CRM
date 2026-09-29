@@ -63,7 +63,7 @@ export function buildContractRows(estimate: Estimate): ContractRow[] {
       // the default — so anything NOT explicitly one-time is recurring.
       //
       // Testing `=== 'recurring'` instead would drop every unresolved line
-      // (a hand-entered line has no catalog item to derive a billing type
+      // (a hand-entered line has no service kit to derive a billing type
       // from, so it arrives as null) out of the payment-schedule base while
       // still counting it in the contract total.
       const isRecurring = svc.billingType !== 'one_time'

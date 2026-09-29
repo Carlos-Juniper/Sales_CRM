@@ -8,12 +8,12 @@ import { FormStatus, SettingsFormShell } from '../company/formStatus'
 import { NumberField, SaveButton } from '../company/SlaForm'
 
 /**
- * Branch production rates: `catalog_items.production_rate` per maintenance kit
+ * Branch production rates: `service_kits.production_rate` per maintenance kit
  * (units per labor hour). Read from the enriched branch GET (commits 32c58fe /
  * 2750a9d) which returns `productionRates` with a `source` field per row.
  * `source` is currently always 'inherited' (no per-branch rate column yet —
  * backend follow-up #16), but we render the badge from the field regardless.
- * Saving PATCHes the changed rates to /branch/{id}, keyed by catalog item id.
+ * Saving PATCHes the changed rates to /branch/{id}, keyed by service kit id.
  */
 export function ProductionRatesForm({
   aspireBranchId,
@@ -65,7 +65,7 @@ function ProductionFields({
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       rates.map((r) => [
-        r.catalogItemId,
+        r.serviceKitId,
         r.productionRate == null ? '' : String(r.productionRate),
       ]),
     ),
@@ -76,11 +76,11 @@ function ProductionFields({
     e.preventDefault()
     const changed: Record<string, number> = {}
     for (const rate of rates) {
-      const raw = values[rate.catalogItemId]
+      const raw = values[rate.serviceKitId]
       if (raw == null || raw.trim() === '') continue
       const next = Number(raw)
       if (next === rate.productionRate) continue
-      changed[rate.catalogItemId] = next
+      changed[rate.serviceKitId] = next
     }
     if (Object.keys(changed).length === 0) return
     update.mutate({ productionRates: changed })
@@ -94,23 +94,23 @@ function ProductionFields({
     >
       <form onSubmit={onSubmit} className="space-y-3">
         {rates.map((rate) => (
-          <div key={rate.catalogItemId} className="space-y-1">
+          <div key={rate.serviceKitId} className="space-y-1">
             {/* Source badge driven by the field value — never hardcoded. */}
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium opacity-80">
                 {rate.description}
               </span>
               <RateSourceBadge
-                catalogItemId={rate.catalogItemId}
+                serviceKitId={rate.serviceKitId}
                 source={rate.source}
               />
             </div>
             <NumberField
-              id={`rate-${rate.catalogItemId}`}
+              id={`rate-${rate.serviceKitId}`}
               label={rate.description}
-              value={values[rate.catalogItemId]}
+              value={values[rate.serviceKitId]}
               onChange={(v) =>
-                setValues((s) => ({ ...s, [rate.catalogItemId]: v }))
+                setValues((s) => ({ ...s, [rate.serviceKitId]: v }))
               }
               min={0}
               step={0.0001}
@@ -126,16 +126,16 @@ function ProductionFields({
 
 /** Inline inherited/override badge for a single production-rate row. */
 function RateSourceBadge({
-  catalogItemId,
+  serviceKitId,
   source,
 }: {
-  catalogItemId: string
+  serviceKitId: string
   source: 'override' | 'inherited'
 }) {
   const isOverride = source === 'override'
   return (
     <span
-      data-testid={`source-badge-${catalogItemId}`}
+      data-testid={`source-badge-${serviceKitId}`}
       className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
         isOverride
           ? 'bg-amber-100 text-amber-800'

@@ -140,7 +140,7 @@ class TestAutoSplitOnCreate:
         mock_query.side_effect = _query_rows([
             [{"id": "sec-1", "square_feet": 1000}],
             [{"section_id": "sec-1", "qty": 10, "unit_sell_cents": 10000,
-              "complexity_pct": 0, "discipline": None, "catalog_item_id": "cat-turf"}],
+              "complexity_pct": 0, "discipline": None, "service_kit_id": "cat-turf"}],
             [{"id": "cat-turf", "service_type": "Turf Area"}],
             _scope_id_rows(),
         ])
@@ -162,9 +162,9 @@ class TestAutoSplitOnCreate:
             [{"id": "sec-1", "square_feet": 1000}],
             [
                 {"section_id": "sec-1", "qty": 10, "unit_sell_cents": 10000,
-                 "complexity_pct": 0, "discipline": None, "catalog_item_id": "cat-turf"},
+                 "complexity_pct": 0, "discipline": None, "service_kit_id": "cat-turf"},
                 {"section_id": "sec-1", "qty": 5, "unit_sell_cents": 6000,
-                 "complexity_pct": 0, "discipline": None, "catalog_item_id": "cat-irr"},
+                 "complexity_pct": 0, "discipline": None, "service_kit_id": "cat-irr"},
             ],
             [
                 {"id": "cat-turf", "service_type": "Turf Area"},
@@ -190,7 +190,7 @@ class TestAutoSplitOnCreate:
         mock_query.side_effect = _query_rows([
             [{"id": "sec-1", "square_feet": 1000}],
             [{"section_id": "sec-1", "qty": 5, "unit_sell_cents": 10000, "complexity_pct": 0,
-              "discipline": "landscape", "catalog_item_id": "cat-irr"}],
+              "discipline": "landscape", "service_kit_id": "cat-irr"}],
             _scope_id_rows(),
         ])
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
@@ -200,8 +200,8 @@ class TestAutoSplitOnCreate:
         # override forces this irrigation-catalog line to LS -> full total, IR=0
         assert 50000 in params
         assert 0 in params
-        # override present -> no catalog_items lookup needed
-        assert not any("catalog_items" in c.args[0] for c in mock_query.call_args_list)
+        # override present -> no service_kits lookup needed
+        assert not any("service_kits" in c.args[0] for c in mock_query.call_args_list)
 
     @patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
@@ -213,7 +213,7 @@ class TestAutoSplitOnCreate:
         mock_query.side_effect = _query_rows([
             [{"id": "sec-1", "square_feet": 1000}],
             [{"section_id": "sec-1", "qty": 2, "unit_sell_cents": 10000, "complexity_pct": 0,
-              "discipline": "irrigation", "catalog_item_id": None}],
+              "discipline": "irrigation", "service_kit_id": None}],
             _scope_id_rows(),
         ])
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
@@ -252,7 +252,7 @@ class TestAutoSplitOnCreate:
         mock_query.side_effect = _query_rows([
             [{"id": "sec-1", "square_feet": 2000}],
             [{"section_id": "sec-1", "qty": 1, "unit_sell_cents": 2000, "complexity_pct": 0.1,
-              "discipline": None, "catalog_item_id": "cat-irr"}],
+              "discipline": None, "service_kit_id": "cat-irr"}],
             [{"id": "cat-irr", "service_type": "Irrigation"}],
             _scope_id_rows(),
         ])
@@ -301,8 +301,8 @@ class TestRecomputeOnEdit:
             [{"id": "sec-1", "square_feet": 1000}],                       # _recompute: estimate_sections
             [{"section_id": "sec-1", "qty": 4, "unit_sell_cents": 5000,
               "complexity_pct": 0, "discipline": "irrigation",
-              "catalog_item_id": None}],                                  # _recompute: section_services (batched)
-            [{"id": "svc-1", "section_id": "sec-1", "catalog_item_id": None,
+              "service_kit_id": None}],                                  # _recompute: section_services (batched)
+            [{"id": "svc-1", "section_id": "sec-1", "service_kit_id": None,
               "discipline": "irrigation", "label": "Drip", "qty": 4, "uom": "ea",
               "complexity_pct": 0, "unit_sell_cents": 5000, "embedded_cost_cents": None,
               "target_gm": None, "hours": None, "sort_order": 0}],        # reload the new service row

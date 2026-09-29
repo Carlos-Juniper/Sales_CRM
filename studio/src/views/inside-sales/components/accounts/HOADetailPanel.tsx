@@ -32,7 +32,7 @@ function InfoRow({ label, value }: { label: string; value: string | null | undef
   if (!value) return null
   return (
     <div className="flex items-start gap-3 py-2 border-b border-[hsl(var(--border))]">
-      <div className="text-xs text-[hsl(var(--muted-fg))] w-28 flex-shrink-0 pt-0.5">{label}</div>
+      <div className="text-xs text-[hsl(var(--muted-fg))] w-28 flex-shrink-0 pt-0.5 max-md:w-20">{label}</div>
       <div className="text-sm text-[hsl(var(--fg))] font-medium flex-1">{value}</div>
     </div>
   )
@@ -128,7 +128,7 @@ export function HOADetailPanel({ property, company, isOpen, onClose, onCreateBid
 
       {/* Footer — engagement actions (promoting creates the
           canonical property; the estimate intake is pre-filled from it) */}
-      <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2">
+      <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2 max-md:flex-wrap max-md:gap-1.5">
         <Button size="sm" variant="outline" onClick={() => onCreateLead(property)}>
           <UserPlus className="h-3.5 w-3.5 mr-1" />
           Create lead

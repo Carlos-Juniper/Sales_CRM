@@ -21,6 +21,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("ENTRA_CLIENT_ID", "x")
 os.environ.setdefault("ENTRA_TENANT_ID", "x")
 
+from api import authz  # noqa: E402
 from api.server import app, require_auth  # noqa: E402
 
 client = TestClient(app)
@@ -325,6 +326,22 @@ class TestMarketingEditsAnyRep:
         assert r.json()["ownerUserId"] == "rep-2"
 
     @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_vp_sales_creates_client_reference_for_a_rep(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("vp_sales", id="lead-1")
+        mock_authz_query.return_value = _live("vp_sales")
+        mock_query.return_value = [{"id": "rep-2", "role": "sales", "active": 1}]
+        r = client.post(
+            "/api/settings/client-references",
+            json=_ref_body(repId="rep-2"),
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["ownerUserId"] == "rep-2"
+
+    @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.proposals.query", new_callable=AsyncMock)
     async def test_marketing_lists_a_reps_roster(self, mock_query, mock_authz_query, as_role):
         as_role("marketing", id="mkt-1")
@@ -376,7 +393,10 @@ class TestMarketingEditsAnyRep:
             json=_ref_body(),
         )
         assert r.status_code == 400
-        assert "sales role" in r.json()["detail"]
+        assert r.json()["detail"] == authz.ROSTER_REP_ROLE_DETAIL
+        assert "VP of Sales" in r.json()["detail"]
+        assert "outside_sales" not in r.json()["detail"]
+        assert "Legacy: Sales" not in r.json()["detail"]
         mock_exec.assert_not_awaited()
 
         mock_query.return_value = []
@@ -386,6 +406,22 @@ class TestMarketingEditsAnyRep:
         )
         assert missing.status_code == 404
         assert missing.json()["detail"] == "Sales rep not found."
+
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_vp_sales_is_a_valid_roster_target(
+        self, mock_query, mock_exec, mock_authz_query, as_role
+    ):
+        as_role("marketing", id="mkt-1")
+        mock_authz_query.return_value = _live("marketing")
+        mock_query.return_value = [{"id": "vp-1", "role": "vp_sales", "active": 1}]
+        r = client.post(
+            "/api/settings/client-references",
+            json=_ref_body(repId="vp-1"),
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["ownerUserId"] == "vp-1"
 
 
 # ── Shared portfolio ──────────────────────────────────────────────────────────
@@ -555,7 +591,13 @@ class TestRosterReadIsolation:
         assert denied.status_code == 403
         assert denied.json()["detail"] == _VIEW_DENIED
 
-    @pytest.mark.parametrize("role", ("marketing", "admin", "manager", "regional_director"))
+    @pytest.mark.parametrize(
+        "role",
+        (
+            "marketing", "admin", "vp_sales",
+            "manager", "regional_director",
+        ),
+    )
     @patch("api.proposals.query", new_callable=AsyncMock)
     async def test_wide_roles_without_rep_id_see_every_row(
         self, mock_query, as_role, role

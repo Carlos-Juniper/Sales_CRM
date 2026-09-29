@@ -32,7 +32,7 @@ function service(id: string, over: Partial<SectionService> = {}): SectionService
   return {
     id,
     sectionId: 'sec-1',
-    catalogItemId: null,
+    serviceKitId: null,
     label: 'Mowing',
     qty: 42,
     uom: '/yr',

@@ -168,7 +168,7 @@ class FakeDb:
         if table == "estimate_status_transitions":
             row.setdefault("at", datetime(2026, 8, 4, 12, 0, 0))
         if table == "takeoff_lines":
-            row.setdefault("catalog_item_id", None)
+            row.setdefault("service_kit_id", None)
         row.setdefault("created_at", datetime(2026, 8, 4, 12, 0, 0))
         row.setdefault("updated_at", datetime(2026, 8, 4, 12, 0, 0))
 
@@ -280,4 +280,19 @@ def db():
          patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock), \
          patch("api.estimating._sync_status_bg", new_callable=AsyncMock):
         yield fake
+
+
+@pytest.fixture(autouse=True)
+def _stub_won_lost_commissions(monkeypatch):
+    """Won and lost commission writes are covered in test_commission_creation.
+
+    HTTP suites that import the estimating routes must not open a real
+    commission transaction when a test PATCHes an estimate to won or lost.
+    """
+    import sys
+
+    if "api.estimating" not in sys.modules:
+        return
+    monkeypatch.setattr("api.estimating.create_on_won", AsyncMock())
+    monkeypatch.setattr("api.estimating.cancel_for_estimate", AsyncMock())
 

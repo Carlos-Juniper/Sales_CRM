@@ -20,9 +20,9 @@ import { describe, it, expect } from 'vitest'
 import type { SectionServiceComponent } from '@/types/estimating'
 import { buildInstallEstimate } from '@/mocks/estimatingData'
 import {
-  INSTALL_KIT_CATALOG,
+  INSTALL_SERVICE_KITS,
   averagedVendorCostCents,
-  installKitCatalogFromItems,
+  installServiceKitsFromItems,
   buildComponent,
   coerceNum,
   estimateGm,
@@ -161,19 +161,19 @@ describe('install kit catalog (II-6.5 live-goods volatility, II-9.5 config not c
   })
 
   it('every catalog row is an install_quantity kit', () => {
-    expect(INSTALL_KIT_CATALOG.length).toBeGreaterThan(0)
-    for (const kit of INSTALL_KIT_CATALOG) {
+    expect(INSTALL_SERVICE_KITS.length).toBeGreaterThan(0)
+    for (const kit of INSTALL_SERVICE_KITS) {
       expect(kit.kitType).toBe('install_quantity')
       expect(kit.productionRate).toBeNull()
     }
   })
 
   it('kitToService seeds a service from the kit with averaged vendor cost', () => {
-    const kit = INSTALL_KIT_CATALOG[0]
+    const kit = INSTALL_SERVICE_KITS[0]
     const svc = kitToService(kit, 'sec-1', 3)
     expect(svc.sectionId).toBe('sec-1')
     expect(svc.sortOrder).toBe(3)
-    expect(svc.catalogItemId).toBe(kit.id)
+    expect(svc.serviceKitId).toBe(kit.id)
     expect(svc.unitSellCents).toBe(kit.unitSellCents)
     expect(svc.embeddedCostCents).toBe(averagedVendorCostCents(kit.vendorPricesCents))
     expect(svc.targetGm).toBe(kit.targetGm)
@@ -181,7 +181,7 @@ describe('install kit catalog (II-6.5 live-goods volatility, II-9.5 config not c
   })
 
   it('refuses to seed from a maintenance (hours-driven) kit — engines stay independent', () => {
-    const kit = { ...INSTALL_KIT_CATALOG[0], kitType: 'maintenance_hours' as const }
+    const kit = { ...INSTALL_SERVICE_KITS[0], kitType: 'maintenance_hours' as const }
     expect(() => kitToService(kit, 'sec-1', 0)).toThrow(/install_quantity/)
   })
 })
@@ -212,21 +212,21 @@ describe('buildComponent / coerceNum / formatGmPct', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The editor reads install kits from GET /catalog-items; the
-// INSTALL_KIT_CATALOG literal is only the offline fallback.
+// The editor reads install kits from GET /service-kits; the
+// INSTALL_SERVICE_KITS literal is only the offline fallback.
 // ---------------------------------------------------------------------------
 
-describe('installKitCatalogFromItems (API catalog adapter)', () => {
+describe('installServiceKitsFromItems (API catalog adapter)', () => {
   it('falls back to the literal when the API returned no install kits', () => {
-    expect(installKitCatalogFromItems([])).toBe(INSTALL_KIT_CATALOG)
+    expect(installServiceKitsFromItems([])).toBe(INSTALL_SERVICE_KITS)
     // maintenance kits alone don't count
-    const maintOnly = [{ ...INSTALL_KIT_CATALOG[0], kitType: 'maintenance_hours' as const }]
-    expect(installKitCatalogFromItems(maintOnly)).toBe(INSTALL_KIT_CATALOG)
+    const maintOnly = [{ ...INSTALL_SERVICE_KITS[0], kitType: 'maintenance_hours' as const }]
+    expect(installServiceKitsFromItems(maintOnly)).toBe(INSTALL_SERVICE_KITS)
   })
 
   it('adapts install_quantity items, using the blended unit cost as the single vendor quote', () => {
-    const { vendorPricesCents: _v, ...item } = INSTALL_KIT_CATALOG[0]
-    const kits = installKitCatalogFromItems([item])
+    const { vendorPricesCents: _v, ...item } = INSTALL_SERVICE_KITS[0]
+    const kits = installServiceKitsFromItems([item])
     expect(kits).toHaveLength(1)
     expect(kits[0].id).toBe(item.id)
     expect(kits[0].vendorPricesCents).toEqual([item.unitCostCents])
@@ -234,8 +234,8 @@ describe('installKitCatalogFromItems (API catalog adapter)', () => {
   })
 
   it('drops inactive kits', () => {
-    const { vendorPricesCents: _v, ...item } = INSTALL_KIT_CATALOG[0]
-    const kits = installKitCatalogFromItems([{ ...item, active: false }, { ...item, id: 'kit-x' }])
+    const { vendorPricesCents: _v, ...item } = INSTALL_SERVICE_KITS[0]
+    const kits = installServiceKitsFromItems([{ ...item, active: false }, { ...item, id: 'kit-x' }])
     expect(kits.map((k) => k.id)).toEqual(['kit-x'])
   })
 })

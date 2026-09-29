@@ -10,6 +10,7 @@ import { useState } from 'react'
 import { Copy, Plus, TriangleAlert, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { formatCents } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { DisciplineSelect } from './DisciplineSelect'
 import { BillingTypeSelect } from './BillingTypeSelect'
@@ -22,20 +23,33 @@ import {
 } from '@/lib/estimating/calc'
 import {
   COMPLEXITY_OPTIONS,
-  MAINTENANCE_SERVICE_CATALOG,
   type MaintenanceCatalogService,
   coerceQty,
-  formatCents,
   granularityFor,
   isComplexityOverridden,
   lineCentsPerSqft,
 } from '@/lib/estimating/maintenance'
+import { messageForErrorCode, CREW_RATE_REQUIRED_CODE } from '@/lib/estimating/crewRateError'
 
 /** Blue-cell convention: estimator-editable inputs (legacy Excel language). */
 const BLUE_CELL = 'bg-[#eff6ff] border-[#bfdbfe] focus-visible:ring-[#2E7D52]'
 
+const EMPTY_CATALOG: MaintenanceCatalogService[] = []
+
 const cellInput =
   'h-8 rounded-md border px-2 text-sm text-[hsl(var(--fg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 transition-colors'
+
+/**
+ * One track list for the hours-driven line table. The header and every
+ * service row both use this class. Tracks are explicit (not `auto`) and
+ * children are `min-w-0`, so each grid sizes from the template instead of
+ * its own content — labels stay over Occurrences, Complexity, Discipline,
+ * Billing, and Line total.
+ *
+ * Service | Occurrences | Complexity | Discipline | Billing | Line total
+ */
+const MAINTENANCE_LINE_GRID =
+  'grid w-full items-center gap-x-4 px-4 [&>*]:min-w-0 grid-cols-[minmax(9rem,1.7fr)_minmax(7.25rem,0.9fr)_minmax(7.25rem,0.85fr)_minmax(6.25rem,0.7fr)_minmax(8rem,0.95fr)_minmax(7.25rem,0.85fr)]'
 
 export interface SectionCardProps {
   section: EstimateSection
@@ -46,10 +60,12 @@ export interface SectionCardProps {
   onDuplicate: () => void
   onRemoveRequest: () => void
   /**
-   * The addable-service catalog, sourced from GET /catalog-items
-   * by the parent editor. Defaults to the literal (offline fallback).
+   * The addable-service catalog, sourced from GET /service-kits
+   * by the parent editor. Empty until that catalog loads.
    */
   catalog?: MaintenanceCatalogService[]
+  /** Service ids the server refused because their price needs a crew rate. */
+  blockedServiceIds?: ReadonlySet<string>
   /** UI-only kit granularity selections (open item: persist to kit config). */
   granularity: Record<string, string>
   onGranularityChange: (serviceId: string, value: string) => void
@@ -61,12 +77,14 @@ function ServiceRow({
   onServiceChange,
   granularity,
   onGranularityChange,
+  blocked,
 }: {
   section: EstimateSection
   svc: SectionService
   onServiceChange: SectionCardProps['onServiceChange']
   granularity: Record<string, string>
   onGranularityChange: SectionCardProps['onGranularityChange']
+  blocked: boolean
 }) {
   const lineCents = maintServiceLine(
     section.squareFeet,
@@ -83,10 +101,20 @@ function ServiceRow({
   return (
     <div
       data-testid={`service-row-${svc.label}`}
-      className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 px-4 py-2 border-t border-[hsl(var(--border))]"
+      data-crew-rate-blocked={blocked ? 'true' : 'false'}
+      className={cn(
+        MAINTENANCE_LINE_GRID,
+        'gap-y-1 py-2 border-t border-[hsl(var(--border))]',
+        blocked && 'bg-amber-50',
+      )}
     >
       <div className="min-w-0">
         <p className="text-sm text-[hsl(var(--fg))] truncate">{svc.label}</p>
+        {blocked && (
+          <p data-testid="crew-rate-blocked-line" className="m-0 mt-1 text-[11px] font-medium text-amber-800">
+            {messageForErrorCode(CREW_RATE_REQUIRED_CODE)}
+          </p>
+        )}
         {gran && (
           <label className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[hsl(var(--muted-fg))]">
             {gran.label}
@@ -124,6 +152,7 @@ function ServiceRow({
           className={cn(
             cellInput,
             BLUE_CELL,
+            'w-full min-w-0',
             overridden && 'border-amber-400 bg-amber-50 text-amber-800',
           )}
           value={String(svc.complexityPct)}
@@ -141,7 +170,7 @@ function ServiceRow({
           <span
             data-testid="complexity-override-flag"
             title="Complexity overridden from the company default"
-            className="inline-flex items-center text-amber-600"
+            className="inline-flex shrink-0 items-center text-amber-600"
           >
             <TriangleAlert className="h-3.5 w-3.5" />
           </span>
@@ -152,7 +181,7 @@ function ServiceRow({
         label={svc.label}
         value={svc.discipline ?? null}
         onChange={(discipline) => onServiceChange(svc.id, { discipline })}
-        className={cn(cellInput, BLUE_CELL)}
+        className={cn(cellInput, BLUE_CELL, 'w-full min-w-0')}
       />
 
       {/* Marks the exception to the 12-month contract bundle: a line billed
@@ -161,7 +190,7 @@ function ServiceRow({
         label={svc.label}
         value={svc.billingType ?? null}
         onChange={(billingType) => onServiceChange(svc.id, { billingType })}
-        className={cn(cellInput, BLUE_CELL)}
+        className={cn(cellInput, BLUE_CELL, 'w-full min-w-0')}
       />
 
       <div className="text-right">
@@ -184,7 +213,8 @@ export function SectionCard({
   onAddLineItem,
   onDuplicate,
   onRemoveRequest,
-  catalog = MAINTENANCE_SERVICE_CATALOG,
+  catalog = EMPTY_CATALOG,
+  blockedServiceIds,
   granularity,
   onGranularityChange,
 }: SectionCardProps) {
@@ -255,26 +285,39 @@ export function SectionCard({
           </span>
         </div>
 
-        {/* Column headers */}
-        <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-3 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))]">
-          <span>Service</span>
-          <span>Occurrences</span>
-          <span>Complexity</span>
-          <span>Discipline</span>
-          <span>Billing</span>
-          <span className="text-right">Line total</span>
-        </div>
+        {/* Column headers + rows share MAINTENANCE_LINE_GRID. The min width
+            keeps those tracks intact; a narrow card scrolls instead of
+            letting the columns collapse on top of each other. */}
+        <div className="overflow-x-auto">
+          <div className="min-w-[52rem]">
+            <div
+              data-testid="maintenance-line-columns"
+              className={cn(
+                MAINTENANCE_LINE_GRID,
+                'py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))]',
+              )}
+            >
+              <span className="whitespace-nowrap">Service</span>
+              <span className="whitespace-nowrap">Occurrences</span>
+              <span className="whitespace-nowrap">Complexity</span>
+              <span className="whitespace-nowrap">Discipline</span>
+              <span className="whitespace-nowrap">Billing</span>
+              <span className="whitespace-nowrap text-right">Line total</span>
+            </div>
 
-        {section.services.map((svc) => (
-          <ServiceRow
-            key={svc.id}
-            section={section}
-            svc={svc}
-            onServiceChange={onServiceChange}
-            granularity={granularity}
-            onGranularityChange={onGranularityChange}
-          />
-        ))}
+            {section.services.map((svc) => (
+              <ServiceRow
+                key={svc.id}
+                section={section}
+                svc={svc}
+                onServiceChange={onServiceChange}
+                granularity={granularity}
+                onGranularityChange={onGranularityChange}
+                blocked={blockedServiceIds?.has(svc.id) ?? false}
+              />
+            ))}
+          </div>
+        </div>
 
         {/* Add line item (I-9.7 — services outside the original sales spec) */}
         <div className="flex items-center gap-2 px-4 py-2 border-t border-dashed border-[hsl(var(--border))]">

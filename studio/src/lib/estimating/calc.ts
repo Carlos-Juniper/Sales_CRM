@@ -16,6 +16,7 @@ import type {
   MarginBandLabel,
   MarginBands,
 } from '@/types/estimating'
+import { compareApprovalTiers } from './approvalOrder'
 
 export const SQFT_PER_ACRE = 43560
 
@@ -118,12 +119,14 @@ export function groupMargin(priceCents: number, costCents: number): number {
 }
 
 /**
- * Config-driven approval routing: the first tier (by `order`) where
- * min ≤ value < max (max null = unbounded). Returns null when no tier
+ * Config-driven approval routing: the first tier where min ≤ value < max
+ * (max null = unbounded). Tiers sort by `order`, then by APPROVAL_ROLE_ORDER,
+ * so admin and vp_sales ceiling rows (same order, unbounded) do not steal a
+ * band from whichever row the API returned first. Returns null when no tier
  * matches (an empty/misconfigured ladder).
  */
 export function tierForValue(valueCents: number, tiers: ApprovalTier[]): ApprovalTier | null {
-  const ordered = [...tiers].sort((a, b) => a.order - b.order)
+  const ordered = [...tiers].sort(compareApprovalTiers)
   return (
     ordered.find(
       (t) =>

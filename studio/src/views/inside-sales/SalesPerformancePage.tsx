@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
 import { useSalesPerformanceSummary, useWonDeals, useLostDeals, useSalesPerformanceReps } from '@/hooks/useSalesPerformance'
 import { useRole } from '@/hooks/useRole'
-import { formatCents } from '@/lib/estimating/maintenance'
+import { formatCents } from '@/lib/money'
 import { getPeriodDates } from '@/lib/commissions'
 import type { Period } from '@/lib/commissions'
 import { ASPIRE_LOST_REASONS } from '@/lib/estimating/aspireOptions'

@@ -1,29 +1,34 @@
 // ---------------------------------------------------------------------------
 // Contract generator — pure calculation layer for Landscape Maintenance
-// Agreement pages (scope narrative, CONTRACT SUMMARY, PAYMENT SCHEDULE).
+// Agreement pages (scope narrative, service tables, payment schedule).
 //
-// Follows the same convention as lib/proposal/chapters.ts: dependency-free of
-// React/JSX, so it can be tested in isolation and its output cached/memoized
-// without coupling to component lifecycle.
+// Callers use buildContract(). It is the only place that turns an estimate
+// into rows, the annual maintenance price, and the 12-month schedule.
 // ---------------------------------------------------------------------------
 
-import { priceEachCents, maintServiceLine } from '@/lib/estimating/calc'
+import { maintServiceLine, priceEachCents } from '@/lib/estimating/calc'
 import type { Estimate } from '@/types/estimating'
 
 export interface ContractRow {
-  /** Service label from section_services.label (verbatim, including units) */
+  /** Service label from section_services.label (verbatim, including units). */
   label: string
-  /** Occurrences per year, or null for items explicitly marked one-time */
+  /** Occurrences per year, or null for items explicitly marked one-time. */
   occurs: number | null
-  /** Price per occurrence in cents */
-  priceEachCents: number
-  /** Extended price in cents (qty × priceEach, computed from maintServiceLine) */
-  extPriceCents: number
-  /** Sales tax in cents (always 0 for v1) */
+  /**
+   * Price per occurrence in cents, or null when the service has no unit price.
+   * Null leaves the money cells blank. A stored zero is 0.
+   */
+  priceEachCents: number | null
+  /**
+   * Extended price in cents, from maintServiceLine (not priceEach × qty).
+   * Null when the service has no unit price, so it adds nothing to a total.
+   */
+  extPriceCents: number | null
+  /** Sales tax in cents (always 0 for v1). */
   salesTaxCents: number
-  /** Total price in cents (extPrice + salesTax) */
+  /** Total price in cents (extended price + sales tax). Missing prices count as 0. */
   totalPriceCents: number
-  /** For internal use: whether this row is recurring (affects payment schedule) */
+  /** Whether this row is recurring (it is part of the payment schedule). */
   isRecurring: boolean
 }
 
@@ -34,54 +39,77 @@ export interface ContractTotals {
 }
 
 export interface PaymentScheduleMonth {
-  /** Month name (e.g. "January", "February") */
+  /** Month name (e.g. "January", "February"). */
   month: string
-  /** Payment amount in cents */
+  /** Payment amount in cents. */
   amountCents: number
 }
 
-/**
- * Build contract summary rows from an estimate. One row per section_service,
- * ordered by section sortOrder then service sortOrder.
- * Zero-price rows are kept (Aspire keeps them).
- */
-export function buildContractRows(estimate: Estimate): ContractRow[] {
-  const rows: ContractRow[] = []
+export interface Contract {
+  rows: ContractRow[]
+  recurringRows: ContractRow[]
+  oneTimeRows: ContractRow[]
+  totals: ContractTotals
+  /** Recurring extended-price sum. Printed as the Annual Maintenance Price. */
+  annualMaintenancePriceCents: number
+  schedule: PaymentScheduleMonth[]
+}
 
-  // Sort sections by sortOrder
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+function amount(cents: number | null): number {
+  return cents ?? 0
+}
+
+/**
+ * One row per section service, ordered by section sortOrder then service
+ * sortOrder. A real zero is kept (Aspire keeps it). A missing unit price
+ * is null on both price fields.
+ */
+function buildContractRows(estimate: Estimate): ContractRow[] {
+  const rows: ContractRow[] = []
   const sortedSections = [...estimate.sections].sort((a, b) => a.sortOrder - b.sortOrder)
 
   for (const section of sortedSections) {
-    // Sort services within section by sortOrder
     const sortedServices = [...section.services].sort((a, b) => a.sortOrder - b.sortOrder)
 
     for (const svc of sortedServices) {
-      const rate = svc.unitSellCents ?? 0
       const complexity = svc.complexityPct ?? 0
       // All maintenance work bundles into the contract cost and is broken into
       // the 12-month payment schedule. One-time is the marked exception, not
       // the default — so anything NOT explicitly one-time is recurring.
       //
       // Testing `=== 'recurring'` instead would drop every unresolved line
-      // (a hand-entered line has no catalog item to derive a billing type
+      // (a hand-entered line has no service kit to derive a billing type
       // from, so it arrives as null) out of the payment-schedule base while
       // still counting it in the contract total.
       const isRecurring = svc.billingType !== 'one_time'
-
-      // priceEachCents = maintServiceLine(..., qty=1, ...)
-      const priceEach = priceEachCents(section.squareFeet, rate, complexity)
-
-      // extPriceCents must come from maintServiceLine directly (with full qty),
-      // never as priceEach × qty, to avoid rounding drift.
-      const extPrice = maintServiceLine(section.squareFeet, rate, svc.qty, complexity)
+      const priced = svc.unitSellCents != null
+      const rate = svc.unitSellCents ?? 0
+      const extPriceCents = priced
+        ? maintServiceLine(section.squareFeet, rate, svc.qty, complexity)
+        : null
 
       rows.push({
         label: svc.label,
         occurs: isRecurring ? svc.qty : null,
-        priceEachCents: priceEach,
-        extPriceCents: extPrice,
-        salesTaxCents: 0, // No tax engine in v1
-        totalPriceCents: extPrice, // total = ext + tax
+        priceEachCents: priced ? priceEachCents(section.squareFeet, rate, complexity) : null,
+        extPriceCents,
+        salesTaxCents: 0,
+        totalPriceCents: amount(extPriceCents),
         isRecurring,
       })
     }
@@ -90,62 +118,51 @@ export function buildContractRows(estimate: Estimate): ContractRow[] {
   return rows
 }
 
-/**
- * Calculate CONTRACT SUMMARY totals from rows.
- */
-export function buildContractTotals(rows: ContractRow[]): ContractTotals {
-  const extPriceCents = rows.reduce((sum, r) => sum + r.extPriceCents, 0)
-  const salesTaxCents = rows.reduce((sum, r) => sum + r.salesTaxCents, 0)
-  const totalPriceCents = rows.reduce((sum, r) => sum + r.totalPriceCents, 0)
-  return { extPriceCents, salesTaxCents, totalPriceCents }
+function buildContractTotals(rows: ContractRow[]): ContractTotals {
+  return {
+    extPriceCents: rows.reduce((sum, row) => sum + amount(row.extPriceCents), 0),
+    salesTaxCents: rows.reduce((sum, row) => sum + row.salesTaxCents, 0),
+    totalPriceCents: rows.reduce((sum, row) => sum + row.totalPriceCents, 0),
+  }
 }
 
 /**
- * Build 12-month payment schedule from contract rows and service start date.
- * Base is the sum of extPriceCents for recurring rows — which is every row
- * except those explicitly marked one-time.
- * Remainder is distributed: the first `rem` months get `per + 1`.
+ * Split one annual amount into twelve monthly payments. Remainder cents go
+ * to the first months: month i < rem receives per + 1. The start date is an
+ * ISO date parsed as UTC midnight; getUTCMonth avoids the US-timezone day
+ * shift that getMonth() would apply.
  */
-export function buildPaymentSchedule(
-  rows: ContractRow[],
-  serviceStartDate: Date | null,
+function buildPaymentSchedule(
+  annualCents: number,
+  serviceStart: Date | null,
 ): PaymentScheduleMonth[] {
-  // Base: sum of recurring rows only
-  const base = rows
-    .filter((r) => r.isRecurring)
-    .reduce((sum, r) => sum + r.extPriceCents, 0)
+  const per = Math.floor(annualCents / 12)
+  const rem = annualCents - per * 12
+  const startMonth = serviceStart ? serviceStart.getUTCMonth() : 0
 
-  const per = Math.floor(base / 12)
-  const rem = base - per * 12
+  return Array.from({ length: 12 }, (_, i) => ({
+    month: MONTH_NAMES[(startMonth + i) % 12],
+    amountCents: i < rem ? per + 1 : per,
+  }))
+}
 
-  // Use getUTCMonth() — service dates are ISO date strings (YYYY-MM-DD), which
-  // JS parses as UTC midnight. getMonth() would shift one day back in US timezones.
-  const startMonth = serviceStartDate ? serviceStartDate.getUTCMonth() : 0
+function parseServiceStart(estimate: Estimate): Date | null {
+  return estimate.serviceStartDate ? new Date(estimate.serviceStartDate) : null
+}
 
-  const monthNames = [
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December',
-  ]
+/** Rows, totals, and the payment schedule for one estimate. */
+export function buildContract(estimate: Estimate): Contract {
+  const rows = buildContractRows(estimate)
+  const recurringRows = rows.filter((row) => row.isRecurring)
+  const oneTimeRows = rows.filter((row) => !row.isRecurring)
+  const annualMaintenancePriceCents = buildContractTotals(recurringRows).extPriceCents
 
-  const schedule: PaymentScheduleMonth[] = []
-  for (let i = 0; i < 12; i++) {
-    const monthIndex = (startMonth + i) % 12
-    const amountCents = i < rem ? per + 1 : per
-    schedule.push({
-      month: monthNames[monthIndex],
-      amountCents,
-    })
+  return {
+    rows,
+    recurringRows,
+    oneTimeRows,
+    totals: buildContractTotals(rows),
+    annualMaintenancePriceCents,
+    schedule: buildPaymentSchedule(annualMaintenancePriceCents, parseServiceStart(estimate)),
   }
-
-  return schedule
 }

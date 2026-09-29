@@ -27,22 +27,31 @@ import { ApiError } from '@/api/client'
 import type { EstimateLifecycle, MaintenanceEstimate, SectionService } from '@/types/estimating'
 import { LostTransition } from './LostTransition'
 import { acresFromSqft, contractTotal, tierForValue } from '@/lib/estimating/calc'
+import { formatCents } from '@/lib/money'
 import { formatOptionalBudget } from '@/lib/estimating/contractBudgets'
 import { tiersForType } from '@/lib/estimating/config'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
+import { useResolvedCrewRate } from '@/hooks/useResolvedCrewRate'
 import {
   buildDefaultSection,
   catalogToService,
   duplicateSection,
-  formatCents,
-  maintenanceCatalogFromItems,
+  maintenanceRowsFromServiceKits,
   removeSection,
   unresolvedProductionRateLabels,
 } from '@/lib/estimating/maintenance'
 import { OCCURRENCE_COUNT_FIELDS } from '@/lib/estimating/occurrences'
 import { persistEstimateTree } from '@/lib/estimating/persistTree'
+import {
+  type CrewRateBlockedLine,
+  isCrewRateBlockedLine,
+  messageForErrorCode,
+  parseCrewRateRequiredError,
+  unsavedCrewRateDerivedLines,
+} from '@/lib/estimating/crewRateError'
 import { useToast } from './useToast'
 import { useEstimatingShell } from './useEstimatingShell'
+import { CrewRateProvenance, NoCrewRateState } from './CrewRateNotice'
 import { SectionCard } from './SectionCard'
 import { IntakeAttachmentsPanel } from './IntakeAttachmentsPanel'
 import { RushBadge } from './RushIndicators'
@@ -125,15 +134,19 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   const toast = useToast()
   // Actor identity for the lifecycle audit comes from the JWT server-side —
   // the client no longer sends or records it.
-  // approval_tiers + catalog_items come from the API-fetched config;
-  // the config.ts / maintenance.ts literals are only the offline fallback.
-  const { approvalTiers, catalogItems } = useEstimatingConfig()
+  // approval_tiers + service_kits come from the API-fetched config.
+  const { approvalTiers, serviceKits } = useEstimatingConfig()
+  // Same resolution as Margin Analysis: frozen snapshot, else the live branch
+  // rate from GET /api/settings/branch/{id}. Null never invents $180.
+  const crew = useResolvedCrewRate(estimate)
 
   const [draft, setDraft] = useState<MaintenanceEstimate>(estimate)
   /** Snapshot Reset restores to (last saved state). */
   const savedRef = useRef<MaintenanceEstimate>(estimate)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  /** Lines the last save response refused because they need a crew rate. */
+  const [blockedLines, setBlockedLines] = useState<CrewRateBlockedLine[]>([])
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null)
   /** UI-only kit granularity picks (I-9.7); persistence is a kit-config open item. */
   const [granularity, setGranularity] = useState<Record<string, string>>({})
@@ -144,8 +157,13 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     () => tiersForType(approvalTiers, 'maintenance'),
     [approvalTiers],
   )
-  // Kits come from GET /catalog-items; literal = offline fallback.
-  const maintCatalog = useMemo(() => maintenanceCatalogFromItems(catalogItems), [catalogItems])
+  // Kits come from GET /service-kits. Catalog prices stay available with no
+  // crew rate; kits priced from the rate are omitted until a rate resolves.
+  const rateMissing = !crew.isLoading && crew.crewRateCents == null
+  const maintCatalog = useMemo(
+    () => maintenanceRowsFromServiceKits(serviceKits, crew.crewRateCents),
+    [serviceKits, crew.crewRateCents],
+  )
   const tier = tierForValue(contractCents, maintenanceTiers)
   const removeTarget = draft.sections.find((s) => s.id === confirmRemoveId) ?? null
 
@@ -193,14 +211,16 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   function handleReset() {
     setDraft({ ...savedRef.current, targetMargin: TARGET_MARGIN_DEFAULT })
     setSaveError(null)
+    setBlockedLines([])
     toast.show('Reset — margin to target, sections to saved state')
   }
 
   async function handleSave() {
     // Save guard (client half — the server enforces it with a 422):
     // every maintenance line must resolve a production rate (kit) or hours.
-    const unresolved = unresolvedProductionRateLabels(draft.sections, catalogItems)
+    const unresolved = unresolvedProductionRateLabels(draft.sections, serviceKits)
     if (unresolved.length > 0) {
+      setBlockedLines([])
       setSaveError(
         `No production rate resolves for ${unresolved.map((l) => `“${l}”`).join(', ')}. ` +
           'Pick a kit with a production rate or enter hours — the line can’t be saved without one.',
@@ -209,6 +229,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     }
     setSaving(true)
     setSaveError(null)
+    setBlockedLines([])
     const toSave: MaintenanceEstimate = { ...draft, contractValueCents: contractTotal(draft) }
     try {
       // Persist the FULL tree (diff-and-apply against the last
@@ -235,9 +256,24 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
       setOpenEstimate(fresh)
       toast.show('Estimate saved')
     } catch (err) {
-      // A 422 is the server-side production-rate guard — surface its message
-      // (it names the offending line) instead of the generic connection copy.
-      if (err instanceof ApiError && err.status === 422) {
+      const crewRateError = parseCrewRateRequiredError(err)
+      if (crewRateError) {
+        // PATCH names saved rows. A create has no row yet, so blockedLines is
+        // empty and the derived-price rule picks the unsaved lines in this save.
+        const lines =
+          crewRateError.blockedLines.length > 0
+            ? crewRateError.blockedLines
+            : unsavedCrewRateDerivedLines(
+                savedRef.current.sections,
+                toSave.sections,
+                serviceKits,
+                crew.liveRateCents,
+              )
+        setBlockedLines(lines)
+        setSaveError(messageForErrorCode(crewRateError.code))
+      } else if (err instanceof ApiError && err.status === 422) {
+        // A 422 is the server-side production-rate guard — surface its message
+        // (it names the offending line) instead of the generic connection copy.
         setSaveError(err.message)
       } else {
         setSaveError('The estimate couldn’t be saved. Check your connection and retry.')
@@ -316,7 +352,11 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
             <RotateCcw className="h-3.5 w-3.5" />
             Reset
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={saving}
+          >
             <Save className="h-3.5 w-3.5" />
             {saving ? 'Saving…' : 'Save'}
           </Button>
@@ -335,6 +375,18 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
       </div>
 
       <MaintenanceScopeSummary estimate={draft} />
+
+      {crew.crewRateCents != null && (
+        <CrewRateProvenance
+          crewRateCents={crew.crewRateCents}
+          source={crew.source}
+          branchCity={draft.branchCity}
+        />
+      )}
+
+      {(rateMissing || blockedLines.length > 0) && (
+        <NoCrewRateState branchCity={draft.branchCity} aspireBranchId={draft.aspireBranchId} />
+      )}
 
       {/* ---- Save error (design-added state) ---- */}
       {saveError && (
@@ -405,6 +457,13 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
             onSqftChange={(squareFeet) => patchSection(section.id, { squareFeet })}
             onServiceChange={(serviceId, patch) => patchService(section.id, serviceId, patch)}
             catalog={maintCatalog}
+            blockedServiceIds={
+              new Set(
+                section.services
+                  .filter((svc) => isCrewRateBlockedLine(section.id, svc.id, blockedLines))
+                  .map((svc) => svc.id),
+              )
+            }
             onAddLineItem={(catalogKey) => {
               const row = maintCatalog.find((r) => r.key === catalogKey)
               if (!row) return

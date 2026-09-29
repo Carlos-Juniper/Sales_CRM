@@ -29,21 +29,18 @@ import {
   resolveOccurrenceHours,
   serviceGroupMargins,
 } from '@/lib/estimating/margins'
-// Slice 11b: the crew-rate constant now lives in the pricing module
-// (maintenance.ts), NOT margins.ts — margins.ts no longer owns a silent
-// margin default. Callers must pass an explicit resolved rate.
-import { MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR } from '@/lib/estimating/maintenance'
-import type { CatalogItem } from '@/types/estimating'
+import type { ServiceKit } from '@/types/estimating'
 
-// The rate the panel resolves and threads in; these lib tests pass it
-// explicitly (there is no default anymore).
-const RATE = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR
+// Callers pass an explicit resolved crew rate. 18_000¢ ($180/hr) is the
+// migration 020 seed for operating branches — a fixture number, not a default
+// the pricing code may fall back to.
+const RATE = 18_000
 
 const maint = buildMaintenanceEstimate()
 const install = buildInstallEstimate()
 
 /** A production-rated maintenance kit (mirrors the workbook seed rows). */
-const MOWING_KIT: CatalogItem = {
+const MOWING_KIT: ServiceKit = {
   id: 'kit-maint-3422',
   description: 'Standard Production Mowing',
   uom: 'Sq. Ft.',
@@ -52,7 +49,7 @@ const MOWING_KIT: CatalogItem = {
   targetGm: 0.22,
   kitType: 'maintenance_hours',
   productionRate: 60_000, // sq ft per labor hour
-  branch: 'All Branches',
+  aspireBranchId: null,
   active: true,
   serviceType: 'Turf Area',
 }
@@ -63,23 +60,23 @@ describe('maintenance cost basis (hours-driven)', () => {
     const mowing = s1.services[0] // 1.6 h, 42/yr, +10%
     const expectedHours = 1.6 * 42 * 1.1 // 73.92 h/yr
     expect(maintenanceLineCost(s1, mowing, [], RATE)).toBe(
-      Math.round(expectedHours * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+      Math.round(expectedHours * RATE),
     )
   })
 
   it('a null-hours line derives hours from its kit production rate (sqft ÷ rate)', () => {
     const s1 = maint.sections[0] // 120,000 SF
-    const noHours = { ...s1.services[0], hours: null, catalogItemId: MOWING_KIT.id }
+    const noHours = { ...s1.services[0], hours: null, serviceKitId: MOWING_KIT.id }
     // hours/occurrence = 120,000 / 60,000 = 2 h → 2 × 42 × 1.1 = 92.4 h/yr
     expect(resolveOccurrenceHours(s1, noHours, [MOWING_KIT])).toBeCloseTo(2, 10)
     expect(maintenanceLineCost(s1, noHours, [MOWING_KIT], RATE)).toBe(
-      Math.round(2 * 42 * 1.1 * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+      Math.round(2 * 42 * 1.1 * RATE),
     )
   })
 
   it('the circular price × (1 − targetMargin) fallback is GONE: an unresolvable line costs 0, never “priced at target”', () => {
     const s1 = maint.sections[0]
-    const noHours = { ...s1.services[0], hours: null, catalogItemId: null }
+    const noHours = { ...s1.services[0], hours: null, serviceKitId: null }
     expect(resolveOccurrenceHours(s1, noHours)).toBeNull()
     // The old fallback would have returned round(2,494,800 × 0.78) — a number
     // that could never flag mispricing because it assumed target margin.
@@ -90,7 +87,7 @@ describe('maintenance cost basis (hours-driven)', () => {
   it('a mispriced line now flags: cost from production rate diverges from price-at-target', () => {
     const s1 = maint.sections[0]
     // Same price either way; real cost = 92.4 h × $180/h = $16,632.
-    const line = { ...s1.services[0], hours: null, catalogItemId: MOWING_KIT.id }
+    const line = { ...s1.services[0], hours: null, serviceKitId: MOWING_KIT.id }
     const realCost = maintenanceLineCost(s1, line, [MOWING_KIT], RATE)
     const circular = Math.round(2_494_800 * 0.78)
     expect(realCost).not.toBe(circular) // over/under-pricing is now visible
@@ -138,8 +135,7 @@ describe('serviceGroupMargins — pivot by service across sections', () => {
     expect(mowing.priceCents).toBe(2_494_800 + 978_075)
     // Hours: 73.92 + 0.7×42×1.15 = 107.73 h/yr × rate
     expect(mowing.costCents).toBe(
-      Math.round(1.6 * 42 * 1.1 * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR) +
-        Math.round(0.7 * 42 * 1.15 * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+      Math.round(1.6 * 42 * 1.1 * RATE) + Math.round(0.7 * 42 * 1.15 * RATE),
     )
     expect(mowing.marginPct).toBeCloseTo(groupMargin(mowing.priceCents, mowing.costCents), 10)
   })

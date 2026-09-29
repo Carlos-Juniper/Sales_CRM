@@ -6,15 +6,18 @@ place those rows are mutated, and every successful write is audited.
 
 Two authorization boundaries, deliberately different:
 
-  * Company writes (Slice 4) are ADMIN-ONLY, and admin is re-read LIVE from the
-    users table by JWT id (Amendment B.2) — a stale/forged `admin` claim on a
-    since-demoted user cannot widen scope. Company settings, margin bands and
-    approval tiers are company-scoped: editing an approval tier moves the REAL
-    403 boundary for approvals (§5.1), so its edit lives behind this guard.
+  * Company writes (Slice 4) are limited to admin-equivalent roles
+    (authz.ADMIN_EQUIVALENT_ROLES: admin, vp_sales),
+    re-read LIVE from the users table by JWT id (Amendment B.2) — a
+    stale/forged claim on a since-demoted user cannot widen scope.
+    regional_director and vice_president are not in that set. Company
+    settings, margin bands and approval tiers are company-scoped: editing an
+    approval tier moves the REAL 403 boundary for approvals (§5.1), so its
+    edit lives behind this guard.
 
   * Branch writes (Slice 5) are scoped by `resolve_branch_scope(user)` — the
     writable branch set comes from the caller's `user_branches` rows, NEVER the
-    path or body. admin (kind='all') may write any branch; a BM/RD may write
+    path or body. Admin-equivalent roles (kind='all') may write any branch; a BM/RD may write
     only a branch in its scope; anyone else 403. A branch id supplied in the
     path/body that is outside the caller's scope still 403s.
 
@@ -38,6 +41,7 @@ from fastapi import Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from db import execute, query
+from api.maintenance_pricing import reprice_open_drafts
 import api.attachments as _att_mod
 from api import authz
 from api import aspire_sync
@@ -126,15 +130,17 @@ def _parse_factors(raw: Any) -> Any:
 # ── Live admin re-read (company writes) ──────────────────────────────────────
 
 async def _require_admin(user: dict) -> None:
-    """403 unless the LIVE users row says admin and active (Amendment B.2).
+    """403 unless the LIVE users row is admin-equivalent and active (B.2).
 
-    Never trusts the JWT `role` claim on the write path: a token that claims
-    admin for a user since demoted or deactivated must not widen scope. Reuses
-    authz._live_role, which reads role+active from users by JWT id and 403s on
-    a missing/inactive row.
+    Admin-equivalent roles are authz.ADMIN_EQUIVALENT_ROLES: admin and
+    vp_sales. regional_director and vice_president
+    are not included. Never trusts the JWT `role` claim on the write path:
+    a token that claims one of those roles for a user since demoted or
+    deactivated must not widen scope. Reuses authz._live_role, which reads
+    role+active from users by JWT id and 403s on a missing/inactive row.
     """
     live_role = await authz._live_role(user)
-    if live_role != "admin":
+    if live_role not in authz.ADMIN_EQUIVALENT_ROLES:
         raise HTTPException(
             status_code=403,
             detail="Admin role required: company settings are admin-owned.",
@@ -230,11 +236,55 @@ def _audit_scope_for_branch(aspire_branch_id: Optional[int]) -> tuple[str, Optio
     return "company", None
 
 
+async def _apply_role_change(
+    user_id: str,
+    current: dict,
+    submitted: str,
+    actor: str,
+) -> None:
+    """Write a users.role change, or return when the stored role is unchanged.
+
+    An equal role skips assignability and the Aspire re-resolve, so saving
+    branches on a legacy row does not rewrite users.role. A real change
+    rejects retired sales (400), resolves an Aspire rep when the new role
+    requires one, then updates and audits.
+    """
+    submitted = submitted.strip()
+    stored = (current.get("role") or "").strip()
+    if submitted == stored:
+        return
+
+    new_role = authz.ensure_assignable_role(submitted)
+    new_rep_id = current.get("aspire_rep_id")
+    if authz.requires_aspire_sales_rep(new_role):
+        # Block a field-sales role that cannot resolve an Aspire contact
+        # BEFORE writing anything (prevent-don't-repair). An existing
+        # aspire_rep_id is trusted, so reassigning sales → a split role
+        # does not drop the link.
+        new_rep_id = await _require_resolved_sales_rep(
+            current.get("email") or "", current.get("aspire_rep_id")
+        )
+
+    await execute(
+        "UPDATE users SET role = %s, aspire_rep_id = %s WHERE id = %s",
+        [new_role, new_rep_id, user_id],
+    )
+    await _audit(
+        scope_type="company",
+        scope_id=None,
+        setting_key=f"user.{user_id}.role",
+        from_value=stored,
+        to_value=new_role,
+        actor=actor,
+    )
+
+
 async def _require_active_sales_rep(rep_id: str) -> None:
     """404/400 unless rep_id is an active roster rep.
 
-    A roster rep is sales (stored outside_sales counts), inside_sales,
-    maintenance_sales, or install_sales. Other active users are not targets.
+    A roster rep is any role in ROSTER_REP_ROLES (normalized sales-rep
+    roles, including vp_sales and legacy sales). Other active users are
+    not targets.
     """
     rows = await query(
         "SELECT id, role, active FROM users WHERE id = %s",
@@ -243,13 +293,7 @@ async def _require_active_sales_rep(rep_id: str) -> None:
     if not rows or not rows[0].get("active"):
         raise HTTPException(status_code=404, detail="Sales rep not found.")
     if not authz.is_roster_rep(rows[0].get("role")):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "rep_id must be an active user with a sales role "
-                "(sales, inside_sales, maintenance_sales, or install_sales)."
-            ),
-        )
+        raise HTTPException(status_code=400, detail=authz.ROSTER_REP_ROLE_DETAIL)
 
 
 async def _authorize_roster_create(
@@ -472,11 +516,11 @@ class BranchSettingsPatch(BaseModel):
     `aspire_branch_id` may appear in the body for wire compatibility but is
     IGNORED for authorization — scope comes from user_branches, never the body
     (critical AC). crew_rate_cents_per_hour writes branch_settings; production
-    rate writes catalog_items; material factors write material_calcs.factors.
+    rate writes service_kits; material factors write material_calcs.factors.
     """
     aspire_branch_id: Optional[int] = None
     crew_rate_cents_per_hour: Optional[int] = None
-    # {catalog_item_id: production_rate}
+    # {service kit id: production_rate}
     production_rates: Optional[dict[str, float]] = None
     # {material_key: {factor_name: value, ...}} — factor columns only, never
     # unit_cost/unit_sell.
@@ -501,8 +545,9 @@ class UserAdminPatch(BaseModel):
     """Partial update of one users row (role / branches / active).
 
     Every field optional — the PATCH applies only the keys present. Setting role
-    to a field-sales role (sales, maintenance_sales, install_sales) re-runs the
-    aspire_rep_id hard-block; `active` toggles the
+    to maintenance_sales or install_sales re-runs the aspire_rep_id hard-block.
+    New assignments of sales or outside_sales are rejected; leaving an existing
+    legacy role unchanged is allowed. `active` toggles the
     deactivate flag (never a DELETE); `branches` is a replace-set on
     user_branches.
     """
@@ -1006,78 +1051,14 @@ def register(app, require_auth) -> None:
         rows take precedence; for any material_key not overridden the company-wide
         row is returned flagged inherited.
 
-        productionRates: catalog_items production_rate values. No per-branch
-        production-rate table exists (catalog_items.production_rate is a single
+        productionRates: service_kits production_rate values. No per-branch
+        production-rate table exists (service_kits.production_rate is a single
         company-wide value written by PATCH /api/settings/branch/{id}), so all
         items are returned flagged source='inherited' (no branch-level override
         is distinguishable from the DB schema alone).
         """
         await _require_branch_write_scope(user, aspire_branch_id)
-
-        # ── crew rate ─────────────────────────────────────────────────────────
-        bs_rows = await query(
-            "SELECT * FROM branch_settings WHERE aspire_branch_id = %s",
-            [aspire_branch_id],
-        )
-        crew_rate = bs_rows[0].get("crew_rate_cents_per_hour") if bs_rows else None
-
-        # ── material factors — effective set (override | inherited) ───────────
-        # 1. Load all branch override rows.
-        branch_factor_rows = await query(
-            """SELECT material_key, factors, aspire_branch_id
-                 FROM material_calcs
-                WHERE aspire_branch_id = %s""",
-            [aspire_branch_id],
-        )
-        # 2. Load company-wide rows (aspire_branch_id IS NULL).
-        company_factor_rows = await query(
-            """SELECT material_key, factors, aspire_branch_id
-                 FROM material_calcs
-                WHERE aspire_branch_id IS NULL""",
-        )
-
-        # Build effective set: branch overrides win; company-wide fills the rest.
-        overridden_keys: set[str] = {r["material_key"] for r in branch_factor_rows}
-        effective_factors: list[dict] = []
-        for r in branch_factor_rows:
-            effective_factors.append({
-                "materialKey": r["material_key"],
-                "factors": _parse_factors(r.get("factors")),
-                "source": "override",
-            })
-        for r in company_factor_rows:
-            if r["material_key"] not in overridden_keys:
-                effective_factors.append({
-                    "materialKey": r["material_key"],
-                    "factors": _parse_factors(r.get("factors")),
-                    "source": "inherited",
-                })
-
-        # ── production rates — catalog_items (company-wide; no per-branch table)
-        # All items are flagged source='inherited': catalog_items.production_rate
-        # is the single company-wide value; per-branch overrides are not stored
-        # in a separate column so the distinction doesn't apply here.
-        catalog_rows = await query(
-            """SELECT id, description, production_rate
-                 FROM catalog_items
-                WHERE active = 1 AND production_rate IS NOT NULL""",
-        )
-        production_rates: list[dict] = [
-            {
-                "catalogItemId": r["id"],
-                "description": r.get("description"),
-                "productionRate": float(r["production_rate"]),
-                "source": "inherited",
-            }
-            for r in catalog_rows
-        ]
-
-        return {
-            "aspireBranchId": aspire_branch_id,
-            "crewRateCentsPerHour": None if crew_rate is None else int(crew_rate),
-            "materialFactors": effective_factors,
-            "productionRates": production_rates,
-        }
+        return await get_branch_settings_payload(aspire_branch_id)
 
     @app.patch("/api/settings/branch/{aspire_branch_id}")
     async def patch_branch_settings(
@@ -1112,6 +1093,10 @@ def register(app, require_auth) -> None:
                    ON DUPLICATE KEY UPDATE crew_rate_cents_per_hour = VALUES(crew_rate_cents_per_hour)""",
                 [aspire_branch_id, body.crew_rate_cents_per_hour],
             )
+            prior_rate = None if prior is None else int(prior)
+            new_rate = int(body.crew_rate_cents_per_hour)
+            if prior_rate != new_rate:
+                await reprice_open_drafts(aspire_branch_id, prior_rate, new_rate)
             await _audit(
                 scope_type="branch",
                 scope_id=scope_id,
@@ -1122,26 +1107,26 @@ def register(app, require_auth) -> None:
             )
             changed += 1
 
-        # ── production rates → catalog_items.production_rate ─────────────────
-        for catalog_item_id, rate in (body.production_rates or {}).items():
+        # ── production rates → service_kits.production_rate ──────────────────
+        for service_kit_id, rate in (body.production_rates or {}).items():
             rows = await query(
-                "SELECT production_rate FROM catalog_items WHERE id = %s",
-                [catalog_item_id],
+                "SELECT production_rate FROM service_kits WHERE id = %s",
+                [service_kit_id],
             )
             if not rows:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Catalog item {catalog_item_id} not found",
+                    detail=f"Service kit {service_kit_id} not found",
                 )
             prior = rows[0].get("production_rate")
             await execute(
-                "UPDATE catalog_items SET production_rate = %s WHERE id = %s",
-                [rate, catalog_item_id],
+                "UPDATE service_kits SET production_rate = %s WHERE id = %s",
+                [rate, service_kit_id],
             )
             await _audit(
                 scope_type="branch",
                 scope_id=scope_id,
-                setting_key=f"production_rate.{catalog_item_id}",
+                setting_key=f"production_rate.{service_kit_id}",
                 from_value=prior,
                 to_value=rate,
                 actor=actor,
@@ -1244,16 +1229,15 @@ def register(app, require_auth) -> None:
 
         Not "create from scratch": name/email come from the M365 pick, so the
         stored email is exact. Email is lowercased (Entra SSO matches lowercased
-        email). A field-sales role (sales, maintenance_sales, install_sales)
-        triggers the aspire_rep_id hard-block; other roles save with no Aspire
-        link and no warning. The authorize and any branch
+        email). Assignable roles are authz.ASSIGNABLE_ROLES. `sales` and
+        `outside_sales` are rejected (400). maintenance_sales and
+        install_sales trigger the aspire_rep_id hard-block; other roles save
+        with no Aspire link and no warning. The authorize and any branch
         set are audited.
         """
         await _require_admin(user)
 
-        role = body.role.strip()
-        if role not in authz.CANONICAL_ROLES:
-            raise HTTPException(status_code=422, detail=f"Unknown role {role!r}")
+        role = authz.ensure_assignable_role(body.role)
 
         email = body.email.strip().lower()
 
@@ -1316,32 +1300,7 @@ def register(app, require_auth) -> None:
 
         # ── role ─────────────────────────────────────────────────────────────
         if body.role is not None:
-            new_role = body.role.strip()
-            if new_role not in authz.CANONICAL_ROLES:
-                raise HTTPException(status_code=422, detail=f"Unknown role {new_role!r}")
-
-            new_rep_id = current.get("aspire_rep_id")
-            if authz.requires_aspire_sales_rep(new_role):
-                # Block a field-sales role that cannot resolve an Aspire contact
-                # BEFORE writing anything (prevent-don't-repair). An existing
-                # aspire_rep_id is trusted, so reassigning sales → a split role
-                # does not drop the link.
-                new_rep_id = await _require_resolved_sales_rep(
-                    current.get("email") or "", current.get("aspire_rep_id")
-                )
-
-            await execute(
-                "UPDATE users SET role = %s, aspire_rep_id = %s WHERE id = %s",
-                [new_role, new_rep_id, user_id],
-            )
-            await _audit(
-                scope_type="company",
-                scope_id=None,
-                setting_key=f"user.{user_id}.role",
-                from_value=current.get("role"),
-                to_value=new_role,
-                actor=actor,
-            )
+            await _apply_role_change(user_id, current, body.role, actor)
 
         # ── active (deactivate/reactivate) ───────────────────────────────────
         if body.active is not None:
@@ -1408,11 +1367,10 @@ def register(app, require_auth) -> None:
         return {"id": user_id, "aspire_rep_id": resolved}
 
     async def get_branch_settings_payload(aspire_branch_id: int) -> dict:
-        """Return the enriched branch settings payload after a PATCH.
+        """Crew rate, material factors, and production rates for one branch.
 
-        Reuses the same enrichment logic as GET /api/settings/branch/{id}: crew
-        rate, materialFactors (override/inherited), productionRates. The PATCH
-        return value and the GET response are therefore always in sync.
+        GET /api/settings/branch/{id} and the PATCH response both call this,
+        so the two payloads stay the same shape.
         """
         bs_rows = await query(
             "SELECT * FROM branch_settings WHERE aspire_branch_id = %s",
@@ -1444,11 +1402,11 @@ def register(app, require_auth) -> None:
                 })
 
         catalog_rows = await query(
-            "SELECT id, description, production_rate FROM catalog_items WHERE active = 1 AND production_rate IS NOT NULL",
+            "SELECT id, description, production_rate FROM service_kits WHERE active = 1 AND production_rate IS NOT NULL",
         )
         production_rates: list[dict] = [
             {
-                "catalogItemId": r["id"],
+                "serviceKitId": r["id"],
                 "description": r.get("description"),
                 "productionRate": float(r["production_rate"]),
                 "source": "inherited",
@@ -2494,8 +2452,9 @@ async def _replace_user_branches(
 async def _require_resolved_sales_rep(email: str, current_rep_id: Any) -> int:
     """Return a resolved Aspire ContactID for a sales rep, or 422 with §2.8 copy.
 
-    The hard-block (§2.8, prevent-don't-repair): a field-sales role (sales,
-    maintenance_sales, install_sales) must map to an Aspire contact so
+    The hard-block (§2.8, prevent-don't-repair): maintenance_sales,
+    install_sales, and a legacy sales row that is being kept must map to an
+    Aspire contact so
     opportunity pushes stamp SalesRepID. If the row
     already carries an aspire_rep_id it is trusted; otherwise the email is
     resolved live against Aspire. An unresolved rep raises 422 with the EXACT

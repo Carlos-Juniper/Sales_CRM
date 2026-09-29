@@ -5,7 +5,7 @@
 //   • TP = QTY × unit sell price; each line carries an embedded SUB COST and
 //     a target GM%. GM% is the pricing lever — never an hourly rate.
 //   • HOURS are tracked for production planning only and NEVER move price.
-//   • Cost basis feeds up from catalog_items; live-goods SKUs may carry
+//   • Cost basis feeds up from service_kits; live-goods SKUs may carry
 //     multiple vendor prices averaged into the kit cost (II-6.5).
 //   • Labor/material component split + same-production-rate labor grouping
 //     (II-9.7 — landscape gets the parts/labor split irrigation already has).
@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 
 import type {
-  CatalogItem,
+  ServiceKit,
   ComponentKind,
   Estimate,
   EstimateSection,
@@ -148,7 +148,7 @@ export function groupSameRateLabor(
 // ----- Kit catalog (II-6.5 live-goods volatility / II-9.5 config-not-code) -----
 
 /**
- * An install kit row: a CatalogItem carrying its per-vendor price quotes.
+ * An install kit row: a ServiceKit carrying its per-vendor price quotes.
  * Live-goods SKUs (a 3-gal shrub can range $0.25–$0.75) average their vendor
  * prices into the kit's cost basis.
  *
@@ -157,7 +157,7 @@ export function groupSameRateLabor(
  * separate surface — open item with Carlos), never by a developer deploy.
  * The component cells in the editor are the per-estimate override surface.
  */
-export interface InstallCatalogKit extends CatalogItem {
+export interface InstallServiceKit extends ServiceKit {
   vendorPricesCents: number[]
 }
 
@@ -170,7 +170,7 @@ export function averagedVendorCostCents(vendorPricesCents: number[]): number {
 }
 
 /** Seed "… — Installed" quantity kits. Adding a kit is a data change. */
-export const INSTALL_KIT_CATALOG: InstallCatalogKit[] = [
+export const INSTALL_SERVICE_KITS: InstallServiceKit[] = [
   {
     id: 'kit-mahogany-30g',
     description: "Mahogany, 10'-12' x 3'-4', 2\" cal — Installed",
@@ -181,7 +181,7 @@ export const INSTALL_KIT_CATALOG: InstallCatalogKit[] = [
     targetGm: 0.45,
     kitType: 'install_quantity',
     productionRate: null,
-    branch: 'Phoenix-Desert',
+    aspireBranchId: null,
     active: true,
     serviceType: 'Landscape Install',
   },
@@ -196,7 +196,7 @@ export const INSTALL_KIT_CATALOG: InstallCatalogKit[] = [
     targetGm: 0.28,
     kitType: 'install_quantity',
     productionRate: null,
-    branch: 'Phoenix-Desert',
+    aspireBranchId: null,
     active: true,
     serviceType: 'Landscape Install',
   },
@@ -210,7 +210,7 @@ export const INSTALL_KIT_CATALOG: InstallCatalogKit[] = [
     targetGm: 0.45,
     kitType: 'install_quantity',
     productionRate: null,
-    branch: 'Phoenix-Desert',
+    aspireBranchId: null,
     active: true,
     serviceType: 'Irrigation Install',
   },
@@ -224,7 +224,7 @@ export const INSTALL_KIT_CATALOG: InstallCatalogKit[] = [
     targetGm: 0.45,
     kitType: 'install_quantity',
     productionRate: null,
-    branch: 'Phoenix-Desert',
+    aspireBranchId: null,
     active: true,
     serviceType: 'Irrigation Install',
   },
@@ -238,23 +238,23 @@ export const INSTALL_KIT_CATALOG: InstallCatalogKit[] = [
     targetGm: 0.22,
     kitType: 'install_quantity',
     productionRate: null,
-    branch: 'Phoenix-Desert',
+    aspireBranchId: null,
     active: true,
     serviceType: 'Landscape Install',
   },
 ]
 
 /**
- * The editors read kits from GET /catalog-items.
- * Adapts install_quantity CatalogItems into the editor's kit shape; the API
+ * The editors read kits from GET /service-kits.
+ * Adapts install_quantity service kits into the editor's kit shape; the API
  * row carries a single blended unit cost, which stands in as the one vendor
- * quote until per-vendor pricing lands. The INSTALL_KIT_CATALOG literal
+ * quote until per-vendor pricing lands. The INSTALL_SERVICE_KITS literal
  * survives ONLY as the offline fallback (API unreachable / not yet loaded ⇒
  * empty list).
  */
-export function installKitCatalogFromItems(items: CatalogItem[]): InstallCatalogKit[] {
+export function installServiceKitsFromItems(items: ServiceKit[]): InstallServiceKit[] {
   const kits = items.filter((k) => k.kitType === 'install_quantity' && k.active)
-  if (kits.length === 0) return INSTALL_KIT_CATALOG
+  if (kits.length === 0) return INSTALL_SERVICE_KITS
   return kits.map((k) => ({
     ...k,
     vendorPricesCents: k.unitCostCents > 0 ? [k.unitCostCents] : [],
@@ -267,7 +267,7 @@ export function installKitCatalogFromItems(items: CatalogItem[]): InstallCatalog
  * pricing engines independent (a maintenance_hours kit can never enter here).
  */
 export function kitToService(
-  kit: InstallCatalogKit,
+  kit: InstallServiceKit,
   sectionId: string,
   sortOrder: number,
 ): SectionService {
@@ -280,7 +280,7 @@ export function kitToService(
   return {
     id: newId('svc'),
     sectionId,
-    catalogItemId: kit.id,
+    serviceKitId: kit.id,
     label: kit.description,
     qty: 1,
     uom: kit.uom,
@@ -306,12 +306,4 @@ export function coerceNum(raw: string): number {
 /** GM% display read: 0.4498… → "44.98%". */
 export function formatGmPct(gm: number): string {
   return `${(gm * 100).toFixed(2)}%`
-}
-
-/** Exact dollars from integer cents: 5_342_000 → "$53,420.00". */
-export function formatCents(cents: number): string {
-  return `$${(cents / 100).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`
 }

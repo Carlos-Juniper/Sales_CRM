@@ -22,14 +22,12 @@ import {
   assertCanEdit,
   estimatingRolesForUser,
   canUserEditField,
-  MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
-  formatCents,
   lineCentsPerSqft,
-  maintenanceCatalogFromItems,
+  maintenanceRowsFromServiceKits,
   sellRateCentsPer1000Sf,
   unresolvedProductionRateLabels,
 } from '@/lib/estimating/maintenance'
-import type { CatalogItem } from '@/types/estimating'
+import type { ServiceKit } from '@/types/estimating'
 import { buildMaintenanceEstimate } from '@/mocks/estimatingData'
 
 describe('maintenance service catalog (sq-ft basis, BRD I-6.5)', () => {
@@ -91,8 +89,8 @@ describe('section operations', () => {
     expect(svc.sortOrder).toBe(3)
   })
 
-  it('buildDefaultSection seeds the catalog defaults', () => {
-    const sec = buildDefaultSection('est-1', 2)
+  it('buildDefaultSection seeds the catalog it is given', () => {
+    const sec = buildDefaultSection('est-1', 2, MAINTENANCE_SERVICE_CATALOG)
     expect(sec.estimateId).toBe('est-1')
     expect(sec.name).toBe('New region')
     expect(sec.sortOrder).toBe(2)
@@ -100,6 +98,11 @@ describe('section operations', () => {
     expect(sec.services.map((s) => s.sectionId)).toEqual(
       sec.services.map(() => sec.id),
     )
+  })
+
+  it('buildDefaultSection does not seed offline catalog prices', () => {
+    const sec = buildDefaultSection('est-1', 0)
+    expect(sec.services).toEqual([])
   })
 
   it('duplicateSection deep-clones, appends " (copy)", inserts after source', () => {
@@ -167,16 +170,27 @@ describe('field ownership (estimator vs approver) — logic-level enforcement', 
 })
 
 describe('canonical auth role → estimating role mapping', () => {
-  it('estimators = maintenance/install estimating (+ admin)', () => {
-    expect(estimatingRolesForUser('maintenance_estimating')).toContain('estimator')
-    expect(estimatingRolesForUser('install_estimating')).toContain('estimator')
-    expect(estimatingRolesForUser('admin')).toContain('estimator')
-    expect(estimatingRolesForUser('manager')).not.toContain('estimator')
+  const lineItemEditors = [
+    'maintenance_estimating',
+    'install_estimating',
+    'admin',
+    'vp_sales',
+    'manager',
+    'regional_director',
+    'vice_president',
+    'ceo',
+  ] as const
+
+  it('line-item editors follow LINE_ITEM_EDIT_ROLES, including admin', () => {
+    for (const role of lineItemEditors) {
+      expect(estimatingRolesForUser(role)).toContain('estimator')
+    }
     expect(estimatingRolesForUser('sales')).not.toContain('estimator')
+    expect(estimatingRolesForUser('procurement')).not.toContain('estimator')
   })
 
   it('approvers = manager/RD/VP/CEO (+ admin)', () => {
-    for (const r of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin'] as const) {
+    for (const r of ['manager', 'regional_director', 'vice_president', 'ceo', 'admin', 'vp_sales'] as const) {
       expect(estimatingRolesForUser(r)).toContain('approver')
     }
     expect(estimatingRolesForUser('maintenance_estimating')).not.toContain('approver')
@@ -192,19 +206,16 @@ describe('canonical auth role → estimating role mapping', () => {
     expect(canUserEditField('maintenance_estimating', 'qty')).toBe(true)
     expect(canUserEditField('maintenance_estimating', 'margin')).toBe(false)
     expect(canUserEditField('manager', 'margin')).toBe(true)
-    expect(canUserEditField('manager', 'qty')).toBe(false)
+    expect(canUserEditField('manager', 'qty')).toBe(true)
     expect(canUserEditField('admin', 'qty')).toBe(true)
     expect(canUserEditField('admin', 'margin')).toBe(true)
+    expect(canUserEditField('vp_sales', 'qty')).toBe(true)
+    expect(canUserEditField('vp_sales', 'margin')).toBe(true)
     expect(canUserEditField('sales', 'qty')).toBe(false)
   })
 })
 
 describe('display reads', () => {
-  it('formatCents renders exact dollars', () => {
-    expect(formatCents(2_494_800)).toBe('$24,948.00')
-    expect(formatCents(0)).toBe('$0.00')
-  })
-
   it('lineCentsPerSqft derives from the shared per-1,000-SF read', () => {
     // 259,200¢ over 120,000 SF = 2.16¢/SF
     expect(lineCentsPerSqft(259_200, 120_000)).toBeCloseTo(2.16, 5)
@@ -213,32 +224,43 @@ describe('display reads', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The editor reads kits from GET /catalog-items; the literal is
-// only the offline fallback. Plus the client half of the save guard.
+// The editor reads kits from GET /service-kits. An empty catalog does not
+// fall back to MAINTENANCE_SERVICE_CATALOG prices. Plus the client half of
+// the save guard.
 // ---------------------------------------------------------------------------
 
-const kit = (over: Partial<CatalogItem> & Pick<CatalogItem, 'id' | 'description'>): CatalogItem => ({
+const kit = (over: Partial<ServiceKit> & Pick<ServiceKit, 'id' | 'description'>): ServiceKit => ({
   uom: 'Sq. Ft.',
   unitCostCents: 0,
   unitSellCents: 0,
   targetGm: 0.22,
   kitType: 'maintenance_hours',
   productionRate: null,
-  branch: 'All Branches',
+  aspireBranchId: null,
   active: true,
   serviceType: '',
   ...over,
 })
 
-describe('maintenanceCatalogFromItems (API catalog adapter)', () => {
+describe('maintenanceRowsFromServiceKits (API catalog adapter)', () => {
   const rated = kit({ id: 'kit-1', description: 'Standard Production Mowing', productionRate: 67650 })
+  const branchRate = 22_500
 
-  it('falls back to the literal when the API returned no usable kits', () => {
-    expect(maintenanceCatalogFromItems([])).toBe(MAINTENANCE_SERVICE_CATALOG)
+  it('does not fall back to the literal catalog when the API returned no usable kits', () => {
+    expect(maintenanceRowsFromServiceKits([], branchRate)).toEqual([])
+    expect(maintenanceRowsFromServiceKits([], null)).toEqual([])
+  })
+
+  it('keeps a catalog price when there is no crew rate and omits a derived price', () => {
+    const derived = kit({ id: 'kit-derived', description: 'Derived Mowing', productionRate: 67650, unitSellCents: 0 })
+    const priced = kit({ id: 'kit-priced', description: 'Catalog Fertilizer', productionRate: 5000, unitSellCents: 450 })
+    const rows = maintenanceRowsFromServiceKits([derived, priced], null)
+    expect(rows.map((r) => r.key)).toEqual(['kit-priced'])
+    expect(rows[0].rateCentsPer1000Sf).toBe(450)
   })
 
   it('adapts rated sq-ft maintenance kits to editor catalog rows (kit id = key)', () => {
-    const rows = maintenanceCatalogFromItems([rated])
+    const rows = maintenanceRowsFromServiceKits([rated], branchRate)
     expect(rows).toHaveLength(1)
     expect(rows[0].key).toBe('kit-1')
     expect(rows[0].label).toBe('Standard Production Mowing')
@@ -246,29 +268,38 @@ describe('maintenanceCatalogFromItems (API catalog adapter)', () => {
   })
 
   it('excludes unrated, inactive, non-sqft, and install kits (only guard-passing kits are addable)', () => {
-    const items: CatalogItem[] = [
+    const items: ServiceKit[] = [
       rated,
       kit({ id: 'kit-unrated', description: 'Prune Easy' }),
       kit({ id: 'kit-inactive', description: 'Old Kit', productionRate: 100, active: false }),
       kit({ id: 'kit-count', description: 'Tree Rings', productionRate: 10, uom: 'CT' }),
       kit({ id: 'kit-install', description: 'Mulch', productionRate: 5, kitType: 'install_quantity' }),
     ]
-    expect(maintenanceCatalogFromItems(items).map((r) => r.key)).toEqual(['kit-1'])
+    expect(maintenanceRowsFromServiceKits(items, branchRate).map((r) => r.key)).toEqual(['kit-1'])
   })
 
-  it('derives the sell rate from the production rate + crew rate + target GM when unit sell is 0', () => {
-    const rows = maintenanceCatalogFromItems([rated])
+  it('derives the sell rate from the branch crew rate + target GM when unit sell is 0', () => {
+    const rows = maintenanceRowsFromServiceKits([rated], branchRate)
     expect(rows[0].rateCentsPer1000Sf).toBe(
-      sellRateCentsPer1000Sf(67650, 0.22, MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+      sellRateCentsPer1000Sf(67650, 0.22, branchRate),
     )
+    // $180/hr is not a silent default — a different branch rate prices differently
+    expect(rows[0].rateCentsPer1000Sf).not.toBe(sellRateCentsPer1000Sf(67650, 0.22, 18_000))
     // and an explicit unit sell wins
     const priced = kit({ id: 'kit-2', description: 'Priced', productionRate: 5000, unitSellCents: 450 })
-    expect(maintenanceCatalogFromItems([priced])[0].rateCentsPer1000Sf).toBe(450)
+    expect(maintenanceRowsFromServiceKits([priced], branchRate)[0].rateCentsPer1000Sf).toBe(450)
   })
 
   it('sellRateCentsPer1000Sf = (1000 ÷ rate) × crew rate ÷ (1 − GM)', () => {
     // 1000/60000 h × 18,000¢ = 300¢ cost → /0.78 = 385¢
     expect(sellRateCentsPer1000Sf(60_000, 0.22, 18_000)).toBe(385)
+    // Same formula at a branch rate of $225/hr: 375¢ cost → /0.78 = 481¢
+    expect(sellRateCentsPer1000Sf(60_000, 0.22, 22_500)).toBe(481)
+  })
+
+  it('does not export a provisional crew-rate default', async () => {
+    const maintenance = await import('@/lib/estimating/maintenance')
+    expect('MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR' in maintenance).toBe(false)
   })
 })
 
@@ -288,28 +319,28 @@ describe('unresolvedProductionRateLabels (client save guard)', () => {
 
   it('flags a line with no hours and no kit — even with the catalog not loaded', () => {
     expect(
-      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: null }), []),
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, serviceKitId: null }), []),
     ).toEqual(['Mowing'])
   })
 
   it('resolves through a production-rated kit', () => {
     expect(
-      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-1' }), [rated]),
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, serviceKitId: 'kit-1' }), [rated]),
     ).toEqual([])
   })
 
   it('flags an unrated or unknown kit once the catalog is loaded', () => {
     expect(
-      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-2' }), [rated, unrated]),
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, serviceKitId: 'kit-2' }), [rated, unrated]),
     ).toEqual(['Mowing'])
     expect(
-      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-nope' }), [rated]),
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, serviceKitId: 'kit-nope' }), [rated]),
     ).toEqual(['Mowing'])
   })
 
   it('gives a kit-carrying line the benefit of the doubt while the catalog is unknown (server still enforces)', () => {
     expect(
-      unresolvedProductionRateLabels(sectionsWith({ hours: null, catalogItemId: 'kit-2' }), []),
+      unresolvedProductionRateLabels(sectionsWith({ hours: null, serviceKitId: 'kit-2' }), []),
     ).toEqual([])
   })
 })

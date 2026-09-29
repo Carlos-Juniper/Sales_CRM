@@ -51,6 +51,13 @@ _SALES = {
 
 @pytest.fixture
 def estimator(db):
+    # Priced maintenance lines require branch_settings.crew_rate_cents_per_hour.
+    # 3689 is the branch on _maintenance_payload (Raleigh Install, an operating
+    # branch seeded at $180/hr by migration 020).
+    db.tables["branch_settings"]["3689"] = {
+        "aspire_branch_id": 3689,
+        "crew_rate_cents_per_hour": 18_000,
+    }
     app.dependency_overrides[require_auth] = lambda: _ESTIMATOR
     yield
     app.dependency_overrides.clear()

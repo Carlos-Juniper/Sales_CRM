@@ -153,7 +153,7 @@ describe('estimating data-access layer (MSW round-trip)', () => {
     expect(newSection.id).toBeTruthy()
 
     const newService = await estimatingApi.createService(created.id, newSection.id, {
-      catalogItemId: null,
+      serviceKitId: null,
       label: 'Pond Edge Trimming',
       qty: 26,
       uom: '/yr',

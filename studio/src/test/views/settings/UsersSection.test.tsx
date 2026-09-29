@@ -206,7 +206,7 @@ describe('UsersSection — authorize from M365 directory', () => {
     })
     fireEvent.click(await screen.findByText('nina.park@juniper.com'))
     fireEvent.change(screen.getByTestId('authorize-role'), {
-      target: { value: 'sales' },
+      target: { value: 'maintenance_sales' },
     })
     fireEvent.click(screen.getByRole('button', { name: /authorize/i }))
 
@@ -229,6 +229,7 @@ describe('UsersSection — enriched backend fields', () => {
     expect(omarRow).toHaveTextContent(/inactive/i)
     // Carla has active: 1 — no Inactive badge.
     expect(screen.getByTestId('user-row-u-carla')).not.toHaveTextContent(/inactive/i)
+    expect(screen.getByTestId('user-row-u-carla')).toHaveTextContent('Legacy: Sales (reassign)')
   })
 
   it('seeds the branch editor from the user real `branches` array', async () => {
@@ -238,11 +239,32 @@ describe('UsersSection — enriched backend fields', () => {
     await screen.findByText('Carla Reyes')
     fireEvent.click(screen.getByRole('button', { name: /edit carla reyes/i }))
     // Branch 101 checkbox must be checked (seeded from real branches).
+    const editRole = screen.getByTestId('edit-role-u-carla') as HTMLSelectElement
+    expect(editRole.value).toBe('sales')
+    const legacy = Array.from(editRole.options).find((option) => option.value === 'sales')
+    expect(legacy?.text).toBe('Legacy: Sales (reassign)')
+    expect(legacy?.disabled).toBe(true)
     const naplesCheck = screen.getByTestId('edit-branch-u-carla-101') as HTMLInputElement
     expect(naplesCheck.checked).toBe(true)
     // Branch 202 must not be checked.
     const sarasotaCheck = screen.getByTestId('edit-branch-u-carla-202') as HTMLInputElement
     expect(sarasotaCheck.checked).toBe(false)
+  })
+
+  it('sends the stored legacy role when the editor saves without changing it', async () => {
+    let patchBody: Record<string, unknown> | null = null
+    server.use(
+      http.patch('*/api/settings/users/:id', async ({ request }) => {
+        patchBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(USERS[0])
+      }),
+    )
+    renderSection()
+    await screen.findByText('Carla Reyes')
+    fireEvent.click(screen.getByRole('button', { name: /edit carla reyes/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save carla reyes/i }))
+    await waitFor(() => expect(patchBody).not.toBeNull())
+    expect(patchBody).toEqual({ role: 'sales', branches: [101] })
   })
 
   it('shows the Aspire rep hint for a sales user with a null aspireRepId', async () => {
@@ -303,10 +325,26 @@ describe('UsersSection — enriched backend fields', () => {
     fireEvent.click(await screen.findByText('nina.park@juniper.com'))
     const select = screen.getByTestId('authorize-role') as HTMLSelectElement
     const labels = Array.from(select.options).map((option) => option.text)
-    expect(labels).toEqual(expect.arrayContaining(['Maintenance Sales', 'Install Sales']))
-    expect(Array.from(select.options).map((option) => option.value)).toEqual(
-      expect.arrayContaining(['maintenance_sales', 'install_sales']),
-    )
+    const values = Array.from(select.options).map((option) => option.value)
+    expect(labels).toEqual(expect.arrayContaining([
+      'Inside Sales',
+      'Maintenance Sales',
+      'Install Sales',
+      'VP of Sales',
+      'Regional Director',
+      'Vice President',
+    ]))
+    expect(values).toEqual(expect.arrayContaining([
+      'inside_sales',
+      'maintenance_sales',
+      'install_sales',
+      'vp_sales',
+      'regional_director',
+      'vice_president',
+    ]))
+    expect(values).not.toContain('sales')
+    expect(values).not.toContain('outside_sales')
+    expect(labels).not.toContain('Legacy: Sales (reassign)')
   })
 
   it('does NOT show the Aspire rep hint for a sales user with a resolved aspireRepId', async () => {

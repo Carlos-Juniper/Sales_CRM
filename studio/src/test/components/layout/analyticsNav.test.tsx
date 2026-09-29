@@ -5,7 +5,14 @@ import { useAuthStore } from '@/store/authStore'
 import { Sidebar } from '@/components/layout/Sidebar'
 import type { UserRole } from '@/types'
 
-const MANAGEMENT: UserRole[] = ['admin', 'manager', 'regional_director', 'vice_president', 'ceo']
+const MANAGEMENT: UserRole[] = [
+  'admin',
+  'vp_sales',
+  'manager',
+  'regional_director',
+  'vice_president',
+  'ceo',
+]
 const DENIED: UserRole[] = [
   'sales',
   'inside_sales',

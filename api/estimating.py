@@ -34,9 +34,11 @@ import api.attachments as _att_mod
 from db import execute, query
 from api import aspire_sync
 from api import authz
+from api.commission_service import cancel_for_estimate, create_on_won
 from api import properties as _props_mod
 from api.aspire_sync import OpportunityInput
 from api.aspire_config import ASPIRE_BRANCH_MAP, ASPIRE_BRANCH_INSTALL_FALLBACKS
+from api.maintenance_pricing import _live_branch_crew_rate, annotate_maintenance_sections, apply_maintenance_crew_prices
 
 logger = logging.getLogger(__name__)
 
@@ -75,61 +77,6 @@ async def _write_back_lead_status(lead_id: Optional[str], status: str) -> None:
     if not lead_id:
         return
     await execute("UPDATE leads SET status = %s WHERE id = %s", [status, lead_id])
-
-
-async def _create_commission_on_won(estimate_id: str) -> None:
-    """Insert a commission record when an estimate transitions to 'won'.
-
-    No-ops silently when: the estimate has no lead, the lead has no crm_rep,
-    or the rep has no active commission rate. Idempotent — the UNIQUE KEY on
-    estimate_id means a duplicate won transition is a no-op at the DB layer.
-    """
-    rows = await query(
-        """
-        SELECT e.contract_value_cents, e.lead_id,
-               l.crm_rep AS crm_rep_id
-        FROM estimates e
-        JOIN leads l ON l.id = e.lead_id
-        WHERE e.id = %s
-        """,
-        [estimate_id],
-    )
-    if not rows:
-        return
-    row = rows[0]
-    crm_rep_id = row.get("crm_rep_id")
-    lead_id = row.get("lead_id")
-    contract_value_cents = row.get("contract_value_cents") or 0
-    if not crm_rep_id:
-        return
-
-    rate_rows = await query(
-        """
-        SELECT commission_rate
-        FROM commission_rates
-        WHERE user_id = %s
-          AND effective_date <= CURDATE()
-          AND (expires_date IS NULL OR expires_date > CURDATE())
-        ORDER BY effective_date DESC
-        LIMIT 1
-        """,
-        [crm_rep_id],
-    )
-    if not rate_rows:
-        return
-    commission_rate = float(rate_rows[0]["commission_rate"])
-    commission_amount_cents = round(contract_value_cents * commission_rate)
-
-    await execute(
-        """
-        INSERT IGNORE INTO commissions
-            (estimate_id, lead_id, user_id, contract_value_cents,
-             commission_rate, commission_amount_cents, status, approved_at)
-        VALUES (%s, %s, %s, %s, %s, %s, 'approved', NOW())
-        """,
-        [estimate_id, lead_id, crm_rep_id, contract_value_cents,
-         commission_rate, commission_amount_cents],
-    )
 
 
 # ── Crew-rate snapshot on transitions (Handoff 38 §2.6 — LOCKED) ─────────────
@@ -572,7 +519,7 @@ def _service_out(
 ) -> dict:
     """Serialize one section_service row.
 
-    `catalog_data` is the joined catalog_items row (service_type, scope_text,
+    `catalog_data` is the joined service_kits row (service_type, scope_text,
     billing_type) that the contract generator reads to split recurring from
     one-time services and print each service's scope paragraph. Only
     _load_estimate has it in hand; the single-row routes below pass nothing and
@@ -580,14 +527,16 @@ def _service_out(
     SectionService TS interface.
 
     billingType resolves the per-line override first (migration 046), falling
-    back to the catalog item. A hand-entered line has no catalog item, so
+    back to the kit. A hand-entered line has no kit, so
     without the override it would resolve to None and drop out of the
     contract's payment-schedule base. Mirrors the `discipline` override.
+
+    serviceKitId is the wire name of section_services.service_kit_id.
     """
     return {
         "id": r["id"],
         "sectionId": r["section_id"],
-        "catalogItemId": r["catalog_item_id"],
+        "serviceKitId": r["service_kit_id"],
         "discipline": r.get("discipline"),
         "label": r["label"],
         "qty": _num(r["qty"]),
@@ -758,20 +707,20 @@ async def _load_estimate(
     for c in component_rows:
         comps_by_service.setdefault(c["section_service_id"], []).append(_component_out(c))
 
-    # Fetch catalog_items data for contract generator fields (scope_text, billing_type, service_type)
+    # Fetch service_kits data for contract generator fields (scope_text, billing_type, service_type)
     catalog_data_by_id: dict[str, dict] = {}
-    catalog_item_ids = {sv["catalog_item_id"] for sv in service_rows if sv.get("catalog_item_id")}
-    if catalog_item_ids:
-        placeholders = ", ".join(["%s"] * len(catalog_item_ids))
+    service_kit_ids = {sv["service_kit_id"] for sv in service_rows if sv.get("service_kit_id")}
+    if service_kit_ids:
+        placeholders = ", ".join(["%s"] * len(service_kit_ids))
         catalog_rows = await query(
-            f"SELECT id, service_type, scope_text, billing_type FROM catalog_items WHERE id IN ({placeholders})",
-            list(catalog_item_ids),
+            f"SELECT id, service_type, scope_text, billing_type FROM service_kits WHERE id IN ({placeholders})",
+            list(service_kit_ids),
         )
         catalog_data_by_id = {r["id"]: r for r in catalog_rows}
 
     services_by_section: dict[str, list[dict]] = {}
     for sv in service_rows:
-        catalog_data = catalog_data_by_id.get(sv.get("catalog_item_id"))
+        catalog_data = catalog_data_by_id.get(sv.get("service_kit_id"))
         services_by_section.setdefault(sv["section_id"], []).append(
             _service_out(sv, comps_by_service.get(sv["id"], []), catalog_data)
         )
@@ -981,7 +930,7 @@ _TAKEOFF_COLS = {
     "addPct": "add_pct",
     "measuredQty": "measured_qty",
     "opportunityQty": "opportunity_qty",
-    "catalogItemId": "catalog_item_id",
+    "serviceKitId": "service_kit_id",
 }
 
 
@@ -1013,7 +962,7 @@ def _takeoff_line_out(r: dict, threshold: float = DISCREPANCY_DEFAULT_THRESHOLD)
         "addPct": add,
         "measuredQty": measured,
         "opportunityQty": opp,
-        "catalogItemId": r.get("catalog_item_id"),
+        "serviceKitId": r.get("service_kit_id"),
         # Derived server-side at the config threshold (company_settings, §5.4) —
         # the UI's live slider re-derives client-side; these are never stored.
         "bidQty": _bid_qty(plan, add),
@@ -1025,7 +974,7 @@ def _takeoff_line_out(r: dict, threshold: float = DISCREPANCY_DEFAULT_THRESHOLD)
 async def _push_takeoff_qtys_bg(estimate_id: str) -> None:
     """ONE batched, best-effort qty push on estimate Save.
 
-    Pushes every takeoff line that carries a catalog_item_id (a single pass,
+    Pushes every takeoff line that carries a service_kit_id (a single pass,
     not a call per edit) to OpportunityServiceItem.ItemQuantity via the
     aspire_sync port. Strictly non-blocking: any failure is logged, never
     raised — an Aspire outage must not fail the Save. (Separate from the
@@ -1040,13 +989,13 @@ async def _push_takeoff_qtys_bg(estimate_id: str) -> None:
         if not rows:
             return
         line_rows = await query(
-            """SELECT catalog_item_id, opportunity_qty, uom FROM takeoff_lines
-                 WHERE estimate_id = %s AND catalog_item_id IS NOT NULL""",
+            """SELECT service_kit_id, opportunity_qty, uom FROM takeoff_lines
+                 WHERE estimate_id = %s AND service_kit_id IS NOT NULL""",
             [estimate_id],
         )
         lines = [
             aspire_sync.TakeoffQtyLine(
-                catalog_item_id=r["catalog_item_id"],
+                service_kit_id=r["service_kit_id"],
                 qty=float(_num(r["opportunity_qty"]) or 0),
                 uom=r.get("uom"),
             )
@@ -1257,13 +1206,20 @@ def _attachment_out(r: dict) -> dict:
 # changing a ladder/band/scope/formula is a row edit, never a code deploy.
 
 def _approval_tier_out(r: dict) -> dict:
+    """CamelCase one approval_tiers row.
+
+    A NULL max stays null. admin and vp_sales (migration 068) are ordinary
+    rows: Settings edits their ceiling, and this mapper does not replace a
+    null max with an unlimited constant.
+    """
+    max_cents = r["max_value_cents"]
     return {
         "id": r["id"],
         "roleKey": r["role_key"],
         "label": r["label"],
         "minValueCents": int(r["min_value_cents"]),
-        "maxValueCents": None if r["max_value_cents"] is None else int(r["max_value_cents"]),
-        "order": r["tier_order"],
+        "maxValueCents": None if max_cents is None else int(max_cents),
+        "order": int(r["tier_order"]),
         "estimateType": r["estimate_type"],
     }
 
@@ -1315,7 +1271,7 @@ ITB_STATUS_CODES = frozenset({"P", "C", "S", "R", "U", "X", "-"})
 # 'P' Pending
 DEFAULT_ITB_STATUS = "P"
 
-# EST LS $ / EST IR $ auto-split. A line's catalog_items.service_type
+# EST LS $ / EST IR $ auto-split. A line's service_kits.service_type
 # in this set is classified as Irrigation; everything else is Landscape. A named
 # config set (not a hardcoded branch) so adding a service type is a data change.
 IRRIGATION_SERVICE_TYPES = frozenset({"Irrigation"})
@@ -1359,26 +1315,26 @@ async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int
     sqft_by_section = {s["id"]: s.get("square_feet") or 0 for s in sections}
     placeholders = ", ".join(["%s"] * len(section_ids))
     svc_rows = await query(
-        f"SELECT section_id, catalog_item_id, discipline, qty, unit_sell_cents, complexity_pct"
+        f"SELECT section_id, service_kit_id, discipline, qty, unit_sell_cents, complexity_pct"
         f" FROM section_services WHERE section_id IN ({placeholders})",
         section_ids,
     )
     lines: list[dict] = []
-    catalog_item_ids: set[str] = set()
+    service_kit_ids: set[str] = set()
     for sv in svc_rows:
         lines.append({**sv, "square_feet": sqft_by_section.get(sv["section_id"], 0)})
         if sv.get("discipline") not in ("landscape", "irrigation"):
-            cid = sv.get("catalog_item_id")
+            cid = sv.get("service_kit_id")
             if cid:
-                catalog_item_ids.add(cid)
+                service_kit_ids.add(cid)
     if not lines:
         return total_cents, 0
     service_types: dict[str, str] = {}
-    if catalog_item_ids:
-        ids = list(catalog_item_ids)
+    if service_kit_ids:
+        ids = list(service_kit_ids)
         placeholders = ", ".join(["%s"] * len(ids))
         rows = await query(
-            f"SELECT id, service_type FROM catalog_items WHERE id IN ({placeholders})", ids
+            f"SELECT id, service_type FROM service_kits WHERE id IN ({placeholders})", ids
         )
         service_types = {r["id"]: r["service_type"] for r in rows}
     # Sum LS and IR independently from the lines themselves (rather than
@@ -1397,7 +1353,7 @@ async def _compute_ls_ir_split(estimate_id: str, est_type: str, total_cents: int
             sell = round((square_feet / 1000) * unit_sell * qty * (1 + complexity))
         else:
             sell = round(qty * unit_sell)
-        discipline = _line_discipline(sv.get("discipline"), service_types.get(sv.get("catalog_item_id")))
+        discipline = _line_discipline(sv.get("discipline"), service_types.get(sv.get("service_kit_id")))
         if discipline == "irrigation":
             ir_cents += sell
         else:
@@ -1541,7 +1497,7 @@ async def _create_itb_project(estimate_id: str, body: dict, est_type: str) -> st
     return project_id
 
 
-def _catalog_item_out(r: dict) -> dict:
+def _service_kit_out(r: dict) -> dict:
     # Slice 14: `branch` city string removed; identity carried by aspire_branch_id
     # (NULL = company-wide per §2.3 convention). The legacy `branch` key is NOT
     # passed through — once 022 is applied the column will not exist in the row.
@@ -1584,13 +1540,13 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
     service_id = _new_id("svc")
     await execute(
         """INSERT INTO section_services
-             (id, section_id, catalog_item_id, discipline, billing_type, label, qty, uom,
+             (id, section_id, service_kit_id, discipline, billing_type, label, qty, uom,
               complexity_pct, unit_sell_cents, embedded_cost_cents, target_gm, hours, sort_order)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
             service_id,
             section_id,
-            svc.get("catalogItemId"),
+            svc.get("serviceKitId"),
             svc.get("discipline"),
             svc.get("billingType"),
             svc["label"],
@@ -1631,41 +1587,37 @@ async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
 #
 # Production rates are REQUIRED: a maintenance service line cannot be saved
 # unless its hours are computable. A line resolves when it carries non-null
-# hours itself, OR its catalog_item has a non-null production_rate. Otherwise
+# hours itself, OR its service kit has a non-null production_rate. Otherwise
 # the write is rejected 422 BEFORE anything persists (the frontend shows its
 # own guard, but the server never trusts the client). Install estimates are
 # untouched — install kits are quantity-driven and carry no production rate.
 
-async def _require_resolvable_maintenance_lines(services: list[dict]) -> None:
-    """Reject (422) any maintenance line whose hours cannot be resolved.
 
-    `services` are camelCase line dicts carrying label / hours / catalogItemId.
-    Kits are fetched in one batched query; a missing kit id counts as
-    unresolvable (a dangling catalog_item_id can never produce hours).
-    """
+async def _require_resolvable_maintenance_lines(services: list[dict], crew_rate_cents: int | None = None) -> None:
+    """422 when hours cannot be resolved, then price crew-rate-derived sells."""
     pending = [svc for svc in services if svc.get("hours") is None]
-    if not pending:
-        return
-    kit_ids = {svc.get("catalogItemId") for svc in pending if svc.get("catalogItemId")}
-    rates: dict[str, Any] = {}
-    if kit_ids:
-        placeholders = ", ".join(["%s"] * len(kit_ids))
-        rows = await query(
-            f"SELECT id, production_rate FROM catalog_items WHERE id IN ({placeholders})",
-            list(kit_ids),
-        )
-        rates = {r["id"]: r.get("production_rate") for r in rows}
-    for svc in pending:
-        kit_id = svc.get("catalogItemId")
-        if kit_id is None or rates.get(kit_id) is None:
-            label = svc.get("label") or "(unnamed line)"
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Maintenance line \"{label}\" cannot be saved: no production rate "
-                    "resolves for it. Enter hours or pick a kit that has a production rate."
-                ),
+    if pending:
+        kit_ids = {svc.get("serviceKitId") for svc in pending if svc.get("serviceKitId")}
+        rates: dict[str, Any] = {}
+        if kit_ids:
+            placeholders = ", ".join(["%s"] * len(kit_ids))
+            rows = await query(
+                f"SELECT id, production_rate FROM service_kits WHERE id IN ({placeholders})",
+                list(kit_ids),
             )
+            rates = {r["id"]: r.get("production_rate") for r in rows}
+        for svc in pending:
+            kit_id = svc.get("serviceKitId")
+            if kit_id is None or rates.get(kit_id) is None:
+                label = svc.get("label") or "(unnamed line)"
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Maintenance line \"{label}\" cannot be saved: no production rate "
+                        "resolves for it. Enter hours or pick a kit that has a production rate."
+                    ),
+                )
+    await apply_maintenance_crew_prices(services, crew_rate_cents)
 
 
 # ── rou ────────────────────────────────────────────────────────────
@@ -1940,11 +1892,13 @@ def register(app, require_auth) -> None:
         _require_due_back_not_past(body.get("dueBackDate"))
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
-            await _require_resolvable_maintenance_lines([
-                svc
-                for section in (body.get("sections") or [])
-                for svc in (section.get("services") or [])
-            ])
+            # Read the branch crew rate only when there are lines to price.
+            # An empty create has nothing to price and issues no extra query.
+            create_lines = annotate_maintenance_sections(body.get("sections"))
+            await _require_resolvable_maintenance_lines(
+                create_lines,
+                await _live_branch_crew_rate(aspire_branch_id) if create_lines else None,
+            )
         # Budgets are optional. Resolve before the INSERT so a 400 persists
         # nothing, and so a blank string is NULL rather than 0. These dollars
         # are not the priced contract value — contract_value_cents, the ITB
@@ -2245,12 +2199,14 @@ def register(app, require_auth) -> None:
                 _sync_status_bg, estimate_id, target_status, body.get("lostReasonId")
             )
 
-        # Commission creation — fires only on the actual won transition.
+        # Commission creation and cancellation — only on the actual transition.
         if target_status == "won" and current.get("status") != "won":
-            background.add_task(_create_commission_on_won, estimate_id)
+            background.add_task(create_on_won, estimate_id)
+        if target_status == "lost" and current.get("status") != "lost":
+            background.add_task(cancel_for_estimate, estimate_id)
 
         # Estimate Save triggers ONE batched, best-effort
-        # push of the takeoff quantities that carry a catalog_item_id. Never
+        # push of the takeoff quantities that carry a service_kit_id. Never
         # blocks the Save; failures are logged inside the task.
         background.add_task(_push_takeoff_qtys_bg, estimate_id)
 
@@ -2426,13 +2382,16 @@ def register(app, require_auth) -> None:
     async def create_section(estimate_id: str, body: dict, _user: dict = Depends(require_auth)) -> dict:
         authz.require_estimator(_user)  # sections are estimator-owned
         est_rows = await query(
-            "SELECT id, estimate_type FROM estimates WHERE id = %s", [estimate_id]
+            "SELECT id, estimate_type, aspire_branch_id FROM estimates WHERE id = %s",
+            [estimate_id],
         )
         if not est_rows:
             raise HTTPException(status_code=404, detail="Not found")
-        # Nested services must resolve a production rate/hours.
         if est_rows[0].get("estimate_type") == "maintenance":
-            await _require_resolvable_maintenance_lines(body.get("services") or [])
+            await _require_resolvable_maintenance_lines(
+                annotate_maintenance_sections([body]),
+                await _live_branch_crew_rate(est_rows[0].get("aspire_branch_id")),
+            )
         idx = await _next_sort_order("estimate_sections", "estimate_id", estimate_id, body)
         section_id = await _insert_section(estimate_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
@@ -2499,12 +2458,14 @@ def register(app, require_auth) -> None:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
-        # A maintenance line must resolve a production rate/hours.
         est_rows = await query(
-            "SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id]
+            "SELECT estimate_type, aspire_branch_id FROM estimates WHERE id = %s",
+            [estimate_id],
         )
         if est_rows and est_rows[0].get("estimate_type") == "maintenance":
-            await _require_resolvable_maintenance_lines([body])
+            await _require_resolvable_maintenance_lines(
+                [body], await _live_branch_crew_rate(est_rows[0].get("aspire_branch_id")),
+            )
         idx = await _next_sort_order("section_services", "section_id", section_id, body)
         service_id = await _insert_service(section_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
@@ -2537,22 +2498,26 @@ def register(app, require_auth) -> None:
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
         current = rows[0]
-        # Guard the MERGED line (row + patch): an edit may not null-out hours
-        # or repoint at an unrated kit and leave the line unresolvable.
         est_rows = await query(
-            "SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id]
+            "SELECT estimate_type, aspire_branch_id FROM estimates WHERE id = %s",
+            [estimate_id],
         )
         if est_rows and est_rows[0].get("estimate_type") == "maintenance":
             merged = {
+                "_serviceId": service_id,
+                "_sectionId": section_id,
                 "label": body.get("label", current.get("label")),
                 "hours": body["hours"] if "hours" in body else current.get("hours"),
-                "catalogItemId": body["catalogItemId"]
-                if "catalogItemId" in body
-                else current.get("catalog_item_id"),
+                "serviceKitId": body["serviceKitId"] if "serviceKitId" in body else current.get("service_kit_id"),
+                "unitSellCents": body["unitSellCents"] if "unitSellCents" in body else current.get("unit_sell_cents"),
             }
-            await _require_resolvable_maintenance_lines([merged])
+            await _require_resolvable_maintenance_lines(
+                [merged], await _live_branch_crew_rate(est_rows[0].get("aspire_branch_id")),
+            )
+            if merged.get("_crewRateDerived"):
+                body["unitSellCents"] = merged["unitSellCents"]
         cols = {
-            "catalogItemId": "catalog_item_id",
+            "serviceKitId": "service_kit_id",
             "discipline": "discipline",
             "billingType": "billing_type",
             "label": "label",
@@ -2783,7 +2748,7 @@ def register(app, require_auth) -> None:
         await execute(
             """INSERT INTO takeoff_lines
                  (id, estimate_id, description, uom, plan_qty, add_pct,
-                  measured_qty, opportunity_qty, catalog_item_id)
+                  measured_qty, opportunity_qty, service_kit_id)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 line_id,
@@ -2794,7 +2759,7 @@ def register(app, require_auth) -> None:
                 body.get("addPct", 0),
                 body.get("measuredQty", 0),
                 body.get("opportunityQty", 0),
-                body.get("catalogItemId"),
+                body.get("serviceKitId"),
             ],
         )
         await execute(
@@ -3359,6 +3324,12 @@ def register(app, require_auth) -> None:
         estimate_type: Optional[str] = Query(default=None),
         _user: dict = Depends(require_auth),
     ) -> list:
+        """Every approval_tiers row, ordered by tier_order.
+
+        Includes the admin and vp_sales rows seeded by migration 068. roleKey
+        is the stored value, and a NULL max_value_cents is null in the JSON
+        so the Settings form can show and edit that ceiling.
+        """
         if estimate_type is not None and estimate_type not in ("maintenance", "install"):
             raise HTTPException(
                 status_code=400, detail="estimate_type must be maintenance or install"
@@ -3489,8 +3460,8 @@ def register(app, require_auth) -> None:
         )
         return {"projectId": project_id, "scopeId": scope_id, "statusCode": code}
 
-    @app.get("/api/estimating/catalog-items")
-    async def list_catalog_items(
+    @app.get("/api/estimating/service-kits")
+    async def list_service_kits(
         # Slice 14: the `branch` city-string filter is removed; callers should
         # filter by aspireBranchId (int) once that param is wired (follow-up).
         kit_type: Optional[str] = Query(default=None),
@@ -3515,6 +3486,6 @@ def register(app, require_auth) -> None:
             params.append(flag)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         rows = await query(
-            f"SELECT * FROM catalog_items {where} ORDER BY description", params
+            f"SELECT * FROM service_kits {where} ORDER BY description", params
         )
-        return [_catalog_item_out(r) for r in rows]
+        return [_service_kit_out(r) for r in rows]

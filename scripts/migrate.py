@@ -22,8 +22,11 @@ import hashlib
 import os
 import re
 import sys
+import uuid
 from pathlib import Path
 from typing import Optional
+
+from api.commission_calc import build_installment_rows, payout_schedule_for
 
 import pymysql
 import pymysql.cursors
@@ -80,6 +83,12 @@ def _fetch_one(conn, sql: str, params=()) -> Optional[dict]:
     with conn.cursor() as cur:
         _run(cur, sql, params)
         return cur.fetchone()
+
+
+def _fetch_all(conn, sql: str, params=()) -> list:
+    with conn.cursor() as cur:
+        _run(cur, sql, params)
+        return list(cur.fetchall())
 
 
 def _execute(conn, sql: str, params=()) -> None:
@@ -157,6 +166,24 @@ def file_checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _sql_word(text: str, i: int) -> str:
+    """Uppercase identifier starting at i, or '' when i is mid-token."""
+    if i > 0 and (text[i - 1].isalnum() or text[i - 1] == "_"):
+        return ""
+    j = i
+    while j < len(text) and (text[j].isalnum() or text[j] == "_"):
+        j += 1
+    return text[i:j].upper()
+
+
+def _end_closes_block(text: str, i: int) -> bool:
+    """True for a block END, false for END IF / END LOOP / END WHILE / END CASE."""
+    j = i + 3
+    while j < len(text) and text[j].isspace():
+        j += 1
+    return _sql_word(text, j) not in {"IF", "LOOP", "WHILE", "CASE", "REPEAT"}
+
+
 def split_statements(sql_text: str) -> list[str]:
     """
     Split SQL text on ';' boundaries, returning only executable DML/DDL.
@@ -165,21 +192,61 @@ def split_statements(sql_text: str) -> list[str]:
     (e.g. "-- name; rest of comment" in 011) cannot create phantom segments.
     Skips blank segments and pure SELECT statements (informational checksums).
 
-    The migration set has no stored procedures or ';'-containing string literals,
-    so semicolon splitting is safe after comment removal.
+    A CREATE TRIGGER ... BEGIN ... END block is one statement. Semicolons
+    inside that block, and inside single-quoted strings, do not split it.
     """
-    # Remove everything from -- to end of line before splitting.
     cleaned = re.sub(r"--[^\n]*", "", sql_text)
-    result = []
-    for part in cleaned.split(";"):
-        effective = part.strip()
-        if not effective:
+    result: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    i = 0
+    n = len(cleaned)
+    while i < n:
+        ch = cleaned[i]
+        if ch == "'":
+            buf.append(ch)
+            i += 1
+            while i < n:
+                buf.append(cleaned[i])
+                if cleaned[i] == "'":
+                    if i + 1 < n and cleaned[i + 1] == "'":
+                        buf.append("'")
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
             continue
-        first_word = effective.split()[0].upper()
-        if first_word == "SELECT":
-            continue  # informational count query, not DDL/DML to execute
-        result.append(effective)
+        word = _sql_word(cleaned, i)
+        if word == "BEGIN":
+            depth += 1
+            buf.append(cleaned[i:i + 5])
+            i += 5
+            continue
+        if word == "END" and _end_closes_block(cleaned, i):
+            if depth:
+                depth -= 1
+            buf.append(cleaned[i:i + 3])
+            i += 3
+            continue
+        if ch == ";" and depth == 0:
+            _append_statement(result, "".join(buf))
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    _append_statement(result, "".join(buf))
     return result
+
+
+def _append_statement(result: list[str], chunk: str) -> None:
+    effective = chunk.strip()
+    if not effective:
+        return
+    if effective.split()[0].upper() == "SELECT":
+        return  # informational count query, not DDL/DML to execute
+    result.append(effective)
 
 
 def exec_statements(conn, stmts: list[str], verbose: bool = False) -> None:
@@ -201,6 +268,17 @@ def table_exists(conn, table: str) -> bool:
         "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.TABLES "
         "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
         (table,),
+    )
+    return bool(row and row["cnt"])
+
+
+def view_exists(conn, view: str) -> bool:
+    """True when INFORMATION_SCHEMA.VIEWS has this view in the current database."""
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.VIEWS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
+        (view,),
     )
     return bool(row and row["cnt"])
 
@@ -240,6 +318,40 @@ def index_exists(conn, table: str, index_name: str) -> bool:
         (table, index_name),
     )
     return bool(row and row["cnt"])
+
+
+def trigger_exists(conn, name: str) -> bool:
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.TRIGGERS "
+        "WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = %s",
+        (name,),
+    )
+    return bool(row and row["cnt"])
+
+
+def foreign_key_exists(conn, table: str, constraint: str) -> bool:
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s "
+        "AND CONSTRAINT_NAME = %s AND CONSTRAINT_TYPE = 'FOREIGN KEY'",
+        (table, constraint),
+    )
+    return bool(row and row["cnt"])
+
+
+def _service_kit_table(conn) -> Optional[str]:
+    """Priced kit catalog: service_kits after 069, catalog_items before it.
+
+    A catalog_items table without kit_type is not the kit catalog. Detectors
+    for the kit seed and scope_text must not query it.
+    """
+    if table_exists(conn, "service_kits") and column_exists(conn, "service_kits", "kit_type"):
+        return "service_kits"
+    if table_exists(conn, "catalog_items") and column_exists(conn, "catalog_items", "kit_type"):
+        return "catalog_items"
+    return None
 
 
 def table_row_count(conn, table: str) -> int:
@@ -369,20 +481,30 @@ def detect_007(conn) -> bool:
 
 
 def detect_008(conn) -> bool:
-    """008 applied ↔ takeoff_lines.catalog_item_id column exists."""
-    return column_exists(conn, "takeoff_lines", "catalog_item_id")
+    """008 applied ↔ the takeoff kit-link column exists.
+
+    069 renames takeoff_lines.catalog_item_id to service_kit_id. Either name
+    means 008 already landed. Treating only the old name as applied would
+    re-run 008's bare ADD COLUMN after the rename.
+    """
+    return column_exists(conn, "takeoff_lines", "catalog_item_id") or column_exists(
+        conn, "takeoff_lines", "service_kit_id"
+    )
 
 
 def detect_009(conn) -> bool:
     """
-    009 applied ↔ at least one seeded catalog_items row with id='kit-maint-5388' exists.
-    Refreshing catalog_items from a newer kit workbook is an explicit, separate
-    operation (scripts/load_catalog_items.py); never triggered here.
+    009 applied ↔ at least one seeded kit row with id='kit-maint-5388' exists.
+
+    The row lives in service_kits after 069 and in catalog_items before it.
+    Refreshing kits from a newer workbook is an explicit, separate operation
+    (scripts/load_service_kits.py); never triggered here.
     """
-    if not table_exists(conn, "catalog_items"):
+    table = _service_kit_table(conn)
+    if table is None:
         return False
     row = _fetch_one(
-        conn, "SELECT COUNT(*) AS cnt FROM catalog_items WHERE id = 'kit-maint-5388'"
+        conn, f"SELECT COUNT(*) AS cnt FROM `{table}` WHERE id = 'kit-maint-5388'"
     )
     return bool(row and row["cnt"] >= 1)
 
@@ -504,13 +626,18 @@ def detect_055(conn) -> bool:
 
 
 def detect_044(conn) -> bool:
-    """044 applied ↔ catalog_items.scope_text column exists.
+    """044 applied ↔ the kit table's scope_text column exists.
 
     Keyed on scope_text (the first column added by the migration). The migration
-    also adds catalog_items.billing_type and estimates.estimate_number, but scope_text
-    is sufficient to detect whether the migration has been applied.
+    also adds billing_type and estimates.estimate_number, but scope_text is
+    sufficient. After 069 the column is on service_kits. Looking it up on a
+    catalog_items table that is no longer the kit catalog would miss it and
+    re-run the ALTER against the wrong table.
     """
-    return column_exists(conn, "catalog_items", "scope_text")
+    table = _service_kit_table(conn)
+    if table is None:
+        return False
+    return column_exists(conn, table, "scope_text")
 
 
 def detect_022(conn) -> bool:
@@ -791,6 +918,194 @@ def detect_041(conn) -> bool:
     """
     return column_exists(conn, "properties", "units")
 
+def detect_065(conn) -> bool:
+    """065 applied ↔ plan tables, the current-plan view, and the seed rows.
+
+    Keys on this migration's own schema and seeds: the plan tables, the empty
+    commission_billing_events ledger, v_current_commission_plans,
+    contract_start_date, the installment basis columns, both snapshot columns,
+    both unique indexes, and the standard maintenance and new-client install
+    seed rows. A commission with zero installments does not flip this.
+    Payout timing is not a column. The three commission ALTERs are guarded,
+    so a partial re-apply of the file is safe. Installment backfill skips
+    rows that already exist and does not rewrite a paid installment.
+    """
+    schema_ok = (
+        table_exists(conn, "commission_plans")
+        and table_exists(conn, "commission_plan_rules")
+        and table_exists(conn, "user_commission_plans")
+        and table_exists(conn, "commission_installments")
+        and table_exists(conn, "commission_billing_events")
+        and column_exists(conn, "commissions", "plan_key")
+        and column_exists(conn, "commissions", "client_type")
+        and column_exists(conn, "commissions", "contract_start_date")
+        and column_exists(conn, "commission_installments", "billing_installment_number")
+        and column_exists(conn, "commission_installments", "collected_amount_cents")
+        and index_exists(conn, "user_commission_plans", "uq_user_commission_plans_user_effective")
+        and index_exists(conn, "commission_installments", "uq_commission_installment")
+        and view_exists(conn, "v_current_commission_plans")
+    )
+    if not schema_ok:
+        return False
+    for sql in (_SEED_MAINT_065, _SEED_INSTALL_065):
+        row = _fetch_one(conn, sql)
+        if not row or int(row["cnt"]) < 1:
+            return False
+    return True
+
+
+_SEED_MAINT_065 = (
+    "SELECT COUNT(*) AS cnt FROM commission_plan_rules "
+    "WHERE plan_key = 'standard' AND estimate_type = 'maintenance' "
+    "AND basis = 'first_year_revenue' AND rate = 0.03000"
+)
+_SEED_INSTALL_065 = (
+    "SELECT COUNT(*) AS cnt FROM commission_plan_rules "
+    "WHERE plan_key = 'standard' AND estimate_type = 'install' "
+    "AND client_type = 'new' AND rate = 0.01200"
+)
+
+
+def _backfill_installment_status(commission: dict, row: dict) -> tuple[str, object]:
+    """Parent paid/cancelled overlaid on a helper row. Existing rows are not updated."""
+    parent = commission.get("status")
+    if parent == "cancelled":
+        return "cancelled", None
+    if parent == "paid" and int(row["installment_number"]) == 1 and (
+        commission.get("estimate_type") == "install" or row["status"] == "scheduled"
+    ):
+        return "paid", commission.get("paid_at")
+    return row["status"], None
+
+
+def backfill_065_installments(conn, verbose: bool = False) -> None:
+    """Insert missing installments with commission_calc. Leave existing rows alone.
+
+    maintenance and install are the only estimate types with a schedule.
+    A second call does not rewrite a paid installment.
+    """
+    commissions = _fetch_all(
+        conn,
+        """
+        SELECT c.id, c.commission_amount_cents, c.status, c.paid_at, c.created_at,
+               c.contract_start_date, e.estimate_type
+        FROM commissions c
+        LEFT JOIN estimates e ON e.id = c.estimate_id
+        """,
+    )
+    existing = _fetch_all(
+        conn,
+        "SELECT commission_id, installment_number FROM commission_installments",
+    )
+    have = {(row["commission_id"], int(row["installment_number"])) for row in existing}
+    for commission in commissions:
+        estimate_type = commission.get("estimate_type") or ""
+        try:
+            schedule = payout_schedule_for(estimate_type)
+        except ValueError:
+            continue
+        rows = build_installment_rows(
+            commission["created_at"],
+            int(commission["commission_amount_cents"]),
+            schedule,
+            commission.get("contract_start_date"),
+        )
+        for row in rows:
+            key = (commission["id"], int(row["installment_number"]))
+            if key in have:
+                continue
+            status, paid_at = _backfill_installment_status(commission, row)
+            payout = row.get("payout_date")
+            if verbose:
+                print(f"    » backfill installment {commission['id']} #{row['installment_number']}")
+            _execute(
+                conn,
+                """
+                INSERT INTO commission_installments
+                    (id, commission_id, installment_number, payout_period_label,
+                     payout_date, amount_cents, status, billing_installment_number,
+                     collected_amount_cents, paid_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    commission["id"],
+                    row["installment_number"],
+                    row.get("payout_period"),
+                    None if payout is None else payout.isoformat(),
+                    row.get("amount_cents"),
+                    status,
+                    row.get("billing_installment_number"),
+                    row.get("collected_amount_cents"),
+                    paid_at,
+                ),
+            )
+            have.add(key)
+
+
+def apply_065(conn, path: Path, verbose: bool = False) -> None:
+    """Run 065's SQL, then backfill installments with the calc helpers."""
+    exec_file(conn, path, verbose)
+    backfill_065_installments(conn, verbose)
+def detect_069(conn) -> bool:
+    """069 applied ↔ the kit catalog was renamed to service_kits.
+
+    True when service_kits has kit_type, both child columns are service_kit_id
+    (the old catalog_item_id columns are gone), and both kit foreign keys are
+    in place. A partial apply stays False so the guarded statements run again.
+    """
+    return (
+        _service_kit_table(conn) == "service_kits"
+        and column_exists(conn, "section_services", "service_kit_id")
+        and not column_exists(conn, "section_services", "catalog_item_id")
+        and column_exists(conn, "takeoff_lines", "service_kit_id")
+        and not column_exists(conn, "takeoff_lines", "catalog_item_id")
+        and foreign_key_exists(conn, "section_services", "fk_services_service_kit")
+        and foreign_key_exists(conn, "takeoff_lines", "fk_takeoff_service_kit")
+    )
+
+
+def detect_070(conn) -> bool:
+    """070 applied ↔ materials, material_prices, and the load trigger exist.
+
+    materials is the item master (inventory_id, no kit_type, no cost column).
+    material_prices has the one-current unique key, the item foreign key, and
+    both marker triggers. material_price_loads and trg_material_price_load_bi
+    record price history. A partial apply stays False.
+    """
+    return (
+        table_exists(conn, "materials")
+        and column_exists(conn, "materials", "inventory_id")
+        and not column_exists(conn, "materials", "kit_type")
+        and not column_exists(conn, "materials", "unit_cost_cents")
+        and table_exists(conn, "material_prices")
+        and index_exists(conn, "material_prices", "uq_material_prices_one_current")
+        and foreign_key_exists(conn, "material_prices", "fk_material_prices_item")
+        and trigger_exists(conn, "trg_material_prices_bi")
+        and trigger_exists(conn, "trg_material_prices_bu")
+        and table_exists(conn, "material_price_loads")
+        and trigger_exists(conn, "trg_material_price_load_bi")
+    )
+
+def detect_068(conn) -> bool:
+    """068 applied ↔ admin and vp_sales have an unbounded approval tier.
+
+    Widens approval_tiers.role_key and inserts a NULL max_value_cents row
+    for each of those roles. Keyed on that effect: the enum contains both
+    role keys and at least one unbounded row exists for each. A re-run is
+    safe (MODIFY to the same enum, INSERT … ON DUPLICATE KEY UPDATE).
+    """
+    values = enum_values(conn, "approval_tiers", "role_key")
+    if not {"admin", "vp_sales"}.issubset(values):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(DISTINCT role_key) AS cnt FROM approval_tiers "
+        "WHERE role_key IN ('admin', 'vp_sales') AND max_value_cents IS NULL",
+    )
+    return bool(row and int(row["cnt"]) >= 2)
+
+
 def detect_064(conn) -> bool:
     """064 applied ↔ estimates.irrigation_occurrences column exists.
 
@@ -889,6 +1204,10 @@ _DETECT: dict = {
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
     "064_estimate_maintenance_occurrence_counts": detect_064,
+    "065_commission_cadence_and_plans":           detect_065,
+    "068_admin_equivalent_approval_tiers":        detect_068,
+    "069_service_kits":                           detect_069,
+    "070_materials_catalog":                      detect_070,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
@@ -992,13 +1311,18 @@ def _step(
                          apply_fn=lambda: apply_004(conn, path, verbose, branch=branch),
                          suffix=_BRANCH_LABEL.get(branch, ""))
 
-    # ── standard detection (005–012) ──────────────────────────────────────────
+    # ── standard detection ────────────────────────────────────────────────────
     detect_fn = _DETECT.get(migration_id)
     if detect_fn and detect_fn(conn):
         if not dry_run:
             record_migration(conn, migration_id, checksum, detected=True)
         return "ok", "already-applied (detected — schema present, no tracking row)"
 
+    if migration_id == "065_commission_cadence_and_plans":
+        return _do_apply(
+            conn, migration_id, path, checksum, dry_run, verbose,
+            apply_fn=lambda: apply_065(conn, path, verbose),
+        )
     return _do_apply(conn, migration_id, path, checksum, dry_run, verbose)
 
 

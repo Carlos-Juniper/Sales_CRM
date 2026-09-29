@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import type { AdminUser, ManageableBranch } from '@/api/settings'
-import type { UserRole } from '@/types'
-import { CANONICAL_ROLES } from '@/types'
+import type { LegacyUserRole, UserRole } from '@/types'
 import { useLinkAspireRep, useUpdateUser } from '@/hooks/useUserAdmin'
-import { requiresAspireSalesRep } from '@/lib/roles'
+import { ASSIGNABLE_ROLES, hasRole, isRetiredSalesRole, requiresAspireSalesRep } from '@/lib/roles'
 import { roleLabel } from '@/lib/roleLabels'
 import { RoleSelect } from './RoleSelect'
 import { BranchMultiSelect } from './BranchMultiSelect'
@@ -80,6 +79,12 @@ export function UserRow({ user, branches }: { user: AdminUser; branches: Managea
   )
 }
 
+function storedEditorRole(role: string): UserRole | LegacyUserRole {
+  if (isRetiredSalesRole(role)) return role
+  if (hasRole(ASSIGNABLE_ROLES, role)) return role
+  return 'maintenance_sales'
+}
+
 function UserRowEditor({
   user,
   branches,
@@ -90,17 +95,15 @@ function UserRowEditor({
 }: {
   user: AdminUser
   branches: ManageableBranch[]
-  onSave: (body: { role: UserRole; branches: number[] }) => void
+  onSave: (body: { role: UserRole | LegacyUserRole; branches: number[] }) => void
   pending: boolean
   onLinkAspire: () => void
   linkPending: boolean
 }) {
-  // Seed the role from the row if it is a canonical value, else default to sales
-  // (legacy rows normalize there — mirrors useRole.normalizeRole).
-  const initialRole = (CANONICAL_ROLES as readonly string[]).includes(user.role)
-    ? (user.role as UserRole)
-    : 'sales'
-  const [role, setRole] = useState<UserRole>(initialRole)
+  // Retired sales stays selected so a branch edit does not assign a new role.
+  // The option is disabled. Any other unknown value starts on
+  // maintenance_sales, an assignable field-sales role.
+  const [role, setRole] = useState<UserRole | LegacyUserRole>(storedEditorRole(user.role))
   const [selected, setSelected] = useState<number[]>(user.branches ?? [])
 
   function toggleBranch(id: number) {
@@ -122,6 +125,7 @@ function UserRowEditor({
           id={`edit-role-${user.id}`}
           testId={`edit-role-${user.id}`}
           value={role}
+          currentRole={user.role}
           onChange={setRole}
         />
       </div>

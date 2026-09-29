@@ -15,7 +15,7 @@
 //     config.DEFAULT_MARGIN_BANDS — no local thresholds.
 // ---------------------------------------------------------------------------
 
-import type { CatalogItem, Estimate, EstimateSection, SectionService } from '@/types/estimating'
+import type { ServiceKit, Estimate, EstimateSection, SectionService } from '@/types/estimating'
 import {
   SQFT_PER_ACRE,
   contractTotal,
@@ -158,11 +158,11 @@ export function medianCents(values: number[]): number {
 export function resolveOccurrenceHours(
   section: EstimateSection,
   svc: SectionService,
-  catalogItems: CatalogItem[] = [],
+  serviceKits: ServiceKit[] = [],
 ): number | null {
   if (svc.hours !== null) return svc.hours
-  const kit = svc.catalogItemId
-    ? catalogItems.find((k) => k.id === svc.catalogItemId)
+  const kit = svc.serviceKitId
+    ? serviceKits.find((k) => k.id === svc.serviceKitId)
     : undefined
   if (kit?.productionRate) return section.squareFeet / kit.productionRate
   return null
@@ -192,10 +192,10 @@ export function maintenanceLineHours(
 export function maintenanceLineCost(
   section: EstimateSection,
   svc: SectionService,
-  catalogItems: CatalogItem[],
+  serviceKits: ServiceKit[],
   crewRateCents: number,
 ): number {
-  const occurrenceHours = resolveOccurrenceHours(section, svc, catalogItems) ?? 0
+  const occurrenceHours = resolveOccurrenceHours(section, svc, serviceKits) ?? 0
   return Math.round(maintenanceLineHours(svc, occurrenceHours) * crewRateCents)
 }
 
@@ -266,7 +266,7 @@ export interface ServiceGroupMargin {
 export function serviceGroupMargins(
   estimate: Estimate,
   crewRateCents: number,
-  catalogItems: CatalogItem[] = [],
+  serviceKits: ServiceKit[] = [],
 ): ServiceGroupMargin[] {
   const contract = contractTotal(estimate)
   const groups = new Map<string, ServiceGroupMargin>()
@@ -296,10 +296,10 @@ export function serviceGroupMargins(
           svc.qty,
           svc.complexityPct,
         )
-        g.costCents += maintenanceLineCost(section, svc, catalogItems, crewRateCents)
+        g.costCents += maintenanceLineCost(section, svc, serviceKits, crewRateCents)
         g.hoursPerYear += maintenanceLineHours(
           svc,
-          resolveOccurrenceHours(section, svc, catalogItems) ?? 0,
+          resolveOccurrenceHours(section, svc, serviceKits) ?? 0,
         )
       } else {
         const split = installLineCostSplit(svc)
@@ -343,11 +343,11 @@ export function perAcreCents(estimate: Estimate): number {
  */
 export function mowingPerOccurrenceCents(
   estimate: Estimate,
-  catalogItems: CatalogItem[] = [],
+  serviceKits: ServiceKit[] = [],
 ): number | null {
   // Price-basis read only (occurrence price ÷ max qty) — the crew rate never
   // enters here, so 0 is safe: it touches cost, which this ignores.
-  const mowing = serviceGroupMargins(estimate, 0, catalogItems).find((g) => /mow/i.test(g.label))
+  const mowing = serviceGroupMargins(estimate, 0, serviceKits).find((g) => /mow/i.test(g.label))
   if (!mowing || mowing.maxQty === 0) return null
   return mowing.priceCents / mowing.maxQty
 }

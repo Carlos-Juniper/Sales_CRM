@@ -19,7 +19,7 @@ export function DisciplineSelect({ label, value, onChange, className, title }: D
   return (
     <select
       aria-label={`Discipline for ${label}`}
-      title={title ?? 'LS/IR split override — Auto derives from the catalog item'}
+      title={title ?? 'LS/IR split override — Auto derives from the service kit'}
       className={cn(
         'rounded-md border px-1.5 text-xs cursor-pointer',
         className,

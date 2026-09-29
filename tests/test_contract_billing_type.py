@@ -31,7 +31,7 @@ def make_row(**overrides) -> dict:
     row = {
         "id": "svc-1",
         "section_id": "sec-1",
-        "catalog_item_id": "kit-maint-1",
+        "service_kit_id": "kit-maint-1",
         "discipline": None,
         "billing_type": None,
         "label": "Mowing & Edging",
@@ -76,13 +76,13 @@ class TestBillingTypeResolution:
     def test_hand_entered_line_resolves_from_its_own_override(self):
         """No catalog item to derive from — the override is the only source."""
         out = _service_out(
-            make_row(catalog_item_id=None, billing_type="recurring"), [], None
+            make_row(service_kit_id=None, billing_type="recurring"), [], None
         )
         assert out["billingType"] == "recurring"
 
     def test_hand_entered_line_without_override_is_unresolved(self):
         """Stays None; contract.ts then bundles it as recurring."""
-        out = _service_out(make_row(catalog_item_id=None, billing_type=None), [], None)
+        out = _service_out(make_row(service_kit_id=None, billing_type=None), [], None)
         assert out["billingType"] is None
 
     def test_scope_text_and_service_type_still_come_from_the_catalog(self):

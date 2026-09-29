@@ -84,7 +84,7 @@ def new_id(prefix: str) -> str:
 
 def lookup_catalog_item(cur, description_fragment: str) -> str | None:
     cur.execute(
-        """SELECT id FROM catalog_items
+        """SELECT id FROM service_kits
            WHERE description LIKE %s AND active = 1
            LIMIT 1""",
         (f"%{description_fragment}%",),
@@ -92,7 +92,7 @@ def lookup_catalog_item(cur, description_fragment: str) -> str | None:
     row = cur.fetchone()
     if row:
         return row["id"]
-    print(f"  ⚠  No catalog_items match for {description_fragment!r}")
+    print(f"  ⚠  No service_kits match for {description_fragment!r}")
     return None
 
 
@@ -158,7 +158,7 @@ def seed_one(cur, rep_name: str, property_name: str, lead_type: str,
         unit_sell = ONE_TIME_UNIT_PRICES.get(label, rate)
         cur.execute(
             """INSERT INTO section_services
-                 (id, section_id, catalog_item_id, label, qty, uom,
+                 (id, section_id, service_kit_id, label, qty, uom,
                   complexity_pct, unit_sell_cents, sort_order)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (new_id("svc"), sec1_id, cat_id, label, qty, uom, complexity, unit_sell, i),
@@ -175,7 +175,7 @@ def seed_one(cur, rep_name: str, property_name: str, lead_type: str,
         unit_sell = ONE_TIME_UNIT_PRICES.get(label, rate)
         cur.execute(
             """INSERT INTO section_services
-                 (id, section_id, catalog_item_id, label, qty, uom,
+                 (id, section_id, service_kit_id, label, qty, uom,
                   complexity_pct, unit_sell_cents, sort_order)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (new_id("svc"), sec2_id, cat_id, label, qty, uom, complexity, unit_sell, i),

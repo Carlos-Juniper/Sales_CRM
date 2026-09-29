@@ -6,7 +6,7 @@ Creates:
   - Two sections: Main Property (342,000 sqft) + Entrance/Amenity (28,500 sqft)
   - Seven recurring services + two one-time services
   - Each section_service is linked to a real catalog_item (by description match)
-    so catalog_items.scope_text + billing_type flow through the API
+    so service_kits.scope_text + billing_type flow through the API
 
 Run AFTER migrations 044+045 are applied and the Cloud SQL proxy is up:
 
@@ -52,7 +52,7 @@ ESTIMATE_ID = f"est-coral-bay-contract-{uuid.uuid4().hex[:8]}"
 # Services to seed — (label, catalog description to look up, qty, uom, rate¢)
 # rate_cents is a fallback if no catalog_item is found.
 # ---------------------------------------------------------------------------
-# The fragment must match an EXISTING catalog_items.description — the contract
+# The fragment must match an EXISTING service_kits.description — the contract
 # page reads billing_type (recurring vs one-time) and scope_text off the linked
 # catalog item, so a line that matches nothing renders with a blank "occurs"
 # column and drops out of the payment-schedule base.
@@ -91,9 +91,9 @@ def lookup_catalog_item(cur, description_fragment: str) -> tuple[str | None, str
     # No service_type filter: that column holds the service CATEGORY
     # ('Turf Area', 'Irrigation', 'Palm Pruning'), never the literal
     # 'maintenance', so filtering on it matched nothing and left every seeded
-    # line with catalog_item_id = NULL.
+    # line with service_kit_id = NULL.
     cur.execute(
-        """SELECT id, billing_type FROM catalog_items
+        """SELECT id, billing_type FROM service_kits
            WHERE description LIKE %s AND active = 1
            LIMIT 1""",
         (f"%{description_fragment}%",),
@@ -101,7 +101,7 @@ def lookup_catalog_item(cur, description_fragment: str) -> tuple[str | None, str
     row = cur.fetchone()
     if row:
         return row["id"], row["billing_type"]
-    print(f"⚠  No catalog_items match for {description_fragment!r} — "
+    print(f"⚠  No service_kits match for {description_fragment!r} — "
           f"this line will render without billing type or scope text.")
     return None, None
 
@@ -110,7 +110,7 @@ def check_migrations(cur) -> None:
     """Warn if migrations 044/045 haven't been applied yet."""
     try:
         cur.execute("SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS "
-                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'catalog_items' "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'service_kits' "
                     "AND COLUMN_NAME = 'scope_text'")
         if not cur.fetchone():
             print("⚠  Migration 044 not applied — scope_text column missing.")
@@ -196,7 +196,7 @@ def seed(conn) -> str:
         unit_sell = ONE_TIME_UNIT_PRICES.get(label, rate)
         cur.execute(
             """INSERT INTO section_services
-                 (id, section_id, catalog_item_id, label, qty, uom,
+                 (id, section_id, service_kit_id, label, qty, uom,
                   complexity_pct, unit_sell_cents, sort_order)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (svc_id, sec1_id, cat_id, label, qty, uom, complexity, unit_sell, i),
@@ -216,7 +216,7 @@ def seed(conn) -> str:
         unit_sell = ONE_TIME_UNIT_PRICES.get(label, rate)
         cur.execute(
             """INSERT INTO section_services
-                 (id, section_id, catalog_item_id, label, qty, uom,
+                 (id, section_id, service_kit_id, label, qty, uom,
                   complexity_pct, unit_sell_cents, sort_order)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (svc_id, sec2_id, cat_id, label, qty, uom, complexity, unit_sell, i),

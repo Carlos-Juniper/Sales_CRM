@@ -23,6 +23,11 @@ function AuthBootstrap({ children }: { children: React.ReactNode }) {
       setInitialized()
       return
     }
+    // Production build (no backend): auto-login already done in main.tsx
+    if (!import.meta.env.DEV) {
+      setInitialized()
+      return
+    }
     me()
       .then(login)
       .catch(() => logout())

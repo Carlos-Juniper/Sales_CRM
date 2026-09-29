@@ -13,14 +13,19 @@ async function enableMocking() {
   }
 
   // Production build deployed as a static app with no backend —
-  // always enable MSW and auto-login with a mock manager user so the
-  // app is fully functional for testing without Entra ID SSO.
+  // try MSW for full mock data; if the service worker fails (some hosting
+  // environments don't support SW), fall back to auto-login only.
+  // The FastAPI app.py also serves /api/auth/me as a safety net.
   if (!import.meta.env.DEV) {
-    const { worker } = await import('./mocks/browser')
-    await worker.start({
-      onUnhandledRequest: 'bypass',
-      serviceWorker: { url: '/mockServiceWorker.js' },
-    })
+    try {
+      const { worker } = await import('./mocks/browser')
+      await worker.start({
+        onUnhandledRequest: 'bypass',
+        serviceWorker: { url: '/mockServiceWorker.js' },
+      })
+    } catch (e) {
+      console.warn('[mock] MSW service worker failed to start, using FastAPI mock fallback', e)
+    }
 
     // Auto-login with mock user (Riley Chen, manager) for full access
     const { useAuthStore } = await import('./store/authStore')

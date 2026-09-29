@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Load the materials item master and cost history from an Aspire/Acumatica workbook.
 
-Reads the Stock Items sheet. Writes ``materials`` (item master, no cost). A priced row is inserted into
-``material_price_loads``. ``trg_material_price_load_bi`` records the cost on
-``material_prices``: it archives the current row and inserts the new one.
-Re-running with the same cost writes no load row and leaves the current
-price in place.
+Reads the Stock Items sheet. Writes ``materials`` (item master, no cost) and
+cost history on ``material_prices``. The loader records history itself (070
+has no triggers): inside the load transaction it locks each item's current
+price row with ``SELECT ... FOR UPDATE``. A changed cost closes that row
+(``is_current = 0``, ``effective_to`` = the later of its ``effective_from``
+and the new ``effective_from``) and inserts the new current row. An
+unchanged cost writes nothing, so re-running the same workbook adds no
+price rows.
 
 The workbook is not part of this repo. Pass its path.
 
@@ -56,6 +59,7 @@ import argparse
 import csv
 import re
 import sys
+import uuid
 import zipfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -808,13 +812,19 @@ ON DUPLICATE KEY UPDATE
     active = VALUES(active)
 """
 
-# The BEFORE INSERT trigger on this table writes material_prices. The loader
-# does not archive or insert price rows itself.
-_LOAD_SQL = """
-INSERT INTO material_price_loads (
-    inventory_id, unit_cost_cents, uom, vendor_id, vendor_name,
-    effective_from, source, entered_by
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+# material_prices.current_inventory_id is a generated column (070): it is
+# never written here. is_current drives it and the one-current unique key.
+_CLOSE_SQL = """
+UPDATE material_prices
+   SET is_current = 0, effective_to = %s
+ WHERE id = %s AND is_current = 1
+"""
+
+_PRICE_SQL = """
+INSERT INTO material_prices (
+    id, inventory_id, unit_cost_cents, uom, vendor_id, vendor_name,
+    effective_from, is_current, source, entered_by
+) VALUES (%s, %s, %s, %s, %s, %s, %s, 1, %s, %s)
 """
 
 
@@ -833,14 +843,20 @@ def _item_params(item: MaterialItem) -> tuple:
     )
 
 
-def _current_prices(cur, inventory_ids: list[str]) -> dict[str, dict]:
+def _lock_current_prices(cur, inventory_ids: list[str]) -> dict[str, dict]:
+    """Current price row per item, locked FOR UPDATE until the caller commits.
+
+    One query per batch of items; each returned row is locked, so a
+    concurrent loader or API write waits instead of racing the close/insert.
+    """
     found: dict[str, dict] = {}
     for batch in _chunks(inventory_ids, BATCH):
         marks = ", ".join(["%s"] * len(batch))
         cur.execute(
-            f"""SELECT id, inventory_id, unit_cost_cents
+            f"""SELECT id, inventory_id, unit_cost_cents, effective_from
                   FROM material_prices
-                 WHERE is_current = 1 AND inventory_id IN ({marks})""",
+                 WHERE is_current = 1 AND inventory_id IN ({marks})
+                   FOR UPDATE""",
             batch,
         )
         for row in cur.fetchall():
@@ -848,11 +864,28 @@ def _current_prices(cur, inventory_ids: list[str]) -> dict[str, dict]:
     return found
 
 
-def apply_plan(conn, plan: LoadPlan, *, today: date | None = None) -> ApplyResult:
-    """Upsert items and hand new costs to the price-history trigger.
+def _close_date(current_from: date | None, new_from: date) -> date:
+    """effective_to for the closed row: never before its own effective_from.
 
-    Caller commits or rolls back. An unchanged cost does not insert a load
-    row. Counts come from the current price rows before and after the trigger.
+    chk_material_prices_range requires effective_to >= effective_from. A row
+    that became current later than ``new_from`` (for example a backdated
+    re-run) closes on its own start date.
+    """
+    if current_from is None:
+        return new_from
+    return max(current_from, new_from)
+
+
+def apply_plan(conn, plan: LoadPlan, *, today: date | None = None) -> ApplyResult:
+    """Upsert items and record cost history on material_prices.
+
+    Runs in the caller's transaction; the caller commits or rolls back, so a
+    failed load leaves nothing half-written. For each priced item the
+    current row is locked (SELECT ... FOR UPDATE). No current row: insert
+    one. Same cost: nothing is written. Different cost: the current row is
+    closed (is_current = 0, effective_to = max(its effective_from, today))
+    before the new current row is inserted, so the one-current unique key
+    on the generated current_inventory_id always holds.
     """
     today = today or date.today()
     result = ApplyResult(items_upserted=len(plan.items))
@@ -861,50 +894,34 @@ def apply_plan(conn, plan: LoadPlan, *, today: date | None = None) -> ApplyResul
             cur.executemany(_ITEM_SQL, [_item_params(item) for item in batch])
 
         priced = [item for item in plan.items if item.unit_cost_cents is not None and item.cost_uom]
-        ids = [item.inventory_id for item in priced]
-        before = _current_prices(cur, ids)
-
-        loads: list[tuple] = []
-        for item in priced:
-            existing = before.get(item.inventory_id)
-            if existing is not None and int(existing["unit_cost_cents"]) == item.unit_cost_cents:
-                continue
-            loads.append((
-                item.inventory_id,
-                item.unit_cost_cents,
-                item.cost_uom,
-                item.preferred_vendor_id,
-                item.preferred_vendor_name,
-                today,
-                SOURCE,
-                ENTERED_BY,
-            ))
-        for batch in _chunks(loads, BATCH):
-            cur.executemany(_LOAD_SQL, batch)
-        loaded_ids = [row[0] for row in loads]
-        for batch in _chunks(loaded_ids, BATCH):
-            marks = ", ".join(["%s"] * len(batch))
-            cur.execute(
-                f"DELETE FROM material_price_loads WHERE inventory_id IN ({marks})",
-                batch,
-            )
-
-        after = _current_prices(cur, ids)
-        for item in priced:
-            prev = before.get(item.inventory_id)
-            nxt = after.get(item.inventory_id)
-            same = (
-                prev is not None
-                and nxt is not None
-                and prev["id"] == nxt["id"]
-                and int(prev["unit_cost_cents"]) == int(nxt["unit_cost_cents"])
-            )
-            if same:
-                result.prices_unchanged += 1
-            elif nxt is not None and (prev is None or prev["id"] != nxt["id"]):
-                result.prices_inserted += 1
-                if prev is not None:
+        for batch in _chunks(priced, BATCH):
+            current = _lock_current_prices(cur, [item.inventory_id for item in batch])
+            closes: list[tuple] = []
+            inserts: list[tuple] = []
+            for item in batch:
+                existing = current.get(item.inventory_id)
+                if existing is not None and int(existing["unit_cost_cents"]) == item.unit_cost_cents:
+                    result.prices_unchanged += 1
+                    continue
+                if existing is not None:
+                    closes.append((_close_date(existing["effective_from"], today), existing["id"]))
                     result.prices_archived += 1
+                inserts.append((
+                    str(uuid.uuid4()),
+                    item.inventory_id,
+                    item.unit_cost_cents,
+                    item.cost_uom,
+                    item.preferred_vendor_id,
+                    item.preferred_vendor_name,
+                    today,
+                    SOURCE,
+                    ENTERED_BY,
+                ))
+                result.prices_inserted += 1
+            if closes:
+                cur.executemany(_CLOSE_SQL, closes)
+            if inserts:
+                cur.executemany(_PRICE_SQL, inserts)
     return result
 
 

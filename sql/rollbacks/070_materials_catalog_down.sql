@@ -7,7 +7,8 @@
 --
 --   mysql ... crm < sql/rollbacks/070_materials_catalog_down.sql
 --
--- This DROPs material_price_loads, material_prices, and materials.
+-- This DROPs material_prices and materials, and the first version's
+-- material_price_loads table and triggers if a database still has them.
 -- It does not touch service_kits.
 --
 -- The schema_migrations row for this file is deleted so the runner will
@@ -15,6 +16,8 @@
 -- ---------------------------------------------------------------------------
 
 DROP TRIGGER IF EXISTS trg_material_price_load_bi;
+DROP TRIGGER IF EXISTS trg_material_prices_bi;
+DROP TRIGGER IF EXISTS trg_material_prices_bu;
 DROP TABLE IF EXISTS material_price_loads;
 DROP TABLE IF EXISTS material_prices;
 DROP TABLE IF EXISTS materials;

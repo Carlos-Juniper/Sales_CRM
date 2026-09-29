@@ -1065,13 +1065,32 @@ def detect_069(conn) -> bool:
     )
 
 
+def column_is_generated(conn, table: str, column: str) -> bool:
+    """True only when the column exists and is a generated column.
+
+    information_schema.COLUMNS.EXTRA is 'STORED GENERATED' or 'VIRTUAL
+    GENERATED' on MySQL 8. A missing or plain column is False.
+    """
+    row = _fetch_one(
+        conn,
+        "SELECT EXTRA AS extra FROM INFORMATION_SCHEMA.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+        (table, column),
+    )
+    if not row:
+        return False
+    return "GENERATED" in str(row.get("extra") or "").upper()
+
+
 def detect_070(conn) -> bool:
-    """070 applied ↔ materials, material_prices, and the load trigger exist.
+    """070 applied ↔ materials and the final material_prices shape exist.
 
     materials is the item master (inventory_id, no kit_type, no cost column).
-    material_prices has the one-current unique key, the item foreign key, and
-    both marker triggers. material_price_loads and trg_material_price_load_bi
-    record price history. A partial apply stays False.
+    material_prices has current_inventory_id as a generated column, the
+    one-current unique key, and fk_material_prices_item. No triggers are
+    involved. The first version of 070 left materials plus a material_prices
+    with a plain current_inventory_id on juniper-dev; that shape, or either
+    table alone, stays False so the guarded statements run and finish it.
     """
     return (
         table_exists(conn, "materials")
@@ -1079,13 +1098,11 @@ def detect_070(conn) -> bool:
         and not column_exists(conn, "materials", "kit_type")
         and not column_exists(conn, "materials", "unit_cost_cents")
         and table_exists(conn, "material_prices")
+        and column_is_generated(conn, "material_prices", "current_inventory_id")
         and index_exists(conn, "material_prices", "uq_material_prices_one_current")
         and foreign_key_exists(conn, "material_prices", "fk_material_prices_item")
-        and trigger_exists(conn, "trg_material_prices_bi")
-        and trigger_exists(conn, "trg_material_prices_bu")
-        and table_exists(conn, "material_price_loads")
-        and trigger_exists(conn, "trg_material_price_load_bi")
     )
+
 
 def detect_068(conn) -> bool:
     """068 applied ↔ admin and vp_sales have an unbounded approval tier.

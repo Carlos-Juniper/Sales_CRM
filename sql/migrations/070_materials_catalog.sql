@@ -3,23 +3,33 @@
 --
 -- Numbered 070. 069 renames the kit table to service_kits. 065 is the
 -- open commission-cadence migration, and 067/068 are the open sales-role
--- migrations. Nothing in this file upgrades an earlier draft: that schema
--- was never deployed.
+-- migrations.
 --
 -- materials holds item-master data only (no sell price, no cost).
 -- material_prices holds cost history. One current row per item:
--- is_current = 1 and current_inventory_id = inventory_id on the live row,
--- NULL on history. The unique key allows many history rows (multiple NULLs)
--- and one current row.
+-- is_current = 1 on the live row. current_inventory_id is a STORED
+-- generated column (inventory_id on the current row, NULL on history).
+-- The unique key allows many history rows (multiple NULLs) and one
+-- current row.
 --
--- MariaDB 10.11 rejects a generated column or a CHECK that reads a
--- foreign-key column (ERROR 1901). The marker triggers set
--- current_inventory_id. A trigger on material_prices cannot update other
--- rows of material_prices (ERROR 1442 on MariaDB 10.11 and MySQL 8.4), so
--- price history is recorded by trg_material_price_load_bi on
--- material_price_loads. The loader inserts the desired current cost there.
--- The trigger closes the previous current row and inserts the new one.
--- An unchanged cost inserts nothing.
+-- No triggers, stored functions, or procedures. Cloud SQL runs with binary
+-- logging on and the migration user has no SUPER, so CREATE TRIGGER fails
+-- with ERROR 1419 (the first version of this file did exactly that on
+-- juniper-dev). Price history is written by the loader
+-- (scripts/load_materials_catalog.py): per item it locks the current row
+-- with SELECT ... FOR UPDATE, closes it when the cost changed, and inserts
+-- the new current row. An unchanged cost writes nothing.
+--
+-- MySQL 8 forbids ON UPDATE CASCADE / SET NULL on a base column of a stored
+-- generated column, so fk_material_prices_item is ON UPDATE RESTRICT.
+-- inventory_id values are Aspire item codes and are not renamed in place.
+--
+-- Re-runnable. The first version of this file stopped at its first CREATE
+-- TRIGGER after creating materials and an older material_prices shape
+-- (plain current_inventory_id, a marker CHECK, fk_material_prices_item
+-- ON UPDATE CASCADE) and was not recorded in schema_migrations. Every
+-- change to that shape below is guarded on information_schema, so this
+-- file finishes that state and also runs on an empty database.
 --
 -- inventory_id is the Aspire item code exactly as it appears on the sheet
 -- (trimmed, never zero-padded). Any non-empty string up to 64 characters
@@ -31,6 +41,15 @@
 -- That file also deletes this file's schema_migrations row.
 -- ---------------------------------------------------------------------------
 
+-- ── 1. Remove objects from the first version ────────────────────────────────
+-- None exist on juniper-dev. A database where they were created (a server
+-- that allowed the triggers) drops them here. DROP TRIGGER needs no SUPER.
+DROP TRIGGER IF EXISTS trg_material_price_load_bi;
+DROP TRIGGER IF EXISTS trg_material_prices_bi;
+DROP TRIGGER IF EXISTS trg_material_prices_bu;
+DROP TABLE IF EXISTS material_price_loads;
+
+-- ── 2. Item master ──────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS materials (
     inventory_id            VARCHAR(64)  NOT NULL,
     aspire_catalog_item_id  BIGINT       DEFAULT NULL,
@@ -63,6 +82,7 @@ CREATE TABLE IF NOT EXISTS materials (
         CHECK (inventory_id <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ── 3. Cost history (final shape on an empty database) ─────────────────────
 CREATE TABLE IF NOT EXISTS material_prices (
     id                   VARCHAR(36)  NOT NULL,
     inventory_id         VARCHAR(64)  NOT NULL,
@@ -73,7 +93,8 @@ CREATE TABLE IF NOT EXISTS material_prices (
     effective_from       DATE         NOT NULL,
     effective_to         DATE         DEFAULT NULL,
     is_current           TINYINT(1)   NOT NULL DEFAULT 0,
-    current_inventory_id VARCHAR(64)  DEFAULT NULL,
+    current_inventory_id VARCHAR(64)
+        GENERATED ALWAYS AS (CASE WHEN is_current = 1 THEN inventory_id END) STORED,
     source               VARCHAR(32)  NOT NULL,
     estimate_id          VARCHAR(36)  DEFAULT NULL,
     entered_by           VARCHAR(255) DEFAULT NULL,
@@ -86,89 +107,109 @@ CREATE TABLE IF NOT EXISTS material_prices (
     KEY idx_material_prices_estimate (estimate_id),
     CONSTRAINT chk_material_prices_cost_nonnegative CHECK (unit_cost_cents >= 0),
     CONSTRAINT chk_material_prices_range CHECK (effective_to IS NULL OR effective_to >= effective_from),
-    CONSTRAINT chk_material_prices_current_marker CHECK (
-        (is_current = 0 AND current_inventory_id IS NULL)
-        OR (is_current = 1 AND current_inventory_id IS NOT NULL)
-    ),
     CONSTRAINT fk_material_prices_item
         FOREIGN KEY (inventory_id) REFERENCES materials (inventory_id)
-        ON DELETE RESTRICT ON UPDATE CASCADE,
+        ON DELETE RESTRICT ON UPDATE RESTRICT,
     CONSTRAINT fk_material_prices_estimate
         FOREIGN KEY (estimate_id) REFERENCES estimates (id)
         ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-DROP TRIGGER IF EXISTS trg_material_prices_bi;
-CREATE TRIGGER trg_material_prices_bi
-BEFORE INSERT ON material_prices
-FOR EACH ROW
-SET NEW.current_inventory_id = IF(NEW.is_current = 1, NEW.inventory_id, NULL);
+-- ── 4. Upgrade the first version's material_prices shape ───────────────────
+-- 4a. The CASCADE item FK blocks a generated column on inventory_id.
+SET @mp_drop_item_fk = IF(
+    (SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS
+      WHERE CONSTRAINT_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'material_prices'
+        AND CONSTRAINT_NAME = 'fk_material_prices_item'
+        AND (UPDATE_RULE <> 'RESTRICT' OR DELETE_RULE <> 'RESTRICT')) = 0,
+    'SELECT 1',
+    'ALTER TABLE material_prices DROP FOREIGN KEY fk_material_prices_item'
+);
+PREPARE stmt_mp_drop_item_fk FROM @mp_drop_item_fk;
+EXECUTE stmt_mp_drop_item_fk;
+DEALLOCATE PREPARE stmt_mp_drop_item_fk;
 
-DROP TRIGGER IF EXISTS trg_material_prices_bu;
-CREATE TRIGGER trg_material_prices_bu
-BEFORE UPDATE ON material_prices
-FOR EACH ROW
-SET NEW.current_inventory_id = IF(NEW.is_current = 1, NEW.inventory_id, NULL);
+-- 4b. The marker CHECK is redundant once the column is generated.
+SET @mp_drop_marker = IF(
+    (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'material_prices'
+        AND CONSTRAINT_NAME = 'chk_material_prices_current_marker'
+        AND CONSTRAINT_TYPE = 'CHECK') = 0,
+    'SELECT 1',
+    'ALTER TABLE material_prices DROP CHECK chk_material_prices_current_marker'
+);
+PREPARE stmt_mp_drop_marker FROM @mp_drop_marker;
+EXECUTE stmt_mp_drop_marker;
+DEALLOCATE PREPARE stmt_mp_drop_marker;
 
--- Write buffer. The loader inserts the cost it wants to be current.
--- trg_material_price_load_bi records history on material_prices.
--- Rows here are not the price record; the loader deletes them after the trigger runs.
-CREATE TABLE IF NOT EXISTS material_price_loads (
-    id              BIGINT       NOT NULL AUTO_INCREMENT,
-    inventory_id    VARCHAR(64)  NOT NULL,
-    unit_cost_cents BIGINT       NOT NULL,
-    uom             VARCHAR(32)  NOT NULL,
-    vendor_id       VARCHAR(64)  DEFAULT NULL,
-    vendor_name     VARCHAR(128) DEFAULT NULL,
-    effective_from  DATE         NOT NULL,
-    source          VARCHAR(32)  NOT NULL,
-    entered_by      VARCHAR(255) DEFAULT NULL,
-    PRIMARY KEY (id),
-    KEY idx_material_price_loads_item (inventory_id),
-    CONSTRAINT fk_material_price_loads_item
-        FOREIGN KEY (inventory_id) REFERENCES materials (inventory_id)
-        ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT chk_material_price_loads_cost_nonnegative CHECK (unit_cost_cents >= 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- 4c. A plain current_inventory_id: drop its unique key, then the column.
+SET @mp_plain_marker = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'material_prices'
+       AND COLUMN_NAME = 'current_inventory_id'
+       AND UPPER(EXTRA) NOT LIKE '%GENERATED%'
+);
+SET @mp_drop_uq = IF(
+    @mp_plain_marker = 0
+    OR (SELECT COUNT(*) FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'material_prices'
+           AND INDEX_NAME = 'uq_material_prices_one_current') = 0,
+    'SELECT 1',
+    'ALTER TABLE material_prices DROP INDEX uq_material_prices_one_current'
+);
+PREPARE stmt_mp_drop_uq FROM @mp_drop_uq;
+EXECUTE stmt_mp_drop_uq;
+DEALLOCATE PREPARE stmt_mp_drop_uq;
 
-DROP TRIGGER IF EXISTS trg_material_price_load_bi;
-CREATE TRIGGER trg_material_price_load_bi
-BEFORE INSERT ON material_price_loads
-FOR EACH ROW
-BEGIN
-    DECLARE cur_id VARCHAR(36);
-    DECLARE cur_cost BIGINT;
-    DECLARE cur_from DATE;
-    DECLARE cur_to DATE;
-    DECLARE CONTINUE HANDLER FOR NOT FOUND SET cur_id = NULL;
+SET @mp_drop_marker_col = IF(
+    @mp_plain_marker = 0,
+    'SELECT 1',
+    'ALTER TABLE material_prices DROP COLUMN current_inventory_id'
+);
+PREPARE stmt_mp_drop_marker_col FROM @mp_drop_marker_col;
+EXECUTE stmt_mp_drop_marker_col;
+DEALLOCATE PREPARE stmt_mp_drop_marker_col;
 
-    SELECT id, unit_cost_cents, effective_from
-      INTO cur_id, cur_cost, cur_from
-      FROM material_prices
-     WHERE inventory_id = NEW.inventory_id AND is_current = 1
-     LIMIT 1;
+-- 4d. Add the generated marker column.
+SET @mp_add_marker_col = IF(
+    (SELECT COUNT(*) FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'material_prices'
+        AND COLUMN_NAME = 'current_inventory_id') > 0,
+    'SELECT 1',
+    'ALTER TABLE material_prices ADD COLUMN current_inventory_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN is_current = 1 THEN inventory_id END) STORED AFTER is_current'
+);
+PREPARE stmt_mp_add_marker_col FROM @mp_add_marker_col;
+EXECUTE stmt_mp_add_marker_col;
+DEALLOCATE PREPARE stmt_mp_add_marker_col;
 
-    IF cur_id IS NULL THEN
-        INSERT INTO material_prices (
-            id, inventory_id, unit_cost_cents, uom, vendor_id, vendor_name,
-            effective_from, is_current, source, entered_by
-        ) VALUES (
-            UUID(), NEW.inventory_id, NEW.unit_cost_cents, NEW.uom,
-            NEW.vendor_id, NEW.vendor_name, NEW.effective_from, 1,
-            NEW.source, NEW.entered_by
-        );
-    ELSEIF cur_cost <> NEW.unit_cost_cents THEN
-        SET cur_to = IF(cur_from > NEW.effective_from, cur_from, NEW.effective_from);
-        UPDATE material_prices
-           SET is_current = 0, effective_to = cur_to
-         WHERE id = cur_id AND is_current = 1;
-        INSERT INTO material_prices (
-            id, inventory_id, unit_cost_cents, uom, vendor_id, vendor_name,
-            effective_from, is_current, source, entered_by
-        ) VALUES (
-            UUID(), NEW.inventory_id, NEW.unit_cost_cents, NEW.uom,
-            NEW.vendor_id, NEW.vendor_name, NEW.effective_from, 1,
-            NEW.source, NEW.entered_by
-        );
-    END IF;
-END;
+-- 4e. One current row per item.
+SET @mp_add_uq = IF(
+    (SELECT COUNT(*) FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'material_prices'
+        AND INDEX_NAME = 'uq_material_prices_one_current') > 0,
+    'SELECT 1',
+    'ALTER TABLE material_prices ADD UNIQUE KEY uq_material_prices_one_current (current_inventory_id)'
+);
+PREPARE stmt_mp_add_uq FROM @mp_add_uq;
+EXECUTE stmt_mp_add_uq;
+DEALLOCATE PREPARE stmt_mp_add_uq;
+
+-- 4f. Item FK, RESTRICT on update and delete.
+SET @mp_add_item_fk = IF(
+    (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'material_prices'
+        AND CONSTRAINT_NAME = 'fk_material_prices_item'
+        AND CONSTRAINT_TYPE = 'FOREIGN KEY') > 0,
+    'SELECT 1',
+    'ALTER TABLE material_prices ADD CONSTRAINT fk_material_prices_item FOREIGN KEY (inventory_id) REFERENCES materials (inventory_id) ON DELETE RESTRICT ON UPDATE RESTRICT'
+);
+PREPARE stmt_mp_add_item_fk FROM @mp_add_item_fk;
+EXECUTE stmt_mp_add_item_fk;
+DEALLOCATE PREPARE stmt_mp_add_item_fk;

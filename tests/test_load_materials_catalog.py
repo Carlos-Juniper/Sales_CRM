@@ -4,7 +4,9 @@ The fixture workbook is synthetic. The Aspire export is not in the repo.
 TestPlan covers ``--include-nonstock`` (the earlier behavior). TestStockOnly
 covers the default mode.
 Database checks use a local scratch schema with migration 070 applied and
-skip when that database is not reachable.
+skip when that database is not reachable. They run on MySQL 8.4 (the Cloud
+SQL engine) as a user without SUPER, with binary logging on, so a trigger in
+070 fails them with ERROR 1419.
 """
 from __future__ import annotations
 
@@ -660,7 +662,6 @@ def materials_db():
 @pytest.fixture
 def db(materials_db):
     with materials_db.cursor() as cur:
-        cur.execute("DELETE FROM material_price_loads")
         cur.execute("DELETE FROM material_prices")
         cur.execute("DELETE FROM materials")
     materials_db.commit()
@@ -800,3 +801,234 @@ class TestApply:
 def replace_costless(item):
     from dataclasses import replace
     return replace(item, unit_cost_cents=None, cost_uom=None)
+
+
+def _all_price_rows(conn) -> list[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, inventory_id, unit_cost_cents, is_current, current_inventory_id,
+                      effective_from, effective_to
+                 FROM material_prices
+                ORDER BY inventory_id, is_current, effective_from, created_at"""
+        )
+        return list(cur.fetchall())
+
+
+def _one_current_per_item(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT inventory_id, SUM(is_current) AS cur, COUNT(*) AS n
+                 FROM material_prices GROUP BY inventory_id"""
+        )
+        rows = list(cur.fetchall())
+    assert rows
+    assert all(int(row["cur"]) == 1 for row in rows), rows
+
+
+def _three_item_workbook(tmp_path: Path, name: str, costs: dict[str, str]) -> Path:
+    return _workbook(
+        tmp_path / name,
+        stock=[
+            _row(**{
+                "Inventory ID": inventory_id,
+                "Description": f"Item {inventory_id}",
+                "Base UOM": "EA",
+                "Last Cost": cost,
+            })
+            for inventory_id, cost in costs.items()
+        ],
+        nonstock=[],
+    )
+
+
+class TestLoaderRerun:
+    """Price history now lives in the loader (070 has no triggers)."""
+
+    COSTS = {"1000000101": "1.00", "1000000102": "2.00", "1000000103": "3.00"}
+
+    def test_rerun_with_unchanged_costs_adds_no_rows(self, db, tmp_path: Path):
+        plan = loader.build_plan(_three_item_workbook(tmp_path, "a.xlsx", self.COSTS))
+        first = loader.apply_plan(db, plan, today=TODAY)
+        db.commit()
+        assert (first.prices_inserted, first.prices_archived, first.prices_unchanged) == (3, 0, 0)
+        before = _all_price_rows(db)
+        assert len(before) == 3
+
+        second = loader.apply_plan(db, plan, today=date(2026, 10, 5))
+        db.commit()
+        assert (second.prices_inserted, second.prices_archived, second.prices_unchanged) == (0, 0, 3)
+        assert _all_price_rows(db) == before
+        _one_current_per_item(db)
+
+    def test_changed_cost_moves_old_row_to_history(self, db, tmp_path: Path):
+        plan = loader.build_plan(_three_item_workbook(tmp_path, "a.xlsx", self.COSTS))
+        loader.apply_plan(db, plan, today=TODAY)
+        db.commit()
+
+        changed = dict(self.COSTS, **{"1000000102": "2.50"})
+        later = date(2026, 10, 5)
+        plan2 = loader.build_plan(_three_item_workbook(tmp_path, "b.xlsx", changed))
+        result = loader.apply_plan(db, plan2, today=later)
+        db.commit()
+        assert (result.prices_inserted, result.prices_archived, result.prices_unchanged) == (1, 1, 2)
+
+        rows = _price_rows(db, "1000000102")
+        assert len(rows) == 2
+        old, new = rows  # ordered by is_current
+        assert old["is_current"] == 0 and old["current_inventory_id"] is None
+        assert int(old["unit_cost_cents"]) == 200
+        assert old["effective_from"] == TODAY and old["effective_to"] == later
+        assert new["is_current"] == 1 and new["current_inventory_id"] == "1000000102"
+        assert int(new["unit_cost_cents"]) == 250
+        assert new["effective_from"] == later and new["effective_to"] is None
+        assert len(_all_price_rows(db)) == 4
+        _one_current_per_item(db)
+
+        # Re-running the changed workbook is a no-op.
+        again = loader.apply_plan(db, plan2, today=date(2026, 10, 9))
+        db.commit()
+        assert (again.prices_inserted, again.prices_archived, again.prices_unchanged) == (0, 0, 3)
+        assert len(_all_price_rows(db)) == 4
+
+    def test_backdated_change_closes_on_the_current_rows_start(self, db, tmp_path: Path):
+        """effective_to = max(old effective_from, new effective_from)."""
+        plan = loader.build_plan(_three_item_workbook(tmp_path, "a.xlsx", {"1000000104": "5.00"}))
+        loader.apply_plan(db, plan, today=TODAY)
+        db.commit()
+        plan2 = loader.build_plan(_three_item_workbook(tmp_path, "b.xlsx", {"1000000104": "6.00"}))
+        earlier = date(2026, 9, 1)
+        loader.apply_plan(db, plan2, today=earlier)
+        db.commit()
+        old, new = _price_rows(db, "1000000104")
+        assert old["effective_to"] == TODAY  # not before its own effective_from
+        assert new["effective_from"] == earlier
+        _one_current_per_item(db)
+
+    def test_unique_key_rejects_a_second_current_row(self, db, tmp_path: Path):
+        plan = loader.build_plan(_three_item_workbook(tmp_path, "a.xlsx", {"1000000105": "1.00"}))
+        loader.apply_plan(db, plan, today=TODAY)
+        db.commit()
+        with db.cursor() as cur:
+            with pytest.raises(pymysql.err.IntegrityError):
+                cur.execute(
+                    """INSERT INTO material_prices
+                           (id, inventory_id, unit_cost_cents, uom, effective_from, is_current, source)
+                       VALUES ('dup-current', '1000000105', 1, 'EA', %s, 1, 'test')""",
+                    (TODAY,),
+                )
+        db.rollback()
+        _one_current_per_item(db)
+
+    def test_generated_marker_cannot_be_written(self, db, tmp_path: Path):
+        plan = loader.build_plan(_three_item_workbook(tmp_path, "a.xlsx", {"1000000106": "1.00"}))
+        loader.apply_plan(db, plan, today=TODAY)
+        db.commit()
+        with db.cursor() as cur:
+            with pytest.raises(pymysql.err.MySQLError):
+                cur.execute(
+                    "UPDATE material_prices SET current_inventory_id = 'x' WHERE inventory_id = '1000000106'"
+                )
+        db.rollback()
+
+
+# The first 070 on juniper-dev: materials plus this material_prices, then
+# ERROR 1419 at CREATE TRIGGER. Not recorded in schema_migrations.
+HALF_APPLIED_PRICES = """
+CREATE TABLE material_prices (
+    id                   VARCHAR(36)  NOT NULL,
+    inventory_id         VARCHAR(64)  NOT NULL,
+    unit_cost_cents      BIGINT       NOT NULL,
+    uom                  VARCHAR(32)  NOT NULL,
+    vendor_id            VARCHAR(64)  DEFAULT NULL,
+    vendor_name          VARCHAR(128) DEFAULT NULL,
+    effective_from       DATE         NOT NULL,
+    effective_to         DATE         DEFAULT NULL,
+    is_current           TINYINT(1)   NOT NULL DEFAULT 0,
+    current_inventory_id VARCHAR(64)  DEFAULT NULL,
+    source               VARCHAR(32)  NOT NULL,
+    estimate_id          VARCHAR(36)  DEFAULT NULL,
+    entered_by           VARCHAR(255) DEFAULT NULL,
+    notes                TEXT         DEFAULT NULL,
+    created_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_material_prices_one_current (current_inventory_id),
+    KEY idx_material_prices_item (inventory_id, effective_from),
+    KEY idx_material_prices_current (inventory_id, is_current),
+    KEY idx_material_prices_estimate (estimate_id),
+    CONSTRAINT chk_material_prices_cost_nonnegative CHECK (unit_cost_cents >= 0),
+    CONSTRAINT chk_material_prices_range CHECK (effective_to IS NULL OR effective_to >= effective_from),
+    CONSTRAINT chk_material_prices_current_marker CHECK (
+        (is_current = 0 AND current_inventory_id IS NULL)
+        OR (is_current = 1 AND current_inventory_id IS NOT NULL)
+    ),
+    CONSTRAINT fk_material_prices_item
+        FOREIGN KEY (inventory_id) REFERENCES materials (inventory_id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_material_prices_estimate
+        FOREIGN KEY (estimate_id) REFERENCES estimates (id)
+        ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+"""
+
+
+class TestMigration070OnDatabase:
+    """Apply 070 from scratch and over the half-applied first version."""
+
+    @staticmethod
+    def _run_file(conn, text: str) -> None:
+        with conn.cursor() as cur:
+            for stmt in migrate.split_statements(text):
+                cur.execute(stmt)
+        conn.commit()
+
+    @staticmethod
+    def _shape(conn) -> str:
+        with conn.cursor() as cur:
+            cur.execute("SHOW CREATE TABLE material_prices")
+            return cur.fetchone()["Create Table"]
+
+    def _reset(self, conn) -> None:
+        self._run_file(conn, _RESET)
+        self._run_file(conn, PRE_070)
+
+    def test_from_scratch_and_over_half_applied_state(self, materials_db):
+        conn = materials_db
+        migration = MIGRATION.read_text(encoding="utf-8")
+        try:
+            self._reset(conn)
+            assert migrate.detect_070(conn) is False
+            self._run_file(conn, migration)
+            assert migrate.detect_070(conn) is True
+            scratch_shape = self._shape(conn)
+            self._run_file(conn, migration)  # re-run is a no-op
+            assert self._shape(conn) == scratch_shape
+
+            # Recreate juniper-dev: materials (070's own DDL) + old-shape prices.
+            self._reset(conn)
+            materials_ddl = next(
+                s for s in migrate.split_statements(migration)
+                if s.startswith("CREATE TABLE IF NOT EXISTS materials")
+            )
+            self._run_file(conn, materials_ddl + ";" + HALF_APPLIED_PRICES)
+            assert migrate.detect_070(conn) is False
+            assert migrate.column_is_generated(conn, "material_prices", "current_inventory_id") is False
+
+            self._run_file(conn, migration)
+            assert migrate.detect_070(conn) is True
+            assert self._shape(conn) == scratch_shape
+            assert "chk_material_prices_current_marker" not in scratch_shape
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT UPDATE_RULE, DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS
+                        WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'fk_material_prices_item'"""
+                )
+                assert cur.fetchone() == {"UPDATE_RULE": "RESTRICT", "DELETE_RULE": "RESTRICT"}
+                cur.execute(
+                    "SELECT COUNT(*) AS n FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE()"
+                )
+                assert cur.fetchone()["n"] == 0
+        finally:
+            # Leave the module fixture's schema in its applied state.
+            self._reset(conn)
+            self._run_file(conn, migration)
+

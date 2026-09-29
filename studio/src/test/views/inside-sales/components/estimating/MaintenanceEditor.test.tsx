@@ -104,6 +104,30 @@ describe('MaintenanceEditor — structure', () => {
     expect(screen.getByDisplayValue('Entry & Medians')).toBeInTheDocument()
   })
 
+  it('shares one column template between hours-driven headers and line rows', () => {
+    renderMaint()
+    const headerLabels = ['Service', 'Occurrences', 'Complexity', 'Discipline', 'Billing', 'Line total']
+
+    for (const name of ['Common Area', 'Entry & Medians']) {
+      const card = sectionCard(name)
+      const header = within(card).getByTestId('maintenance-line-columns')
+      const row = within(card).getAllByTestId(/^service-row-/)[0]
+
+      expect([...header.children].map((el) => el.textContent)).toEqual(headerLabels)
+
+      const headerCols = [...header.classList].find((token) => token.startsWith('grid-cols-'))
+      const rowCols = [...row.classList].find((token) => token.startsWith('grid-cols-'))
+      expect(headerCols).toBeTruthy()
+      expect(rowCols).toBe(headerCols)
+      expect(headerCols).not.toMatch(/auto/)
+
+      const headerGap = [...header.classList].find((token) => token.startsWith('gap-x-'))
+      const rowGap = [...row.classList].find((token) => token.startsWith('gap-x-'))
+      expect(headerGap).toBe('gap-x-4')
+      expect(rowGap).toBe(headerGap)
+    }
+  })
+
   it('shows section totals, unit reads, and the contract roll-up from calc.ts', () => {
     renderMaint()
     const s1 = sectionCard('Common Area')

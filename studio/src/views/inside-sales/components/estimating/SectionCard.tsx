@@ -39,6 +39,18 @@ const EMPTY_CATALOG: MaintenanceCatalogService[] = []
 const cellInput =
   'h-8 rounded-md border px-2 text-sm text-[hsl(var(--fg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 transition-colors'
 
+/**
+ * One track list for the hours-driven line table. The header and every
+ * service row both use this class. Tracks are explicit (not `auto`) and
+ * children are `min-w-0`, so each grid sizes from the template instead of
+ * its own content — labels stay over Occurrences, Complexity, Discipline,
+ * Billing, and Line total.
+ *
+ * Service | Occurrences | Complexity | Discipline | Billing | Line total
+ */
+const MAINTENANCE_LINE_GRID =
+  'grid w-full items-center gap-x-4 px-4 [&>*]:min-w-0 grid-cols-[minmax(9rem,1.7fr)_minmax(7.25rem,0.9fr)_minmax(7.25rem,0.85fr)_minmax(6.25rem,0.7fr)_minmax(8rem,0.95fr)_minmax(7.25rem,0.85fr)]'
+
 export interface SectionCardProps {
   section: EstimateSection
   onRename: (name: string) => void
@@ -91,7 +103,8 @@ function ServiceRow({
       data-testid={`service-row-${svc.label}`}
       data-crew-rate-blocked={blocked ? 'true' : 'false'}
       className={cn(
-        'grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 px-4 py-2 border-t border-[hsl(var(--border))]',
+        MAINTENANCE_LINE_GRID,
+        'gap-y-1 py-2 border-t border-[hsl(var(--border))]',
         blocked && 'bg-amber-50',
       )}
     >
@@ -139,6 +152,7 @@ function ServiceRow({
           className={cn(
             cellInput,
             BLUE_CELL,
+            'w-full min-w-0',
             overridden && 'border-amber-400 bg-amber-50 text-amber-800',
           )}
           value={String(svc.complexityPct)}
@@ -156,7 +170,7 @@ function ServiceRow({
           <span
             data-testid="complexity-override-flag"
             title="Complexity overridden from the company default"
-            className="inline-flex items-center text-amber-600"
+            className="inline-flex shrink-0 items-center text-amber-600"
           >
             <TriangleAlert className="h-3.5 w-3.5" />
           </span>
@@ -167,7 +181,7 @@ function ServiceRow({
         label={svc.label}
         value={svc.discipline ?? null}
         onChange={(discipline) => onServiceChange(svc.id, { discipline })}
-        className={cn(cellInput, BLUE_CELL)}
+        className={cn(cellInput, BLUE_CELL, 'w-full min-w-0')}
       />
 
       {/* Marks the exception to the 12-month contract bundle: a line billed
@@ -176,7 +190,7 @@ function ServiceRow({
         label={svc.label}
         value={svc.billingType ?? null}
         onChange={(billingType) => onServiceChange(svc.id, { billingType })}
-        className={cn(cellInput, BLUE_CELL)}
+        className={cn(cellInput, BLUE_CELL, 'w-full min-w-0')}
       />
 
       <div className="text-right">
@@ -271,27 +285,39 @@ export function SectionCard({
           </span>
         </div>
 
-        {/* Column headers */}
-        <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-3 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))]">
-          <span>Service</span>
-          <span>Occurrences</span>
-          <span>Complexity</span>
-          <span>Discipline</span>
-          <span>Billing</span>
-          <span className="text-right">Line total</span>
-        </div>
+        {/* Column headers + rows share MAINTENANCE_LINE_GRID. The min width
+            keeps those tracks intact; a narrow card scrolls instead of
+            letting the columns collapse on top of each other. */}
+        <div className="overflow-x-auto">
+          <div className="min-w-[52rem]">
+            <div
+              data-testid="maintenance-line-columns"
+              className={cn(
+                MAINTENANCE_LINE_GRID,
+                'py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))] bg-[hsl(var(--muted))]',
+              )}
+            >
+              <span className="whitespace-nowrap">Service</span>
+              <span className="whitespace-nowrap">Occurrences</span>
+              <span className="whitespace-nowrap">Complexity</span>
+              <span className="whitespace-nowrap">Discipline</span>
+              <span className="whitespace-nowrap">Billing</span>
+              <span className="whitespace-nowrap text-right">Line total</span>
+            </div>
 
-        {section.services.map((svc) => (
-          <ServiceRow
-            key={svc.id}
-            section={section}
-            svc={svc}
-            onServiceChange={onServiceChange}
-            granularity={granularity}
-            onGranularityChange={onGranularityChange}
-            blocked={blockedServiceIds?.has(svc.id) ?? false}
-          />
-        ))}
+            {section.services.map((svc) => (
+              <ServiceRow
+                key={svc.id}
+                section={section}
+                svc={svc}
+                onServiceChange={onServiceChange}
+                granularity={granularity}
+                onGranularityChange={onGranularityChange}
+                blocked={blockedServiceIds?.has(svc.id) ?? false}
+              />
+            ))}
+          </div>
+        </div>
 
         {/* Add line item (I-9.7 — services outside the original sales spec) */}
         <div className="flex items-center gap-2 px-4 py-2 border-t border-dashed border-[hsl(var(--border))]">

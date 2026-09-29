@@ -1,6 +1,8 @@
 """Materials catalog loader (scripts/load_materials_catalog.py).
 
 The fixture workbook is synthetic. The Aspire export is not in the repo.
+TestPlan covers ``--include-nonstock`` (the earlier behavior). TestStockOnly
+covers the default mode.
 Database checks use a local scratch schema with migration 070 applied and
 skip when that database is not reachable.
 """
@@ -229,7 +231,7 @@ class TestPlan:
                 }),
             ],
         )
-        plan = loader.build_plan(path)
+        plan = loader.build_plan(path, include_nonstock=True)
         stock = _by_id(plan)["1000000001"]
         assert stock.description == "Stock Pipe"
         assert stock.is_stock_item == 1
@@ -291,7 +293,7 @@ class TestPlan:
                 _row(**{"Inventory ID": "101", "Description": "Nonstock name", "Base UOM": "FT", "Last Cost": "9"}),
             ],
         )
-        plan = loader.build_plan(path)
+        plan = loader.build_plan(path, include_nonstock=True)
         assert _by_id(plan)["101"].description == "Single product"
         assert _by_id(plan)["101"].inventory_id == "101"
         assert _by_id(plan)["101"].is_stock_item == 1
@@ -331,7 +333,7 @@ class TestPlan:
             ],
             nonstock=[],
         )
-        plan = loader.build_plan(path)
+        plan = loader.build_plan(path, include_nonstock=True)
         assert plan.items == []
         assert [rej.row_number for rej in plan.rejects] == [2, 3]
         assert {rej.reason for rej in plan.rejects} == {"conflicting_duplicate_inventory_id"}
@@ -358,7 +360,7 @@ class TestPlan:
                 "Inventory ID": "4000000001", "Description": "Stens only", "Base UOM": "EA", "Last Cost": "6",
             })])],
         )
-        plan = loader.build_plan(path)
+        plan = loader.build_plan(path, include_nonstock=True)
         assert "6060000001" not in _by_id(plan)
         assert "4000000001" not in _by_id(plan)
         kept = _by_id(plan)["3000000001"]
@@ -382,13 +384,218 @@ class TestPlan:
         rejects = tmp_path / "out.csv"
         brief = tmp_path / "conflicts.md"
         assert loader.main([
-            str(path), "--dry-run", "--rejects", str(rejects), "--conflicts", str(brief),
+            str(path), "--dry-run", "--include-nonstock", "--rejects", str(rejects), "--conflicts", str(brief),
         ]) == 0
         text = rejects.read_text(encoding="utf-8")
         assert text.splitlines()[0] == "reason,sheet,row_number,inventory_id,description,item_class,aspire_category,uom,vendor,last_cost"
         assert "missing_inventory_id" in text
         assert "101" not in text
         assert "Inventory IDs used for more than one product" in brief.read_text(encoding="utf-8")
+
+
+def _stock_row(inventory_id: str, description: str, *, classes: tuple[str, str] | None = None, **values) -> list:
+    # Keyword names use underscores for spaces: Last_Cost="4" is "Last Cost".
+    extra = {key.replace("_", " "): value for key, value in values.items()}
+    row = _row(**{"Inventory ID": inventory_id, "Description": description, "Base UOM": "EA", **extra})
+    if classes is not None:
+        row[2], row[3] = classes
+    return row
+
+
+HERBICIDE = ("101-AG-Herbiside", "AGRONOMY__-HERBISIDE_")
+FITTINGS = ("605-IRR-PVC Fittings", "IRRIGATION-PVC_FITTIN")
+
+
+class TestStockOnly:
+    def test_nonstock_sheet_is_not_required(self, tmp_path: Path):
+        path = tmp_path / "stock-only.xlsx"
+        write_xlsx(path, [("Stock Items", [HEADERS, _stock_row("1000000001", "Coupling")])])
+        plan = loader.build_plan(path)
+        assert [item.inventory_id for item in plan.items] == ["1000000001"]
+        assert plan.nonstock_sheet is None
+        assert plan.nonstock_skipped == 0
+        with pytest.raises(ValueError, match="NONStock"):
+            loader.build_plan(path, include_nonstock=True)
+
+    def test_nonstock_sheet_is_ignored(self, tmp_path: Path):
+        path = _workbook(
+            tmp_path / "ignored.xlsx",
+            # Stock row has no cost and no purchase UOM. Non-stock has both.
+            stock=[_stock_row("1000000001", "Stock Pipe", classes=FITTINGS)],
+            nonstock=[
+                _row(**{
+                    "Inventory ID": "1000000001", "Description": "Old Pipe Name", "Base UOM": "FT",
+                    "Purchase UOM": "BOX", "Last Cost": "9.99", "Manufacturer": "ACME",
+                }),
+                _row(**{"Inventory ID": "1000000002", "Description": "Nonstock Only", "Base UOM": "EA", "Last Cost": "2"}),
+                _row(**{"Inventory ID": "101", "Description": "Nonstock short id", "Base UOM": "EA"}),
+            ],
+        )
+        plan = loader.build_plan(path)
+        assert list(_by_id(plan)) == ["1000000001"]
+        item = _by_id(plan)["1000000001"]
+        assert item.description == "Stock Pipe"
+        assert item.base_uom == "EA"
+        assert item.purchase_uom is None
+        assert item.manufacturer is None
+        assert item.unit_cost_cents is None
+        assert plan.rejects == []
+        assert plan.nonstock_sheet == "NONStock Items"
+        assert plan.nonstock_rows == 3
+        assert plan.nonstock_skipped == 3
+
+    def test_agronomy_is_held_by_default(self, tmp_path: Path):
+        path = _workbook(
+            tmp_path / "ag.xlsx",
+            stock=[
+                _stock_row("1010000001", "Barricade 50LB", classes=HERBICIDE),
+                _stock_row("1020000001", "Insecticide", classes=("102-AG-Insecticide", "AGRONOMY__-INSECTICID")),
+                # Loaded class alone marks agronomy.
+                _stock_row("1070000001", "Liquid fert", classes=("", "AGRONOMY__-LIQ_FERT__")),
+                _stock_row("6050000001", "Coupling", classes=FITTINGS),
+                # "AG" inside another word is not agronomy.
+                _stock_row("7000000001", "Bag", classes=("700-LS-Bags", "LANDSCAPE_-AGGREGATE_")),
+            ],
+            nonstock=[],
+        )
+        plan = loader.build_plan(path)
+        assert sorted(_by_id(plan)) == ["6050000001", "7000000001"]
+        held = sorted(rej.inventory_id for rej in plan.rejects if rej.reason == "held_agronomy")
+        assert held == ["1010000001", "1020000001", "1070000001"]
+        assert plan.reject_count("held_agronomy") == 3
+
+        included = loader.build_plan(path, include_agronomy=True)
+        assert sorted(_by_id(included)) == ["1010000001", "1020000001", "1070000001", "6050000001", "7000000001"]
+        assert _by_id(included)["1010000001"].item_class == "AGRONOMY__-HERBISIDE_"
+        assert included.rejects == []
+
+    def test_invalid_id_boundary(self, tmp_path: Path):
+        path = _workbook(
+            tmp_path / "ids.xlsx",
+            stock=[
+                _stock_row("1234567890", "Ten digits"),
+                _stock_row(" 2000000001 ", "Ten digits, padded"),
+                _stock_row("123456789", "Nine digits"),
+                _stock_row("12345678901", "Eleven digits"),
+                _stock_row("ABC1234567", "Not numeric"),
+                _stock_row("1" * 65, "Too long"),
+                _row(**{"Inventory ID": "", "Description": "No id"}),
+                # The placeholder 101 on several herbicides is invalid, not a conflict.
+                *[_stock_row("101", f"Herbicide {n}", classes=HERBICIDE, Last_Cost=str(n)) for n in range(1, 4)],
+            ],
+            nonstock=[],
+        )
+        plan = loader.build_plan(path, include_agronomy=True)
+        assert sorted(_by_id(plan)) == ["1234567890", "2000000001"]
+        invalid = sorted(rej.inventory_id for rej in plan.rejects if rej.reason == "invalid_inventory_id")
+        assert invalid == ["101", "101", "101", "123456789", "12345678901", "ABC1234567"]
+        assert not any(rej.reason in loader.CONFLICT_REASONS for rej in plan.rejects)
+        reasons = {(rej.inventory_id, rej.reason) for rej in plan.rejects}
+        assert ("1" * 65, "inventory_id_too_long") in reasons
+        assert ("", "missing_inventory_id") in reasons
+
+    def test_conflicting_ids_are_still_rejected(self, tmp_path: Path):
+        path = _workbook(
+            tmp_path / "conflict.xlsx",
+            stock=[
+                _stock_row("6060000001", "Repair coupling", Last_Cost="2"),
+                _stock_row("6060000001", "CL 160 PVC BE PIPE", Last_Cost="3"),
+                _stock_row("3000000001", "Same", Last_Cost="4"),
+                _stock_row("3000000001", "Same", Last_Cost="4"),
+            ],
+            nonstock=[_stock_row("6060000001", "Nonstock fallback", Last_Cost="8")],
+        )
+        plan = loader.build_plan(path)
+        assert list(_by_id(plan)) == ["3000000001"]
+        assert plan.identical_duplicates == 1
+        assert [(rej.inventory_id, rej.reason) for rej in plan.rejects] == [
+            ("6060000001", "conflicting_duplicate_inventory_id"),
+            ("6060000001", "conflicting_duplicate_inventory_id"),
+        ]
+        assert "## 6060000001" in loader.format_conflict_brief(plan)
+
+    def test_include_nonstock_keeps_the_earlier_behavior(self, tmp_path: Path):
+        path = _workbook(
+            tmp_path / "modes.xlsx",
+            stock=[
+                _stock_row("1000000001", "Stock Pipe", classes=FITTINGS, Last_Cost="1"),
+                _stock_row("1010000001", "Barricade", classes=HERBICIDE, Last_Cost="5"),
+                _stock_row("101", "Single herbicide", classes=HERBICIDE, Last_Cost="4"),
+            ],
+            nonstock=[
+                _row(**{"Inventory ID": "1000000001", "Description": "Old Pipe Name", "Base UOM": "FT"}),
+                _row(**{"Inventory ID": "1000000002", "Description": "Nonstock Only", "Base UOM": "EA"}),
+            ],
+        )
+        old = loader.build_plan(path, include_nonstock=True)
+        assert sorted(_by_id(old)) == ["1000000001", "1000000002", "101", "1010000001"]
+        assert _by_id(old)["1000000001"].description == "Stock Pipe"
+        assert _by_id(old)["1000000002"].is_stock_item == 0
+        assert old.rejects == []
+        assert old.stock_overrides == 1
+        assert old.nonstock_skipped == 0
+
+        default = loader.build_plan(path)
+        assert sorted(_by_id(default)) == ["1000000001"]
+        assert sorted((rej.inventory_id, rej.reason) for rej in default.rejects) == [
+            ("101", "invalid_inventory_id"),
+            ("1010000001", "held_agronomy"),
+        ]
+        assert default.nonstock_skipped == 2
+
+    def test_dry_run_summary_counts(self, tmp_path: Path, monkeypatch, capsys):
+        path = _workbook(
+            tmp_path / "summary.xlsx",
+            stock=[
+                _stock_row("1000000001", "Pipe", classes=FITTINGS),
+                _stock_row("1010000001", "Barricade", classes=HERBICIDE),
+                _stock_row("101", "Avenue South", classes=HERBICIDE),
+                _stock_row("101", "Barricade", classes=HERBICIDE),
+                _stock_row("6060000001", "Repair coupling"),
+                _stock_row("6060000001", "PVC pipe"),
+            ],
+            nonstock=[_row(**{"Inventory ID": "1000000002", "Description": "Nonstock Only", "Base UOM": "EA"})],
+            extra=[("Template Stock Items STENS", [
+                HEADERS,
+                _stock_row("4000000001", "Stens one"),
+                _stock_row("4000000002", "Stens two"),
+                _row(**{"Description": "Stens no id"}),
+            ])],
+        )
+        monkeypatch.setattr(migrate, "connect", lambda: (_ for _ in ()).throw(AssertionError("connect")))
+        rejects = tmp_path / "out.csv"
+        assert loader.main([str(path), "--dry-run", "--rejects", str(rejects)]) == 0
+        out = capsys.readouterr().out
+        for line in (
+            "  mode: stock-only, agronomy held",
+            "  nonstock sheet: NONStock Items rows=1 (not loaded)",
+            "  loaded: 1",
+            "  held agronomy: 1",
+            "  rejected conflicts: 2 rows (1 inventory ids)",
+            "  rejected invalid ids: 2",
+            "  skipped STENS: 2",
+            "  skipped non-stock: 1",
+        ):
+            assert line in out.splitlines()
+        text = rejects.read_text(encoding="utf-8")
+        assert text.count("held_agronomy") == 1
+        assert text.count("invalid_inventory_id") == 2
+
+        assert loader.main([str(path), "--dry-run", "--rejects", str(rejects), "--include-agronomy"]) == 0
+        out = capsys.readouterr().out
+        assert "  mode: stock-only, agronomy included" in out.splitlines()
+        assert "  loaded: 2" in out.splitlines()
+        assert "  held agronomy: 0" in out.splitlines()
+
+        assert loader.main([str(path), "--dry-run", "--rejects", str(rejects), "--include-nonstock"]) == 0
+        out = capsys.readouterr().out
+        assert "  mode: include-nonstock" in out.splitlines()
+        assert "  loaded: 3" in out.splitlines()
+        assert "  rejected conflicts: 4 rows (2 inventory ids)" in out.splitlines()
+
+    def test_mode_flags_are_exclusive(self, tmp_path: Path):
+        with pytest.raises(SystemExit):
+            loader.main([str(tmp_path / "x.xlsx"), "--stock-only", "--include-nonstock"])
 
 
 PRE_070 = """
@@ -550,7 +757,7 @@ class TestApply:
             })],
             nonstock=[],
         )
-        plan = loader.build_plan(path)
+        plan = loader.build_plan(path, include_nonstock=True)
         assert plan.items[0].inventory_id == "101"
         result = loader.apply_plan(db, plan, today=TODAY)
         db.commit()

@@ -36,6 +36,7 @@ from typing import Optional
 
 from db import execute, query
 from api.authz import CANONICAL_ROLES, normalize_role
+from api import avatar
 
 # The canonical business roles. The settings API rejects new assignments of
 # `sales` / `outside_sales` (admins must pick maintenance or install sales).
@@ -46,13 +47,6 @@ VALID_ROLES = CANONICAL_ROLES
 # Roles that require a branch_id. Managers are scoped to a branch; other roles
 # may be provisioned without one (branch_id is nullable in crm_users).
 BRANCH_REQUIRED_ROLES = {"manager"}
-
-
-def _avatar_initials(name: str) -> str:
-    """First letter of the first two words, uppercased (crm_users caps at 5)."""
-    parts = [p for p in name.split() if p]
-    initials = "".join(p[0] for p in parts[:2]).upper()
-    return initials[:5]
 
 
 async def provision(
@@ -80,7 +74,7 @@ async def provision(
         raise ValueError("name cannot be empty.")
 
     if not avatar_initials:
-        avatar_initials = _avatar_initials(name) or name[:1].upper()
+        avatar_initials = avatar.avatar_initials(name, email)
 
     # SELECT-then-INSERT/UPDATE mirrors the upsert helpers in db.py (upsert_lead,
     # upsert_hoa_property). Keyed on the normalized email so a re-run updates the

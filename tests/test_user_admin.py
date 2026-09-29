@@ -32,9 +32,12 @@ api.aspire_sync.resolve_aspire_rep_id.
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
+import pymysql
 import pytest
+from pymysql.constants import ER
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("MYSQL_HOST", "localhost")
@@ -85,6 +88,27 @@ def as_role():
 
 def _live(role: str, active: int = 1) -> list[dict]:
     return [{"role": role, "active": active}]
+
+
+@asynccontextmanager
+async def _noop_tx():
+    yield None
+
+
+@pytest.fixture(autouse=True)
+def _no_real_transaction():
+    """authorize_user opens db.transaction(); keep it off the real pool."""
+    with patch("api.settings.transaction", new=_noop_tx):
+        yield
+
+
+def _raise_on(sql_fragment: str, errno: int):
+    """execute side effect: raise IntegrityError(errno) for SQL containing sql_fragment."""
+    async def _execute(sql, params=None):
+        if sql_fragment in sql:
+            raise pymysql.err.IntegrityError(errno, "simulated")
+        return 1
+    return _execute
 
 
 # ── Admin-only write boundary (live role re-read, B.2) ───────────────────────
@@ -179,6 +203,9 @@ class TestAuthorizeFromDirectory:
         # Email stored lowercased so Entra SSO's lowercased-email match hits.
         assert "jane.doe@juniperlandscaping.com" in insert_params
         assert "Jane.Doe@JuniperLandscaping.com" not in insert_params
+        # avatar_initials is NOT NULL with no default: omitting it is ERROR 1364.
+        assert "avatar_initials" in insert_sqls[0].args[0]
+        assert "JD" in insert_params
 
         audit_sqls = [
             c for c in mock_exec.await_args_list if "config_audit" in c.args[0]
@@ -187,6 +214,94 @@ class TestAuthorizeFromDirectory:
         flat = " ".join(str(p) for c in audit_sqls for p in c.args[1])
         assert "jane.doe@juniperlandscaping.com" in flat
         assert "test.user@juniperlandscaping.com" in flat  # actor
+
+
+    @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_authorize_existing_email_is_409_and_writes_nothing(
+        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role
+    ):
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = [{"id": "u-existing"}]
+        r = client.post(
+            "/api/settings/users",
+            json={
+                "name": "Jane Doe",
+                "email": "Jane.Doe@JuniperLandscaping.com",
+                "role": "manager",
+            },
+        )
+        assert r.status_code == 409
+        assert r.json()["detail"] == (
+            "A user with email jane.doe@juniperlandscaping.com already exists."
+        )
+        # Matched on the lowercased email, like Entra SSO.
+        assert mock_query.await_args.args[1] == ["jane.doe@juniperlandscaping.com"]
+        mock_exec.assert_not_awaited()
+        mock_resolve.assert_not_awaited()
+
+    @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_authorize_duplicate_key_race_is_409(
+        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role
+    ):
+        """The pre-check passed but a concurrent authorize inserted first (1062)."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = []
+        mock_exec.side_effect = _raise_on("INSERT INTO users", ER.DUP_ENTRY)
+        r = client.post(
+            "/api/settings/users",
+            json={
+                "name": "Jane Doe",
+                "email": "jane.doe@juniperlandscaping.com",
+                "role": "manager",
+            },
+        )
+        assert r.status_code == 409
+        assert "already exists" in r.json()["detail"]
+        assert not [c for c in mock_exec.await_args_list if "config_audit" in c.args[0]]
+
+    @patch("api.aspire_sync.resolve_aspire_rep_id", new_callable=AsyncMock)
+    @patch("api.authz.query", new_callable=AsyncMock)
+    @patch("api.settings.execute", new_callable=AsyncMock)
+    @patch("api.settings.query", new_callable=AsyncMock)
+    async def test_authorize_unknown_branch_is_422(
+        self, mock_query, mock_exec, mock_authz_query, mock_resolve, as_role
+    ):
+        """fk_user_branches_branch rejects the id (1452); the transaction rolls back."""
+        as_role("admin")
+        mock_authz_query.return_value = _live("admin")
+        mock_query.return_value = []
+        mock_exec.side_effect = _raise_on("INSERT INTO user_branches", ER.NO_REFERENCED_ROW_2)
+        rolled_back = []
+
+        @asynccontextmanager
+        async def _tx():
+            try:
+                yield None
+            except BaseException:
+                rolled_back.append(True)
+                raise
+
+        with patch("api.settings.transaction", new=_tx):
+            r = client.post(
+                "/api/settings/users",
+                json={
+                    "name": "Jane Doe",
+                    "email": "jane.doe@juniperlandscaping.com",
+                    "role": "manager",
+                    "branches": [999999],
+                },
+            )
+        assert r.status_code == 422
+        assert r.json()["detail"] == "One or more branch ids in [999999] do not exist."
+        assert rolled_back == [True]
 
 
 # ── Hard-block sales without a resolved aspire_rep_id (§2.8) ──────────────────

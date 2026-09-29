@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import aiomysql
 
 _pool: aiomysql.Pool | None = None
+# Set for the duration of transaction() so query/execute share that connection.
+_conn_ctx: ContextVar[aiomysql.Connection | None] = ContextVar("db_conn", default=None)
 
 
 def _cfg() -> dict:
@@ -33,23 +37,55 @@ async def _get_pool() -> aiomysql.Pool:
     return _pool
 
 
-async def query(sql: str, params: list | None = None) -> list[dict]:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            # Pass None (not []) when there are no params so aiomysql skips
-            # %-substitution — otherwise a literal % in the SQL (LIKE, DATE_FORMAT)
-            # raises "not enough arguments for format string".
-            await cur.execute(sql, params if params else None)
+async def _run_on(conn: aiomysql.Connection, sql: str, params: list | None, *, fetch: bool):
+    async with conn.cursor() as cur:
+        # Pass None (not []) when there are no params so aiomysql skips
+        # %-substitution — otherwise a literal % in the SQL (LIKE, DATE_FORMAT)
+        # raises "not enough arguments for format string".
+        await cur.execute(sql, params if params else None)
+        if fetch:
             return await cur.fetchall()
+        return cur.rowcount
+
+
+async def query(sql: str, params: list | None = None) -> list[dict]:
+    conn = _conn_ctx.get()
+    if conn is not None:
+        return await _run_on(conn, sql, params, fetch=True)
+    pool = await _get_pool()
+    async with pool.acquire() as acquired:
+        return await _run_on(acquired, sql, params, fetch=True)
 
 
 async def execute(sql: str, params: list | None = None) -> int:
+    conn = _conn_ctx.get()
+    if conn is not None:
+        return await _run_on(conn, sql, params, fetch=False)
+    pool = await _get_pool()
+    async with pool.acquire() as acquired:
+        return await _run_on(acquired, sql, params, fetch=False)
+
+
+@asynccontextmanager
+async def transaction():
+    """Run query and execute on one connection inside an explicit transaction.
+
+    The pool uses autocommit, so a multi-statement write has to begin and
+    commit itself. A failure rolls the connection back before the error
+    propagates.
+    """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(sql, params if params else None)
-            return cur.rowcount
+        await conn.begin()
+        token = _conn_ctx.set(conn)
+        try:
+            yield conn
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+        finally:
+            _conn_ctx.reset(token)
 
 
 def _in_clause(values: list) -> tuple[str, list]:

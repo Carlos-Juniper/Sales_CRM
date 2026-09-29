@@ -281,3 +281,18 @@ def db():
          patch("api.estimating._sync_status_bg", new_callable=AsyncMock):
         yield fake
 
+
+@pytest.fixture(autouse=True)
+def _stub_won_lost_commissions(monkeypatch):
+    """Won and lost commission writes are covered in test_commission_creation.
+
+    HTTP suites that import the estimating routes must not open a real
+    commission transaction when a test PATCHes an estimate to won or lost.
+    """
+    import sys
+
+    if "api.estimating" not in sys.modules:
+        return
+    monkeypatch.setattr("api.estimating.create_on_won", AsyncMock())
+    monkeypatch.setattr("api.estimating.cancel_for_estimate", AsyncMock())
+

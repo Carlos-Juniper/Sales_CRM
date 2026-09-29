@@ -1,8 +1,9 @@
 /**
  * Commission display helpers.
- * Currency formatting uses formatCents from the estimating module.
+ *
+ * For currency formatting, import formatCents from @/lib/money.
  */
-import { formatCents } from '@/lib/estimating/maintenance'
+import { formatCents } from '@/lib/money'
 
 /** Shown when a payout amount is still unknown. Never a guessed value. */
 export const PENDING_BILLING_DATA_LABEL = 'Pending billing data'

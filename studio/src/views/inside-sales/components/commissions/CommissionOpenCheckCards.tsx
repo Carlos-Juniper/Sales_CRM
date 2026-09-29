@@ -1,4 +1,4 @@
-import { formatCents } from '@/lib/estimating/maintenance'
+import { formatCents } from '@/lib/money'
 import { formatPayoutDate } from '@/lib/commissions'
 import type { CommissionNextPayout } from '@/types/commissions'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'

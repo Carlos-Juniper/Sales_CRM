@@ -13,7 +13,7 @@ import {
 } from '@/hooks/useCommissions'
 import { useRole } from '@/hooks/useRole'
 import { useAuthStore } from '@/store/authStore'
-import { formatCents } from '@/lib/estimating/maintenance'
+import { formatCents } from '@/lib/money'
 import {
   closedCommissionLabel,
   formatPayoutDate,

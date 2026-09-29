@@ -1,7 +1,7 @@
 import { CalendarClock } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/shared/LoadingSkeleton'
-import { formatCents } from '@/lib/estimating/maintenance'
+import { formatCents } from '@/lib/money'
 import { formatCloseQuarter } from '@/lib/commissions'
 import type { CommissionPayoutSchedule } from '@/types/commissions'
 import { InstallmentStatusBadge } from './InstallmentStatusBadge'

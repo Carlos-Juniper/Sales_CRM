@@ -2548,6 +2548,11 @@
   margin-bottom: 0.05in;
 }
 
+/* Services table only. The other .contract-tbl tables keep auto layout. */
+.proposal-root .services-tbl {
+  table-layout: fixed;
+}
+
 .proposal-root .contract-tbl th {
   background: var(--jn-green);
   color: #fff;

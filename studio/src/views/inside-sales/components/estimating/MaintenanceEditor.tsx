@@ -27,6 +27,7 @@ import { ApiError } from '@/api/client'
 import type { EstimateLifecycle, MaintenanceEstimate, SectionService } from '@/types/estimating'
 import { LostTransition } from './LostTransition'
 import { acresFromSqft, contractTotal, tierForValue } from '@/lib/estimating/calc'
+import { formatCents } from '@/lib/money'
 import { formatOptionalBudget } from '@/lib/estimating/contractBudgets'
 import { tiersForType } from '@/lib/estimating/config'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
@@ -34,7 +35,6 @@ import {
   buildDefaultSection,
   catalogToService,
   duplicateSection,
-  formatCents,
   maintenanceRowsFromServiceKits,
   removeSection,
   unresolvedProductionRateLabels,

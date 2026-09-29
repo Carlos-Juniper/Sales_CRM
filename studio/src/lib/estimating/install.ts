@@ -307,11 +307,3 @@ export function coerceNum(raw: string): number {
 export function formatGmPct(gm: number): string {
   return `${(gm * 100).toFixed(2)}%`
 }
-
-/** Exact dollars from integer cents: 5_342_000 → "$53,420.00". */
-export function formatCents(cents: number): string {
-  return `$${(cents / 100).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`
-}

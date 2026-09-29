@@ -25,6 +25,7 @@ import {
   useCreateBeamDraft,
   useGenerateBeamTakeoff,
 } from '@/hooks/useBeamTakeoff'
+import { formatCents } from '@/lib/money'
 import { useToast } from './useToast'
 
 const STATUS_LABEL: Record<BeamRequest['status'], string> = {
@@ -40,7 +41,7 @@ const STATUS_LABEL: Record<BeamRequest['status'], string> = {
 
 function formatCost(cents: number | null): string {
   if (cents === null) return 'cost unavailable'
-  return `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return formatCents(cents)
 }
 
 function formatEta(seconds: number | null): string | null {

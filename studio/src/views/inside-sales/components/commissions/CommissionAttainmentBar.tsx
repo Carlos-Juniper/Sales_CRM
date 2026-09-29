@@ -1,4 +1,4 @@
-import { formatCents } from '@/lib/estimating/maintenance'
+import { formatCents } from '@/lib/money'
 
 interface CommissionAttainmentBarProps {
   label: string

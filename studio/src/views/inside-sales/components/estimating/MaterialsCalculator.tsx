@@ -19,6 +19,7 @@
 
 import { useState, useMemo } from 'react'
 import { Info } from 'lucide-react'
+import { formatCents } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { buildMaterialCalc } from '@/lib/estimating/config'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
@@ -39,10 +40,6 @@ const BLUE_INPUT =
 /** Computed qty display — brand-green highlight per spec. */
 const QTY_CELL =
   'rounded-lg bg-[#d1fae5] border border-[#6ee7b7] px-3 py-2 text-center'
-
-function formatCents(cents: number): string {
-  return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
-}
 
 function gmLabel(gm: number, bands: MarginBands): string {
   const band = marginBand(gm, bands)

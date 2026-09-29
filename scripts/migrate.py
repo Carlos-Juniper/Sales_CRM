@@ -1104,6 +1104,16 @@ def detect_070(conn) -> bool:
     )
 
 
+def detect_071(conn) -> bool:
+    """071 applied ↔ both item class tables, the code key, and the group FK exist."""
+    return (
+        table_exists(conn, "item_class_groups")
+        and table_exists(conn, "item_classes")
+        and index_exists(conn, "item_classes", "uq_item_classes_code")
+        and foreign_key_exists(conn, "item_classes", "fk_item_classes_group")
+    )
+
+
 def detect_068(conn) -> bool:
     """068 applied ↔ admin and vp_sales have an unbounded approval tier.
 
@@ -1225,6 +1235,7 @@ _DETECT: dict = {
     "068_admin_equivalent_approval_tiers":        detect_068,
     "069_service_kits":                           detect_069,
     "070_materials_catalog":                      detect_070,
+    "071_item_classes":                           detect_071,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

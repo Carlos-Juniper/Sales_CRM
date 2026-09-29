@@ -1821,13 +1821,6 @@ async def issue_render_token(
     return {"token": token}
 
 
-def _avatar_initials(name: str) -> str:
-    """First letter of the first two words, uppercased (crm_users caps at 5)."""
-    parts = [p for p in name.split() if p]
-    initials = "".join(p[0] for p in parts[:2]).upper()
-    return initials[:5]
-
-
 class EntraCallbackBody(BaseModel):
     id_token: str
 

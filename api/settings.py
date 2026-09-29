@@ -40,12 +40,16 @@ log = logging.getLogger(__name__)
 from fastapi import Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from db import execute, query
+import pymysql
+from pymysql.constants import ER
+
+from db import execute, query, transaction
 from api.maintenance_pricing import reprice_open_drafts
 import api.attachments as _att_mod
 from api import authz
 from api import aspire_sync
 from api import graph
+from api.avatar import avatar_initials
 from api._serialize import coerce_row
 
 
@@ -1233,13 +1237,18 @@ def register(app, require_auth) -> None:
         `outside_sales` are rejected (400). maintenance_sales and
         install_sales trigger the aspire_rep_id hard-block; other roles save
         with no Aspire link and no warning. The authorize and any branch
-        set are audited.
+        set are audited. An email that is already a user is 409; a branch id
+        with no branches row is 422. The user, audit and branch rows are one
+        transaction.
         """
         await _require_admin(user)
 
         role = authz.ensure_assignable_role(body.role)
 
         email = body.email.strip().lower()
+        duplicate_detail = f"A user with email {email} already exists."
+        if await query("SELECT id FROM users WHERE LOWER(email) = %s LIMIT 1", [email]):
+            raise HTTPException(status_code=409, detail=duplicate_detail)
 
         # Hard-block field sales without a resolvable Aspire contact BEFORE any write.
         aspire_rep_id: Optional[int] = None
@@ -1247,23 +1256,41 @@ def register(app, require_auth) -> None:
             aspire_rep_id = await _require_resolved_sales_rep(email, None)
 
         user_id = str(uuid.uuid4())
-        await execute(
-            """INSERT INTO users (id, email, name, role, active, aspire_rep_id)
-                 VALUES (%s, %s, %s, %s, 1, %s)""",
-            [user_id, email, body.name, role, aspire_rep_id],
-        )
-
         actor = _actor(user)
-        await _audit(
-            scope_type="company",
-            scope_id=None,
-            setting_key=f"user.{user_id}.authorize",
-            from_value=None,
-            to_value=email,
-            actor=actor,
-        )
-        if body.branches is not None:
-            await _replace_user_branches(user_id, body.branches, actor)
+        # The user row, its audit row and its branches land together or not at all.
+        async with transaction():
+            try:
+                await execute(
+                    """INSERT INTO users (id, email, name, role, active, aspire_rep_id, avatar_initials)
+                         VALUES (%s, %s, %s, %s, 1, %s, %s)""",
+                    [user_id, email, body.name, role, aspire_rep_id,
+                     avatar_initials(body.name, email)],
+                )
+            except pymysql.err.IntegrityError as exc:
+                # A concurrent authorize of the same email won the race.
+                if exc.args[0] == ER.DUP_ENTRY:
+                    raise HTTPException(status_code=409, detail=duplicate_detail) from exc
+                raise
+
+            await _audit(
+                scope_type="company",
+                scope_id=None,
+                setting_key=f"user.{user_id}.authorize",
+                from_value=None,
+                to_value=email,
+                actor=actor,
+            )
+            if body.branches is not None:
+                try:
+                    await _replace_user_branches(user_id, body.branches, actor)
+                except pymysql.err.IntegrityError as exc:
+                    # fk_user_branches_branch: a branch id with no branches row.
+                    if exc.args[0] == ER.NO_REFERENCED_ROW_2:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"One or more branch ids in {body.branches} do not exist.",
+                        ) from exc
+                    raise
 
         return {
             "id": user_id,

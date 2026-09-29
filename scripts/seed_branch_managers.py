@@ -3,8 +3,8 @@ Seed branch managers into `users` (role='manager'), from a Word-doc roster of
 full name / email / branch city supplied by Carlos.
 
 Follows the same shape as api/settings.py's authorize_user endpoint:
-  INSERT INTO users (id, email, name, role, active, aspire_rep_id)
-  VALUES (uuid, lower(email), name, 'manager', 1, NULL)
+  INSERT INTO users (id, email, name, role, active, aspire_rep_id, avatar_initials)
+  VALUES (uuid, lower(email), name, 'manager', 1, NULL, initials)
 then a user_branches row per (user_id, aspire_branch_id) — NOT users.branch_id,
 which the authorize flow no longer writes (branch scoping is user_branches-only,
 see api/authz.py).
@@ -40,6 +40,11 @@ if env_file.exists():
 
 import pymysql  # noqa: E402 (after env load)
 
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from api.avatar import avatar_initials  # noqa: E402
+
 DB_CFG = dict(
     host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
     port=int(os.environ.get("MYSQL_PORT", 3306)),
@@ -69,11 +74,6 @@ ROSTER = [
 ]
 
 ROLE = "manager"
-
-
-def avatar_initials(name: str) -> str:
-    parts = name.split()
-    return (parts[0][0] + parts[-1][0]).upper() if len(parts) > 1 else parts[0][:2].upper()
 
 
 def find_branch_candidates(cur, city_label: str) -> list[dict]:
@@ -163,7 +163,7 @@ def apply_plan(conn, cur, rows: list[dict]) -> None:
         cur.execute(
             """INSERT INTO users (id, email, name, role, active, aspire_rep_id, avatar_initials)
                  VALUES (%s, %s, %s, %s, 1, NULL, %s)""",
-            (user_id, email, r["name"], ROLE, avatar_initials(r["name"])),
+            (user_id, email, r["name"], ROLE, avatar_initials(r["name"], email)),
         )
         branch_ids = [b["aspire_branch_id"] for b in r["branches"]]
         for branch_id in branch_ids:

@@ -146,7 +146,7 @@ export default function CalendarPage() {
         )}
 
         {showGrid && (
-          <div className="h-full p-4">
+          <div className="h-full p-4 max-md:p-2">
             <CalendarGrid
               events={activeEvents}
               view={view}
@@ -179,7 +179,7 @@ export default function CalendarPage() {
 
 function CalendarLoadingSkeleton() {
   return (
-    <div className="absolute inset-0 p-4 space-y-2" aria-label="Loading calendar">
+    <div className="absolute inset-0 p-4 space-y-2 max-md:p-2" aria-label="Loading calendar">
       <div className="flex gap-2">
         {Array.from({ length: 7 }).map((_, i) => (
           <Skeleton key={i} className="flex-1 h-8 rounded" />

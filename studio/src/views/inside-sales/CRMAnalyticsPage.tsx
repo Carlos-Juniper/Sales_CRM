@@ -82,9 +82,9 @@ export default function CRMAnalyticsPage() {
       <TopNav title="CRM Analytics" />
 
       <ScrollArea className="flex-1">
-        <div className="p-5 space-y-5">
+        <div className="p-5 space-y-5 max-md:p-3">
 
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start justify-between gap-4 max-md:flex-col max-md:gap-3">
             <div>
               <h1 className="text-2xl font-semibold text-[hsl(var(--fg))]">
                 {selectedCrm?.name || 'CRM'} Performance
@@ -95,7 +95,7 @@ export default function CRMAnalyticsPage() {
             </div>
 
             {showCrmSelector && crmUsers.length > 0 && (
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 flex-shrink-0 max-md:w-full">
                 <label className="text-sm font-medium text-[hsl(var(--muted-fg))]">
                   View CRM:
                 </label>
@@ -119,7 +119,7 @@ export default function CRMAnalyticsPage() {
           </div>
 
           {isLoading ? (
-            <div className="flex gap-3">
+            <div className="flex gap-3 max-md:grid max-md:grid-cols-2 max-md:gap-2">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Card key={i} className="flex-1">
                   <CardContent className="pt-4 pb-5">
@@ -129,7 +129,7 @@ export default function CRMAnalyticsPage() {
               ))}
             </div>
           ) : analytics ? (
-            <div className="flex gap-3">
+            <div className="flex gap-3 max-md:grid max-md:grid-cols-2 max-md:gap-2">
               <StatCard
                 label="Win Rate"
                 dotColor="bg-green-500"
@@ -158,7 +158,7 @@ export default function CRMAnalyticsPage() {
             </div>
           ) : null}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 max-md:gap-3">
             <div className="lg:col-span-1">
               <CrmPipelineAnalyticsCard analytics={analytics} isLoading={isLoading} />
             </div>

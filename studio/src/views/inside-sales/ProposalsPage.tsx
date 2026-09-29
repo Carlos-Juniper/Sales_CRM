@@ -103,7 +103,7 @@ export default function ProposalsPage() {
       />
 
       <ScrollArea className="flex-1">
-        <div className="p-5">
+        <div className="p-5 max-md:p-3">
           <PageHeader
             title="Proposal Packages"
             description="Saved proposal packages, each linked to its lead."
@@ -138,7 +138,7 @@ export default function ProposalsPage() {
 
           <div className="border border-[hsl(var(--border))] rounded-lg overflow-hidden bg-[hsl(var(--card))]">
             {isLoading && (
-              <div className="p-4 space-y-3">
+              <div className="p-4 space-y-3 max-md:p-3">
                 {Array.from({ length: 5 }).map((_, i) => (
                   <Skeleton key={i} className="h-16 w-full" />
                 ))}
@@ -178,7 +178,7 @@ export default function ProposalsPage() {
                   data-testid="proposal-row"
                   onClick={() => openLead(pkg.leadId)}
                   className={cn(
-                    'flex w-full items-start gap-4 border-b border-[hsl(var(--border))] px-4 py-3.5 text-left last:border-0 transition-colors',
+                    'flex w-full items-start gap-4 border-b border-[hsl(var(--border))] px-4 py-3.5 text-left last:border-0 transition-colors max-md:px-3',
                     'hover:bg-[hsl(var(--muted))]',
                     selected && 'bg-[#2E7D52]/5',
                   )}

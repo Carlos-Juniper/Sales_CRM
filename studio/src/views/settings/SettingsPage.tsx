@@ -80,9 +80,9 @@ export function SettingsPage() {
   }
 
   return (
-    <div data-testid="settings-shell" className="flex h-full">
+    <div data-testid="settings-shell" className="flex h-full max-md:flex-col">
       {/* Section nav */}
-      <nav className="w-56 flex-shrink-0 border-r border-[var(--border)] overflow-y-auto p-3 space-y-4">
+      <nav className="w-56 flex-shrink-0 border-r border-[var(--border)] overflow-y-auto p-3 space-y-4 max-md:w-full max-md:border-b max-md:border-r-0 max-md:max-h-[35vh]">
         {visibleGroups.map((group) => (
           <SectionGroupNav
             key={group.id}
@@ -94,7 +94,7 @@ export function SettingsPage() {
       </nav>
 
       {/* Section content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6 max-md:p-3">
         {showBranchPicker && (
           <div className="mb-4">
             <label className="block text-xs font-medium text-[var(--fg)] opacity-70 mb-1">

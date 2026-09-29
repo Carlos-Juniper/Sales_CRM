@@ -202,23 +202,23 @@ export default function SalesPerformancePage() {
       <TopNav title="Sales Performance" />
 
       <ScrollArea className="flex-1">
-        <div className="p-5 space-y-5">
+        <div className="p-5 space-y-5 max-md:p-3">
 
           {/* ── Filter bar ─────────────────────────────────────────────── */}
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap max-md:gap-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[hsl(var(--muted-fg))]" />
               <Input
                 placeholder="Search deals..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="pl-8 h-9 w-[200px] text-sm"
+                className="pl-8 h-9 w-[200px] text-sm max-md:w-full"
               />
             </div>
 
             {canViewRepSelector && reps && reps.length > 0 && (
               <Select value={selectedUserId ?? 'all'} onValueChange={v => setSelectedUserId(v === 'all' ? undefined : v)}>
-                <SelectTrigger className="w-[160px]">
+                <SelectTrigger className="w-[160px] max-md:flex-1">
                   <SelectValue placeholder="All Reps" />
                 </SelectTrigger>
                 <SelectContent>
@@ -231,7 +231,7 @@ export default function SalesPerformancePage() {
             )}
 
             <Select value={period} onValueChange={v => setPeriod(v as Period)}>
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-[150px] max-md:flex-1">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -259,7 +259,7 @@ export default function SalesPerformancePage() {
           </div>
 
           {/* ── KPI cards ─────────────────────────────────────────────── */}
-          <div className="flex gap-3 flex-wrap">
+          <div className="flex gap-3 flex-wrap max-md:grid max-md:grid-cols-2 max-md:gap-2">
             {summaryLoading ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <Skeleton key={i} className="h-24 flex-1 min-w-[120px]" />
@@ -362,7 +362,7 @@ export default function SalesPerformancePage() {
           )}
 
           {/* ── Won + Lost deal lists ──────────────────────────────────── */}
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 max-md:gap-3">
 
             {/* Won Deals */}
             <Card>

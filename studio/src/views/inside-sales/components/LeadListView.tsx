@@ -61,7 +61,7 @@ export function LeadListView({
         <LeadFilters />
 
         {/* Sort controls */}
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] flex-shrink-0">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] flex-shrink-0 max-md:px-3">
           <span className="text-xs text-[hsl(var(--muted-fg))] mr-1">Sort:</span>
           {SORT_OPTIONS.map(({ field, label }) => (
             <button
@@ -94,7 +94,7 @@ export function LeadListView({
 
         {/* Lead list */}
         <ScrollArea className="flex-1">
-          <div className="p-4 grid gap-3 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
+          <div className="p-4 grid gap-3 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 max-md:p-3">
             {isLoading && Array.from({ length: 6 }).map((_, i) => <LeadCardSkeleton key={i} />)}
 
             {isError && (

@@ -84,12 +84,12 @@ export default function CommissionsPage() {
       <TopNav title="Commissions" />
 
       <ScrollArea className="flex-1">
-        <div className="p-5 space-y-5">
+        <div className="p-5 space-y-5 max-md:p-3">
 
           {/* Header with rep selector + period dropdown */}
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start justify-between gap-4 max-md:flex-col max-md:gap-3">
             <div>
-              <h1 className="text-2xl font-semibold text-[hsl(var(--fg))]">
+              <h1 className="text-2xl font-semibold text-[hsl(var(--fg))] max-md:text-xl">
                 {canViewRepSelector && selectedRep
                   ? `${selectedRep.name}'s Commissions`
                   : 'Your Commissions'}
@@ -99,10 +99,10 @@ export default function CommissionsPage() {
               </p>
             </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-shrink-0 max-md:w-full">
               {canViewRepSelector && reps && reps.length > 0 && (
                 <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                  <SelectTrigger className="w-[200px]">
+                  <SelectTrigger className="w-[200px] max-md:flex-1">
                     <SelectValue placeholder="All Reps" />
                   </SelectTrigger>
                   <SelectContent>
@@ -116,7 +116,7 @@ export default function CommissionsPage() {
               )}
 
               <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
-                <SelectTrigger className="w-[160px]">
+                <SelectTrigger className="w-[160px] max-md:flex-1">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -153,7 +153,7 @@ export default function CommissionsPage() {
           )}
 
           {/* KPI Cards */}
-          <div className="flex gap-4 flex-wrap">
+          <div className="flex gap-4 flex-wrap max-md:grid max-md:grid-cols-2 max-md:gap-2">
             {summaryLoading ? (
               <>
                 <Skeleton className="h-28 flex-1 min-w-[140px]" />
@@ -171,6 +171,7 @@ export default function CommissionsPage() {
                   value={formatCents(summary?.paid_ytd_cents ?? 0)}
                   dotColor="bg-green-500"
                 />
+                <div className="max-md:col-span-2" />
               </>
             )}
             {commissionsLoading ? (

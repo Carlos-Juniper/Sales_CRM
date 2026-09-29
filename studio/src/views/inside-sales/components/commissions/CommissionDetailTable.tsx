@@ -82,14 +82,14 @@ export function CommissionDetailTable({
   return (
     <div>
       {/* Filters */}
-      <div className="flex gap-3 px-4 py-3 border-b bg-[hsl(var(--muted))]">
+      <div className="flex gap-3 px-4 py-3 border-b bg-[hsl(var(--muted))] max-md:flex-col max-md:gap-2 max-md:px-3">
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[hsl(var(--muted-fg))]" />
           <Input
             placeholder="Search by property..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 h-9 w-[220px] text-sm"
+            className="pl-8 h-9 w-[220px] text-sm max-md:w-full"
           />
         </div>
 
@@ -99,7 +99,7 @@ export function CommissionDetailTable({
             onFiltersChange({ ...filters, status: value === 'all' ? undefined : value as Commission['status'] })
           }
         >
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-[180px] max-md:w-full">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
@@ -119,7 +119,7 @@ export function CommissionDetailTable({
             })
           }
         >
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-[180px] max-md:w-full">
             <SelectValue placeholder="Type" />
           </SelectTrigger>
           <SelectContent>

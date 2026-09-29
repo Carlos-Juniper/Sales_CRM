@@ -4,7 +4,7 @@
 import { Link } from 'react-router-dom'
 import { Settings2, TriangleAlert } from 'lucide-react'
 import type { CrewRateSource } from '@/hooks/useResolvedCrewRate'
-import { formatCents } from '@/lib/estimating/maintenance'
+import { formatCents } from '@/lib/money'
 
 /**
  * Settings → Branch → Crew rate.

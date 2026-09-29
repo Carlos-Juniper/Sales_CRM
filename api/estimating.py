@@ -1892,9 +1892,12 @@ def register(app, require_auth) -> None:
         _require_due_back_not_past(body.get("dueBackDate"))
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
+            # Read the branch crew rate only when there are lines to price.
+            # An empty create has nothing to price and issues no extra query.
+            create_lines = annotate_maintenance_sections(body.get("sections"))
             await _require_resolvable_maintenance_lines(
-                annotate_maintenance_sections(body.get("sections")),
-                await _live_branch_crew_rate(aspire_branch_id),
+                create_lines,
+                await _live_branch_crew_rate(aspire_branch_id) if create_lines else None,
             )
         # Budgets are optional. Resolve before the INSERT so a 400 persists
         # nothing, and so a blank string is NULL rather than 0. These dollars

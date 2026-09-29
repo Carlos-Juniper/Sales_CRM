@@ -29,15 +29,12 @@ import {
   resolveOccurrenceHours,
   serviceGroupMargins,
 } from '@/lib/estimating/margins'
-// Slice 11b: the crew-rate constant now lives in the pricing module
-// (maintenance.ts), NOT margins.ts — margins.ts no longer owns a silent
-// margin default. Callers must pass an explicit resolved rate.
-import { MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR } from '@/lib/estimating/maintenance'
 import type { ServiceKit } from '@/types/estimating'
 
-// The rate the panel resolves and threads in; these lib tests pass it
-// explicitly (there is no default anymore).
-const RATE = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR
+// Callers pass an explicit resolved crew rate. 18_000¢ ($180/hr) is the
+// migration 020 seed for operating branches — a fixture number, not a default
+// the pricing code may fall back to.
+const RATE = 18_000
 
 const maint = buildMaintenanceEstimate()
 const install = buildInstallEstimate()
@@ -63,7 +60,7 @@ describe('maintenance cost basis (hours-driven)', () => {
     const mowing = s1.services[0] // 1.6 h, 42/yr, +10%
     const expectedHours = 1.6 * 42 * 1.1 // 73.92 h/yr
     expect(maintenanceLineCost(s1, mowing, [], RATE)).toBe(
-      Math.round(expectedHours * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+      Math.round(expectedHours * RATE),
     )
   })
 
@@ -73,7 +70,7 @@ describe('maintenance cost basis (hours-driven)', () => {
     // hours/occurrence = 120,000 / 60,000 = 2 h → 2 × 42 × 1.1 = 92.4 h/yr
     expect(resolveOccurrenceHours(s1, noHours, [MOWING_KIT])).toBeCloseTo(2, 10)
     expect(maintenanceLineCost(s1, noHours, [MOWING_KIT], RATE)).toBe(
-      Math.round(2 * 42 * 1.1 * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+      Math.round(2 * 42 * 1.1 * RATE),
     )
   })
 
@@ -138,8 +135,7 @@ describe('serviceGroupMargins — pivot by service across sections', () => {
     expect(mowing.priceCents).toBe(2_494_800 + 978_075)
     // Hours: 73.92 + 0.7×42×1.15 = 107.73 h/yr × rate
     expect(mowing.costCents).toBe(
-      Math.round(1.6 * 42 * 1.1 * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR) +
-        Math.round(0.7 * 42 * 1.15 * MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+      Math.round(1.6 * 42 * 1.1 * RATE) + Math.round(0.7 * 42 * 1.15 * RATE),
     )
     expect(mowing.marginPct).toBeCloseTo(groupMargin(mowing.priceCents, mowing.costCents), 10)
   })

@@ -197,11 +197,12 @@ class TestBranchSettingsScope:
         assert r.status_code == 403
         mock_exec.assert_not_awaited()
 
+    @patch("api.settings.reprice_open_drafts", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
     async def test_manager_in_scope_branch_200_and_audits(
-        self, mock_query, mock_exec, mock_authz_query, as_role
+        self, mock_query, mock_exec, mock_authz_query, mock_reprice, as_role
     ):
         as_role("manager")
         mock_authz_query.return_value = [{"aspire_branch_id": 1403}]
@@ -233,6 +234,7 @@ class TestBranchSettingsScope:
         assert "branch" in flat
         assert "1403" in flat  # scope_id
         assert "18000" in flat and "20000" in flat  # from → to
+        mock_reprice.assert_awaited_once_with(1403, 18000, 20000)
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
@@ -251,11 +253,12 @@ class TestBranchSettingsScope:
         assert r.status_code == 403
         mock_exec.assert_not_awaited()
 
+    @patch("api.settings.reprice_open_drafts", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.execute", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
     async def test_admin_patches_any_branch_200(
-        self, mock_query, mock_exec, mock_authz_query, as_role
+        self, mock_query, mock_exec, mock_authz_query, mock_reprice, as_role
     ):
         as_role("admin")
         # admin → resolve_branch_scope returns kind='all' without touching
@@ -277,6 +280,7 @@ class TestBranchSettingsScope:
             c for c in mock_exec.await_args_list if "branch_settings" in c.args[0]
         ]
         assert len(bs_updates) == 1
+        mock_reprice.assert_awaited_once_with(3696, 18000, 21000)
 
 
 # ── Slice 9: manageable-branches list (GET /api/settings/branches) ────────────

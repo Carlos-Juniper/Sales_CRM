@@ -14,13 +14,11 @@
 // ---------------------------------------------------------------------------
 
 import type { CSSProperties } from 'react'
-import { Link } from 'react-router-dom'
 import './MarginAnalysis.css'
 import {
   BarChart2,
   CheckCircle2,
   Info,
-  Settings2,
   TrendingDown,
   TrendingUp,
   TriangleAlert,
@@ -44,6 +42,7 @@ import {
   serviceGroupMargins,
 } from '@/lib/estimating/margins'
 import { useEstimatingShell } from './useEstimatingShell'
+import { CrewRateProvenance, NoCrewRateState } from './CrewRateNotice'
 import { cn } from '@/lib/utils'
 
 // ----- Band + palette metadata (display only; thresholds live in config) -----
@@ -198,49 +197,6 @@ const VERDICT_SUB: Record<BenchmarkStatus, (perAcre: string, band: string) => st
 
 // ----- Main component ---------------------------------------------------------------
 
-/**
- * Loud no-crew-rate state (§2.3). Maintenance margin is hours × loaded crew
- * rate — with no rate there is NO defensible margin number, so the panel
- * REFUSES to show one and points the manager at the branch crew-rate setting.
- * A silent 18_000 fallback would hand an approver a confidently-wrong margin.
- */
-function NoCrewRateState({
-  branchCity,
-  aspireBranchId,
-}: {
-  branchCity: string | null
-  aspireBranchId: number | null
-}) {
-  const cityLabel = branchCity ?? 'this branch'
-  return (
-    <div className="flex flex-col gap-4 pb-6">
-      <div
-        data-testid="margin-no-crew-rate"
-        className="flex flex-col items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-10 text-center dark:border-amber-700/60 dark:bg-amber-950/30"
-      >
-        <TriangleAlert className="h-8 w-8 text-amber-600 dark:text-amber-400" />
-        <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-          No crew rate configured for {cityLabel}
-        </p>
-        <p className="max-w-md text-xs text-amber-700 dark:text-amber-400">
-          Maintenance margin is priced from the loaded crew rate (hours × rate). Without it, this
-          panel will not show a margin — a wrong number is worse than none before an approval.
-        </p>
-        {aspireBranchId !== null ? (
-          <Link
-            data-testid="crew-rate-settings-link"
-            to={`/settings/branch/${aspireBranchId}/crew-rate`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-amber-400 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:bg-transparent dark:text-amber-300"
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            Set the crew rate for {cityLabel}
-          </Link>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
 export function MarginAnalysis() {
   const { openEstimate } = useEstimatingShell()
   // The ONE canonical band set — API-fetched; literal = fallback.
@@ -314,15 +270,11 @@ export function MarginAnalysis() {
           The frozen snapshot (review+) vs the live branch rate is shown so the
           approver knows exactly what number priced this margin (§2.6). */}
       {isMaintenance ? (
-        <p
-          data-testid="crew-rate-provenance"
-          data-source={crew.source}
-          className="text-[11px] text-[hsl(var(--muted-fg))]"
-        >
-          Priced at {formatCents(crewRateCents)}/hr loaded crew rate
-          {estimate.branchCity ? ` — ${estimate.branchCity}` : ''}
-          {crew.source === 'snapshot' ? ' (frozen at submission)' : ''}
-        </p>
+        <CrewRateProvenance
+          crewRateCents={crewRateCents}
+          source={crew.source}
+          branchCity={estimate.branchCity}
+        />
       ) : null}
 
       {/* §2.6 hand-back rate-change notice — maintenance in_progress only.

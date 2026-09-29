@@ -22,7 +22,6 @@ import {
   assertCanEdit,
   estimatingRolesForUser,
   canUserEditField,
-  MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
   lineCentsPerSqft,
   maintenanceRowsFromServiceKits,
   sellRateCentsPer1000Sf,
@@ -90,8 +89,8 @@ describe('section operations', () => {
     expect(svc.sortOrder).toBe(3)
   })
 
-  it('buildDefaultSection seeds the catalog defaults', () => {
-    const sec = buildDefaultSection('est-1', 2)
+  it('buildDefaultSection seeds the catalog it is given', () => {
+    const sec = buildDefaultSection('est-1', 2, MAINTENANCE_SERVICE_CATALOG)
     expect(sec.estimateId).toBe('est-1')
     expect(sec.name).toBe('New region')
     expect(sec.sortOrder).toBe(2)
@@ -99,6 +98,11 @@ describe('section operations', () => {
     expect(sec.services.map((s) => s.sectionId)).toEqual(
       sec.services.map(() => sec.id),
     )
+  })
+
+  it('buildDefaultSection does not seed offline catalog prices', () => {
+    const sec = buildDefaultSection('est-1', 0)
+    expect(sec.services).toEqual([])
   })
 
   it('duplicateSection deep-clones, appends " (copy)", inserts after source', () => {
@@ -220,8 +224,9 @@ describe('display reads', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The editor reads kits from GET /service-kits; the literal is
-// only the offline fallback. Plus the client half of the save guard.
+// The editor reads kits from GET /service-kits. An empty catalog does not
+// fall back to MAINTENANCE_SERVICE_CATALOG prices. Plus the client half of
+// the save guard.
 // ---------------------------------------------------------------------------
 
 const kit = (over: Partial<ServiceKit> & Pick<ServiceKit, 'id' | 'description'>): ServiceKit => ({
@@ -239,13 +244,23 @@ const kit = (over: Partial<ServiceKit> & Pick<ServiceKit, 'id' | 'description'>)
 
 describe('maintenanceRowsFromServiceKits (API catalog adapter)', () => {
   const rated = kit({ id: 'kit-1', description: 'Standard Production Mowing', productionRate: 67650 })
+  const branchRate = 22_500
 
-  it('falls back to the literal when the API returned no usable kits', () => {
-    expect(maintenanceRowsFromServiceKits([])).toBe(MAINTENANCE_SERVICE_CATALOG)
+  it('does not fall back to the literal catalog when the API returned no usable kits', () => {
+    expect(maintenanceRowsFromServiceKits([], branchRate)).toEqual([])
+    expect(maintenanceRowsFromServiceKits([], null)).toEqual([])
+  })
+
+  it('keeps a catalog price when there is no crew rate and omits a derived price', () => {
+    const derived = kit({ id: 'kit-derived', description: 'Derived Mowing', productionRate: 67650, unitSellCents: 0 })
+    const priced = kit({ id: 'kit-priced', description: 'Catalog Fertilizer', productionRate: 5000, unitSellCents: 450 })
+    const rows = maintenanceRowsFromServiceKits([derived, priced], null)
+    expect(rows.map((r) => r.key)).toEqual(['kit-priced'])
+    expect(rows[0].rateCentsPer1000Sf).toBe(450)
   })
 
   it('adapts rated sq-ft maintenance kits to editor catalog rows (kit id = key)', () => {
-    const rows = maintenanceRowsFromServiceKits([rated])
+    const rows = maintenanceRowsFromServiceKits([rated], branchRate)
     expect(rows).toHaveLength(1)
     expect(rows[0].key).toBe('kit-1')
     expect(rows[0].label).toBe('Standard Production Mowing')
@@ -260,22 +275,31 @@ describe('maintenanceRowsFromServiceKits (API catalog adapter)', () => {
       kit({ id: 'kit-count', description: 'Tree Rings', productionRate: 10, uom: 'CT' }),
       kit({ id: 'kit-install', description: 'Mulch', productionRate: 5, kitType: 'install_quantity' }),
     ]
-    expect(maintenanceRowsFromServiceKits(items).map((r) => r.key)).toEqual(['kit-1'])
+    expect(maintenanceRowsFromServiceKits(items, branchRate).map((r) => r.key)).toEqual(['kit-1'])
   })
 
-  it('derives the sell rate from the production rate + crew rate + target GM when unit sell is 0', () => {
-    const rows = maintenanceRowsFromServiceKits([rated])
+  it('derives the sell rate from the branch crew rate + target GM when unit sell is 0', () => {
+    const rows = maintenanceRowsFromServiceKits([rated], branchRate)
     expect(rows[0].rateCentsPer1000Sf).toBe(
-      sellRateCentsPer1000Sf(67650, 0.22, MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR),
+      sellRateCentsPer1000Sf(67650, 0.22, branchRate),
     )
+    // $180/hr is not a silent default — a different branch rate prices differently
+    expect(rows[0].rateCentsPer1000Sf).not.toBe(sellRateCentsPer1000Sf(67650, 0.22, 18_000))
     // and an explicit unit sell wins
     const priced = kit({ id: 'kit-2', description: 'Priced', productionRate: 5000, unitSellCents: 450 })
-    expect(maintenanceRowsFromServiceKits([priced])[0].rateCentsPer1000Sf).toBe(450)
+    expect(maintenanceRowsFromServiceKits([priced], branchRate)[0].rateCentsPer1000Sf).toBe(450)
   })
 
   it('sellRateCentsPer1000Sf = (1000 ÷ rate) × crew rate ÷ (1 − GM)', () => {
     // 1000/60000 h × 18,000¢ = 300¢ cost → /0.78 = 385¢
     expect(sellRateCentsPer1000Sf(60_000, 0.22, 18_000)).toBe(385)
+    // Same formula at a branch rate of $225/hr: 375¢ cost → /0.78 = 481¢
+    expect(sellRateCentsPer1000Sf(60_000, 0.22, 22_500)).toBe(481)
+  })
+
+  it('does not export a provisional crew-rate default', async () => {
+    const maintenance = await import('@/lib/estimating/maintenance')
+    expect('MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR' in maintenance).toBe(false)
   })
 })
 

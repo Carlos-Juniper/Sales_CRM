@@ -669,6 +669,21 @@ const allHandlers = [
     ])
   }),
 
+  // GET /api/settings/branch/:id — crew rate the maintenance editor prices from.
+  // Migration 020 seeds 18000 cents/hr for active operating branches and leaves
+  // every other branch without a row (the API then returns null). These ids are
+  // the operating branches the mock picker offers. Tests override with server.use().
+  http.get(`${API}/settings/branch/:id`, ({ params }) => {
+    const aspireBranchId = Number(params.id)
+    const seeded = new Set([1374, 1403, 3579, 3668, 3684, 3688, 3689, 3696])
+    return HttpResponse.json({
+      aspireBranchId,
+      crewRateCentsPerHour: seeded.has(aspireBranchId) ? 18_000 : null,
+      materialFactors: [],
+      productionRates: [],
+    })
+  }),
+
   // ---------------------------------------------------------------------
   // Estimating config read APIs — read-only; the seeded config
   // tables mirrored here. Tests override with server.use() to simulate DB

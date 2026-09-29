@@ -41,6 +41,7 @@ from fastapi import Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from db import execute, query
+from api.maintenance_pricing import reprice_open_drafts
 import api.attachments as _att_mod
 from api import authz
 from api import aspire_sync
@@ -1092,6 +1093,10 @@ def register(app, require_auth) -> None:
                    ON DUPLICATE KEY UPDATE crew_rate_cents_per_hour = VALUES(crew_rate_cents_per_hour)""",
                 [aspire_branch_id, body.crew_rate_cents_per_hour],
             )
+            prior_rate = None if prior is None else int(prior)
+            new_rate = int(body.crew_rate_cents_per_hour)
+            if prior_rate != new_rate:
+                await reprice_open_drafts(aspire_branch_id, prior_rate, new_rate)
             await _audit(
                 scope_type="branch",
                 scope_id=scope_id,

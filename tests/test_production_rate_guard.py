@@ -49,6 +49,12 @@ def db():
     fake = FakeDb()
     for kit in (RATED_KIT, UNRATED_KIT):
         fake.tables["service_kits"][kit["id"]] = dict(kit)
+    # _maintenance_payload prices lines on branch 3689. Seed its crew rate so
+    # the production-rate specs are not rejected by the crew-rate gate.
+    fake.tables["branch_settings"]["3689"] = {
+        "aspire_branch_id": 3689,
+        "crew_rate_cents_per_hour": 18_000,
+    }
     with patch("api.estimating.query", new=AsyncMock(side_effect=fake.query)), \
          patch("api.estimating.execute", new=AsyncMock(side_effect=fake.execute)), \
          patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock), \

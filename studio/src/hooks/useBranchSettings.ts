@@ -6,6 +6,7 @@ import {
 } from '@/api/settings'
 import { estimatingConfigApi } from '@/api/estimating'
 import type { ServiceKit, MaterialCalcRow } from '@/types/estimating'
+import { ESTIMATES_KEY } from '@/hooks/useEstimate'
 import { useUIStore } from '@/store/uiStore'
 
 // Query keys — crew rate and production rates come from the branch settings
@@ -83,7 +84,14 @@ export function useUpdateBranchSettings(aspireBranchId: number | undefined) {
       if (ctx?.previous !== undefined) qc.setQueryData(key, ctx.previous)
       toast('Could not save branch settings', { variant: 'error' })
     },
-    onSuccess: () => toast('Branch settings saved', { variant: 'success' }),
+    onSuccess: (_data, body) => {
+      toast('Branch settings saved', { variant: 'success' })
+      // The same PATCH reprices crew-rate-derived lines on this branch's open
+      // drafts. Refetch estimates so an open editor shows those prices.
+      if (body.crewRateCentsPerHour !== undefined) {
+        qc.invalidateQueries({ queryKey: [ESTIMATES_KEY] })
+      }
+    },
     onSettled: (_data, _err, body) => {
       qc.invalidateQueries({ queryKey: key })
       if (body.productionRates !== undefined)

@@ -10,9 +10,17 @@
 // ---------------------------------------------------------------------------
 
 import { Calculator } from 'lucide-react'
+import type { MaintenanceEstimate } from '@/types/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
 import { MaintenanceEditor } from './MaintenanceEditor'
 import { InstallEditor } from './InstallEditor'
+
+/** Changes when the server rewrites a line's sell, so the editor remounts onto it. */
+function maintenancePriceKey(estimate: MaintenanceEstimate): string {
+  return estimate.sections
+    .map((section) => section.services.map((svc) => `${svc.id}:${svc.unitSellCents ?? ''}`).join(','))
+    .join('|')
+}
 
 /**
  * Mounted by EstimatingPage's `case 'editor':`. Reads the open estimate from
@@ -40,8 +48,14 @@ export function LineItemEditor() {
   // discriminant, never a UI mode.
   switch (openEstimate.estimateType) {
     case 'maintenance':
-      // key: reset draft state when a different estimate is opened.
-      return <MaintenanceEditor key={openEstimate.id} estimate={openEstimate} />
+      // id: a different estimate. price key: the branch crew-rate save
+      // rewrote derived sells, so drop the previous draft and its blocked lines.
+      return (
+        <MaintenanceEditor
+          key={`${openEstimate.id}:${maintenancePriceKey(openEstimate)}`}
+          estimate={openEstimate}
+        />
+      )
     case 'install':
       // key: reset draft state when a different estimate is opened.
       return <InstallEditor key={openEstimate.id} estimate={openEstimate} />

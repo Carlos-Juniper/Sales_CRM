@@ -23,16 +23,18 @@ import {
 } from '@/lib/estimating/calc'
 import {
   COMPLEXITY_OPTIONS,
-  MAINTENANCE_SERVICE_CATALOG,
   type MaintenanceCatalogService,
   coerceQty,
   granularityFor,
   isComplexityOverridden,
   lineCentsPerSqft,
 } from '@/lib/estimating/maintenance'
+import { messageForErrorCode, CREW_RATE_REQUIRED_CODE } from '@/lib/estimating/crewRateError'
 
 /** Blue-cell convention: estimator-editable inputs (legacy Excel language). */
 const BLUE_CELL = 'bg-[#eff6ff] border-[#bfdbfe] focus-visible:ring-[#2E7D52]'
+
+const EMPTY_CATALOG: MaintenanceCatalogService[] = []
 
 const cellInput =
   'h-8 rounded-md border px-2 text-sm text-[hsl(var(--fg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 transition-colors'
@@ -47,9 +49,11 @@ export interface SectionCardProps {
   onRemoveRequest: () => void
   /**
    * The addable-service catalog, sourced from GET /service-kits
-   * by the parent editor. Defaults to the literal (offline fallback).
+   * by the parent editor. Empty until that catalog loads.
    */
   catalog?: MaintenanceCatalogService[]
+  /** Service ids the server refused because their price needs a crew rate. */
+  blockedServiceIds?: ReadonlySet<string>
   /** UI-only kit granularity selections (open item: persist to kit config). */
   granularity: Record<string, string>
   onGranularityChange: (serviceId: string, value: string) => void
@@ -61,12 +65,14 @@ function ServiceRow({
   onServiceChange,
   granularity,
   onGranularityChange,
+  blocked,
 }: {
   section: EstimateSection
   svc: SectionService
   onServiceChange: SectionCardProps['onServiceChange']
   granularity: Record<string, string>
   onGranularityChange: SectionCardProps['onGranularityChange']
+  blocked: boolean
 }) {
   const lineCents = maintServiceLine(
     section.squareFeet,
@@ -83,10 +89,19 @@ function ServiceRow({
   return (
     <div
       data-testid={`service-row-${svc.label}`}
-      className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 px-4 py-2 border-t border-[hsl(var(--border))]"
+      data-crew-rate-blocked={blocked ? 'true' : 'false'}
+      className={cn(
+        'grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 px-4 py-2 border-t border-[hsl(var(--border))]',
+        blocked && 'bg-amber-50',
+      )}
     >
       <div className="min-w-0">
         <p className="text-sm text-[hsl(var(--fg))] truncate">{svc.label}</p>
+        {blocked && (
+          <p data-testid="crew-rate-blocked-line" className="m-0 mt-1 text-[11px] font-medium text-amber-800">
+            {messageForErrorCode(CREW_RATE_REQUIRED_CODE)}
+          </p>
+        )}
         {gran && (
           <label className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[hsl(var(--muted-fg))]">
             {gran.label}
@@ -184,7 +199,8 @@ export function SectionCard({
   onAddLineItem,
   onDuplicate,
   onRemoveRequest,
-  catalog = MAINTENANCE_SERVICE_CATALOG,
+  catalog = EMPTY_CATALOG,
+  blockedServiceIds,
   granularity,
   onGranularityChange,
 }: SectionCardProps) {
@@ -273,6 +289,7 @@ export function SectionCard({
             onServiceChange={onServiceChange}
             granularity={granularity}
             onGranularityChange={onGranularityChange}
+            blocked={blockedServiceIds?.has(svc.id) ?? false}
           />
         ))}
 

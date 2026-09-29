@@ -23,19 +23,6 @@ import type { LegacyUserRole, UserRole } from '@/types'
 import { APPROVER_ROLES, LINE_ITEM_EDIT_ROLES, hasRole, normalizeRole } from '@/lib/roles'
 import { per1000SfRead } from './calc'
 
-/**
- * Loaded crew-hour rate (labor + equipment burden) used to derive a kit's
- * SELL rate from its production rate when the catalog row carries no explicit
- * unit sell, integer cents/hr. PROVISIONAL demo config — TODO(carlos): replace
- * with real branch crew rates (kit production-rate migration) before ship.
- *
- * Slice 11b NOTE: this is a PRICING helper default, NOT a margin source. The
- * Margin Analysis panel must NEVER silently fall back to this value — it
- * resolves the crew rate snapshot→live→null and refuses a number when null
- * (§2.3). Do not reintroduce this as a default in margins.ts.
- */
-export const MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR = 18_000
-
 // ----- Complexity (I-9.7) ----------------------------------------------------
 
 /**
@@ -112,11 +99,16 @@ export const MAINTENANCE_SERVICE_CATALOG: MaintenanceCatalogService[] = [
  * production rate when the catalog row carries no explicit unit sell:
  * cost/1,000 SF = (1,000 ÷ rate) hours × loaded crew rate, marked up to the
  * kit's target GM. Keeps hours-driven kits priced from hours, never a guess.
+ *
+ * `crewRateCents` is the estimate's resolved branch crew rate (frozen snapshot,
+ * else `branch_settings.crew_rate_cents_per_hour`). There is no default: a
+ * missing rate must block pricing, not invent one. This is the only copy of
+ * the formula — the API enforces that a rate exists and does not recompute it.
  */
 export function sellRateCentsPer1000Sf(
   productionRate: number,
   targetGm: number,
-  crewRateCents: number = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
+  crewRateCents: number,
 ): number {
   const costPer1000 = (1000 / productionRate) * crewRateCents
   const gm = targetGm >= 1 || targetGm < 0 ? 0 : targetGm
@@ -128,12 +120,15 @@ export function sellRateCentsPer1000Sf(
  * Adapts maintenance_hours service kits to the editor's row shape,
  * keeping the sq-ft-only basis rule: only ACTIVE, sq-ft, production-rated
  * kits are addable (a line seeded from one always passes the save guard).
- * The MAINTENANCE_SERVICE_CATALOG literal survives ONLY as the offline
- * fallback (API unreachable / not yet loaded ⇒ empty list).
+ *
+ * A kit with its own unit sell is a catalog price and does not need a crew
+ * rate. A kit with no unit sell is priced from the crew rate; with no rate
+ * that kit is omitted. An empty API catalog stays empty — the literal
+ * MAINTENANCE_SERVICE_CATALOG is not a price fallback.
  */
 export function maintenanceRowsFromServiceKits(
   items: ServiceKit[],
-  crewRateCents: number = MAINT_LOADED_CREW_RATE_CENTS_PER_HOUR,
+  crewRateCents: number | null,
 ): MaintenanceCatalogService[] {
   const kits = items.filter(
     (k) =>
@@ -143,18 +138,22 @@ export function maintenanceRowsFromServiceKits(
       k.productionRate > 0 &&
       /sq/i.test(k.uom),
   )
-  if (kits.length === 0) return MAINTENANCE_SERVICE_CATALOG
-  return kits.map((k) => ({
-    key: k.id,
-    label: k.description,
-    uom: '/yr',
-    basis: 'sqft',
-    rateCentsPer1000Sf:
-      k.unitSellCents > 0
+  const rows: MaintenanceCatalogService[] = []
+  for (const k of kits) {
+    const catalogPrice = k.unitSellCents > 0
+    if (!catalogPrice && crewRateCents == null) continue
+    rows.push({
+      key: k.id,
+      label: k.description,
+      uom: '/yr',
+      basis: 'sqft',
+      rateCentsPer1000Sf: catalogPrice
         ? k.unitSellCents
-        : sellRateCentsPer1000Sf(k.productionRate as number, k.targetGm, crewRateCents),
-    defaultQty: 1,
-  }))
+        : sellRateCentsPer1000Sf(k.productionRate as number, k.targetGm, crewRateCents as number),
+      defaultQty: 1,
+    })
+  }
+  return rows
 }
 
 /**
@@ -244,15 +243,15 @@ export function catalogToService(
 }
 
 /**
- * Default new section, seeded with the core region-template services.
- * `catalog` comes from GET /service-kits; the literal is the
- * offline fallback. API catalogs (whose keys are kit ids, not the literal
- * seed keys) seed the first three rows.
+ * Default new section, seeded from the catalog the editor already resolved.
+ * An omitted catalog seeds nothing — there is no offline price list.
+ * API catalogs (whose keys are kit ids, not the literal seed keys) seed the
+ * first three rows.
  */
 export function buildDefaultSection(
   estimateId: string,
   sortOrder: number,
-  catalog: MaintenanceCatalogService[] = MAINTENANCE_SERVICE_CATALOG,
+  catalog: MaintenanceCatalogService[] = [],
 ): EstimateSection {
   const id = newId('sec')
   const seedKeys = ['mow', 'trim', 'fert']

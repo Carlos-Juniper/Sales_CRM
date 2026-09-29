@@ -38,6 +38,7 @@ from api.commission_service import cancel_for_estimate, create_on_won
 from api import properties as _props_mod
 from api.aspire_sync import OpportunityInput
 from api.aspire_config import ASPIRE_BRANCH_MAP, ASPIRE_BRANCH_INSTALL_FALLBACKS
+from api.maintenance_pricing import _live_branch_crew_rate, annotate_maintenance_sections, apply_maintenance_crew_prices
 
 logger = logging.getLogger(__name__)
 
@@ -1591,36 +1592,32 @@ async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
 # own guard, but the server never trusts the client). Install estimates are
 # untouched — install kits are quantity-driven and carry no production rate.
 
-async def _require_resolvable_maintenance_lines(services: list[dict]) -> None:
-    """Reject (422) any maintenance line whose hours cannot be resolved.
 
-    `services` are camelCase line dicts carrying label / hours / serviceKitId.
-    Kits are fetched in one batched query; a missing kit id counts as
-    unresolvable (a dangling service_kit_id can never produce hours).
-    """
+async def _require_resolvable_maintenance_lines(services: list[dict], crew_rate_cents: int | None = None) -> None:
+    """422 when hours cannot be resolved, then price crew-rate-derived sells."""
     pending = [svc for svc in services if svc.get("hours") is None]
-    if not pending:
-        return
-    kit_ids = {svc.get("serviceKitId") for svc in pending if svc.get("serviceKitId")}
-    rates: dict[str, Any] = {}
-    if kit_ids:
-        placeholders = ", ".join(["%s"] * len(kit_ids))
-        rows = await query(
-            f"SELECT id, production_rate FROM service_kits WHERE id IN ({placeholders})",
-            list(kit_ids),
-        )
-        rates = {r["id"]: r.get("production_rate") for r in rows}
-    for svc in pending:
-        kit_id = svc.get("serviceKitId")
-        if kit_id is None or rates.get(kit_id) is None:
-            label = svc.get("label") or "(unnamed line)"
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Maintenance line \"{label}\" cannot be saved: no production rate "
-                    "resolves for it. Enter hours or pick a kit that has a production rate."
-                ),
+    if pending:
+        kit_ids = {svc.get("serviceKitId") for svc in pending if svc.get("serviceKitId")}
+        rates: dict[str, Any] = {}
+        if kit_ids:
+            placeholders = ", ".join(["%s"] * len(kit_ids))
+            rows = await query(
+                f"SELECT id, production_rate FROM service_kits WHERE id IN ({placeholders})",
+                list(kit_ids),
             )
+            rates = {r["id"]: r.get("production_rate") for r in rows}
+        for svc in pending:
+            kit_id = svc.get("serviceKitId")
+            if kit_id is None or rates.get(kit_id) is None:
+                label = svc.get("label") or "(unnamed line)"
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Maintenance line \"{label}\" cannot be saved: no production rate "
+                        "resolves for it. Enter hours or pick a kit that has a production rate."
+                    ),
+                )
+    await apply_maintenance_crew_prices(services, crew_rate_cents)
 
 
 # ── rou ────────────────────────────────────────────────────────────
@@ -1895,11 +1892,10 @@ def register(app, require_auth) -> None:
         _require_due_back_not_past(body.get("dueBackDate"))
         # Guard runs BEFORE any INSERT so a reject persists nothing.
         if est_type == "maintenance":
-            await _require_resolvable_maintenance_lines([
-                svc
-                for section in (body.get("sections") or [])
-                for svc in (section.get("services") or [])
-            ])
+            await _require_resolvable_maintenance_lines(
+                annotate_maintenance_sections(body.get("sections")),
+                await _live_branch_crew_rate(aspire_branch_id),
+            )
         # Budgets are optional. Resolve before the INSERT so a 400 persists
         # nothing, and so a blank string is NULL rather than 0. These dollars
         # are not the priced contract value — contract_value_cents, the ITB
@@ -2383,13 +2379,16 @@ def register(app, require_auth) -> None:
     async def create_section(estimate_id: str, body: dict, _user: dict = Depends(require_auth)) -> dict:
         authz.require_estimator(_user)  # sections are estimator-owned
         est_rows = await query(
-            "SELECT id, estimate_type FROM estimates WHERE id = %s", [estimate_id]
+            "SELECT id, estimate_type, aspire_branch_id FROM estimates WHERE id = %s",
+            [estimate_id],
         )
         if not est_rows:
             raise HTTPException(status_code=404, detail="Not found")
-        # Nested services must resolve a production rate/hours.
         if est_rows[0].get("estimate_type") == "maintenance":
-            await _require_resolvable_maintenance_lines(body.get("services") or [])
+            await _require_resolvable_maintenance_lines(
+                annotate_maintenance_sections([body]),
+                await _live_branch_crew_rate(est_rows[0].get("aspire_branch_id")),
+            )
         idx = await _next_sort_order("estimate_sections", "estimate_id", estimate_id, body)
         section_id = await _insert_section(estimate_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
@@ -2456,12 +2455,14 @@ def register(app, require_auth) -> None:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
-        # A maintenance line must resolve a production rate/hours.
         est_rows = await query(
-            "SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id]
+            "SELECT estimate_type, aspire_branch_id FROM estimates WHERE id = %s",
+            [estimate_id],
         )
         if est_rows and est_rows[0].get("estimate_type") == "maintenance":
-            await _require_resolvable_maintenance_lines([body])
+            await _require_resolvable_maintenance_lines(
+                [body], await _live_branch_crew_rate(est_rows[0].get("aspire_branch_id")),
+            )
         idx = await _next_sort_order("section_services", "section_id", section_id, body)
         service_id = await _insert_service(section_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
@@ -2494,20 +2495,24 @@ def register(app, require_auth) -> None:
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
         current = rows[0]
-        # Guard the MERGED line (row + patch): an edit may not null-out hours
-        # or repoint at an unrated kit and leave the line unresolvable.
         est_rows = await query(
-            "SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id]
+            "SELECT estimate_type, aspire_branch_id FROM estimates WHERE id = %s",
+            [estimate_id],
         )
         if est_rows and est_rows[0].get("estimate_type") == "maintenance":
             merged = {
+                "_serviceId": service_id,
+                "_sectionId": section_id,
                 "label": body.get("label", current.get("label")),
                 "hours": body["hours"] if "hours" in body else current.get("hours"),
-                "serviceKitId": body["serviceKitId"]
-                if "serviceKitId" in body
-                else current.get("service_kit_id"),
+                "serviceKitId": body["serviceKitId"] if "serviceKitId" in body else current.get("service_kit_id"),
+                "unitSellCents": body["unitSellCents"] if "unitSellCents" in body else current.get("unit_sell_cents"),
             }
-            await _require_resolvable_maintenance_lines([merged])
+            await _require_resolvable_maintenance_lines(
+                [merged], await _live_branch_crew_rate(est_rows[0].get("aspire_branch_id")),
+            )
+            if merged.get("_crewRateDerived"):
+                body["unitSellCents"] = merged["unitSellCents"]
         cols = {
             "serviceKitId": "service_kit_id",
             "discipline": "discipline",

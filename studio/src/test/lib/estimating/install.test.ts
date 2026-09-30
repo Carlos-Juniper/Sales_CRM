@@ -38,6 +38,13 @@ import {
   serviceSubCostCents,
   serviceTotalCents,
   unitCostBasisCents,
+  componentRollups,
+  estimateRollup,
+  formatGmPctOrDash,
+  rollupGm,
+  sectionRollup,
+  serviceCostOrNull,
+  serviceRollup,
 } from '@/lib/estimating/install'
 
 function fixture() {
@@ -237,5 +244,64 @@ describe('installServiceKitsFromItems (API catalog adapter)', () => {
     const { vendorPricesCents: _v, ...item } = INSTALL_SERVICE_KITS[0]
     const kits = installServiceKitsFromItems([{ ...item, active: false }, { ...item, id: 'kit-x' }])
     expect(kits.map((k) => k.id)).toEqual(['kit-x'])
+  })
+})
+
+// ----- Handoff 55 §6: three-level roll-ups ------------------------------------
+
+describe('three-level roll-ups (item → service → section → estimate)', () => {
+  it('service roll-up reports cost, price and GM', () => {
+    const trees = fixture().sections[0].services[0]
+    expect(serviceRollup(trees)).toEqual({ costCents: 1_650_000, priceCents: 3_000_000, gm: 0.45 })
+  })
+
+  it('cost is null (unresolvable) with no components and no embedded cost; GM follows', () => {
+    const svc = { ...fixture().sections[0].services[0], components: [], embeddedCostCents: null }
+    expect(serviceCostOrNull(svc)).toBeNull()
+    expect(serviceRollup(svc).gm).toBeNull()
+    // legacy helper still reads it as 0 (unchanged behaviour)
+    expect(serviceSubCostCents(svc)).toBe(0)
+  })
+
+  it('GM is null when price is 0', () => {
+    expect(rollupGm(0, 100)).toBeNull()
+    expect(rollupGm(1000, null)).toBeNull()
+    expect(rollupGm(1000, 600)).toBeCloseTo(0.4, 10)
+  })
+
+  it('item roll-ups: extended cost, prices apportioned to sum exactly to the line TP', () => {
+    const trees = fixture().sections[0].services[0]
+    const items = componentRollups(trees)
+    expect(items.map((i) => i.costCents)).toEqual([24 * 42_500, 24 * 18_200, 24 * 8_050])
+    expect(items.reduce((s, i) => s + (i.priceCents ?? 0), 0)).toBe(serviceTotalCents(trees))
+    expect(items[0].priceCents).toBe(1_854_545)
+    for (const i of items) expect(i.gm).toBeCloseTo(0.45, 5)
+  })
+
+  it('item price / GM are null when the line has zero component cost', () => {
+    const trees = fixture().sections[0].services[0]
+    const zero = { ...trees, components: trees.components.map((c) => ({ ...c, unitCostCents: 0 })) }
+    expect(componentRollups(zero).every((i) => i.priceCents === null && i.gm === null)).toBe(true)
+  })
+
+  it('section and estimate roll-ups sum children; one unresolvable child nulls the cost', () => {
+    const est = fixture()
+    expect(sectionRollup(est.sections[0]).costCents).toBe(1_843_200)
+    expect(sectionRollup(est.sections[0]).priceCents).toBe(3_350_000)
+    expect(estimateRollup(est).costCents).toBe(3_053_760)
+    expect(estimateRollup(est).gm).toBeCloseTo(estimateGm(est), 12)
+    est.sections[1].services[0] = {
+      ...est.sections[1].services[0],
+      components: [],
+      embeddedCostCents: null,
+    }
+    expect(sectionRollup(est.sections[1]).costCents).toBeNull()
+    expect(estimateRollup(est).costCents).toBeNull()
+    expect(estimateRollup(est).priceCents).toBe(5_342_000)
+  })
+
+  it('formatGmPctOrDash renders "—" for null', () => {
+    expect(formatGmPctOrDash(null)).toBe('—')
+    expect(formatGmPctOrDash(0.4498)).toBe('44.98%')
   })
 })

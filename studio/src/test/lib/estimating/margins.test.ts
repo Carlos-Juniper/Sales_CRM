@@ -95,7 +95,7 @@ describe('maintenance cost basis (hours-driven)', () => {
 })
 
 describe('install cost basis (materials-inclusive)', () => {
-  it('uses qty × embedded cost for the line cost', () => {
+  it('uses the component-sum basis for the line cost (equals embedded on this fixture)', () => {
     const trees = install.sections[0].services[0] // 24 × 68,750¢
     expect(installLineCost(trees)).toBe(24 * 68_750)
   })
@@ -107,16 +107,28 @@ describe('install cost basis (materials-inclusive)', () => {
     expect(installLineCost(noEmbedded)).toBe(24 * 68_750)
   })
 
-  it('splits cost into material / labor / unattributed from components', () => {
-    const sod = install.sections[1].services[0] // 48 plt, embedded 26,900
+  it('splits cost into material / labor from components — the component sum IS the cost (H55 §6)', () => {
+    const sod = install.sections[1].services[0] // 48 plt, stale embedded 26,900
     const split = installLineCostSplit(sod)
     expect(split.materialCents).toBe(48 * 19_500)
     expect(split.laborCents).toBe(48 * Math.round(1.1 * 5_200)) // 5,720/unit
-    // Embedded (26,900) exceeds the component sum (25,220) → 1,680 unattributed.
-    expect(split.unattributedCents).toBe(48 * (26_900 - 25_220))
+    // Components (25,220/unit) override the stale embedded 26,900 — the same
+    // basis the install editor uses — so nothing is left unattributed.
+    expect(installLineCost(sod)).toBe(48 * 25_220)
+    expect(split.unattributedCents).toBe(0)
     expect(split.materialCents + split.laborCents + split.unattributedCents).toBe(
       installLineCost(sod),
     )
+  })
+
+  it('a kit-priced line with no components costs qty × embedded, all unattributed', () => {
+    const sod = { ...install.sections[1].services[0], components: [] }
+    expect(installLineCost(sod)).toBe(48 * 26_900)
+    expect(installLineCostSplit(sod)).toEqual({
+      materialCents: 0,
+      laborCents: 0,
+      unattributedCents: 48 * 26_900,
+    })
   })
 })
 

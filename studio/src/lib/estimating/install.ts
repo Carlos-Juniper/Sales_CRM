@@ -79,6 +79,132 @@ export function estimateGm(estimate: InstallEstimate): number {
   return groupMargin(total, estimateSubCostCents(estimate))
 }
 
+// ----- Three-level roll-ups: item → service → section (Handoff 55 §6) ---------
+//
+// Every level reports total COST, total PRICE and GM%. Price always resolves
+// (a null unit sell reads as 0, exactly as `serviceTotalCents` and
+// calc.sectionTotal already do — kit-priced lines price as before). Cost and
+// GM are `null` when they cannot be resolved, and the editor renders "—" for
+// null — never 0 (the useResolvedCrewRate.ts convention: refuse a number
+// rather than show a plausible-but-wrong one).
+//
+// The cost basis is the SAME component-sum basis as `unitCostBasisCents`,
+// including its fallback to the kit's flat `embeddedCostCents` when a line has
+// no components. Margin Analysis (margins.ts installLineCost) reads this same
+// basis, so the editor and the panel cannot disagree.
+
+export interface InstallRollup {
+  /** Total cost, integer cents; null when unresolvable. */
+  costCents: number | null
+  /** Total price (TP), integer cents. */
+  priceCents: number
+  /** Decimal GM; null when cost is unresolvable or price is 0. */
+  gm: number | null
+}
+
+/** Item-level roll-up: cost always resolves; price/GM may not (see componentRollups). */
+export interface ItemRollup {
+  costCents: number
+  priceCents: number | null
+  gm: number | null
+}
+
+/** GM for a roll-up; null (rendered "—") when cost is unknown or price is 0. */
+export function rollupGm(priceCents: number, costCents: number | null): number | null {
+  if (costCents === null || priceCents === 0) return null
+  return groupMargin(priceCents, costCents)
+}
+
+/**
+ * Line cost with unresolvable made explicit: the component sum when
+ * components exist, else qty × embedded cost, else null (no components AND
+ * no embedded cost — `serviceSubCostCents` reads that case as 0).
+ */
+export function serviceCostOrNull(svc: SectionService): number | null {
+  if (svc.components.length === 0 && svc.embeddedCostCents == null) return null
+  return serviceSubCostCents(svc)
+}
+
+/** Service (line) roll-up. */
+export function serviceRollup(svc: SectionService): InstallRollup {
+  const priceCents = serviceTotalCents(svc)
+  const costCents = serviceCostOrNull(svc)
+  return { costCents, priceCents, gm: rollupGm(priceCents, costCents) }
+}
+
+/** Extended item cost, integer cents: line qty × (component qty × unit cost). */
+export function componentExtendedCostCents(
+  svc: SectionService,
+  component: SectionServiceComponent,
+): number {
+  return Math.round(svc.qty * componentCost(component.qty, component.unitCostCents))
+}
+
+/**
+ * Item (component) roll-ups, index-aligned with `svc.components`.
+ *
+ * Items carry a cost but no sell price of their own: the line is priced from
+ * its unit sell / target GM (one line-level GM — Handoff 55 open item 2). An
+ * item's price is therefore its cost-proportional share of the line price,
+ * apportioned by largest remainder so the item prices sum exactly to the line
+ * TP; its GM equals the line GM. When the line's component cost is 0 the share
+ * is undefined, so price and GM are null ("—").
+ */
+export function componentRollups(svc: SectionService): ItemRollup[] {
+  const costs = svc.components.map((c) => componentExtendedCostCents(svc, c))
+  const totalCost = costs.reduce((a, b) => a + b, 0)
+  const linePrice = serviceTotalCents(svc)
+  if (totalCost <= 0) {
+    return costs.map((costCents) => ({ costCents, priceCents: null, gm: null }))
+  }
+  const raw = costs.map((c) => (linePrice * c) / totalCost)
+  const floors = raw.map((r) => Math.floor(r))
+  let remainder = linePrice - floors.reduce((a, b) => a + b, 0)
+  const order = raw
+    .map((r, i) => ({ i, frac: r - Math.floor(r) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i)
+  for (const { i } of order) {
+    if (remainder <= 0) break
+    floors[i] += 1
+    remainder -= 1
+  }
+  return costs.map((costCents, i) => ({
+    costCents,
+    priceCents: floors[i],
+    gm: rollupGm(floors[i], costCents),
+  }))
+}
+
+/** Sum roll-ups: cost is null if ANY child cost is unresolvable. */
+function sumRollups(children: InstallRollup[], priceCents: number): InstallRollup {
+  let costCents: number | null = 0
+  for (const r of children) {
+    if (r.costCents === null) {
+      costCents = null
+      break
+    }
+    costCents += r.costCents
+  }
+  return { costCents, priceCents, gm: rollupGm(priceCents, costCents) }
+}
+
+/** Section (group) roll-up; price from calc.sectionTotal (never re-derived). */
+export function sectionRollup(
+  section: EstimateSection,
+  serviceRollups: InstallRollup[] = section.services.map(serviceRollup),
+): InstallRollup {
+  return sumRollups(serviceRollups, sectionTotalCents(section))
+}
+
+/** Estimate (parent-row) roll-up. */
+export function estimateRollup(
+  estimate: Estimate,
+  sectionRollups: InstallRollup[] = estimate.sections.map((s) => sectionRollup(s)),
+): InstallRollup {
+  const price = sectionRollups.reduce((sum, r) => sum + r.priceCents, 0)
+  return sumRollups(sectionRollups, price)
+}
+
 // ----- Hours (production planning ONLY — never price) -------------------------
 
 export function sectionHours(section: EstimateSection): number {
@@ -306,4 +432,12 @@ export function coerceNum(raw: string): number {
 /** GM% display read: 0.4498… → "44.98%". */
 export function formatGmPct(gm: number): string {
   return `${(gm * 100).toFixed(2)}%`
+}
+
+/** Placeholder for an unresolvable value — never render 0 in its place. */
+export const UNRESOLVED = '—'
+
+/** GM% display read with the unresolvable convention: null → "—". */
+export function formatGmPctOrDash(gm: number | null): string {
+  return gm === null ? UNRESOLVED : formatGmPct(gm)
 }

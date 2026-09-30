@@ -7,7 +7,8 @@
 //     editors mutate — never a second data tree (the prototype's unsynced
 //     copy is exactly what this replaces).
 //   • Maintenance cost is HOURS-driven (hours × loaded crew rate);
-//     install cost is MATERIALS-inclusive (embedded cost with a
+//     install cost is MATERIALS-inclusive (component-sum cost basis shared
+//     with the install editor, falling back to the kit's embedded cost;
 //     labor/material component split, BRD II-9.7).
 //   • Benchmark bands are CONFIG rows, clearly provisional — production
 //     sources them from historical won-bid data (BRD III-6 auto-calculator).
@@ -18,11 +19,13 @@
 import type { ServiceKit, Estimate, EstimateSection, SectionService } from '@/types/estimating'
 import {
   SQFT_PER_ACRE,
+  componentCost,
   contractTotal,
   groupMargin,
   installLineTotal,
   maintServiceLine,
 } from './calc'
+import { serviceSubCostCents } from './install'
 
 // ----- Benchmark config (provisional, BRD III-6) ------------------------------
 
@@ -206,25 +209,33 @@ export interface InstallCostSplit {
   unattributedCents: number
 }
 
-/** Per-unit component cost, integer cents. */
+/** Per-unit component cost for one kind, integer cents (calc.componentCost per row). */
 function unitComponentCost(svc: SectionService, kind: 'labor' | 'material'): number {
   return svc.components
     .filter((c) => c.kind === kind)
-    .reduce((sum, c) => sum + Math.round(c.qty * c.unitCostCents), 0)
+    .reduce((sum, c) => sum + componentCost(c.qty, c.unitCostCents), 0)
 }
 
 /**
- * Install line cost, integer cents — qty × embedded cost, falling back to the
- * kit-component roll-up when no embedded cost is stored.
+ * Install line cost, integer cents — the SAME component-sum basis the install
+ * editor uses (install.ts `serviceSubCostCents` / `unitCostBasisCents`):
+ * qty × Σ component cost when components exist, else qty × the kit's embedded
+ * cost (null reads as 0).
+ *
+ * Handoff 55 §6: this used to prefer `embeddedCostCents` over the components,
+ * so a line whose components had been edited showed one GM in the editor and
+ * another here. Both now read one basis.
  */
 export function installLineCost(svc: SectionService): number {
-  const unitCost =
-    svc.embeddedCostCents ??
-    unitComponentCost(svc, 'material') + unitComponentCost(svc, 'labor')
-  return Math.round(svc.qty * unitCost)
+  return serviceSubCostCents(svc)
 }
 
-/** Materials-inclusive split of an install line's cost (BRD II-9.7). */
+/**
+ * Materials-inclusive split of an install line's cost (BRD II-9.7). With
+ * components, material + labor carry the cost (unattributed is only a
+ * rounding remainder, clamped at 0); without them, the kit's flat embedded
+ * cost is all unattributed.
+ */
 export function installLineCostSplit(svc: SectionService): InstallCostSplit {
   const materialCents = Math.round(svc.qty * unitComponentCost(svc, 'material'))
   const laborCents = Math.round(svc.qty * unitComponentCost(svc, 'labor'))

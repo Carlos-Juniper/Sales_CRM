@@ -39,6 +39,7 @@ from api import properties as _props_mod
 from api.aspire_sync import OpportunityInput
 from api.aspire_config import ASPIRE_BRANCH_MAP, ASPIRE_BRANCH_INSTALL_FALLBACKS
 from api.service_catalog import validate_service_category
+from api.catalog_links import prepare_component, validate_estimate_tree, validate_service_ref
 from api.maintenance_pricing import _live_branch_crew_rate, annotate_maintenance_sections, apply_maintenance_crew_prices
 
 logger = logging.getLogger(__name__)
@@ -508,6 +509,7 @@ def _component_out(r: dict) -> dict:
         "sectionServiceId": r["section_service_id"],
         "kind": r["kind"],
         "label": r["label"],
+        "inventoryId": r.get("inventory_id"),
         "qty": _num(r["qty"]),
         "unitCostCents": int(r["unit_cost_cents"]),
         "hours": _num(r["hours"]),
@@ -538,6 +540,7 @@ def _service_out(
         "id": r["id"],
         "sectionId": r["section_id"],
         "serviceKitId": r["service_kit_id"],
+        "serviceId": r.get("service_id"),
         "discipline": r.get("discipline"),
         "label": r["label"],
         "qty": _num(r["qty"]),
@@ -1520,15 +1523,17 @@ def _service_kit_out(r: dict) -> dict:
 
 async def _insert_component(service_id: str, comp: dict, idx: int) -> str:
     component_id = _new_id("cmp")
+    comp = await prepare_component(comp, query)  # kind, inventoryId, price snapshot (074)
     await execute(
         """INSERT INTO section_service_components
-             (id, section_service_id, kind, label, qty, unit_cost_cents, hours, sort_order)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+             (id, section_service_id, kind, label, inventory_id, qty, unit_cost_cents, hours, sort_order)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
             component_id,
             service_id,
             comp["kind"],
             comp["label"],
+            comp.get("inventoryId"),
             comp.get("qty", 0),
             comp.get("unitCostCents", 0),
             comp.get("hours"),
@@ -1542,13 +1547,14 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
     service_id = _new_id("svc")
     await execute(
         """INSERT INTO section_services
-             (id, section_id, service_kit_id, discipline, billing_type, label, qty, uom,
+             (id, section_id, service_kit_id, service_id, discipline, billing_type, label, qty, uom,
               complexity_pct, unit_sell_cents, embedded_cost_cents, target_gm, hours, sort_order)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
             service_id,
             section_id,
             svc.get("serviceKitId"),
+            svc.get("serviceId"),
             svc.get("discipline"),
             svc.get("billingType"),
             svc["label"],
@@ -1885,8 +1891,7 @@ def register(app, require_auth) -> None:
                 status_code=400,
                 detail="aspireBranchId is required — select a branch from the intake form",
             )
-        for section in body.get("sections") or []:  # migration 073, before any write
-            await validate_service_category(section, est_type, query)
+        await validate_estimate_tree(body.get("sections"), est_type, query)  # 073/074, before any write
         # Yearly occurrence counts are optional on maintenance create. Validate
         # before any INSERT so a 422 persists nothing. Install may omit them
         # (they store NULL); a value that is sent is held to the same range.
@@ -2477,6 +2482,7 @@ def register(app, require_auth) -> None:
             await _require_resolvable_maintenance_lines(
                 [body], await _live_branch_crew_rate(est_rows[0].get("aspire_branch_id")),
             )
+        await validate_estimate_tree([{"services": [body]}], None, query)
         idx = await _next_sort_order("section_services", "section_id", section_id, body)
         service_id = await _insert_service(section_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
@@ -2527,8 +2533,10 @@ def register(app, require_auth) -> None:
             )
             if merged.get("_crewRateDerived"):
                 body["unitSellCents"] = merged["unitSellCents"]
+        await validate_service_ref(body, query)
         cols = {
             "serviceKitId": "service_kit_id",
+            "serviceId": "service_id",
             "discipline": "discipline",
             "billingType": "billing_type",
             "label": "label",
@@ -2602,8 +2610,7 @@ def register(app, require_auth) -> None:
         _user: dict = Depends(require_auth),
     ) -> dict:
         authz.require_estimator(_user)  # components are estimator-owned
-        if body.get("kind") not in ("labor", "material"):
-            raise HTTPException(status_code=400, detail="kind must be labor or material")
+        body = await prepare_component(body, query)  # 400 on kind, 422 on inventoryId
         rows = await query(_SERVICE_CHAIN_SQL, [service_id, section_id, estimate_id])
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
@@ -2634,9 +2641,11 @@ def register(app, require_auth) -> None:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
+        body = await prepare_component(body, query, current=rows[0])
         cols = {
             "kind": "kind",
             "label": "label",
+            "inventoryId": "inventory_id",
             "qty": "qty",
             "unitCostCents": "unit_cost_cents",
             "hours": "hours",

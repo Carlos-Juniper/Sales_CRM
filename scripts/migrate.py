@@ -1145,6 +1145,32 @@ def detect_073(conn) -> bool:
     )
 
 
+COMPONENT_KINDS_074 = "enum('labor','material','equipment','subcontractor','other')"
+
+
+def detect_074(conn) -> bool:
+    """074 applied ↔ section_service_components.kind has the five cost
+    buckets, inventory_id exists, and fk_components_material (the file's last
+    statement) exists. A partial apply stays False and the guarded file runs
+    again.
+    """
+    if not (
+        column_exists(conn, "section_service_components", "inventory_id")
+        and foreign_key_exists(conn, "section_service_components", "fk_components_material")
+    ):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COLUMN_TYPE AS col_type FROM INFORMATION_SCHEMA.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+        ("section_service_components", "kind"),
+    )
+    col_type = row["col_type"] if row else ""
+    if isinstance(col_type, bytes):
+        col_type = col_type.decode()
+    return str(col_type).lower() == COMPONENT_KINDS_074
+
+
 def detect_068(conn) -> bool:
     """068 applied ↔ admin and vp_sales have an unbounded approval tier.
 
@@ -1269,6 +1295,7 @@ _DETECT: dict = {
     "071_item_classes":                           detect_071,
     "072_materials_item_status":                  detect_072,
     "073_service_catalog":                        detect_073,
+    "074_component_material_link":                detect_074,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

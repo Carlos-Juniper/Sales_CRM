@@ -312,6 +312,11 @@ export interface SectionService {
   /** section_services.service_kit_id (service_kits.id). */
   serviceKitId: string | null
   /**
+   * `services.id` (catalog level 2, migration 073) this line was added from.
+   * Null for kit and hand-entered lines. Optional so existing literals compile.
+   */
+  serviceId?: string | null
+  /**
    * Per-line LS/IR override for the ITB EST LS $ / EST IR $ split. `null`
    * derives the discipline from the kit's `serviceType` (irrigation
    * vs. landscape); a manual line with no kit defaults to landscape
@@ -352,16 +357,23 @@ export interface SectionService {
   components: SectionServiceComponent[]
 }
 
-export type ComponentKind = 'labor' | 'material'
+/** Aspire's five cost buckets (migration 074); was `'labor' | 'material'`. */
+export type ComponentKind = CostBucketKind
 
 export interface SectionServiceComponent {
   id: string
   sectionServiceId: string
   kind: ComponentKind
   label: string
+  /**
+   * `materials.inventory_id` when picked from GET /api/estimating/materials
+   * (migration 074); null for labor / sub / other and free-text rows. Sending
+   * it without `unitCostCents` snapshots the current price server-side.
+   */
+  inventoryId?: string | null
   /** Editable (blue-cell). */
   qty: number
-  /** Editable (blue-cell). Integer cents. */
+  /** Editable (blue-cell). Integer cents. A snapshot: never re-priced after save. */
   unitCostCents: number
   hours: number | null
   sortOrder: number

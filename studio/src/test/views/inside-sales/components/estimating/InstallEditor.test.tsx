@@ -159,9 +159,11 @@ describe('InstallEditor — quantity-driven pricing, live', () => {
     await user.clear(cost)
     await user.type(cost, '200')
 
-    // component TP: 1 × $200.00 (TP + component sub-cost cells)
+    // H55 §6: item rows show EXTENDED cost — line qty 24 × (1 × $200.00) —
+    // and carry the line GM (items have no sell price of their own).
     const compRow = screen.getByTestId('install-component-Backfill + staking kit')
-    expect(within(compRow).getAllByText('$200.00').length).toBeGreaterThanOrEqual(1)
+    expect(within(compRow).getByText('$4,800.00')).toBeInTheDocument()
+    expect(within(compRow).getByText('35.44%')).toBeInTheDocument()
     // unit basis 425 + 182 + 200 = 807 → sub 24 × 807 = $19,368 → GM 35.44%
     const trees = row("Mahogany 10'-12' — Installed")
     expect(within(trees).getByText('$19,368.00')).toBeInTheDocument()
@@ -317,6 +319,85 @@ describe('InstallEditor — empty / saving / save-error states', () => {
     await user.click(screen.getByRole('button', { name: /^save$/i }))
     await waitFor(() => expect(spy).toHaveBeenCalled())
     expect(spy.mock.calls[0][1]).not.toHaveProperty('estimateType')
+  })
+})
+
+// ----- Handoff 55 §6: three-level roll-ups + collapse -----------------------
+
+describe('InstallEditor — item → service → section roll-ups (H55 §6)', () => {
+  it('item rows show extended cost, apportioned price and GM%', async () => {
+    const user = userEvent.setup()
+    renderInstall()
+    await user.click(screen.getByRole('button', { name: /toggle components for mahogany/i }))
+    // Mahogany 30g: 24 × 42,500 = $10,200 cost; share of $30,000 TP at the
+    // line GM (45%) = 10,200 / 0.55 = $18,545.45
+    const tree = "Mahogany 10'-12' (30g)"
+    expect(screen.getByTestId(`install-component-cost-${tree}`)).toHaveTextContent('$10,200.00')
+    expect(screen.getByTestId(`install-component-price-${tree}`)).toHaveTextContent('$18,545.45')
+    expect(screen.getByTestId(`install-component-gm-${tree}`)).toHaveTextContent('45.00%')
+  })
+
+  it('section rows show cost, price and GM%', () => {
+    const est = buildInstallEstimate()
+    renderInstall(est)
+    const sid = est.sections[0].id
+    expect(screen.getByTestId(`install-group-cost-${sid}`)).toHaveTextContent('$18,432.00')
+    expect(screen.getByTestId(`install-group-gm-${sid}`)).toHaveTextContent('44.98%')
+    expect(screen.getByTestId('install-parent-cost')).toHaveTextContent('$30,537.60')
+  })
+
+  it('editing an ITEM quantity moves the service, section and estimate totals', async () => {
+    const user = userEvent.setup()
+    const est = buildInstallEstimate()
+    renderInstall(est)
+    await user.click(screen.getByRole('button', { name: /toggle components for mahogany/i }))
+    const qty = screen.getByLabelText('Component qty for Install crew')
+    await user.clear(qty)
+    await user.type(qty, '4.5')
+    // unit basis 42,500 + 4.5×5,200 + 8,050 = 73,950 → sub 24 × 73,950 = $17,748
+    expect(screen.getByTestId("install-cost-Mahogany 10'-12' — Installed")).toHaveTextContent('$17,748.00')
+    // section: 17,748 + 1,932 = $19,680 · estimate: + 12,105.60 = $31,785.60
+    expect(screen.getByTestId(`install-group-cost-${est.sections[0].id}`)).toHaveTextContent('$19,680.00')
+    expect(screen.getByTestId('install-parent-cost')).toHaveTextContent('$31,785.60')
+    // GM (30,000 − 17,748) / 30,000 = 40.84%
+    expect(screen.getByTestId("install-gm-Mahogany 10'-12' — Installed")).toHaveTextContent('40.84%')
+  })
+
+  it('renders "—", never 0, for an unresolvable cost / GM', async () => {
+    const user = userEvent.setup()
+    const est = buildInstallEstimate()
+    // No components and no embedded cost → cost cannot be resolved.
+    est.sections[1].services[0].components = []
+    est.sections[1].services[0].embeddedCostCents = null
+    renderInstall(est)
+    expect(screen.getByTestId('install-cost-Bermuda Sod — Installed')).toHaveTextContent('—')
+    expect(screen.getByTestId('install-gm-Bermuda Sod — Installed')).toHaveTextContent('—')
+    expect(screen.getByTestId(`install-group-gm-${est.sections[1].id}`)).toHaveTextContent('—')
+    expect(screen.getByTestId('install-parent-gm')).toHaveTextContent('—')
+    // A zero-price line has no GM either.
+    const trees = row("Mahogany 10'-12' — Installed")
+    await user.clear(within(trees).getByLabelText(/qty for/i))
+    expect(screen.getByTestId("install-gm-Mahogany 10'-12' — Installed")).toHaveTextContent('—')
+  })
+
+  it('section and parent rows collapse and expand (view-local)', async () => {
+    const user = userEvent.setup()
+    const est = buildInstallEstimate()
+    renderInstall(est)
+    const sectionToggle = screen.getByRole('button', { name: `Toggle section ${est.sections[0].name}` })
+    expect(sectionToggle).toHaveAttribute('aria-expanded', 'true')
+    await user.click(sectionToggle)
+    expect(screen.queryByTestId("install-row-Mahogany 10'-12' — Installed")).not.toBeInTheDocument()
+    expect(screen.getByTestId('install-row-Bermuda Sod — Installed')).toBeInTheDocument()
+    await user.click(sectionToggle)
+    expect(screen.getByTestId("install-row-Mahogany 10'-12' — Installed")).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Toggle all groups' }))
+    expect(screen.queryAllByTestId(/^install-group-sec/)).toHaveLength(0)
+    // totals remain on the parent row while collapsed
+    expect(within(screen.getByTestId('install-parent-row')).getByText('$53,420.00')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Toggle all groups' }))
+    expect(screen.getByTestId(`install-group-${est.sections[0].id}`)).toBeInTheDocument()
   })
 })
 

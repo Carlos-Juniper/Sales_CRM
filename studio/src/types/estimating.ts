@@ -467,6 +467,41 @@ export interface ServiceCategory {
   services: CatalogService[]
 }
 
+// ----- Materials search (Handoff 55 §2) -------------------------------------
+
+/** One bid-able material from GET /api/estimating/materials. */
+export interface MaterialSearchItem {
+  /** `materials.inventory_id`; store on the component as `inventoryId`. */
+  inventoryId: string
+  description: string
+  alternateName: string | null
+  /** Acumatica item class id, e.g. `IRRIGATION-PVC_PIPE__`. */
+  itemClass: string | null
+  itemClassCode: number | null
+  itemClassName: string | null
+  /** e.g. `606-IRR-PVC Pipe`. */
+  itemClassLabel: string | null
+  /** Sales UOM, else base UOM. */
+  uom: string | null
+  baseUom: string | null
+  salesUom: string | null
+  purchaseUom: string | null
+  preferredVendorName: string | null
+  /** Current `material_prices` cost, integer cents; null when the item has no price. */
+  unitCostCents: number | null
+  /** UOM of `unitCostCents`; null with it. */
+  costUom: string | null
+}
+
+/**
+ * Query: `q`, `itemClassCodes` (comma-separated), `limit` (default 25, max 100),
+ * `cursor`. Pass `nextCursor` back with the same q / itemClassCodes for the next page.
+ */
+export interface MaterialSearchResponse {
+  items: MaterialSearchItem[]
+  nextCursor: string | null
+}
+
 // ----- Materials calculator (config-driven formulas) ------------------------
 
 export type MaterialComputeType =

@@ -418,6 +418,7 @@ from api import settings as _settings      # noqa: E402
 from api import commissions as _commissions  # noqa: E402
 from api import sales_performance as _sales_performance  # noqa: E402
 from api import service_catalog as _service_catalog  # noqa: E402
+from api import materials_search as _materials_search  # noqa: E402
 
 _estimating.register(app, require_auth)
 _properties.register(app, require_auth)
@@ -429,6 +430,7 @@ _settings.register(app, require_auth)
 _commissions.register(app, require_auth)
 _sales_performance.register(app, require_auth)
 _service_catalog.register(app, require_auth)
+_materials_search.register(app, require_auth)
 
 
 # ── Leads ────────────────────────────────────────────────────────────────────

@@ -66,6 +66,8 @@ for _name, _value in _TEST_ENV.items():
 # user or host breaks the same tests just as quietly: the give-away is the
 # suite finishing in ~10s with 24 skips instead of ~6min with 1.
 
+import contextlib  # noqa: E402
+import copy  # noqa: E402
 import re  # noqa: E402
 from datetime import datetime  # noqa: E402
 from unittest.mock import AsyncMock, patch  # noqa: E402
@@ -88,6 +90,22 @@ class FakeDb:
         from collections import defaultdict
 
         self.tables: dict[str, dict[str, dict]] = defaultdict(dict)
+        self.tx_events: list[str] = []
+
+    # -- transaction (db.transaction stand-in) -----------------------------------
+    @contextlib.asynccontextmanager
+    async def transaction(self):
+        """Stands in for db.transaction(): snapshot on begin, restore on error."""
+        snapshot = copy.deepcopy(dict(self.tables))
+        self.tx_events.append("begin")
+        try:
+            yield None
+        except BaseException:
+            self.tables.clear()
+            self.tables.update(snapshot)
+            self.tx_events.append("rollback")
+            raise
+        self.tx_events.append("commit")
 
     # -- helpers ---------------------------------------------------------------
     def _cascade_delete(self, table: str, row_id: str) -> None:
@@ -272,11 +290,35 @@ class FakeDb:
         raise AssertionError(f"FakeDb.query: unhandled SQL: {s}")
 
 
+# Minimal seeded install catalog, so install creates go through the
+# catalog-driven section path (api/install_sections.py) as they do in a seeded
+# database. Suites that need the full catalog seed it themselves.
+DEFAULT_INSTALL_CATEGORY = {"id": "install-cat-landscape", "name": "Landscape", "estimate_type": "install",
+                            "sort_order": 10, "is_optional": 0, "active": 1}
+
+
+def seed_default_install_catalog(fake: "FakeDb") -> None:
+    fake.tables["service_categories"][DEFAULT_INSTALL_CATEGORY["id"]] = dict(DEFAULT_INSTALL_CATEGORY)
+
+
+async def catalog_or_empty(sql, params=None):
+    """query side_effect for mock-style suites: the seeded default install
+    category for the service_categories reads, [] for everything else."""
+    return [dict(DEFAULT_INSTALL_CATEGORY)] if "FROM service_categories" in sql else []
+
+
+@contextlib.asynccontextmanager
+async def _noop_transaction():
+    yield None
+
+
 @pytest.fixture
 def db():
     fake = FakeDb()
+    seed_default_install_catalog(fake)
     with patch("api.estimating.query", new=AsyncMock(side_effect=fake.query)), \
          patch("api.estimating.execute", new=AsyncMock(side_effect=fake.execute)), \
+         patch("api.estimating.transaction", new=fake.transaction), \
          patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock), \
          patch("api.estimating._sync_status_bg", new_callable=AsyncMock):
         yield fake
@@ -295,4 +337,15 @@ def _stub_won_lost_commissions(monkeypatch):
         return
     monkeypatch.setattr("api.estimating.create_on_won", AsyncMock())
     monkeypatch.setattr("api.estimating.cancel_for_estimate", AsyncMock())
+
+
+@pytest.fixture(autouse=True)
+def _stub_estimate_create_transaction(monkeypatch):
+    """create_estimate wraps its writes in db.transaction(). Suites that mock
+    api.estimating.query/execute directly must not open a real pool
+    connection; the db fixture replaces this with FakeDb.transaction."""
+    import sys
+
+    if "api.estimating" in sys.modules:
+        monkeypatch.setattr("api.estimating.transaction", _noop_transaction)
 

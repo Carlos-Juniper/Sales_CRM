@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest  # noqa: F401  (asyncio_mode=auto)
 
-from conftest import FakeDb  # the one shared copy
+from conftest import FakeDb, seed_default_install_catalog  # the one shared copy
 from test_estimating_line_items import (  # same-dir import (pytest rootdir)
     _ESTIMATOR,
     _install_payload,
@@ -55,8 +55,10 @@ def db():
         "aspire_branch_id": 3689,
         "crew_rate_cents_per_hour": 18_000,
     }
+    seed_default_install_catalog(fake)  # install create uses the catalog-driven section path
     with patch("api.estimating.query", new=AsyncMock(side_effect=fake.query)), \
          patch("api.estimating.execute", new=AsyncMock(side_effect=fake.execute)), \
+         patch("api.estimating.transaction", new=fake.transaction), \
          patch("api.estimating._sync_new_opportunity_bg", new_callable=AsyncMock), \
          patch("api.estimating._sync_status_bg", new_callable=AsyncMock):
         yield fake

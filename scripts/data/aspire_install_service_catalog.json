@@ -1,0 +1,3736 @@
+{
+  "extracted_at": "2026-09-30T17:25:10Z",
+  "source": "Aspire REST (cloud-api.youraspire.com) via MCP aspire_query; READ-ONLY",
+  "raw_responses": "scripts/data/aspire_raw/ is kept locally only (gitignored, never committed: raw Aspire customer data). See its README.md for exact endpoints, $filter/$orderby and paging",
+  "sample": {
+    "opportunities_install_fetched": 425,
+    "opportunities_with_groups_in_sample": 238,
+    "service_groups_all_divisions_fetched": 2566,
+    "service_groups_install_in_sample": 715,
+    "opportunity_services_all_divisions_fetched": 2901,
+    "opportunity_services_install_in_sample": 955,
+    "opportunities_with_service_rows_in_sample": 159,
+    "opportunity_created_min": "2026-09-15T14:55:15.837Z",
+    "opportunity_created_max": "2026-09-30T16:56:58.85Z",
+    "note": "ALL counts in this file are SAMPLE counts from the window above, never population totals. The Aspire REST surface exposes no $count/total."
+  },
+  "divisions": [
+    {
+      "division_id": 2594,
+      "division_code": "IN-HS",
+      "name": "Install:  Hardscape",
+      "active": true
+    },
+    {
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "name": "Install: Irrigation",
+      "active": true
+    },
+    {
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "name": "Install: Landscape",
+      "active": true
+    },
+    {
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "name": "Design: Landscape and Irrigation Design",
+      "active": true
+    },
+    {
+      "division_id": 2441,
+      "division_code": "IN-MC",
+      "name": "Install: Marketing/Charity Projects",
+      "active": true
+    },
+    {
+      "division_id": 1578,
+      "division_code": "IN-SO",
+      "name": "Install: Sod",
+      "active": true
+    },
+    {
+      "division_id": 1579,
+      "division_code": "IN-SUB",
+      "name": "Install: Subcontract",
+      "active": true
+    }
+  ],
+  "service_types": [
+    {
+      "service_type_id": 7367,
+      "name": "Install Hardscape",
+      "division_id": 2594,
+      "division_code": "IN-HS",
+      "division_name": "Install:  Hardscape",
+      "sort_order": 1,
+      "active": true,
+      "service_count": 1
+    },
+    {
+      "service_type_id": 7369,
+      "name": "Paver Subcontractor",
+      "division_id": 2594,
+      "division_code": "IN-HS",
+      "division_name": "Install:  Hardscape",
+      "sort_order": 1,
+      "active": true,
+      "service_count": 1
+    },
+    {
+      "service_type_id": 2553,
+      "name": "Install Irrigation",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "division_name": "Install: Irrigation",
+      "sort_order": null,
+      "active": true,
+      "service_count": 8
+    },
+    {
+      "service_type_id": 2602,
+      "name": "Install Irrigation Enhancement",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "division_name": "Install: Irrigation",
+      "sort_order": null,
+      "active": true,
+      "service_count": 1
+    },
+    {
+      "service_type_id": 2603,
+      "name": "Install Lighting",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "division_name": "Install: Irrigation",
+      "sort_order": null,
+      "active": true,
+      "service_count": 2
+    },
+    {
+      "service_type_id": 2604,
+      "name": "Install Drainage",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "division_name": "Install: Irrigation",
+      "sort_order": null,
+      "active": true,
+      "service_count": 2
+    },
+    {
+      "service_type_id": 2614,
+      "name": "install Drainage Enhancement",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "division_name": "Install: Irrigation",
+      "sort_order": null,
+      "active": true,
+      "service_count": 1
+    },
+    {
+      "service_type_id": 2615,
+      "name": "Install Lighting Enhancement",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "division_name": "Install: Irrigation",
+      "sort_order": null,
+      "active": true,
+      "service_count": 1
+    },
+    {
+      "service_type_id": 2554,
+      "name": "Install Landscape",
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "division_name": "Install: Landscape",
+      "sort_order": null,
+      "active": true,
+      "service_count": 5
+    },
+    {
+      "service_type_id": 2616,
+      "name": "Install Landscape Enhancement",
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "division_name": "Install: Landscape",
+      "sort_order": null,
+      "active": true,
+      "service_count": 1
+    },
+    {
+      "service_type_id": 2617,
+      "name": "Plant Material Purchase",
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "division_name": "Install: Landscape",
+      "sort_order": null,
+      "active": true,
+      "service_count": 1
+    },
+    {
+      "service_type_id": 2552,
+      "name": "Landscape Design DO NOT USE",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "division_name": "Design: Landscape and Irrigation Design",
+      "sort_order": null,
+      "active": true,
+      "service_count": 0
+    },
+    {
+      "service_type_id": 6643,
+      "name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "division_name": "Design: Landscape and Irrigation Design",
+      "sort_order": null,
+      "active": true,
+      "service_count": 15
+    },
+    {
+      "service_type_id": 6644,
+      "name": "Field Work",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "division_name": "Design: Landscape and Irrigation Design",
+      "sort_order": null,
+      "active": true,
+      "service_count": 2
+    },
+    {
+      "service_type_id": 6645,
+      "name": "Record Drawings",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "division_name": "Design: Landscape and Irrigation Design",
+      "sort_order": null,
+      "active": true,
+      "service_count": 0
+    },
+    {
+      "service_type_id": 6646,
+      "name": "Graphic Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "division_name": "Design: Landscape and Irrigation Design",
+      "sort_order": null,
+      "active": true,
+      "service_count": 0
+    },
+    {
+      "service_type_id": 6647,
+      "name": "Landscape Architectural Enhancements",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "division_name": "Design: Landscape and Irrigation Design",
+      "sort_order": null,
+      "active": true,
+      "service_count": 0
+    },
+    {
+      "service_type_id": 6648,
+      "name": "Single Family Lot Typical Landscape Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "division_name": "Design: Landscape and Irrigation Design",
+      "sort_order": null,
+      "active": true,
+      "service_count": 0
+    },
+    {
+      "service_type_id": 6649,
+      "name": "Multi-Family Typical Landscape Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "division_name": "Design: Landscape and Irrigation Design",
+      "sort_order": null,
+      "active": true,
+      "service_count": 0
+    },
+    {
+      "service_type_id": 6650,
+      "name": "Reimbursable Expenses",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "division_name": "Design: Landscape and Irrigation Design",
+      "sort_order": null,
+      "active": true,
+      "service_count": 0
+    },
+    {
+      "service_type_id": 6653,
+      "name": "Marketing/Gratis",
+      "division_id": 2441,
+      "division_code": "IN-MC",
+      "division_name": "Install: Marketing/Charity Projects",
+      "sort_order": null,
+      "active": true,
+      "service_count": 1
+    },
+    {
+      "service_type_id": 2555,
+      "name": "Install Sod",
+      "division_id": 1578,
+      "division_code": "IN-SO",
+      "division_name": "Install: Sod",
+      "sort_order": null,
+      "active": true,
+      "service_count": 5
+    },
+    {
+      "service_type_id": 2556,
+      "name": "Install Subcontractor",
+      "division_id": 1579,
+      "division_code": "IN-SUB",
+      "division_name": "Install: Subcontract",
+      "sort_order": null,
+      "active": true,
+      "service_count": 1
+    }
+  ],
+  "services": [
+    {
+      "service_id": 18878,
+      "name": "IN: Irrigation Install",
+      "name_abbrev": "Irrigation Install",
+      "display_name": "Irrigation Install",
+      "service_type_id": 2553,
+      "service_type_name": "Install Irrigation",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 12,
+      "sample_line_count": 407
+    },
+    {
+      "service_id": 18879,
+      "name": "IN: Irrigation Warranty",
+      "name_abbrev": "Irrigation Warranty ",
+      "display_name": "Irrigation Warranty ",
+      "service_type_id": 2553,
+      "service_type_name": "Install Irrigation",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 11,
+      "sample_line_count": 1
+    },
+    {
+      "service_id": 18880,
+      "name": "IN: Irrigation Wet Check",
+      "name_abbrev": "Irrigation Wet Check",
+      "display_name": "Irrigation Wet Check",
+      "service_type_id": 2553,
+      "service_type_name": "Install Irrigation",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 10,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 28771,
+      "name": "IN: Install Sleeving",
+      "name_abbrev": "Install Sleeving",
+      "display_name": "Install Sleeving",
+      "service_type_id": 2553,
+      "service_type_name": "Install Irrigation",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 11,
+      "sample_line_count": 2
+    },
+    {
+      "service_id": 29823,
+      "name": "IN: Irrigation Backcharge DO NOT USE",
+      "name_abbrev": "Backcharge",
+      "display_name": "Backcharge",
+      "service_type_id": 2553,
+      "service_type_name": "Install Irrigation",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": false,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 4,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 30271,
+      "name": "IN:  Irrigation Parts Purchased- DO NOT USE!",
+      "name_abbrev": "IN:  Irrigation Part",
+      "display_name": "IN:  Irrigation Parts Purchased",
+      "service_type_id": 2553,
+      "service_type_name": "Install Irrigation",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 5,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 35502,
+      "name": "IN: Root Barrier",
+      "name_abbrev": "Install Root Barrier",
+      "display_name": "IN: Root Barrier",
+      "service_type_id": 2553,
+      "service_type_name": "Install Irrigation",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 9,
+      "sample_line_count": 1
+    },
+    {
+      "service_id": 35503,
+      "name": "IN: Install Turf Mat",
+      "name_abbrev": "Install Turf Mat",
+      "display_name": "IN: Install Turf Mat",
+      "service_type_id": 2553,
+      "service_type_name": "Install Irrigation",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 9,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 18882,
+      "name": "IN: Landscape Install",
+      "name_abbrev": "Landscape Install",
+      "display_name": "Landscape Install",
+      "service_type_id": 2554,
+      "service_type_name": "Install Landscape",
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 12,
+      "sample_line_count": 331
+    },
+    {
+      "service_id": 18883,
+      "name": "IN: Landscape Warranty",
+      "name_abbrev": "Landscape Warranty",
+      "display_name": "Landscape Warranty",
+      "service_type_id": 2554,
+      "service_type_name": "Install Landscape",
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 11,
+      "sample_line_count": 10
+    },
+    {
+      "service_id": 29824,
+      "name": "IN: Landscape Backcharge DO NOT USE",
+      "name_abbrev": "Backcharge",
+      "display_name": "Backcharge",
+      "service_type_id": 2554,
+      "service_type_name": "Install Landscape",
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 4,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 35557,
+      "name": "IN: Install Buff Mulch",
+      "name_abbrev": "Buff Mulch",
+      "display_name": "IN: Install Buff Mulch",
+      "service_type_id": 2554,
+      "service_type_name": "Install Landscape",
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 9,
+      "sample_line_count": 11
+    },
+    {
+      "service_id": 50236,
+      "name": "IN: Completed Landscape",
+      "name_abbrev": "IN: Completed Landsc",
+      "display_name": "IN: Completed Landscape",
+      "service_type_id": 2554,
+      "service_type_name": "Install Landscape",
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 1,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 18887,
+      "name": "IN: Sod Enhancement DO NOT USE",
+      "name_abbrev": "Sod Enhancement",
+      "display_name": "Sod Enhancement",
+      "service_type_id": 2555,
+      "service_type_name": "Install Sod",
+      "division_id": 1578,
+      "division_code": "IN-SO",
+      "sort_order": 0,
+      "active": false,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 4,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 18888,
+      "name": "IN: Sod Install",
+      "name_abbrev": "Sod Install",
+      "display_name": "Sod Install",
+      "service_type_id": 2555,
+      "service_type_name": "Install Sod",
+      "division_id": 1578,
+      "division_code": "IN-SO",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 12,
+      "sample_line_count": 6
+    },
+    {
+      "service_id": 18889,
+      "name": "IN: Sod Warranty",
+      "name_abbrev": "Sod Warranty",
+      "display_name": "Sod Warranty",
+      "service_type_id": 2555,
+      "service_type_name": "Install Sod",
+      "division_id": 1578,
+      "division_code": "IN-SO",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 12,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 29825,
+      "name": "IN: Sod Backcharge DO NOT USE",
+      "name_abbrev": "Backcharge",
+      "display_name": "Backcharge",
+      "service_type_id": 2555,
+      "service_type_name": "Install Sod",
+      "division_id": 1578,
+      "division_code": "IN-SO",
+      "sort_order": 0,
+      "active": false,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 4,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 50173,
+      "name": "Install:  Sod/Lennar",
+      "name_abbrev": "Install:  Sod/Lennar",
+      "display_name": "Install:  Sod/Lennar",
+      "service_type_id": 2555,
+      "service_type_name": "Install Sod",
+      "division_id": 1578,
+      "division_code": "IN-SO",
+      "sort_order": 0,
+      "active": false,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 1,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 18890,
+      "name": "IN: Subcontractor",
+      "name_abbrev": "Subcontractor",
+      "display_name": "Subcontractor",
+      "service_type_id": 2556,
+      "service_type_name": "Install Subcontractor",
+      "division_id": 1579,
+      "division_code": "IN-SUB",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 12,
+      "sample_line_count": 65
+    },
+    {
+      "service_id": 18877,
+      "name": "IN: Irrigation Enhancement - DO NOT USE",
+      "name_abbrev": "Irrigation Enhanceme",
+      "display_name": "Irrigation Enhancement",
+      "service_type_id": 2602,
+      "service_type_name": "Install Irrigation Enhancement",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 6,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 18885,
+      "name": "IN: Lighting Install",
+      "name_abbrev": "Lighting Install",
+      "display_name": "Lighting Install",
+      "service_type_id": 2603,
+      "service_type_name": "Install Lighting",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 11,
+      "sample_line_count": 32
+    },
+    {
+      "service_id": 18886,
+      "name": "IN: Lighting Warranty",
+      "name_abbrev": "Lighting Warranty",
+      "display_name": "Lighting Warranty",
+      "service_type_id": 2603,
+      "service_type_name": "Install Lighting",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 11,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 18875,
+      "name": "IN: Drainage Install",
+      "name_abbrev": "Drainage Install",
+      "display_name": "Drainage Install",
+      "service_type_id": 2604,
+      "service_type_name": "Install Drainage",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 11,
+      "sample_line_count": 29
+    },
+    {
+      "service_id": 18876,
+      "name": "IN: Drainage Warranty",
+      "name_abbrev": "Drainage Warranty",
+      "display_name": "Drainage Warranty",
+      "service_type_id": 2604,
+      "service_type_name": "Install Drainage",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 11,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 18874,
+      "name": "IN: Drainage Enhancement DO NOT USE",
+      "name_abbrev": "Drainage Enhancement",
+      "display_name": "Drainage Enhancement",
+      "service_type_id": 2614,
+      "service_type_name": "install Drainage Enhancement",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": false,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 4,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 18884,
+      "name": "IN: Lighting Enhancement DO NOT USE",
+      "name_abbrev": "Lighting Enhancement",
+      "display_name": "Lighting Enhancement",
+      "service_type_id": 2615,
+      "service_type_name": "Install Lighting Enhancement",
+      "division_id": 1577,
+      "division_code": "IN-IRR",
+      "sort_order": 0,
+      "active": false,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 4,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 18881,
+      "name": "IN: Landscape Enhancement - DO NOT USE",
+      "name_abbrev": "Landscape Enhancemen",
+      "display_name": "Landscape Enhancement",
+      "service_type_id": 2616,
+      "service_type_name": "Install Landscape Enhancement",
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 6,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 18945,
+      "name": "IN: Plant Material Purchase",
+      "name_abbrev": "Plant Material Purch",
+      "display_name": "Plant Material Purchase",
+      "service_type_id": 2617,
+      "service_type_name": "Plant Material Purchase",
+      "division_id": 1569,
+      "division_code": "IN-LA",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 10,
+      "sample_line_count": 1
+    },
+    {
+      "service_id": 18873,
+      "name": "DS: Code Minimum Landscape Architectural Services",
+      "name_abbrev": "Code Minimum Landsca",
+      "display_name": "Code Minimum Landscape Architectural Services",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 44221,
+      "name": "DS: Marketing/Gratis",
+      "name_abbrev": "Marketing/Gratis",
+      "display_name": "Marketing/Gratis",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 46030,
+      "name": "DS: Field Work",
+      "name_abbrev": "Field Work",
+      "display_name": "Field Work",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 46031,
+      "name": "DS: As-Builts and Record Drawings",
+      "name_abbrev": "Record Drawings",
+      "display_name": "As-Builts and Record Drawings",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 9
+    },
+    {
+      "service_id": 46032,
+      "name": "DS: Graphic Design",
+      "name_abbrev": "Graphic Design",
+      "display_name": "Graphic Design",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 46033,
+      "name": "DS: Landscape Architectural Enhancements",
+      "name_abbrev": "Landscape Architectu",
+      "display_name": "Landscape Architectural Enhancements",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 46034,
+      "name": "DS: Single Family Lot Typical Landscape Design",
+      "name_abbrev": "Single Family Lot Ty",
+      "display_name": "Single Family Lot Typical Landscape Design",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 46035,
+      "name": "DS: Multi-Family Typical Landscape Design",
+      "name_abbrev": "Multi-Family Typical",
+      "display_name": "Multi-Family Typical Landscape Design",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 46036,
+      "name": "DS: Courtesy Single Family and Multi-Family Lot Typical Landscape Design",
+      "name_abbrev": "Courtesy Single Fami",
+      "display_name": "Courtesy Single Family and Multi-Family Lot Typical Landscape Design",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 46038,
+      "name": "DS: Reimbursable Expenses",
+      "name_abbrev": "Reimbursable Expense",
+      "display_name": "Reimbursable Expenses",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 50180,
+      "name": "DS: Irrigation Land Development Infrastructure Design",
+      "name_abbrev": "IRR Infrastructure",
+      "display_name": "DS: Irrigation Land Development Infrastructure Design",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 50181,
+      "name": "DS: Irrigation Land Development Common Area Distribution Design",
+      "name_abbrev": "IRR Com Area Dist",
+      "display_name": "DS: Irrigation Land Development Common Area Distribution Design",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 1
+    },
+    {
+      "service_id": 50182,
+      "name": "DS: Irrigation Single Family Lot Typical Design",
+      "name_abbrev": "IRR Typical",
+      "display_name": "DS: Irrigation Single Family Lot Typical Design",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 50183,
+      "name": "DS: Irrigation Custom Residential Lot Design",
+      "name_abbrev": "IRR Custom Home",
+      "display_name": "DS: Irrigation Custom Residential Lot Design",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 50184,
+      "name": "DS: Irrigation Commercial Project Design",
+      "name_abbrev": "IRR Commercial ",
+      "display_name": "DS: Irrigation Commercial Project Design",
+      "service_type_id": 6643,
+      "service_type_name": "Landscape and Irrigation Design",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 50788,
+      "name": "ME: Agronomy Herbicide Treatments",
+      "name_abbrev": "Herbicide Treatments",
+      "display_name": "Agronomy Herbicide Treatments",
+      "service_type_id": 6644,
+      "service_type_name": "Field Work",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 50803,
+      "name": "Aquatic Spray Service 4",
+      "name_abbrev": "Midge Treatment",
+      "display_name": "Aquatic Spray Service 4",
+      "service_type_id": 6644,
+      "service_type_name": "Field Work",
+      "division_id": 1573,
+      "division_code": "IN-LD",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": true,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 2,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 44222,
+      "name": "IN: Marketing/Gratis",
+      "name_abbrev": "Marketing/Gratis",
+      "display_name": "Marketing/Gratis",
+      "service_type_id": 6653,
+      "service_type_name": "Marketing/Gratis",
+      "division_id": 2441,
+      "division_code": "IN-MC",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 11,
+      "sample_line_count": 0
+    },
+    {
+      "service_id": 50697,
+      "name": "IN: Hardscape Install",
+      "name_abbrev": "IN: Hardscape ",
+      "display_name": "IN: Hardscape Install",
+      "service_type_id": 7367,
+      "service_type_name": "Install Hardscape",
+      "division_id": 2594,
+      "division_code": "IN-HS",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": false,
+      "multi_visit": false,
+      "all_branches": false,
+      "branch_count": 11,
+      "sample_line_count": 41
+    },
+    {
+      "service_id": 50780,
+      "name": "Paver Subcontractor",
+      "name_abbrev": "Paver Sub",
+      "display_name": "Paver Subcontractor",
+      "service_type_id": 7369,
+      "service_type_name": "Paver Subcontractor",
+      "division_id": 2594,
+      "division_code": "IN-HS",
+      "sort_order": 0,
+      "active": true,
+      "contract_service": true,
+      "multi_visit": false,
+      "all_branches": true,
+      "branch_count": 0,
+      "sample_line_count": 0
+    }
+  ],
+  "observed_groups": [
+    {
+      "normalised_name": "optional services",
+      "raw_names": [
+        "Optional Services"
+      ],
+      "raw_name_sample_counts": {
+        "Optional Services": 236
+      },
+      "sample_group_count": 236,
+      "optional_service_group": true,
+      "sample_groups_with_service_rows_fetched": 39,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 89
+        },
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 9
+        },
+        {
+          "service_id": 50697,
+          "service_name": "IN: Hardscape Install",
+          "service_type_name": "Install Hardscape",
+          "is_install_division_service": true,
+          "sample_line_count": 9
+        },
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "landscape",
+      "raw_names": [
+        "Landscape",
+        "Landscape "
+      ],
+      "raw_name_sample_counts": {
+        "Landscape": 98,
+        "Landscape ": 2
+      },
+      "sample_group_count": 100,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 61,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 143
+        },
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        },
+        {
+          "service_id": 18883,
+          "service_name": "IN: Landscape Warranty",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "irrigation",
+      "raw_names": [
+        "IRRIGATION",
+        "Irrigation",
+        "Irrigation "
+      ],
+      "raw_name_sample_counts": {
+        "IRRIGATION": 3,
+        "Irrigation": 62,
+        "Irrigation ": 24
+      },
+      "sample_group_count": 89,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 61,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 364
+        },
+        {
+          "service_id": 46031,
+          "service_name": "DS: As-Builts and Record Drawings",
+          "service_type_name": "Landscape and Irrigation Design",
+          "is_install_division_service": true,
+          "sample_line_count": 9
+        },
+        {
+          "service_id": 35502,
+          "service_name": "IN: Root Barrier",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        },
+        {
+          "service_id": 50181,
+          "service_name": "DS: Irrigation Land Development Common Area Distribution Design",
+          "service_type_name": "Landscape and Irrigation Design",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "default group",
+      "raw_names": [
+        "Default Group"
+      ],
+      "raw_name_sample_counts": {
+        "Default Group": 58
+      },
+      "sample_group_count": 58,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 36,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 21
+        },
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 20
+        },
+        {
+          "service_id": 18888,
+          "service_name": "IN: Sod Install",
+          "service_type_name": "Install Sod",
+          "is_install_division_service": true,
+          "sample_line_count": 6
+        },
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        },
+        {
+          "service_id": 18883,
+          "service_name": "IN: Landscape Warranty",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        },
+        {
+          "service_id": 18945,
+          "service_name": "IN: Plant Material Purchase",
+          "service_type_name": "Plant Material Purchase",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        },
+        {
+          "service_id": 18879,
+          "service_name": "IN: Irrigation Warranty",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "sod - subcontractor",
+      "raw_names": [
+        "Sod - Subcontractor"
+      ],
+      "raw_name_sample_counts": {
+        "Sod - Subcontractor": 18
+      },
+      "sample_group_count": 18,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 15,
+      "service_ids": [
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 15
+        }
+      ]
+    },
+    {
+      "normalised_name": "ls install",
+      "raw_names": [
+        "LS INSTALL"
+      ],
+      "raw_name_sample_counts": {
+        "LS INSTALL": 17
+      },
+      "sample_group_count": 17,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 10,
+      "service_ids": [
+        {
+          "service_id": 35557,
+          "service_name": "IN: Install Buff Mulch",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 10
+        }
+      ]
+    },
+    {
+      "normalised_name": "drainage",
+      "raw_names": [
+        "Drainage"
+      ],
+      "raw_name_sample_counts": {
+        "Drainage": 9
+      },
+      "sample_group_count": 9,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 8,
+      "service_ids": [
+        {
+          "service_id": 18875,
+          "service_name": "IN: Drainage Install",
+          "service_type_name": "Install Drainage",
+          "is_install_division_service": true,
+          "sample_line_count": 29
+        }
+      ]
+    },
+    {
+      "normalised_name": "fuel surcharge",
+      "raw_names": [
+        "Fuel Surcharge"
+      ],
+      "raw_name_sample_counts": {
+        "Fuel Surcharge": 9
+      },
+      "sample_group_count": 9,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 9,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 9
+        }
+      ]
+    },
+    {
+      "normalised_name": "nto",
+      "raw_names": [
+        "NTO"
+      ],
+      "raw_name_sample_counts": {
+        "NTO": 9
+      },
+      "sample_group_count": 9,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 9,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 9
+        }
+      ]
+    },
+    {
+      "normalised_name": "90 - day maintenance",
+      "raw_names": [
+        "90 - Day Maintenance"
+      ],
+      "raw_name_sample_counts": {
+        "90 - Day Maintenance": 8
+      },
+      "sample_group_count": 8,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 8,
+      "service_ids": [
+        {
+          "service_id": 30733,
+          "service_name": "MC: 90 Day Landscape Maintenance ",
+          "service_type_name": "Maintenance Contract Mow",
+          "is_install_division_service": false,
+          "sample_line_count": 8
+        }
+      ]
+    },
+    {
+      "normalised_name": "artificial turf - subcontractor",
+      "raw_names": [
+        "Artificial Turf - Subcontractor"
+      ],
+      "raw_name_sample_counts": {
+        "Artificial Turf - Subcontractor": 8
+      },
+      "sample_group_count": 8,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 8,
+      "service_ids": [
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 8
+        }
+      ]
+    },
+    {
+      "normalised_name": "bond",
+      "raw_names": [
+        "Bond"
+      ],
+      "raw_name_sample_counts": {
+        "Bond": 8
+      },
+      "sample_group_count": 8,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 8,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 8
+        }
+      ]
+    },
+    {
+      "normalised_name": "espalier - subcontractor",
+      "raw_names": [
+        "Espalier - Subcontractor"
+      ],
+      "raw_name_sample_counts": {
+        "Espalier - Subcontractor": 8
+      },
+      "sample_group_count": 8,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 8,
+      "service_ids": [
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 8
+        }
+      ]
+    },
+    {
+      "normalised_name": "lighting",
+      "raw_names": [
+        "Lighting"
+      ],
+      "raw_name_sample_counts": {
+        "Lighting": 8
+      },
+      "sample_group_count": 8,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 8,
+      "service_ids": [
+        {
+          "service_id": 18885,
+          "service_name": "IN: Lighting Install",
+          "service_type_name": "Install Lighting",
+          "is_install_division_service": true,
+          "sample_line_count": 32
+        }
+      ]
+    },
+    {
+      "normalised_name": "littoral - subcontractor",
+      "raw_names": [
+        "Littoral - Subcontractor"
+      ],
+      "raw_name_sample_counts": {
+        "Littoral - Subcontractor": 8
+      },
+      "sample_group_count": 8,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 8,
+      "service_ids": [
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 8
+        }
+      ]
+    },
+    {
+      "normalised_name": "pavers",
+      "raw_names": [
+        "Pavers"
+      ],
+      "raw_name_sample_counts": {
+        "Pavers": 8
+      },
+      "sample_group_count": 8,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 8,
+      "service_ids": [
+        {
+          "service_id": 50697,
+          "service_name": "IN: Hardscape Install",
+          "service_type_name": "Install Hardscape",
+          "is_install_division_service": true,
+          "sample_line_count": 32
+        }
+      ]
+    },
+    {
+      "normalised_name": "well/pump- subcontractor",
+      "raw_names": [
+        "Well/Pump- Subcontractor"
+      ],
+      "raw_name_sample_counts": {
+        "Well/Pump- Subcontractor": 7
+      },
+      "sample_group_count": 7,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 7,
+      "service_ids": [
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 7
+        }
+      ]
+    },
+    {
+      "normalised_name": "irrigation install",
+      "raw_names": [
+        "Irrigation Install"
+      ],
+      "raw_name_sample_counts": {
+        "Irrigation Install": 6
+      },
+      "sample_group_count": 6,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "sod",
+      "raw_names": [
+        "Sod",
+        "Sod "
+      ],
+      "raw_name_sample_counts": {
+        "Sod": 5,
+        "Sod ": 1
+      },
+      "sample_group_count": 6,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 5,
+      "service_ids": [
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 5
+        }
+      ]
+    },
+    {
+      "normalised_name": "warranty",
+      "raw_names": [
+        "Warranty"
+      ],
+      "raw_name_sample_counts": {
+        "Warranty": 6
+      },
+      "sample_group_count": 6,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 5,
+      "service_ids": [
+        {
+          "service_id": 18883,
+          "service_name": "IN: Landscape Warranty",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 5
+        }
+      ]
+    },
+    {
+      "normalised_name": "direction bore - subcontractor",
+      "raw_names": [
+        "Direction Bore - Subcontractor"
+      ],
+      "raw_name_sample_counts": {
+        "Direction Bore - Subcontractor": 5
+      },
+      "sample_group_count": 5,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 5,
+      "service_ids": [
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 5
+        }
+      ]
+    },
+    {
+      "normalised_name": "pump station - subcontractor",
+      "raw_names": [
+        "Pump Station - Subcontractor"
+      ],
+      "raw_name_sample_counts": {
+        "Pump Station - Subcontractor": 5
+      },
+      "sample_group_count": 5,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 5,
+      "service_ids": [
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 5
+        }
+      ]
+    },
+    {
+      "normalised_name": "sleeving",
+      "raw_names": [
+        "Sleeving"
+      ],
+      "raw_name_sample_counts": {
+        "Sleeving": 5
+      },
+      "sample_group_count": 5,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 2,
+      "service_ids": [
+        {
+          "service_id": 28771,
+          "service_name": "IN: Install Sleeving",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        }
+      ]
+    },
+    {
+      "normalised_name": "house install",
+      "raw_names": [
+        "House Install"
+      ],
+      "raw_name_sample_counts": {
+        "House Install": 3
+      },
+      "sample_group_count": 3,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 3,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 3
+        }
+      ]
+    },
+    {
+      "normalised_name": "service call",
+      "raw_names": [
+        "Service Call"
+      ],
+      "raw_name_sample_counts": {
+        "Service Call": 3
+      },
+      "sample_group_count": 3,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "billable punch",
+      "raw_names": [
+        "Billable Punch"
+      ],
+      "raw_name_sample_counts": {
+        "Billable Punch": 2
+      },
+      "sample_group_count": 2,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "bldg 26- 1308 chopin ln",
+      "raw_names": [
+        "Bldg 26- 1308 Chopin Ln"
+      ],
+      "raw_name_sample_counts": {
+        "Bldg 26- 1308 Chopin Ln": 2
+      },
+      "sample_group_count": 2,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 2,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        }
+      ]
+    },
+    {
+      "normalised_name": "buff mulch",
+      "raw_names": [
+        "Buff Mulch"
+      ],
+      "raw_name_sample_counts": {
+        "Buff Mulch": 2
+      },
+      "sample_group_count": 2,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 2,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        },
+        {
+          "service_id": 35557,
+          "service_name": "IN: Install Buff Mulch",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "irrigation - grand bay",
+      "raw_names": [
+        "Irrigation - GRAND BAY"
+      ],
+      "raw_name_sample_counts": {
+        "Irrigation - GRAND BAY": 2
+      },
+      "sample_group_count": 2,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 2,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        }
+      ]
+    },
+    {
+      "normalised_name": "landscape - grand bay heaven model",
+      "raw_names": [
+        "Landscape - GRAND BAY HEAVEN MODEL"
+      ],
+      "raw_name_sample_counts": {
+        "Landscape - GRAND BAY HEAVEN MODEL": 2
+      },
+      "sample_group_count": 2,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 2,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        }
+      ]
+    },
+    {
+      "normalised_name": "mulch, soil, sod, rock",
+      "raw_names": [
+        "Mulch, Soil, Sod, Rock"
+      ],
+      "raw_name_sample_counts": {
+        "Mulch, Soil, Sod, Rock": 2
+      },
+      "sample_group_count": 2,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 2,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        }
+      ]
+    },
+    {
+      "normalised_name": "supplemental",
+      "raw_names": [
+        "SUPPLEMENTAL"
+      ],
+      "raw_name_sample_counts": {
+        "SUPPLEMENTAL": 2
+      },
+      "sample_group_count": 2,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 2,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        }
+      ]
+    },
+    {
+      "normalised_name": "11245 rolling fork trl- replace street tree",
+      "raw_names": [
+        "11245 Rolling Fork Trl- Replace Street Tree"
+      ],
+      "raw_name_sample_counts": {
+        "11245 Rolling Fork Trl- Replace Street Tree": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "135 o'keeffe circle- adding tree to block appartments",
+      "raw_names": [
+        "135 O'Keeffe Circle- Adding tree to block appartments"
+      ],
+      "raw_name_sample_counts": {
+        "135 O'Keeffe Circle- Adding tree to block appartments": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "1509 14th st w- plants at the back of pool",
+      "raw_names": [
+        "1509 14th St W- Plants at the back of pool"
+      ],
+      "raw_name_sample_counts": {
+        "1509 14th St W- Plants at the back of pool": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "2609 86th st e- redo front of home",
+      "raw_names": [
+        "2609 86th St E- Redo front of home"
+      ],
+      "raw_name_sample_counts": {
+        "2609 86th St E- Redo front of home": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "add hours for geofoam install",
+      "raw_names": [
+        "Add Hours for Geofoam Install"
+      ],
+      "raw_name_sample_counts": {
+        "Add Hours for Geofoam Install": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "add viburnum",
+      "raw_names": [
+        "Add Viburnum"
+      ],
+      "raw_name_sample_counts": {
+        "Add Viburnum": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "bed prep",
+      "raw_names": [
+        "bed prep"
+      ],
+      "raw_name_sample_counts": {
+        "bed prep": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "bldg 25- 1324 chopin ln",
+      "raw_names": [
+        "Bldg 25- 1324 Chopin Ln"
+      ],
+      "raw_name_sample_counts": {
+        "Bldg 25- 1324 Chopin Ln": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "bldg 27- 1205 bach ln- buff mulch",
+      "raw_names": [
+        "Bldg 27- 1205 Bach Ln- Buff Mulch"
+      ],
+      "raw_name_sample_counts": {
+        "Bldg 27- 1205 Bach Ln- Buff Mulch": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "cabana",
+      "raw_names": [
+        "Cabana"
+      ],
+      "raw_name_sample_counts": {
+        "Cabana": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "courtyard drainage installation",
+      "raw_names": [
+        "Courtyard Drainage Installation "
+      ],
+      "raw_name_sample_counts": {
+        "Courtyard Drainage Installation ": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "customer satisfacting",
+      "raw_names": [
+        "Customer Satisfacting"
+      ],
+      "raw_name_sample_counts": {
+        "Customer Satisfacting": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18883,
+          "service_name": "IN: Landscape Warranty",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "entrance 2",
+      "raw_names": [
+        "Entrance 2"
+      ],
+      "raw_name_sample_counts": {
+        "Entrance 2": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "entrance 3",
+      "raw_names": [
+        "Entrance 3"
+      ],
+      "raw_name_sample_counts": {
+        "Entrance 3": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "foundation plantings",
+      "raw_names": [
+        "Foundation Plantings"
+      ],
+      "raw_name_sample_counts": {
+        "Foundation Plantings": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "install sod",
+      "raw_names": [
+        "install sod"
+      ],
+      "raw_name_sample_counts": {
+        "install sod": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "internal hrs",
+      "raw_names": [
+        "Internal Hrs"
+      ],
+      "raw_name_sample_counts": {
+        "Internal Hrs": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "irrigation - savoy",
+      "raw_names": [
+        "Irrigation - Savoy"
+      ],
+      "raw_name_sample_counts": {
+        "Irrigation - Savoy": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "irrigation - water's edge",
+      "raw_names": [
+        "Irrigation - WATER'S EDGE"
+      ],
+      "raw_name_sample_counts": {
+        "Irrigation - WATER'S EDGE": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "irrigation = $2,904 / unit",
+      "raw_names": [
+        "Irrigation = $2,904 / Unit"
+      ],
+      "raw_name_sample_counts": {
+        "Irrigation = $2,904 / Unit": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "irrigation = $2,917 / unit",
+      "raw_names": [
+        "Irrigation = $2,917 / Unit"
+      ],
+      "raw_name_sample_counts": {
+        "Irrigation = $2,917 / Unit": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "irrigation enhancement",
+      "raw_names": [
+        "Irrigation Enhancement"
+      ],
+      "raw_name_sample_counts": {
+        "Irrigation Enhancement": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "irrigation installation",
+      "raw_names": [
+        "Irrigation Installation"
+      ],
+      "raw_name_sample_counts": {
+        "Irrigation Installation": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "irrigation scm 3 add",
+      "raw_names": [
+        "Irrigation SCM 3 Add"
+      ],
+      "raw_name_sample_counts": {
+        "Irrigation SCM 3 Add": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        }
+      ]
+    },
+    {
+      "normalised_name": "landscape - amenity center",
+      "raw_names": [
+        "Landscape - Amenity Center"
+      ],
+      "raw_name_sample_counts": {
+        "Landscape - Amenity Center": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 7
+        }
+      ]
+    },
+    {
+      "normalised_name": "landscape - bldg. type a",
+      "raw_names": [
+        "Landscape - Bldg. Type A"
+      ],
+      "raw_name_sample_counts": {
+        "Landscape - Bldg. Type A": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        }
+      ]
+    },
+    {
+      "normalised_name": "landscape - bldg. type b",
+      "raw_names": [
+        "Landscape - Bldg. Type B"
+      ],
+      "raw_name_sample_counts": {
+        "Landscape - Bldg. Type B": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        }
+      ]
+    },
+    {
+      "normalised_name": "landscape - entry median",
+      "raw_names": [
+        "Landscape - Entry Median"
+      ],
+      "raw_name_sample_counts": {
+        "Landscape - Entry Median": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 7
+        }
+      ]
+    },
+    {
+      "normalised_name": "landscape - savoy",
+      "raw_names": [
+        "Landscape - Savoy"
+      ],
+      "raw_name_sample_counts": {
+        "Landscape - Savoy": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "landscape -water's edge model",
+      "raw_names": [
+        "Landscape -WATER'S EDGE MODEL"
+      ],
+      "raw_name_sample_counts": {
+        "Landscape -WATER'S EDGE MODEL": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "landscape = $1,259.50 / unit",
+      "raw_names": [
+        "Landscape = $1,259.50 / Unit"
+      ],
+      "raw_name_sample_counts": {
+        "Landscape = $1,259.50 / Unit": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "landscape enhancement",
+      "raw_names": [
+        "Landscape Enhancement"
+      ],
+      "raw_name_sample_counts": {
+        "Landscape Enhancement": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "landscape- mediate drive",
+      "raw_names": [
+        "Landscape- Mediate Drive"
+      ],
+      "raw_name_sample_counts": {
+        "Landscape- Mediate Drive": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "landscape:",
+      "raw_names": [
+        "Landscape: "
+      ],
+      "raw_name_sample_counts": {
+        "Landscape: ": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 2
+        }
+      ]
+    },
+    {
+      "normalised_name": "mulch",
+      "raw_names": [
+        "Mulch"
+      ],
+      "raw_name_sample_counts": {
+        "Mulch": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "new landscape install",
+      "raw_names": [
+        "New Landscape Install"
+      ],
+      "raw_name_sample_counts": {
+        "New Landscape Install": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "palm removal and palm replacement",
+      "raw_names": [
+        " Palm Removal and Palm Replacement"
+      ],
+      "raw_name_sample_counts": {
+        " Palm Removal and Palm Replacement": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "pergola",
+      "raw_names": [
+        "Pergola"
+      ],
+      "raw_name_sample_counts": {
+        "Pergola": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "perimeter buffers",
+      "raw_names": [
+        "Perimeter Buffers"
+      ],
+      "raw_name_sample_counts": {
+        "Perimeter Buffers": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "program decoder",
+      "raw_names": [
+        "Program Decoder"
+      ],
+      "raw_name_sample_counts": {
+        "Program Decoder": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "property prep",
+      "raw_names": [
+        "Property Prep"
+      ],
+      "raw_name_sample_counts": {
+        "Property Prep": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "pump station",
+      "raw_names": [
+        "Pump Station"
+      ],
+      "raw_name_sample_counts": {
+        "Pump Station": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "repair work oct2026",
+      "raw_names": [
+        "Repair Work OCT2026"
+      ],
+      "raw_name_sample_counts": {
+        "Repair Work OCT2026": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "rfi 266",
+      "raw_names": [
+        "RFI 266"
+      ],
+      "raw_name_sample_counts": {
+        "RFI 266": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18878,
+          "service_name": "IN: Irrigation Install",
+          "service_type_name": "Install Irrigation",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "rye ranch elementary school",
+      "raw_names": [
+        "Rye Ranch Elementary School"
+      ],
+      "raw_name_sample_counts": {
+        "Rye Ranch Elementary School": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "site prep",
+      "raw_names": [
+        "Site Prep"
+      ],
+      "raw_name_sample_counts": {
+        "Site Prep": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "supplemental items",
+      "raw_names": [
+        "Supplemental Items"
+      ],
+      "raw_name_sample_counts": {
+        "Supplemental Items": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "transplant oaks- (5)",
+      "raw_names": [
+        "Transplant Oaks- (5) "
+      ],
+      "raw_name_sample_counts": {
+        "Transplant Oaks- (5) ": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "true up ticket - includes all outstanding cos thru 09.23.2026",
+      "raw_names": [
+        "True Up Ticket - Includes all Outstanding COs thru 09.23.2026"
+      ],
+      "raw_name_sample_counts": {
+        "True Up Ticket - Includes all Outstanding COs thru 09.23.2026": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "vua plantings",
+      "raw_names": [
+        "VUA Plantings"
+      ],
+      "raw_name_sample_counts": {
+        "VUA Plantings": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18882,
+          "service_name": "IN: Landscape Install",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "warranty sept 2026",
+      "raw_names": [
+        "Warranty Sept 2026"
+      ],
+      "raw_name_sample_counts": {
+        "Warranty Sept 2026": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    },
+    {
+      "normalised_name": "warranty work oct 2026",
+      "raw_names": [
+        "Warranty Work Oct 2026"
+      ],
+      "raw_name_sample_counts": {
+        "Warranty Work Oct 2026": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18883,
+          "service_name": "IN: Landscape Warranty",
+          "service_type_name": "Install Landscape",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "well",
+      "raw_names": [
+        "Well"
+      ],
+      "raw_name_sample_counts": {
+        "Well": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 1,
+      "service_ids": [
+        {
+          "service_id": 18890,
+          "service_name": "IN: Subcontractor",
+          "service_type_name": "Install Subcontractor",
+          "is_install_division_service": true,
+          "sample_line_count": 1
+        }
+      ]
+    },
+    {
+      "normalised_name": "wet check",
+      "raw_names": [
+        "Wet Check"
+      ],
+      "raw_name_sample_counts": {
+        "Wet Check": 1
+      },
+      "sample_group_count": 1,
+      "optional_service_group": false,
+      "sample_groups_with_service_rows_fetched": 0,
+      "service_ids": []
+    }
+  ],
+  "answers": {
+    "q1_sleeving": {
+      "service_id": 28771,
+      "service_name": "IN: Install Sleeving",
+      "service_type_id": 2553,
+      "service_type_name": "Install Irrigation",
+      "division_code": "IN-IRR",
+      "active": true,
+      "verdict": "CONFIRMED - 'IN: Install Sleeving' (28771) is a Service under ServiceType 2553 'Install Irrigation' (division IN-IRR). Sleeving is a service, not a section.",
+      "group_named_sleeving_sample_count": 5,
+      "group_named_sleeving_raw": [
+        "Sleeving"
+      ],
+      "sample_line_count_for_28771": 2
+    },
+    "q2_do_not_use": {
+      "18874": {
+        "name": "IN: Drainage Enhancement DO NOT USE",
+        "service_type_id": 2614,
+        "service_type_name": "install Drainage Enhancement",
+        "active": false,
+        "seen_on_opportunities": [],
+        "sample_line_count": 0
+      },
+      "18877": {
+        "name": "IN: Irrigation Enhancement - DO NOT USE",
+        "service_type_id": 2602,
+        "service_type_name": "Install Irrigation Enhancement",
+        "active": true,
+        "seen_on_opportunities": [],
+        "sample_line_count": 0
+      },
+      "18881": {
+        "name": "IN: Landscape Enhancement - DO NOT USE",
+        "service_type_id": 2616,
+        "service_type_name": "Install Landscape Enhancement",
+        "active": true,
+        "seen_on_opportunities": [],
+        "sample_line_count": 0
+      },
+      "18884": {
+        "name": "IN: Lighting Enhancement DO NOT USE",
+        "service_type_id": 2615,
+        "service_type_name": "Install Lighting Enhancement",
+        "active": false,
+        "seen_on_opportunities": [],
+        "sample_line_count": 0
+      },
+      "18887": {
+        "name": "IN: Sod Enhancement DO NOT USE",
+        "service_type_id": 2555,
+        "service_type_name": "Install Sod",
+        "active": false,
+        "seen_on_opportunities": [],
+        "sample_line_count": 0
+      },
+      "29823": {
+        "name": "IN: Irrigation Backcharge DO NOT USE",
+        "service_type_id": 2553,
+        "service_type_name": "Install Irrigation",
+        "active": false,
+        "seen_on_opportunities": [],
+        "sample_line_count": 0
+      },
+      "29825": {
+        "name": "IN: Sod Backcharge DO NOT USE",
+        "service_type_id": 2555,
+        "service_type_name": "Install Sod",
+        "active": false,
+        "seen_on_opportunities": [],
+        "sample_line_count": 0
+      },
+      "50173": {
+        "name": "Install:  Sod/Lennar",
+        "service_type_id": 2555,
+        "service_type_name": "Install Sod",
+        "active": false,
+        "seen_on_opportunities": [],
+        "sample_line_count": 0
+      },
+      "29824": {
+        "name": "IN: Landscape Backcharge DO NOT USE",
+        "service_type_id": 2554,
+        "service_type_name": "Install Landscape",
+        "active": true,
+        "seen_on_opportunities": [],
+        "sample_line_count": 0
+      },
+      "30271": {
+        "name": "IN:  Irrigation Parts Purchased- DO NOT USE!",
+        "service_type_id": 2553,
+        "service_type_name": "Install Irrigation",
+        "active": true,
+        "seen_on_opportunities": [],
+        "sample_line_count": 0
+      }
+    },
+    "q3_optional": {
+      "verdict": "CONFIRMED - every sampled group normalising to 'optional services' carries OptionalServiceGroup=true, and NO other group name in the sample carries that flag.",
+      "group_names_with_optional_true": [
+        "optional services"
+      ],
+      "optional_services_sample_count": 236,
+      "optional_services_raw_names": [
+        "Optional Services"
+      ]
+    }
+  },
+  "caveats": [
+    "ALL counts in this file are SAMPLE counts. The Aspire REST surface exposes no $count/total, so no population figure could be obtained for anything.",
+    "Sample window: 425 install opportunities created 2026-09-15..2026-09-30 (15 days), fetched newest-first. Every one of them has OpportunityType='Work Order' - no 'Contract'-type opportunities fell in the window, so the group vocabulary is the vocabulary of work orders/change orders, which may differ from new-construction bid estimates.",
+    "Division mix of the fetched opportunities is heavily skewed: IN-LA 370, IN-IRR 50, IN-SUB 2, IN-HS 1, IN-LD 1, IN-SO 1, IN-MC 0. Group-name evidence for the Sod, Hardscape, Design and Marketing sections is therefore thin even though Pavers/Hardscape groups do appear (they sit on IN-LA opportunities).",
+    "The MCP transport caps each response at roughly 250 KB, which truncated many OpportunityServices windows. Gaps were refilled with follow-up $filter range windows, but the service<->group join is still incomplete: 955 install line rows were captured across 159 of the 238 sampled install opportunities (and 290-ish of the 715 sampled install groups). The uncaptured rows are whole OpportunityServiceGroupID sub-ranges, which is arbitrary with respect to group name, so the group->service mapping should not be biased - but every per-service and per-group line count is an UNDERCOUNT, not a total.",
+    "'Install: Enhancements' (DivisionID 1576) is DELIBERATELY EXCLUDED: its DivisionCode is 'INEN' (no hyphen), so it does not match DivisionCode LIKE 'IN-%'. It is Active=false and its only ServiceType (2618 'Irrigation Service DO NOT USE') has zero services in the catalog, so nothing is lost - but the filter choice is a choice.",
+    "Division IN-LD is named 'Design: Landscape and Irrigation Design'. It matches the IN-% filter and is included here, but it is DESIGN work, not install labour. Whether Design is a level-1 section of the install estimate or a separate thing is a product decision this extract cannot make.",
+    "ServiceTypes 2552, 6645, 6646, 6647, 6648, 6649 and 6650 exist but have ZERO services - the real design services all hang off ServiceType 6643. Do not create empty level-1 sections from them.",
+    "SortOrder is 0 for every one of the 48 install services and null for most install ServiceTypes (only 7367/7369 have SortOrder=1). Aspire carries no usable display ordering for this catalog; ordering must be decided by us.",
+    "ContractService is false for 46 of the 48 install services; only 50780 'Paver Subcontractor' and 50803 'Aquatic Spray Service 4' are true.",
+    "Group names are free text and the sample contains one-off junk: street addresses ('11245 Rolling Fork Trl- Replace Street Tree', 'Bldg 26- 1308 Chopin Ln'), per-unit price notes ('Irrigation = $2,904 / Unit'), model names ('Landscape - GRAND BAY HEAVEN MODEL') and typos ('Customer Satisfacting'). Normalisation here is lowercase + whitespace-collapse only; raw strings are preserved.",
+    "'Default Group' (58 sampled groups) is Aspire's unnamed-group default, not a real section. It carries a mixture of services (18878, 18882, 18888, 18890, 18883, 18945, 18879) and must not be seeded as a section.",
+    "mcp__aspire__mssql_* was unavailable for the whole of this extraction (every call times out), so nothing here was cross-checked against the Aspire SQL replica.",
+    "One probe response was not archived verbatim: Opportunities $orderby=OpportunityID desc&$top=3 (a schema probe). Its one install row (OpportunityID 2902847) IS in opportunities_install.page1.json; its two maintenance rows (2902848, 2902846, both MT-IR) are out of scope for this extract and were not transcribed. Every other response is archived under scripts/data/aspire_raw/ (local only, gitignored)."
+  ],
+  "recommended_sections": {
+    "rule": "Level-1 section := the Aspire ServiceType a Service belongs to, collapsed onto the 9 sections below. Every install Service maps to exactly one section via its ServiceTypeID; the map is total over the 48 services in `services`.",
+    "service_type_to_section": {
+      "2552": "design",
+      "2553": "irrigation",
+      "2554": "landscape",
+      "2555": "sod",
+      "2556": "subcontractor",
+      "2602": "irrigation",
+      "2603": "lighting",
+      "2604": "drainage",
+      "2614": "drainage",
+      "2615": "lighting",
+      "2616": "landscape",
+      "2617": "landscape",
+      "6643": "design",
+      "6644": "design",
+      "6645": "design",
+      "6646": "design",
+      "6647": "design",
+      "6648": "design",
+      "6649": "design",
+      "6650": "design",
+      "6653": "marketing_gratis",
+      "7367": "hardscape",
+      "7369": "hardscape"
+    },
+    "sections": [
+      {
+        "section_key": "landscape",
+        "label": "Landscape",
+        "division_codes": [
+          "IN-LA"
+        ],
+        "service_type_ids": [
+          2554,
+          2616,
+          2617
+        ],
+        "service_types": [
+          {
+            "service_type_id": 2554,
+            "name": "Install Landscape",
+            "service_count": 5
+          },
+          {
+            "service_type_id": 2616,
+            "name": "Install Landscape Enhancement",
+            "service_count": 1
+          },
+          {
+            "service_type_id": 2617,
+            "name": "Plant Material Purchase",
+            "service_count": 1
+          }
+        ],
+        "service_ids": [
+          18882,
+          18883,
+          29824,
+          35557,
+          50236,
+          18881,
+          18945
+        ],
+        "services": [
+          {
+            "service_id": 18882,
+            "name": "IN: Landscape Install",
+            "active": true,
+            "sample_line_count": 331
+          },
+          {
+            "service_id": 18883,
+            "name": "IN: Landscape Warranty",
+            "active": true,
+            "sample_line_count": 10
+          },
+          {
+            "service_id": 29824,
+            "name": "IN: Landscape Backcharge DO NOT USE",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 35557,
+            "name": "IN: Install Buff Mulch",
+            "active": true,
+            "sample_line_count": 11
+          },
+          {
+            "service_id": 50236,
+            "name": "IN: Completed Landscape",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 18881,
+            "name": "IN: Landscape Enhancement - DO NOT USE",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 18945,
+            "name": "IN: Plant Material Purchase",
+            "active": true,
+            "sample_line_count": 1
+          }
+        ],
+        "observed_group_names_normalised": [
+          "landscape",
+          "ls install",
+          "buff mulch",
+          "mulch",
+          "mulch, soil, sod, rock",
+          "foundation plantings",
+          "vua plantings",
+          "perimeter buffers",
+          "house install",
+          "new landscape install",
+          "bed prep",
+          "add viburnum",
+          "transplant oaks- (5)",
+          "palm removal and palm replacement",
+          "landscape enhancement",
+          "site prep",
+          "property prep"
+        ],
+        "sample_group_count": 136
+      },
+      {
+        "section_key": "irrigation",
+        "label": "Irrigation",
+        "division_codes": [
+          "IN-IRR"
+        ],
+        "service_type_ids": [
+          2553,
+          2602
+        ],
+        "service_types": [
+          {
+            "service_type_id": 2553,
+            "name": "Install Irrigation",
+            "service_count": 8
+          },
+          {
+            "service_type_id": 2602,
+            "name": "Install Irrigation Enhancement",
+            "service_count": 1
+          }
+        ],
+        "service_ids": [
+          18878,
+          18879,
+          18880,
+          28771,
+          29823,
+          30271,
+          35502,
+          35503,
+          18877
+        ],
+        "services": [
+          {
+            "service_id": 18878,
+            "name": "IN: Irrigation Install",
+            "active": true,
+            "sample_line_count": 407
+          },
+          {
+            "service_id": 18879,
+            "name": "IN: Irrigation Warranty",
+            "active": true,
+            "sample_line_count": 1
+          },
+          {
+            "service_id": 18880,
+            "name": "IN: Irrigation Wet Check",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 28771,
+            "name": "IN: Install Sleeving",
+            "active": true,
+            "sample_line_count": 2
+          },
+          {
+            "service_id": 29823,
+            "name": "IN: Irrigation Backcharge DO NOT USE",
+            "active": false,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 30271,
+            "name": "IN:  Irrigation Parts Purchased- DO NOT USE!",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 35502,
+            "name": "IN: Root Barrier",
+            "active": true,
+            "sample_line_count": 1
+          },
+          {
+            "service_id": 35503,
+            "name": "IN: Install Turf Mat",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 18877,
+            "name": "IN: Irrigation Enhancement - DO NOT USE",
+            "active": true,
+            "sample_line_count": 0
+          }
+        ],
+        "observed_group_names_normalised": [
+          "irrigation",
+          "irrigation install",
+          "irrigation installation",
+          "irrigation enhancement",
+          "sleeving",
+          "wet check",
+          "program decoder",
+          "pump station",
+          "well",
+          "irrigation scm 3 add"
+        ],
+        "sample_group_count": 107
+      },
+      {
+        "section_key": "drainage",
+        "label": "Drainage",
+        "division_codes": [
+          "IN-IRR"
+        ],
+        "service_type_ids": [
+          2604,
+          2614
+        ],
+        "service_types": [
+          {
+            "service_type_id": 2604,
+            "name": "Install Drainage",
+            "service_count": 2
+          },
+          {
+            "service_type_id": 2614,
+            "name": "install Drainage Enhancement",
+            "service_count": 1
+          }
+        ],
+        "service_ids": [
+          18875,
+          18876,
+          18874
+        ],
+        "services": [
+          {
+            "service_id": 18875,
+            "name": "IN: Drainage Install",
+            "active": true,
+            "sample_line_count": 29
+          },
+          {
+            "service_id": 18876,
+            "name": "IN: Drainage Warranty",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 18874,
+            "name": "IN: Drainage Enhancement DO NOT USE",
+            "active": false,
+            "sample_line_count": 0
+          }
+        ],
+        "observed_group_names_normalised": [
+          "drainage",
+          "courtyard drainage installation"
+        ],
+        "sample_group_count": 10
+      },
+      {
+        "section_key": "lighting",
+        "label": "Lighting",
+        "division_codes": [
+          "IN-IRR"
+        ],
+        "service_type_ids": [
+          2603,
+          2615
+        ],
+        "service_types": [
+          {
+            "service_type_id": 2603,
+            "name": "Install Lighting",
+            "service_count": 2
+          },
+          {
+            "service_type_id": 2615,
+            "name": "Install Lighting Enhancement",
+            "service_count": 1
+          }
+        ],
+        "service_ids": [
+          18885,
+          18886,
+          18884
+        ],
+        "services": [
+          {
+            "service_id": 18885,
+            "name": "IN: Lighting Install",
+            "active": true,
+            "sample_line_count": 32
+          },
+          {
+            "service_id": 18886,
+            "name": "IN: Lighting Warranty",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 18884,
+            "name": "IN: Lighting Enhancement DO NOT USE",
+            "active": false,
+            "sample_line_count": 0
+          }
+        ],
+        "observed_group_names_normalised": [
+          "lighting"
+        ],
+        "sample_group_count": 8
+      },
+      {
+        "section_key": "sod",
+        "label": "Sod",
+        "division_codes": [
+          "IN-SO"
+        ],
+        "service_type_ids": [
+          2555
+        ],
+        "service_types": [
+          {
+            "service_type_id": 2555,
+            "name": "Install Sod",
+            "service_count": 5
+          }
+        ],
+        "service_ids": [
+          18887,
+          18888,
+          18889,
+          29825,
+          50173
+        ],
+        "services": [
+          {
+            "service_id": 18887,
+            "name": "IN: Sod Enhancement DO NOT USE",
+            "active": false,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 18888,
+            "name": "IN: Sod Install",
+            "active": true,
+            "sample_line_count": 6
+          },
+          {
+            "service_id": 18889,
+            "name": "IN: Sod Warranty",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 29825,
+            "name": "IN: Sod Backcharge DO NOT USE",
+            "active": false,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 50173,
+            "name": "Install:  Sod/Lennar",
+            "active": false,
+            "sample_line_count": 0
+          }
+        ],
+        "observed_group_names_normalised": [
+          "sod",
+          "install sod"
+        ],
+        "sample_group_count": 7
+      },
+      {
+        "section_key": "hardscape",
+        "label": "Hardscape / Pavers",
+        "division_codes": [
+          "IN-HS"
+        ],
+        "service_type_ids": [
+          7367,
+          7369
+        ],
+        "service_types": [
+          {
+            "service_type_id": 7367,
+            "name": "Install Hardscape",
+            "service_count": 1
+          },
+          {
+            "service_type_id": 7369,
+            "name": "Paver Subcontractor",
+            "service_count": 1
+          }
+        ],
+        "service_ids": [
+          50697,
+          50780
+        ],
+        "services": [
+          {
+            "service_id": 50697,
+            "name": "IN: Hardscape Install",
+            "active": true,
+            "sample_line_count": 41
+          },
+          {
+            "service_id": 50780,
+            "name": "Paver Subcontractor",
+            "active": true,
+            "sample_line_count": 0
+          }
+        ],
+        "observed_group_names_normalised": [
+          "pavers",
+          "cabana",
+          "pergola"
+        ],
+        "sample_group_count": 10
+      },
+      {
+        "section_key": "subcontractor",
+        "label": "Subcontractor",
+        "division_codes": [
+          "IN-SUB"
+        ],
+        "service_type_ids": [
+          2556
+        ],
+        "service_types": [
+          {
+            "service_type_id": 2556,
+            "name": "Install Subcontractor",
+            "service_count": 1
+          }
+        ],
+        "service_ids": [
+          18890
+        ],
+        "services": [
+          {
+            "service_id": 18890,
+            "name": "IN: Subcontractor",
+            "active": true,
+            "sample_line_count": 65
+          }
+        ],
+        "observed_group_names_normalised": [
+          "sod - subcontractor",
+          "artificial turf - subcontractor",
+          "espalier - subcontractor",
+          "littoral - subcontractor",
+          "well/pump- subcontractor",
+          "direction bore - subcontractor",
+          "pump station - subcontractor"
+        ],
+        "sample_group_count": 59
+      },
+      {
+        "section_key": "design",
+        "label": "Design",
+        "division_codes": [
+          "IN-LD"
+        ],
+        "service_type_ids": [
+          2552,
+          6643,
+          6644,
+          6645,
+          6646,
+          6647,
+          6648,
+          6649,
+          6650
+        ],
+        "service_types": [
+          {
+            "service_type_id": 2552,
+            "name": "Landscape Design DO NOT USE",
+            "service_count": 0
+          },
+          {
+            "service_type_id": 6643,
+            "name": "Landscape and Irrigation Design",
+            "service_count": 15
+          },
+          {
+            "service_type_id": 6644,
+            "name": "Field Work",
+            "service_count": 2
+          },
+          {
+            "service_type_id": 6645,
+            "name": "Record Drawings",
+            "service_count": 0
+          },
+          {
+            "service_type_id": 6646,
+            "name": "Graphic Design",
+            "service_count": 0
+          },
+          {
+            "service_type_id": 6647,
+            "name": "Landscape Architectural Enhancements",
+            "service_count": 0
+          },
+          {
+            "service_type_id": 6648,
+            "name": "Single Family Lot Typical Landscape Design",
+            "service_count": 0
+          },
+          {
+            "service_type_id": 6649,
+            "name": "Multi-Family Typical Landscape Design",
+            "service_count": 0
+          },
+          {
+            "service_type_id": 6650,
+            "name": "Reimbursable Expenses",
+            "service_count": 0
+          }
+        ],
+        "service_ids": [
+          18873,
+          44221,
+          46030,
+          46031,
+          46032,
+          46033,
+          46034,
+          46035,
+          46036,
+          46038,
+          50180,
+          50181,
+          50182,
+          50183,
+          50184,
+          50788,
+          50803
+        ],
+        "services": [
+          {
+            "service_id": 18873,
+            "name": "DS: Code Minimum Landscape Architectural Services",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 44221,
+            "name": "DS: Marketing/Gratis",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 46030,
+            "name": "DS: Field Work",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 46031,
+            "name": "DS: As-Builts and Record Drawings",
+            "active": true,
+            "sample_line_count": 9
+          },
+          {
+            "service_id": 46032,
+            "name": "DS: Graphic Design",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 46033,
+            "name": "DS: Landscape Architectural Enhancements",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 46034,
+            "name": "DS: Single Family Lot Typical Landscape Design",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 46035,
+            "name": "DS: Multi-Family Typical Landscape Design",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 46036,
+            "name": "DS: Courtesy Single Family and Multi-Family Lot Typical Landscape Design",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 46038,
+            "name": "DS: Reimbursable Expenses",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 50180,
+            "name": "DS: Irrigation Land Development Infrastructure Design",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 50181,
+            "name": "DS: Irrigation Land Development Common Area Distribution Design",
+            "active": true,
+            "sample_line_count": 1
+          },
+          {
+            "service_id": 50182,
+            "name": "DS: Irrigation Single Family Lot Typical Design",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 50183,
+            "name": "DS: Irrigation Custom Residential Lot Design",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 50184,
+            "name": "DS: Irrigation Commercial Project Design",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 50788,
+            "name": "ME: Agronomy Herbicide Treatments",
+            "active": true,
+            "sample_line_count": 0
+          },
+          {
+            "service_id": 50803,
+            "name": "Aquatic Spray Service 4",
+            "active": true,
+            "sample_line_count": 0
+          }
+        ],
+        "observed_group_names_normalised": [],
+        "sample_group_count": 0
+      },
+      {
+        "section_key": "marketing_gratis",
+        "label": "Marketing / Gratis",
+        "division_codes": [
+          "IN-MC"
+        ],
+        "service_type_ids": [
+          6653
+        ],
+        "service_types": [
+          {
+            "service_type_id": 6653,
+            "name": "Marketing/Gratis",
+            "service_count": 1
+          }
+        ],
+        "service_ids": [
+          44222
+        ],
+        "services": [
+          {
+            "service_id": 44222,
+            "name": "IN: Marketing/Gratis",
+            "active": true,
+            "sample_line_count": 0
+          }
+        ],
+        "observed_group_names_normalised": [],
+        "sample_group_count": 0
+      }
+    ],
+    "optional_services": {
+      "rule": "'Optional Services' is NOT a ServiceType-derived section. In Aspire it is an ordinary group whose OptionalServiceGroup flag is true; the services inside it come from the normal install catalog (sample: 18882 Landscape Install ×89, 18878 Irrigation Install ×9, 50697 Hardscape Install ×9, 18890 Subcontractor ×1). Model it as a boolean on the section/line, not as a 10th section."
+    },
+    "unplaceable_or_flagged": [
+      {
+        "service_id": 18890,
+        "name": "IN: Subcontractor",
+        "issue": "Single catch-all service used for EVERY subcontracted trade. In the sample it appears under 7 distinct sub-trade group names (Sod - Subcontractor, Artificial Turf, Espalier, Littoral, Well/Pump, Direction Bore, Pump Station) plus 'Sod' and 'Default Group'. The sub-trade lives only in the free-text group name / line DisplayName, never in the Service. A one-Service->one-Section rule collapses all subs into one section; if the UI needs per-trade subcontractor sections they must come from somewhere other than the Aspire Service."
+      },
+      {
+        "service_id": 30733,
+        "name": "MC: 90 Day Landscape Maintenance",
+        "issue": "Appears 8x on install opportunities under the group '90 - Day Maintenance', but it belongs to ServiceType 2608 'Maintenance Contract Mow' in division MT-CT, so the DivisionCode LIKE 'IN-%' filter EXCLUDES it and it is NOT in `services`. If the app needs a '90-Day Maintenance' section on install estimates, this service must be added by hand."
+      },
+      {
+        "service_id": 46031,
+        "name": "DS: As-Builts and Record Drawings",
+        "issue": "A Design (IN-LD) service, but observed 9x inside groups named 'Irrigation' on install opportunities. Section-by-ServiceType would file it under Design, contradicting how estimators actually group it."
+      },
+      {
+        "service_id": 50181,
+        "name": "DS: Irrigation Land Development Common Area Distribution Design",
+        "issue": "Same as 46031 - a Design service observed once inside an 'Irrigation' group."
+      },
+      {
+        "service_id": 50788,
+        "name": "ME: Agronomy Herbicide Treatments",
+        "issue": "Filed under ServiceType 6644 'Field Work' in the DESIGN division IN-LD. Almost certainly mis-filed in Aspire. Never observed on a sampled install opportunity. Do not seed under Design without a human decision."
+      },
+      {
+        "service_id": 50803,
+        "name": "Aquatic Spray Service 4",
+        "issue": "Same as 50788 - an aquatics service sitting under Design/'Field Work'. ContractService=true (the only other ContractService=true install-division service is 50780 Paver Subcontractor). Mis-filed; exclude or reassign by hand."
+      }
+    ]
+  }
+}

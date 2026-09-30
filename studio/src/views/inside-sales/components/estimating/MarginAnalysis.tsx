@@ -117,6 +117,7 @@ function InstallGroupRow({ group, color, bands }: { group: ServiceGroupMargin; c
   const cost = group.costCents || 1
   const matPct = (group.materialCostCents / cost) * 100
   const laborPct = (group.laborCostCents / cost) * 100
+  const bucketsPct = (group.otherBucketsCostCents / cost) * 100
   const otherPct = (group.unattributedCostCents / cost) * 100
   return (
     <div className="space-y-1.5" data-testid="margin-group-row">
@@ -125,6 +126,7 @@ function InstallGroupRow({ group, color, bands }: { group: ServiceGroupMargin; c
       <div className="flex h-4 rounded-full overflow-hidden bg-[hsl(var(--muted))]" data-testid="group-cost-split-bar">
         <div className="h-full margin-split-seg" style={{ '--seg-width': `${matPct}%`, '--seg-color': color } as CSSProperties} />
         <div className="h-full margin-split-seg opacity-45" style={{ '--seg-width': `${laborPct}%`, '--seg-color': color } as CSSProperties} />
+        <div className="h-full margin-split-seg opacity-25" style={{ '--seg-width': `${bucketsPct}%`, '--seg-color': color } as CSSProperties} />
         <div className="h-full margin-split-seg" style={{ '--seg-width': `${otherPct}%`, '--seg-color': '#9ca3af' } as CSSProperties} />
       </div>
       <div className="flex flex-wrap justify-between gap-x-3 text-[10px] text-[hsl(var(--muted-fg))]">
@@ -133,6 +135,9 @@ function InstallGroupRow({ group, color, bands }: { group: ServiceGroupMargin; c
           <span className="font-medium">({Math.round(matPct)}% of cost)</span>
         </span>
         <span>Labor: {formatCents(group.laborCostCents)}</span>
+        {group.otherBucketsCostCents > 0 && (
+          <span>Equip / sub / other: {formatCents(group.otherBucketsCostCents)}</span>
+        )}
         <span>Price: {formatCents(group.priceCents)}</span>
       </div>
     </div>

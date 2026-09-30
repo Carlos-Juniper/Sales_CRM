@@ -13,6 +13,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { EstimateSection, SectionService, SectionServiceComponent } from '@/types/estimating'
 import { estimatingApi } from '@/api/estimating'
 import { diffEstimateTree, persistEstimateTree } from '@/lib/estimating/persistTree'
+import { duplicateSection } from '@/lib/estimating/maintenance'
 
 function component(id: string, over: Partial<SectionServiceComponent> = {}): SectionServiceComponent {
   return {
@@ -54,6 +55,7 @@ function section(id: string, over: Partial<EstimateSection> = {}): EstimateSecti
     name: 'Common Area',
     squareFeet: 120_000,
     sortOrder: 0,
+    serviceCategoryId: null,
     services: [],
     ...over,
   }
@@ -208,5 +210,56 @@ describe('persistEstimateTree — applies the diff through the typed client', ()
     const saved = [section('sec-1', { services: [service('svc-1')] })]
     await persistEstimateTree('est-1', saved, saved)
     expect(createSection).not.toHaveBeenCalled()
+  })
+})
+
+describe('serviceCategoryId (Handoff 55 §3)', () => {
+  it('createSection sends serviceCategoryId when the draft section carries one', async () => {
+    const createSection = vi.spyOn(estimatingApi, 'createSection').mockResolvedValue({} as never)
+    const added = section('sec-local-9', { name: 'Landscape - Amenity Center', serviceCategoryId: 'cat-1' })
+    await persistEstimateTree('est-1', [], [added])
+    expect(createSection).toHaveBeenCalledTimes(1)
+    expect(createSection.mock.calls[0][1]).toMatchObject({
+      name: 'Landscape - Amenity Center',
+      serviceCategoryId: 'cat-1',
+    })
+  })
+
+  it('sends serviceCategoryId: null for a section with no category (takeoff / maintenance)', async () => {
+    const createSection = vi.spyOn(estimatingApi, 'createSection').mockResolvedValue({} as never)
+    await persistEstimateTree('est-1', [], [section('sec-local-10')])
+    expect(createSection.mock.calls[0][1].serviceCategoryId).toBeNull()
+  })
+
+  it('diffs a changed serviceCategoryId as a section update', () => {
+    const saved = [section('sec-1', { serviceCategoryId: null })]
+    const draft = [section('sec-1', { serviceCategoryId: 'cat-2' })]
+    expect(diffEstimateTree(saved, draft)).toEqual([
+      { op: 'updateSection', sectionId: 'sec-1', patch: { serviceCategoryId: 'cat-2' } },
+    ])
+  })
+
+  it('duplicateSection does not duplicate-insert: ONE createSection, children nested, no stray creates', async () => {
+    const createSection = vi.spyOn(estimatingApi, 'createSection').mockResolvedValue({} as never)
+    const createService = vi.spyOn(estimatingApi, 'createService').mockResolvedValue({} as never)
+    const createComponent = vi.spyOn(estimatingApi, 'createComponent').mockResolvedValue({} as never)
+    const saved = [
+      section('sec-1', {
+        serviceCategoryId: 'cat-1',
+        services: [service('svc-1', { components: [component('cmp-1')] })],
+      }),
+    ]
+    const draft = duplicateSection(saved, 'sec-1')
+    const ops = diffEstimateTree(saved, draft)
+    expect(ops.map((o) => o.op)).toEqual(['createSection'])
+
+    await persistEstimateTree('est-1', saved, draft)
+    expect(createSection).toHaveBeenCalledTimes(1)
+    expect(createService).not.toHaveBeenCalled()
+    expect(createComponent).not.toHaveBeenCalled()
+    const body = createSection.mock.calls[0][1]
+    expect(body.serviceCategoryId).toBe('cat-1')
+    expect(body.services).toHaveLength(1)
+    expect(body.services![0].components).toHaveLength(1)
   })
 })

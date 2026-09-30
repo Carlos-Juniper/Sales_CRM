@@ -38,7 +38,22 @@ import {
   serviceSubCostCents,
   serviceTotalCents,
   unitCostBasisCents,
+  componentRollups,
+  estimateRollup,
+  formatGmPctOrDash,
+  rollupGm,
+  sectionRollup,
+  serviceCostOrNull,
+  serviceRollup,
+  COMPONENT_KINDS,
+  COMPONENT_KIND_LABELS,
+  componentExtendedCostCents,
+  componentUnitCostOrNull,
+  addOptionalService,
+  findCategorySection,
+  optionalServicesCategory,
 } from '@/lib/estimating/install'
+import { SERVICE_CATALOG_FIXTURE } from '@/mocks/serviceCatalogData'
 
 function fixture() {
   return buildInstallEstimate()
@@ -237,5 +252,173 @@ describe('installServiceKitsFromItems (API catalog adapter)', () => {
     const { vendorPricesCents: _v, ...item } = INSTALL_SERVICE_KITS[0]
     const kits = installServiceKitsFromItems([{ ...item, active: false }, { ...item, id: 'kit-x' }])
     expect(kits.map((k) => k.id)).toEqual(['kit-x'])
+  })
+})
+
+// ----- Handoff 55 §6: three-level roll-ups ------------------------------------
+
+describe('three-level roll-ups (item → service → section → estimate)', () => {
+  it('service roll-up reports cost, price and GM', () => {
+    const trees = fixture().sections[0].services[0]
+    expect(serviceRollup(trees)).toEqual({ costCents: 1_650_000, priceCents: 3_000_000, gm: 0.45 })
+  })
+
+  it('cost is null (unresolvable) with no components and no embedded cost; GM follows', () => {
+    const svc = { ...fixture().sections[0].services[0], components: [], embeddedCostCents: null }
+    expect(serviceCostOrNull(svc)).toBeNull()
+    expect(serviceRollup(svc).gm).toBeNull()
+    // legacy helper still reads it as 0 (unchanged behaviour)
+    expect(serviceSubCostCents(svc)).toBe(0)
+  })
+
+  it('GM is null when price is 0', () => {
+    expect(rollupGm(0, 100)).toBeNull()
+    expect(rollupGm(1000, null)).toBeNull()
+    expect(rollupGm(1000, 600)).toBeCloseTo(0.4, 10)
+  })
+
+  it('item roll-ups: extended cost, prices apportioned to sum exactly to the line TP', () => {
+    const trees = fixture().sections[0].services[0]
+    const items = componentRollups(trees)
+    expect(items.map((i) => i.costCents)).toEqual([24 * 42_500, 24 * 18_200, 24 * 8_050])
+    expect(items.reduce((s, i) => s + (i.priceCents ?? 0), 0)).toBe(serviceTotalCents(trees))
+    expect(items[0].priceCents).toBe(1_854_545)
+    for (const i of items) expect(i.gm).toBeCloseTo(0.45, 5)
+  })
+
+  it('item price / GM are null when the line has zero component cost', () => {
+    const trees = fixture().sections[0].services[0]
+    const zero = { ...trees, components: trees.components.map((c) => ({ ...c, unitCostCents: 0 })) }
+    expect(componentRollups(zero).every((i) => i.priceCents === null && i.gm === null)).toBe(true)
+  })
+
+  it('section and estimate roll-ups sum children; one unresolvable child nulls the cost', () => {
+    const est = fixture()
+    expect(sectionRollup(est.sections[0]).costCents).toBe(1_843_200)
+    expect(sectionRollup(est.sections[0]).priceCents).toBe(3_350_000)
+    expect(estimateRollup(est).costCents).toBe(3_053_760)
+    expect(estimateRollup(est).gm).toBeCloseTo(estimateGm(est), 12)
+    est.sections[1].services[0] = {
+      ...est.sections[1].services[0],
+      components: [],
+      embeddedCostCents: null,
+    }
+    expect(sectionRollup(est.sections[1]).costCents).toBeNull()
+    expect(estimateRollup(est).costCents).toBeNull()
+    expect(estimateRollup(est).priceCents).toBe(5_342_000)
+  })
+
+  it('formatGmPctOrDash renders "—" for null', () => {
+    expect(formatGmPctOrDash(null)).toBe('—')
+    expect(formatGmPctOrDash(0.4498)).toBe('44.98%')
+  })
+})
+
+// ----- Handoff 55 §3 (revised): Optional Services is the only section add ----------
+
+describe('Optional Services helpers', () => {
+  const optional = SERVICE_CATALOG_FIXTURE.find((c) => c.isOptional)!
+  const service = {
+    id: 'svc-opt-1',
+    serviceCategoryId: optional.id,
+    name: 'IN: Optional Lighting',
+    displayName: 'Optional Lighting',
+    sortOrder: 0,
+    defaultOccurrences: null,
+    aspireServiceId: null,
+    active: true,
+    defaultItems: [],
+  }
+
+  it('finds the install Optional Services category', () => {
+    expect(optionalServicesCategory(SERVICE_CATALOG_FIXTURE)?.name).toBe('Optional Services')
+    expect(optionalServicesCategory([])).toBeNull()
+  })
+
+  it('creates ONE Optional Services section on the first pick, linked to the category', () => {
+    const est = fixture()
+    const next = addOptionalService(est.id, est.sections, optional, service)
+    expect(next).toHaveLength(est.sections.length + 1)
+    const added = next[next.length - 1]
+    expect(added).toMatchObject({
+      estimateId: est.id,
+      name: 'Optional Services',
+      serviceCategoryId: optional.id,
+      sortOrder: est.sections.length,
+    })
+    expect(added.services).toHaveLength(1)
+    expect(added.services[0]).toMatchObject({
+      sectionId: added.id,
+      serviceId: 'svc-opt-1',
+      serviceKitId: null,
+      label: 'Optional Lighting',
+    })
+  })
+
+  it('adds later picks into the existing Optional Services section, never a second one', () => {
+    const est = fixture()
+    const once = addOptionalService(est.id, est.sections, optional, service)
+    const twice = addOptionalService(est.id, once, optional, service)
+    expect(twice).toHaveLength(once.length)
+    expect(findCategorySection(twice, optional)!.services).toHaveLength(2)
+  })
+})
+
+// ----- Handoff 55 §4: unknown (null) item cost ----------------------------------
+
+describe('null unit cost — "—", never $0', () => {
+  const base = {
+    id: 'svc-n',
+    sectionId: 'sec-n',
+    serviceKitId: null,
+    label: 'Line',
+    qty: 2,
+    uom: 'EA',
+    complexityPct: 0,
+    unitSellCents: 10_000,
+    embeddedCostCents: null,
+    targetGm: null,
+    hours: null,
+    sortOrder: 0,
+  }
+  const cmp = (id: string, unitCostCents: number | null, kind: 'labor' | 'material' = 'material') => ({
+    id,
+    sectionServiceId: 'svc-n',
+    kind,
+    label: id,
+    qty: 1,
+    unitCostCents,
+    hours: null,
+    sortOrder: 0,
+  })
+
+  it('an unknown item cost makes the item, line and section cost unknown', () => {
+    const svc = { ...base, components: [cmp('a', 1000), cmp('b', null)] }
+    expect(componentUnitCostOrNull(svc.components[1])).toBeNull()
+    expect(componentExtendedCostCents(svc, svc.components[1])).toBeNull()
+    expect(serviceRollup(svc)).toEqual({ costCents: null, priceCents: 20_000, gm: null })
+    const rollups = componentRollups(svc)
+    expect(rollups[0]).toEqual({ costCents: 2000, priceCents: null, gm: null })
+    expect(rollups[1]).toEqual({ costCents: null, priceCents: null, gm: null })
+  })
+
+  it('a catalog line with no items costs 0; a hand line with no cost is still unknown', () => {
+    expect(serviceRollup({ ...base, serviceId: 'svc-cat-x', components: [] }).costCents).toBe(0)
+    expect(serviceRollup({ ...base, components: [] }).costCents).toBeNull()
+  })
+
+  it('never groups an unknown-cost labor line', () => {
+    const merged = groupSameRateLabor([cmp('l1', null, 'labor'), cmp('l2', null, 'labor')])
+    expect(merged).toHaveLength(2)
+  })
+
+  it('labels every cost bucket distinctly', () => {
+    expect(COMPONENT_KINDS.map((k) => COMPONENT_KIND_LABELS[k])).toEqual([
+      'LABOR',
+      'MATERIAL',
+      'EQUIPMENT',
+      'SUB',
+      'OTHER',
+    ])
   })
 })

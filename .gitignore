@@ -73,3 +73,7 @@ Proposify Replacement - Meeting Summary.md
 studio/public/proposal/photos/
 studio/public/proposal/headshots/
 studio/public/proposal/portfolio/
+
+# ── Raw Aspire API responses (customer data): local only, never in git ─────
+# The seed reads only scripts/data/aspire_install_service_catalog.json.
+scripts/data/aspire_raw/

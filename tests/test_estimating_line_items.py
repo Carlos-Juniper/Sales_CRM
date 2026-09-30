@@ -121,7 +121,7 @@ def _install_payload() -> dict:
         "dueBackDate": "2027-08-25",
         "sections": [
             {
-                "name": "Phase 1 — Planting",
+                "name": "Landscape",
                 "squareFeet": 0,
                 "sortOrder": 0,
                 "services": [

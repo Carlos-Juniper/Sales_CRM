@@ -23,20 +23,52 @@ import type {
   InstallEstimate,
   SectionService,
   SectionServiceComponent,
+  CatalogService,
+  ServiceCategory,
 } from '@/types/estimating'
 import { componentCost, groupMargin, installLineTotal, sectionTotal } from './calc'
+import { catalogServiceToLine } from './installCatalog'
 
 // ----- Cost basis & margins (II-6.8 / II-6.5) --------------------------------
+
+/** Aspire's five cost buckets, in display order (migration 074). */
+export const COMPONENT_KINDS: readonly ComponentKind[] = [
+  'labor',
+  'material',
+  'equipment',
+  'subcontractor',
+  'other',
+]
+
+/** Badge text per cost bucket — never collapse a non-labor kind into "MATERIAL". */
+export const COMPONENT_KIND_LABELS: Record<ComponentKind, string> = {
+  labor: 'LABOR',
+  material: 'MATERIAL',
+  equipment: 'EQUIPMENT',
+  subcontractor: 'SUB',
+  other: 'OTHER',
+}
+
+/**
+ * Per-unit cost of one component, integer cents (qty × unit cost); null when
+ * the unit cost is unknown (Handoff 55 §4/§5: a material with no current
+ * price). Never coerce that null to $0 for display.
+ */
+export function componentUnitCostOrNull(c: SectionServiceComponent): number | null {
+  return c.unitCostCents === null ? null : componentCost(c.qty, c.unitCostCents)
+}
 
 /**
  * Per-unit cost basis for a kit line, integer cents.
  * With components (the estimator-facing override surface), the LIVE sum of
  * qty × unit cost per component wins; without them, the kit's embedded
- * SUB COST from the catalog applies. Null embedded cost reads as 0.
+ * SUB COST from the catalog applies. Null embedded cost — and a null
+ * (unknown) component cost — read as 0 here; `serviceCostOrNull` is the
+ * null-aware read the editor renders.
  */
 export function unitCostBasisCents(svc: SectionService): number {
   if (svc.components.length > 0) {
-    return svc.components.reduce((sum, c) => sum + componentCost(c.qty, c.unitCostCents), 0)
+    return svc.components.reduce((sum, c) => sum + (componentUnitCostOrNull(c) ?? 0), 0)
   }
   return svc.embeddedCostCents ?? 0
 }
@@ -79,6 +111,146 @@ export function estimateGm(estimate: InstallEstimate): number {
   return groupMargin(total, estimateSubCostCents(estimate))
 }
 
+// ----- Three-level roll-ups: item → service → section (Handoff 55 §6) ---------
+//
+// Every level reports total COST, total PRICE and GM%. Price always resolves
+// (a null unit sell reads as 0, exactly as `serviceTotalCents` and
+// calc.sectionTotal already do — kit-priced lines price as before). Cost and
+// GM are `null` when they cannot be resolved, and the editor renders "—" for
+// null — never 0 (the useResolvedCrewRate.ts convention: refuse a number
+// rather than show a plausible-but-wrong one).
+//
+// The cost basis is the SAME component-sum basis as `unitCostBasisCents`,
+// including its fallback to the kit's flat `embeddedCostCents` when a line has
+// no components. Margin Analysis (margins.ts installLineCost) reads this same
+// basis, so the editor and the panel cannot disagree.
+
+export interface InstallRollup {
+  /** Total cost, integer cents; null when unresolvable. */
+  costCents: number | null
+  /** Total price (TP), integer cents. */
+  priceCents: number
+  /** Decimal GM; null when cost is unresolvable or price is 0. */
+  gm: number | null
+}
+
+/** Item-level roll-up: cost is null when the item's unit cost is unknown. */
+export interface ItemRollup {
+  costCents: number | null
+  priceCents: number | null
+  gm: number | null
+}
+
+/** GM for a roll-up; null (rendered "—") when cost is unknown or price is 0. */
+export function rollupGm(priceCents: number, costCents: number | null): number | null {
+  if (costCents === null || priceCents === 0) return null
+  return groupMargin(priceCents, costCents)
+}
+
+/**
+ * Line cost with unresolvable made explicit: the component sum when
+ * components exist, else qty × embedded cost, else null (no components AND
+ * no embedded cost — `serviceSubCostCents` reads that case as 0).
+ *
+ * Handoff 55 §4: any component with an unknown (null) unit cost makes the
+ * line cost unknown. A catalog service line (`serviceId` set) with no items
+ * yet has nothing priced, so it costs 0 rather than blanking the section and
+ * estimate GM — most catalog services ship with zero default items.
+ */
+export function serviceCostOrNull(svc: SectionService): number | null {
+  if (svc.components.some((c) => c.unitCostCents === null)) return null
+  if (svc.components.length === 0 && svc.embeddedCostCents == null) {
+    return svc.serviceId ? 0 : null
+  }
+  return serviceSubCostCents(svc)
+}
+
+/** Service (line) roll-up. */
+export function serviceRollup(svc: SectionService): InstallRollup {
+  const priceCents = serviceTotalCents(svc)
+  const costCents = serviceCostOrNull(svc)
+  return { costCents, priceCents, gm: rollupGm(priceCents, costCents) }
+}
+
+/** Extended item cost, integer cents: line qty × (component qty × unit cost); null when unknown. */
+export function componentExtendedCostCents(
+  svc: SectionService,
+  component: SectionServiceComponent,
+): number | null {
+  const unit = componentUnitCostOrNull(component)
+  return unit === null ? null : Math.round(svc.qty * unit)
+}
+
+/**
+ * Item (component) roll-ups, index-aligned with `svc.components`.
+ *
+ * Items carry a cost but no sell price of their own: the line is priced from
+ * its unit sell / target GM (one line-level GM — Handoff 55 open item 2). An
+ * item's price is therefore its cost-proportional share of the line price,
+ * apportioned by largest remainder so the item prices sum exactly to the line
+ * TP; its GM equals the line GM. When the line's component cost is 0 the share
+ * is undefined, so price and GM are null ("—").
+ */
+export function componentRollups(svc: SectionService): ItemRollup[] {
+  const maybeCosts = svc.components.map((c) => componentExtendedCostCents(svc, c))
+  // An unknown item cost leaves the line's cost share undefined for every item.
+  if (maybeCosts.some((c) => c === null)) {
+    return maybeCosts.map((costCents) => ({ costCents, priceCents: null, gm: null }))
+  }
+  const costs = maybeCosts as number[]
+  const totalCost = costs.reduce((a, b) => a + b, 0)
+  const linePrice = serviceTotalCents(svc)
+  if (totalCost <= 0) {
+    return costs.map((costCents) => ({ costCents, priceCents: null, gm: null }))
+  }
+  const raw = costs.map((c) => (linePrice * c) / totalCost)
+  const floors = raw.map((r) => Math.floor(r))
+  let remainder = linePrice - floors.reduce((a, b) => a + b, 0)
+  const order = raw
+    .map((r, i) => ({ i, frac: r - Math.floor(r) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i)
+  for (const { i } of order) {
+    if (remainder <= 0) break
+    floors[i] += 1
+    remainder -= 1
+  }
+  return costs.map((costCents, i) => ({
+    costCents,
+    priceCents: floors[i],
+    gm: rollupGm(floors[i], costCents),
+  }))
+}
+
+/** Sum roll-ups: cost is null if ANY child cost is unresolvable. */
+function sumRollups(children: InstallRollup[], priceCents: number): InstallRollup {
+  let costCents: number | null = 0
+  for (const r of children) {
+    if (r.costCents === null) {
+      costCents = null
+      break
+    }
+    costCents += r.costCents
+  }
+  return { costCents, priceCents, gm: rollupGm(priceCents, costCents) }
+}
+
+/** Section (group) roll-up; price from calc.sectionTotal (never re-derived). */
+export function sectionRollup(
+  section: EstimateSection,
+  serviceRollups: InstallRollup[] = section.services.map(serviceRollup),
+): InstallRollup {
+  return sumRollups(serviceRollups, sectionTotalCents(section))
+}
+
+/** Estimate (parent-row) roll-up. */
+export function estimateRollup(
+  estimate: Estimate,
+  sectionRollups: InstallRollup[] = estimate.sections.map((s) => sectionRollup(s)),
+): InstallRollup {
+  const price = sectionRollups.reduce((sum, r) => sum + r.priceCents, 0)
+  return sumRollups(sectionRollups, price)
+}
+
 // ----- Hours (production planning ONLY — never price) -------------------------
 
 export function sectionHours(section: EstimateSection): number {
@@ -97,9 +269,72 @@ function newId(prefix: string): string {
   return `${prefix}-${Date.now()}-${opSeq}`
 }
 
+// ----- Sections from the service catalog (Handoff 55 §3, as revised) ----------
+//
+// Every install estimate is created by the BACKEND with one section per
+// standard catalog category, in catalog order, each carrying its
+// serviceCategoryId. The editor never creates, repeats or renames those
+// sections, and there are no area suffixes. The only section an estimator
+// can add is Aspire's Optional Services group, by picking one of its
+// services (the backend 422s any other section add, duplicate or rename).
+
+/** The install Optional Services category, if the catalog has one. */
+export function optionalServicesCategory(categories: ServiceCategory[]): ServiceCategory | null {
+  return categories.find((c) => c.estimateType === 'install' && c.isOptional) ?? null
+}
+
+/** The estimate's Optional Services section (linked by category id), if present. */
+export function findCategorySection(
+  sections: EstimateSection[],
+  category: ServiceCategory,
+): EstimateSection | null {
+  return sections.find((s) => s.serviceCategoryId === category.id) ?? null
+}
+
+/**
+ * Add an Optional Services service (with its default items, §4): into the
+ * estimate's existing Optional Services section, else into ONE new section
+ * named after the category (never a second one). Returns the new sections.
+ */
+export function addOptionalService(
+  estimateId: string,
+  sections: EstimateSection[],
+  category: ServiceCategory,
+  service: CatalogService,
+): EstimateSection[] {
+  const existing = findCategorySection(sections, category)
+  if (existing) {
+    return sections.map((s) =>
+      s === existing
+        ? { ...s, services: [...s.services, catalogServiceToLine(service, s.id, s.services.length)] }
+        : s,
+    )
+  }
+  const id = newId('sec')
+  const section: EstimateSection = {
+    id,
+    estimateId,
+    name: category.name,
+    // Square footage drives maintenance pricing only.
+    squareFeet: 0,
+    sortOrder: sections.length,
+    services: [catalogServiceToLine(service, id, 0)],
+    serviceCategoryId: category.id,
+  }
+  return [...sections, section]
+}
+
 // ----- Components ("+ Add labor / cost line", II-9.7) ---------------------------
 
-/** Defaults for a freshly split labor or material/cost line. */
+const NEW_COMPONENT_LABEL: Record<ComponentKind, string> = {
+  labor: 'Install labor',
+  material: 'New material line',
+  equipment: 'New equipment line',
+  subcontractor: 'New subcontractor line',
+  other: 'New cost line',
+}
+
+/** Defaults for a freshly split plain line (any cost bucket, no material link). */
 export function buildComponent(
   sectionServiceId: string,
   kind: ComponentKind,
@@ -109,7 +344,7 @@ export function buildComponent(
     id: newId('cmp'),
     sectionServiceId,
     kind,
-    label: kind === 'labor' ? 'Install labor' : 'New material line',
+    label: NEW_COMPONENT_LABEL[kind],
     qty: 1,
     unitCostCents: 0,
     hours: kind === 'labor' ? 1 : null,
@@ -128,7 +363,8 @@ export function groupSameRateLabor(
   const merged: SectionServiceComponent[] = []
   const laborByRate = new Map<number, SectionServiceComponent>()
   for (const c of components) {
-    if (c.kind !== 'labor') {
+    // An unknown-cost labor line has no rate to group on; it stays separate.
+    if (c.kind !== 'labor' || c.unitCostCents === null) {
       merged.push(c)
       continue
     }
@@ -306,4 +542,17 @@ export function coerceNum(raw: string): number {
 /** GM% display read: 0.4498… → "44.98%". */
 export function formatGmPct(gm: number): string {
   return `${(gm * 100).toFixed(2)}%`
+}
+
+/** A fresh local id for a draft node (the server mints the real one on save). */
+export function newDraftId(prefix: string): string {
+  return newId(prefix)
+}
+
+/** Placeholder for an unresolvable value — never render 0 in its place. */
+export const UNRESOLVED = '—'
+
+/** GM% display read with the unresolvable convention: null → "—". */
+export function formatGmPctOrDash(gm: number | null): string {
+  return gm === null ? UNRESOLVED : formatGmPct(gm)
 }

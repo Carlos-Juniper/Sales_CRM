@@ -483,6 +483,7 @@ export function buildMaintenanceEstimate(
     estimateId,
     name: 'Common Area',
     squareFeet: 120000,
+    serviceCategoryId: null,
     sortOrder: 0,
     services: [],
   }
@@ -496,6 +497,7 @@ export function buildMaintenanceEstimate(
     estimateId,
     name: 'Entry & Medians',
     squareFeet: 45000,
+    serviceCategoryId: null,
     sortOrder: 1,
     services: [],
   }
@@ -558,6 +560,7 @@ export function buildInstallEstimate(
     estimateId,
     name: 'Phase 1 — Streetscape',
     squareFeet: 68000,
+    serviceCategoryId: null,
     sortOrder: 0,
     services: [],
   }
@@ -597,6 +600,7 @@ export function buildInstallEstimate(
     estimateId,
     name: 'Phase 2 — Amenity Center',
     squareFeet: 22000,
+    serviceCategoryId: null,
     sortOrder: 1,
     services: [],
   }

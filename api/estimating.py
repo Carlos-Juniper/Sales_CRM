@@ -31,13 +31,16 @@ from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request, Res
 from pydantic import BaseModel
 
 import api.attachments as _att_mod
-from db import execute, query
+from db import execute, query, transaction
 from api import aspire_sync
 from api import authz
 from api.commission_service import cancel_for_estimate, create_on_won
 from api import properties as _props_mod
 from api.aspire_sync import OpportunityInput
 from api.aspire_config import ASPIRE_BRANCH_MAP, ASPIRE_BRANCH_INSTALL_FALLBACKS
+from api.catalog_links import (prepare_component, validate_estimate_tree, validate_section_category,
+                               validate_service_ref)
+from api.install_sections import plan_install_create_sections
 from api.maintenance_pricing import _live_branch_crew_rate, annotate_maintenance_sections, apply_maintenance_crew_prices
 
 logger = logging.getLogger(__name__)
@@ -507,7 +510,9 @@ def _component_out(r: dict) -> dict:
         "sectionServiceId": r["section_service_id"],
         "kind": r["kind"],
         "label": r["label"],
+        "inventoryId": r.get("inventory_id"),
         "qty": _num(r["qty"]),
+        "uom": r.get("uom"),
         "unitCostCents": int(r["unit_cost_cents"]),
         "hours": _num(r["hours"]),
         "sortOrder": r["sort_order"],
@@ -537,6 +542,7 @@ def _service_out(
         "id": r["id"],
         "sectionId": r["section_id"],
         "serviceKitId": r["service_kit_id"],
+        "serviceId": r.get("service_id"),
         "discipline": r.get("discipline"),
         "label": r["label"],
         "qty": _num(r["qty"]),
@@ -562,6 +568,7 @@ def _section_out(r: dict, services: list[dict]) -> dict:
         "name": r["name"],
         "squareFeet": _num(r["square_feet"]),
         "sortOrder": r["sort_order"],
+        "serviceCategoryId": r.get("service_category_id"),
         "services": services,
     }
 
@@ -1518,16 +1525,19 @@ def _service_kit_out(r: dict) -> dict:
 
 async def _insert_component(service_id: str, comp: dict, idx: int) -> str:
     component_id = _new_id("cmp")
+    comp = await prepare_component(comp, query)  # kind, inventoryId, price snapshot (074)
     await execute(
         """INSERT INTO section_service_components
-             (id, section_service_id, kind, label, qty, unit_cost_cents, hours, sort_order)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+             (id, section_service_id, kind, label, inventory_id, qty, uom, unit_cost_cents, hours, sort_order)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
             component_id,
             service_id,
             comp["kind"],
             comp["label"],
+            comp.get("inventoryId"),
             comp.get("qty", 0),
+            comp.get("uom"),
             comp.get("unitCostCents", 0),
             comp.get("hours"),
             comp.get("sortOrder", idx),
@@ -1540,13 +1550,14 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
     service_id = _new_id("svc")
     await execute(
         """INSERT INTO section_services
-             (id, section_id, service_kit_id, discipline, billing_type, label, qty, uom,
+             (id, section_id, service_kit_id, service_id, discipline, billing_type, label, qty, uom,
               complexity_pct, unit_sell_cents, embedded_cost_cents, target_gm, hours, sort_order)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
             service_id,
             section_id,
             svc.get("serviceKitId"),
+            svc.get("serviceId"),
             svc.get("discipline"),
             svc.get("billingType"),
             svc["label"],
@@ -1568,14 +1579,16 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
 async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
     section_id = _new_id("sec")
     await execute(
-        """INSERT INTO estimate_sections (id, estimate_id, name, square_feet, sort_order)
-           VALUES (%s, %s, %s, %s, %s)""",
+        """INSERT INTO estimate_sections
+             (id, estimate_id, name, square_feet, sort_order, service_category_id)
+           VALUES (%s, %s, %s, %s, %s, %s)""",
         [
             section_id,
             estimate_id,
             section.get("name", ""),
             section.get("squareFeet", 0),
             section.get("sortOrder", idx),
+            section.get("serviceCategoryId"),
         ],
     )
     for vi, svc in enumerate(section.get("services") or []):
@@ -1881,6 +1894,9 @@ def register(app, require_auth) -> None:
                 status_code=400,
                 detail="aspireBranchId is required — select a branch from the intake form",
             )
+        if est_type == "install":  # one section per standard catalog category (api/install_sections.py)
+            body["sections"] = await plan_install_create_sections(body.get("sections"), query)
+        await validate_estimate_tree(body.get("sections"), est_type, query)  # 073/074, before any write
         # Yearly occurrence counts are optional on maintenance create. Validate
         # before any INSERT so a 422 persists nothing. Install may omit them
         # (they store NULL); a value that is sent is held to the same range.
@@ -1912,59 +1928,60 @@ def register(app, require_auth) -> None:
         if raw_due is None or raw_due == "":
             body["dueBackDate"] = _default_due_back_date(await _sla_return_window_days())
         estimate_id = _new_id("est")
-        # Auto-assign the next sequential estimate number (contract generator).
-        next_num_row = await query("SELECT COALESCE(MAX(estimate_number), 0) + 1 AS next_num FROM estimates")
-        estimate_number = int(next_num_row[0]["next_num"]) if next_num_row else 1
-        await execute(
-            """INSERT INTO estimates
-                 (id, estimate_type, name, aspire_number, estimate_number, client_name, aspire_branch_id,
-                  customer_type,
-                  acreage, contract_value_cents, target_margin, status, lifecycle, aspire_owner,
-                  priority, win_probability, site_walk_date, due_back_date, anticipated_close_date,
-                  service_start_date, assigned_ls_estimator, assigned_irr_estimator, crm_rep,
-                  notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status,
-                  mowing_occurrences, pruning_occurrences, turf_fert_occurrences,
-                  shrub_fert_occurrences, ipm_occurrences, irrigation_occurrences,
-                  homes_budget, common_area_budget)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            [
-                estimate_id,
-                est_type,
-                body.get("name", ""),
-                body.get("aspireNumber"),
-                estimate_number,
-                body.get("clientName", ""),
-                aspire_branch_id,
-                body.get("customerType", ""),
-                body.get("acreage"),
-                body.get("contractValueCents", 0),
-                body.get("targetMargin", 0.22),
-                body.get("status", "new_from_sales"),
-                body.get("lifecycle", "bidding"),
-                body.get("aspireOwner", "estimating"),
-                body.get("priority", "medium"),
-                body.get("winProbability", 0.20),
-                body.get("siteWalkDate"),
-                body.get("dueBackDate"),
-                body.get("anticipatedCloseDate"),
-                body.get("serviceStartDate"),
-                body.get("assignedLsEstimator"),
-                body.get("assignedIrrEstimator"),
-                body.get("crmRep"),
-                (body.get("approvalSettings") or {}).get("notifyBmRdOnReturn", True),
-                body.get("notes"),
-                body.get("propertyId"),
-                body.get("leadId"),
-                # RFI status tracked first-class (install).
-                body.get("rfiStatus"),
-                *_occurrence_insert_values(body),
-                # NULL when the rep left the budget blank. 0 only when they sent 0.
-                homes_budget,
-                common_area_budget,
-            ],
-        )
-        for si, section in enumerate(body.get("sections") or []):
-            await _insert_section(estimate_id, section, si)
+        async with transaction():  # estimate + its sections commit or roll back together (autocommit pool)
+            # Auto-assign the next sequential estimate number (contract generator).
+            next_num_row = await query("SELECT COALESCE(MAX(estimate_number), 0) + 1 AS next_num FROM estimates")
+            estimate_number = int(next_num_row[0]["next_num"]) if next_num_row else 1
+            await execute(
+                """INSERT INTO estimates
+                     (id, estimate_type, name, aspire_number, estimate_number, client_name, aspire_branch_id,
+                      customer_type,
+                      acreage, contract_value_cents, target_margin, status, lifecycle, aspire_owner,
+                      priority, win_probability, site_walk_date, due_back_date, anticipated_close_date,
+                      service_start_date, assigned_ls_estimator, assigned_irr_estimator, crm_rep,
+                      notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status,
+                      mowing_occurrences, pruning_occurrences, turf_fert_occurrences,
+                      shrub_fert_occurrences, ipm_occurrences, irrigation_occurrences,
+                      homes_budget, common_area_budget)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                [
+                    estimate_id,
+                    est_type,
+                    body.get("name", ""),
+                    body.get("aspireNumber"),
+                    estimate_number,
+                    body.get("clientName", ""),
+                    aspire_branch_id,
+                    body.get("customerType", ""),
+                    body.get("acreage"),
+                    body.get("contractValueCents", 0),
+                    body.get("targetMargin", 0.22),
+                    body.get("status", "new_from_sales"),
+                    body.get("lifecycle", "bidding"),
+                    body.get("aspireOwner", "estimating"),
+                    body.get("priority", "medium"),
+                    body.get("winProbability", 0.20),
+                    body.get("siteWalkDate"),
+                    body.get("dueBackDate"),
+                    body.get("anticipatedCloseDate"),
+                    body.get("serviceStartDate"),
+                    body.get("assignedLsEstimator"),
+                    body.get("assignedIrrEstimator"),
+                    body.get("crmRep"),
+                    (body.get("approvalSettings") or {}).get("notifyBmRdOnReturn", True),
+                    body.get("notes"),
+                    body.get("propertyId"),
+                    body.get("leadId"),
+                    # RFI status tracked first-class (install).
+                    body.get("rfiStatus"),
+                    *_occurrence_insert_values(body),
+                    # NULL when the rep left the budget blank. 0 only when they sent 0.
+                    homes_budget,
+                    common_area_budget,
+                ],
+            )
+            for si, section in enumerate(body.get("sections") or []):
+                await _insert_section(estimate_id, section, si)
         # Structured intake payload lands in its own table (never estimate.notes).
         # Maintenance scopeOfWork inside intake.payload is optional free text.
         # When a rep still sends it, it is stored verbatim with the rest of the
@@ -2387,6 +2404,7 @@ def register(app, require_auth) -> None:
         )
         if not est_rows:
             raise HTTPException(status_code=404, detail="Not found")
+        await validate_estimate_tree([body], est_rows[0].get("estimate_type"), query)  # 073/074 + D9
         if est_rows[0].get("estimate_type") == "maintenance":
             await _require_resolvable_maintenance_lines(
                 annotate_maintenance_sections([body]),
@@ -2416,7 +2434,11 @@ def register(app, require_auth) -> None:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
-        cols = {"name": "name", "squareFeet": "square_feet", "sortOrder": "sort_order"}
+        if "serviceCategoryId" in body:
+            est = await query("SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id])
+            await validate_section_category(body, est[0]["estimate_type"] if est else None, section_id, query)
+        cols = {"name": "name", "squareFeet": "square_feet", "sortOrder": "sort_order",
+                "serviceCategoryId": "service_category_id"}
         await _apply_updates("estimate_sections", cols, body, section_id)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
         # A squareFeet edit changes every maintenance line's
@@ -2466,6 +2488,7 @@ def register(app, require_auth) -> None:
             await _require_resolvable_maintenance_lines(
                 [body], await _live_branch_crew_rate(est_rows[0].get("aspire_branch_id")),
             )
+        await validate_estimate_tree([{"services": [body]}], None, query, section_id=section_id)
         idx = await _next_sort_order("section_services", "section_id", section_id, body)
         service_id = await _insert_service(section_id, {**body, "sortOrder": idx}, idx)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
@@ -2516,8 +2539,10 @@ def register(app, require_auth) -> None:
             )
             if merged.get("_crewRateDerived"):
                 body["unitSellCents"] = merged["unitSellCents"]
+        await validate_service_ref(body, query, section_id=section_id)  # exists + D9 category match
         cols = {
             "serviceKitId": "service_kit_id",
+            "serviceId": "service_id",
             "discipline": "discipline",
             "billingType": "billing_type",
             "label": "label",
@@ -2591,8 +2616,7 @@ def register(app, require_auth) -> None:
         _user: dict = Depends(require_auth),
     ) -> dict:
         authz.require_estimator(_user)  # components are estimator-owned
-        if body.get("kind") not in ("labor", "material"):
-            raise HTTPException(status_code=400, detail="kind must be labor or material")
+        body = await prepare_component(body, query)  # 400 on kind, 422 on inventoryId
         rows = await query(_SERVICE_CHAIN_SQL, [service_id, section_id, estimate_id])
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
@@ -2623,10 +2647,13 @@ def register(app, require_auth) -> None:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
+        body = await prepare_component(body, query, current=rows[0])
         cols = {
             "kind": "kind",
             "label": "label",
+            "inventoryId": "inventory_id",
             "qty": "qty",
+            "uom": "uom",
             "unitCostCents": "unit_cost_cents",
             "hours": "hours",
             "sortOrder": "sort_order",

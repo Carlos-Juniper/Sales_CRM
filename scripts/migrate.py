@@ -1130,6 +1130,51 @@ def detect_072(conn) -> bool:
     )
 
 
+def detect_073(conn) -> bool:
+    """073 applied ↔ service_default_items and its service_kits FK exist.
+
+    Keyed on the migration's own effect (Handoff 55 §1), not on a sibling
+    artifact. service_default_items and fk_default_items_service_kit are the
+    file's LAST statements, so True means everything before them landed too
+    (the catalog tables, both estimate-tree FK columns, the materials
+    FULLTEXT index). A partial apply stays False and the guarded file runs
+    again. services.uq_services_aspire_service is checked too, so a database
+    that ran 073 before that key was UNIQUE re-runs the guarded file.
+    """
+    return (
+        table_exists(conn, "service_default_items")
+        and foreign_key_exists(conn, "service_default_items", "fk_default_items_service_kit")
+        and index_exists(conn, "services", "uq_services_aspire_service")
+    )
+
+
+COMPONENT_KINDS_074 = "enum('labor','material','equipment','subcontractor','other')"
+
+
+def detect_074(conn) -> bool:
+    """074 applied ↔ section_service_components.kind has the five cost
+    buckets, inventory_id and uom exist, and fk_components_material (the
+    file's last statement) exists. A partial apply stays False and the guarded
+    file runs again; so does a database that ran 074 before uom was added.
+    """
+    if not (
+        column_exists(conn, "section_service_components", "inventory_id")
+        and column_exists(conn, "section_service_components", "uom")
+        and foreign_key_exists(conn, "section_service_components", "fk_components_material")
+    ):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COLUMN_TYPE AS col_type FROM INFORMATION_SCHEMA.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+        ("section_service_components", "kind"),
+    )
+    col_type = row["col_type"] if row else ""
+    if isinstance(col_type, bytes):
+        col_type = col_type.decode()
+    return str(col_type).lower() == COMPONENT_KINDS_074
+
+
 def detect_068(conn) -> bool:
     """068 applied ↔ admin and vp_sales have an unbounded approval tier.
 
@@ -1253,6 +1298,8 @@ _DETECT: dict = {
     "070_materials_catalog":                      detect_070,
     "071_item_classes":                           detect_071,
     "072_materials_item_status":                  detect_072,
+    "073_service_catalog":                        detect_073,
+    "074_component_material_link":                detect_074,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

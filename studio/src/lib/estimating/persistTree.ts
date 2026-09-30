@@ -52,7 +52,8 @@ export type TreeOp =
   | { op: 'deleteComponent'; sectionId: string; serviceId: string; componentId: string }
 
 // Diffable scalar fields per level (ids/children handled structurally).
-const SECTION_FIELDS = ['name', 'squareFeet', 'sortOrder'] as const
+// serviceCategoryId: Handoff 55 §3 (estimate_sections.service_category_id).
+const SECTION_FIELDS = ['name', 'squareFeet', 'sortOrder', 'serviceCategoryId'] as const
 const SERVICE_FIELDS = [
   'serviceKitId',
   'discipline',
@@ -66,7 +67,17 @@ const SERVICE_FIELDS = [
   'hours',
   'sortOrder',
 ] as const
-const COMPONENT_FIELDS = ['kind', 'label', 'qty', 'unitCostCents', 'hours', 'sortOrder'] as const
+// inventoryId / uom: Handoff 55 §5 (074) — a re-picked material or unit patches.
+const COMPONENT_FIELDS = [
+  'kind',
+  'label',
+  'inventoryId',
+  'uom',
+  'qty',
+  'unitCostCents',
+  'hours',
+  'sortOrder',
+] as const
 
 function changedFields<T, K extends keyof T>(saved: T, draft: T, fields: readonly K[]): Partial<T> {
   const patch: Partial<T> = {}
@@ -168,6 +179,9 @@ function toComponentPayload(c: SectionServiceComponent): CreateComponentPayload 
   return {
     kind: c.kind,
     label: c.label,
+    // Handoff 55 §4/§5 (074): the material link; null for labor / sub / other.
+    inventoryId: c.inventoryId ?? null,
+    uom: c.uom ?? null,
     qty: c.qty,
     unitCostCents: c.unitCostCents,
     hours: c.hours,
@@ -178,6 +192,8 @@ function toComponentPayload(c: SectionServiceComponent): CreateComponentPayload 
 function toServicePayload(sv: SectionService): CreateServicePayload {
   return {
     serviceKitId: sv.serviceKitId,
+    // Handoff 55 §4 (073): the catalog service this line was added from.
+    serviceId: sv.serviceId ?? null,
     label: sv.label,
     qty: sv.qty,
     uom: sv.uom,
@@ -196,6 +212,8 @@ function toSectionPayload(s: EstimateSection): CreateSectionPayload {
     name: s.name,
     squareFeet: s.squareFeet,
     sortOrder: s.sortOrder,
+    // Handoff 55 §3: always present on the read type (null when unset).
+    serviceCategoryId: s.serviceCategoryId,
     services: s.services.map(toServicePayload),
   }
 }

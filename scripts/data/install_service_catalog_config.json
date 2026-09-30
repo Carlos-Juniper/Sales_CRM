@@ -1,0 +1,33 @@
+{
+  "_about": "Hand-maintained config for scripts/load_service_catalog.py (Handoff 55 §1/§2). The Aspire extract is scripts/data/aspire_install_service_catalog.json; this file holds only the decisions the extract cannot make.",
+  "seeded_sections": {
+    "_note": "Section keys from the extract's recommended_sections, seeded as install service_categories in this display order. 'design' is left out on purpose until product decides whether it is a level-1 install section.",
+    "order": ["landscape", "irrigation", "drainage", "lighting", "sod", "hardscape", "subcontractor", "marketing_gratis"]
+  },
+  "optional_section": {
+    "_note": "Not an Aspire ServiceType: one extra install category, is_optional = 1, whose raw Aspire group name the extract verified (answer q3). It owns no services.",
+    "code": "optional_services",
+    "name": "Optional Services"
+  },
+  "item_class_codes": {
+    "_note": "Handoff 55 section -> item-class mapping as item_classes.code values (scripts/data/acumatica_item_classes.xlsx), the materials-search soft prefilter. Filter on the code, never on the padded underscore id. A section not listed here = NULL = unfiltered. landscape: 701 Aggregate, 702 Soil, 704 Mulch, 705 Geotextile, 706 Planters, 708 Hardscape/Pavers, 709 Lumber + 80x LG (Trees, Palms, Shrubs/Vines, Bamboo, Annuals, Small Materials). 807 LG-Subcontractor Labor is Subcontractor's.",
+    "by_section": {
+      "landscape": [701, 702, 704, 705, 706, 708, 709, 801, 802, 803, 804, 805, 806],
+      "irrigation": [601, 602, 605, 606],
+      "sod": [703],
+      "drainage": [604],
+      "lighting": [710],
+      "subcontractor": [603, 707, 807]
+    }
+  },
+  "required_services": {
+    "_note": "The five main install services, by Aspire service id. The load fails if the extract stops producing any of them.",
+    "by_aspire_id": {
+      "18878": "IN: Irrigation Install",
+      "18882": "IN: Landscape Install",
+      "18888": "IN: Sod Install",
+      "18875": "IN: Drainage Install",
+      "18885": "IN: Lighting Install"
+    }
+  }
+}

@@ -29,6 +29,7 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest  # noqa: F401  (asyncio_mode=auto)
+from conftest import DEFAULT_INSTALL_CATEGORY
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("MYSQL_HOST", "localhost")
@@ -113,6 +114,8 @@ def _query_rows(rows):
             return [{"next_num": 1}]
         if "sla_return_window_days" in sql:
             return [{"sla_return_window_days": 14}]
+        if "FROM service_categories" in sql:  # seeded default install category (conftest)
+            return [dict(DEFAULT_INSTALL_CATEGORY)]
         return next(it)
 
     return _side_effect

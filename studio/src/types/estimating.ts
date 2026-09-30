@@ -296,6 +296,12 @@ export interface EstimateSection {
   /** Drives maintenance pricing. */
   squareFeet: number
   sortOrder: number
+  /**
+   * `service_categories.id` this section was built from (migration 073).
+   * Null for older sections. Accepted on section create/patch and estimate create.
+   * Required: the API always returns it (null when unset).
+   */
+  serviceCategoryId: string | null
   services: SectionService[]
 }
 
@@ -304,6 +310,11 @@ export interface SectionService {
   sectionId: string
   /** section_services.service_kit_id (service_kits.id). */
   serviceKitId: string | null
+  /**
+   * `services.id` (catalog level 2, migration 073) this line was added from.
+   * Null for kit and hand-entered lines. Optional so existing literals compile.
+   */
+  serviceId?: string | null
   /**
    * Per-line LS/IR override for the ITB EST LS $ / EST IR $ split. `null`
    * derives the discipline from the kit's `serviceType` (irrigation
@@ -345,17 +356,32 @@ export interface SectionService {
   components: SectionServiceComponent[]
 }
 
-export type ComponentKind = 'labor' | 'material'
+/** Aspire's five cost buckets (migration 074); was `'labor' | 'material'`. */
+export type ComponentKind = CostBucketKind
 
 export interface SectionServiceComponent {
   id: string
   sectionServiceId: string
   kind: ComponentKind
   label: string
+  /**
+   * `materials.inventory_id` when picked from GET /api/estimating/materials
+   * (migration 074); null for labor / sub / other and free-text rows. Sending
+   * it without `unitCostCents` snapshots the current price server-side.
+   */
+  inventoryId?: string | null
+  /**
+   * Unit of `qty` and of `unitCostCents` (Handoff 55 §5, component `uom`
+   * column in 074): the picked material's unit; null for free-text rows.
+   */
+  uom?: string | null
   /** Editable (blue-cell). */
   qty: number
-  /** Editable (blue-cell). Integer cents. */
-  unitCostCents: number
+  /**
+   * Editable (blue-cell). Integer cents. A snapshot: never re-priced after save.
+   * Null = unknown cost (a material with no current price); rendered "—", never $0.00.
+   */
+  unitCostCents: number | null
   hours: number | null
   sortOrder: number
 }
@@ -383,6 +409,116 @@ export interface ServiceKit {
   aspireBranchId: number | null
   active: boolean
   serviceType: string
+}
+
+// ----- Service catalog (Handoff 55 §1, migration 073) ----------------------
+
+/**
+ * Aspire's five cost buckets. `service_default_items.kind` uses all five from
+ * migration 073; `section_service_components.kind` widens to match in 074.
+ */
+export type CostBucketKind = 'labor' | 'material' | 'equipment' | 'subcontractor' | 'other'
+
+/**
+ * One D2 template row from `service_default_items`, copied into
+ * `section_service_components` when its service is added (§4).
+ */
+export interface ServiceDefaultItem {
+  id: string
+  serviceId: string
+  kind: CostBucketKind
+  label: string
+  /** `materials.inventory_id`; null for labor / sub / other lines. */
+  inventoryId: string | null
+  /** `service_kits.id` the line is driven by, when there is one. */
+  serviceKitId: string | null
+  qty: number
+  /** Template cost, integer cents. Null = resolve from the current material price. */
+  unitCostCents: number | null
+  /**
+   * `unitCostCents` when set, else the material's current `material_prices`
+   * cost at read time, else null. Snapshot THIS onto the new component's
+   * `unitCostCents`; never re-resolve a saved component.
+   */
+  resolvedUnitCostCents: number | null
+  hours: number | null
+  sortOrder: number
+}
+
+/** Level 2: an Aspire canonical Service (`services`). */
+export interface CatalogService {
+  id: string
+  serviceCategoryId: string
+  /** Aspire Service name verbatim, e.g. `IN: Irrigation Install`. */
+  name: string
+  displayName: string
+  sortOrder: number
+  /** Maintenance only (Handoff 54); null on install. */
+  defaultOccurrences: number | null
+  aspireServiceId: number | null
+  /** Always true in the catalog response (inactive services are omitted). */
+  active: boolean
+  defaultItems: ServiceDefaultItem[]
+}
+
+/**
+ * Level 1: the section an estimator picks (`service_categories`), from
+ * GET /api/estimating/service-catalog?estimateType=install, with services and
+ * default items nested.
+ */
+export interface ServiceCategory {
+  id: string
+  code: string
+  /** Written to `estimate_sections.name` (plus an optional ` - suffix`). */
+  name: string
+  estimateType: EstimateType
+  sortOrder: number
+  /**
+   * Aspire's Optional Services group. It owns no services of its own: in
+   * Aspire its lines come from the ordinary install catalog.
+   */
+  isOptional: boolean
+  aspireServiceGroupName: string | null
+  /** `item_classes.code` values for the materials-search soft prefilter. Null = unfiltered. */
+  itemClassCodes: number[] | null
+  /** Always true in the catalog response (inactive categories are omitted). */
+  active: boolean
+  services: CatalogService[]
+}
+
+// ----- Materials search (Handoff 55 §2) -------------------------------------
+
+/** One bid-able material from GET /api/estimating/materials. */
+export interface MaterialSearchItem {
+  /** `materials.inventory_id`; store on the component as `inventoryId`. */
+  inventoryId: string
+  description: string
+  alternateName: string | null
+  /** Acumatica item class id, e.g. `IRRIGATION-PVC_PIPE__`. */
+  itemClass: string | null
+  itemClassCode: number | null
+  itemClassName: string | null
+  /** e.g. `606-IRR-PVC Pipe`. */
+  itemClassLabel: string | null
+  /** Sales UOM, else base UOM. */
+  uom: string | null
+  baseUom: string | null
+  salesUom: string | null
+  purchaseUom: string | null
+  preferredVendorName: string | null
+  /** Current `material_prices` cost, integer cents; null when the item has no price. */
+  unitCostCents: number | null
+  /** UOM of `unitCostCents`; null with it. */
+  costUom: string | null
+}
+
+/**
+ * Query: `q`, `itemClassCodes` (comma-separated), `limit` (default 25, max 100),
+ * `cursor`. Pass `nextCursor` back with the same q / itemClassCodes for the next page.
+ */
+export interface MaterialSearchResponse {
+  items: MaterialSearchItem[]
+  nextCursor: string | null
 }
 
 // ----- Materials calculator (config-driven formulas) ------------------------

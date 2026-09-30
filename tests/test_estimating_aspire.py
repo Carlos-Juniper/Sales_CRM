@@ -11,6 +11,7 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from conftest import catalog_or_empty
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("MYSQL_HOST", "localhost")
@@ -213,7 +214,7 @@ class TestCreateBranchIdentityContract:
     def test_resolves_branch_city_from_id_when_client_omits_it(
         self, mock_query, mock_exec, mock_load, mock_bg, authed
     ):
-        mock_query.return_value = []
+        mock_query.side_effect = catalog_or_empty  # seeded install catalog, [] otherwise
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         # Client sends only the id. Post-022 there is no city column to fill.
         resp = client.post("/api/estimating/estimates", json={

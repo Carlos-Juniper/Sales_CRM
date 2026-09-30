@@ -15,6 +15,7 @@ import re
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from conftest import catalog_or_empty
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("MYSQL_HOST", "localhost")
@@ -152,7 +153,7 @@ class TestCreateOccurrenceCounts:
         self, mock_query, mock_exec, mock_load, _bg, authed
     ):
         """Install intake does not send the counts and does not require scope text."""
-        mock_query.return_value = []
+        mock_query.side_effect = catalog_or_empty  # seeded install catalog, [] otherwise
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Planting", "clientName": "LLC",

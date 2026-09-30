@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from conftest import DEFAULT_INSTALL_CATEGORY
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -98,6 +99,8 @@ class MemoryDb:
         if "COALESCE(MAX(estimate_number)" in s:
             nums = [int(r.get("estimate_number") or 0) for r in self.estimates.values()]
             return [{"next_num": (max(nums) if nums else 0) + 1}]
+        if "FROM service_categories" in s:  # seeded install catalog (catalog-driven sections)
+            return [dict(DEFAULT_INSTALL_CATEGORY)]
         if "FROM itb_scopes" in s or "FROM estimate_sections" in s:
             return []
         if "SELECT id FROM estimates" in s:

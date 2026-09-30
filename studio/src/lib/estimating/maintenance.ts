@@ -259,7 +259,7 @@ export function buildDefaultSection(
   const services = (seedRows.length > 0 ? seedRows : catalog.slice(0, 3)).map((row, i) =>
     catalogToService(row, id, i),
   )
-  return { id, estimateId, name: 'New region', squareFeet: 100_000, sortOrder, services }
+  return { id, estimateId, name: 'New region', squareFeet: 100_000, sortOrder, serviceCategoryId: null, services }
 }
 
 /** Deep-clone `sectionId`, append " (copy)", insert right after the source. */

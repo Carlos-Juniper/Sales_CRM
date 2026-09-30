@@ -22,8 +22,11 @@ import type {
   Property,
   SectionService,
   SectionServiceComponent,
+  MaterialSearchResponse,
+  ServiceCategory,
   TakeoffLine,
 } from '@/types/estimating'
+import { materialSearchQuery, type MaterialSearchParams } from '@/lib/estimating/materialSearch'
 import type { EstimateLifecycle } from '@/types/estimating'
 import type { OccurrenceCountKey } from '@/lib/estimating/occurrences'
 import type { StatusTransitionRecord } from '@/lib/estimating/transitions'
@@ -180,7 +183,12 @@ export type CreateServicePayload = Omit<SectionService, 'id' | 'sectionId' | 'co
   components?: CreateComponentPayload[]
 }
 export type UpdateServicePayload = Partial<Omit<SectionService, 'id' | 'sectionId' | 'components'>>
-export type CreateSectionPayload = Omit<EstimateSection, 'id' | 'estimateId' | 'services'> & {
+export type CreateSectionPayload = Omit<
+  EstimateSection,
+  'id' | 'estimateId' | 'services' | 'serviceCategoryId'
+> & {
+  /** Handoff 55 §3: optional on write (the backend stores null when absent). */
+  serviceCategoryId?: string | null
   services?: CreateServicePayload[]
 }
 export type UpdateSectionPayload = Partial<Omit<EstimateSection, 'id' | 'estimateId' | 'services'>>
@@ -509,6 +517,22 @@ export const estimatingConfigApi = {
   /** Aspire-derived branch list for the intake dropdowns. */
   branches: (kind: 'install' | 'maintenance') =>
     apiClient.get<BranchOption[]>(`/estimating/config/branches?kind=${kind}`),
+  /**
+   * Handoff 55 service catalog: active categories → services → default
+   * items (backend PR #40, api/service_catalog.py). Note the camelCase
+   * `estimateType` query param (the other config reads use snake_case).
+   */
+  serviceCatalog: (estimateType: EstimateType) =>
+    apiClient.get<ServiceCategory[]>(
+      `/estimating/service-catalog?estimateType=${encodeURIComponent(estimateType)}`,
+    ),
+  /**
+   * Handoff 55 §5 materials search (backend PR #41): ranked, class-filtered,
+   * keyset-paged; limit clamped to 1…100. Pass `nextCursor` back with the
+   * same q / itemClassCodes for the next page.
+   */
+  searchMaterials: (params: MaterialSearchParams) =>
+    apiClient.get<MaterialSearchResponse>(`/estimating/materials?${materialSearchQuery(params)}`),
   serviceKits: (params?: ListServiceKitsParams) => {
     const qs = new URLSearchParams()
     if (params?.kitType) qs.set('kit_type', params.kitType)

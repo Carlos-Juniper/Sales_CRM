@@ -14,6 +14,7 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest  # noqa: F401  (asyncio_mode=auto)
+from conftest import DEFAULT_INSTALL_CATEGORY
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("MYSQL_HOST", "localhost")
@@ -86,6 +87,8 @@ def _query_rows(rows):
             return [{"next_num": 1}]
         if "sla_return_window_days" in sql:
             return [{"sla_return_window_days": 14}]
+        if "FROM service_categories" in sql:  # seeded default install category (conftest)
+            return [dict(DEFAULT_INSTALL_CATEGORY)]
         return next(it)
 
     return _side_effect
@@ -98,13 +101,15 @@ def _split_query_count(mock_query):
     These assertions exist to pin down that the split does not issue a query
     per line. Counting raw calls conflates that with unrelated statements
     create() happens to make, so the estimate-number lookup and the blank
-    due-back SLA read are filtered out rather than absorbed into a bumped
-    expected count.
+    due-back SLA read (and the install service-catalog read that plans an
+    install estimate's sections) are filtered out rather than absorbed into a
+    bumped expected count.
     """
     return sum(
         1 for call in mock_query.call_args_list
         if "AS next_num" not in (call.args[0] if call.args else "")
         and "sla_return_window_days" not in (call.args[0] if call.args else "")
+        and "FROM service_categories" not in (call.args[0] if call.args else "")
     )
 
 
@@ -327,7 +332,8 @@ class TestRecomputeOnEdit:
 # down the contract, but they'd pass even if the split silently used stale
 # data. This uses tests/test_estimating_line_items.py's FakeDb (interprets
 # real SQL against in-memory tables) to prove the split actually reflects
-# what's persisted after real intake (sections: []) + a later line-item add.
+# what's persisted after real intake (sections: [], so the catalog's
+# auto-created section) + a later line-item add.
 
 class TestRecomputeEndToEnd:
     def test_split_updates_as_lines_are_added_after_real_intake(self, estimator, db):
@@ -343,12 +349,9 @@ class TestRecomputeEndToEnd:
         assert itb_row["est_ls_cents"] == 100000
         assert itb_row["est_ir_cents"] == 0
 
-        section_resp = client.post(
-            f"/api/estimating/estimates/{estimate_id}/sections",
-            json={"name": "Zone 1", "squareFeet": 0},
-        )
-        assert section_resp.status_code == 201
-        section_id = section_resp.json()["id"]
+        # Install sections come from the catalog: use the auto-created one
+        # (conftest seeds one standard category) rather than adding a section.
+        section_id = resp.json()["sections"][0]["id"]
 
         service_resp = client.post(
             f"/api/estimating/estimates/{estimate_id}/sections/{section_id}/services",
@@ -379,12 +382,7 @@ class TestRecomputeEndToEnd:
             "dueBackDate": "2026-09-30", "sections": [],
         })
         estimate_id = resp.json()["id"]
-
-        section_resp = client.post(
-            f"/api/estimating/estimates/{estimate_id}/sections",
-            json={"name": "Zone 1", "squareFeet": 0},
-        )
-        section_id = section_resp.json()["id"]
+        section_id = resp.json()["sections"][0]["id"]  # auto-created from the seeded catalog
 
         # Irrigation lines totalling far more than the original $1,000 intake.
         for _ in range(2):

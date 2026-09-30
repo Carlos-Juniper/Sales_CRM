@@ -7,7 +7,8 @@
 //     editors mutate — never a second data tree (the prototype's unsynced
 //     copy is exactly what this replaces).
 //   • Maintenance cost is HOURS-driven (hours × loaded crew rate);
-//     install cost is MATERIALS-inclusive (embedded cost with a
+//     install cost is MATERIALS-inclusive (component-sum cost basis shared
+//     with the install editor, falling back to the kit's embedded cost;
 //     labor/material component split, BRD II-9.7).
 //   • Benchmark bands are CONFIG rows, clearly provisional — production
 //     sources them from historical won-bid data (BRD III-6 auto-calculator).
@@ -15,14 +16,22 @@
 //     config.DEFAULT_MARGIN_BANDS — no local thresholds.
 // ---------------------------------------------------------------------------
 
-import type { ServiceKit, Estimate, EstimateSection, SectionService } from '@/types/estimating'
+import type {
+  ComponentKind,
+  ServiceKit,
+  Estimate,
+  EstimateSection,
+  SectionService,
+} from '@/types/estimating'
 import {
   SQFT_PER_ACRE,
+  componentCost,
   contractTotal,
   groupMargin,
   installLineTotal,
   maintServiceLine,
 } from './calc'
+import { COMPONENT_KINDS, serviceSubCostCents } from './install'
 
 // ----- Benchmark config (provisional, BRD III-6) ------------------------------
 
@@ -202,34 +211,59 @@ export function maintenanceLineCost(
 export interface InstallCostSplit {
   materialCents: number
   laborCents: number
+  /**
+   * Line cost per cost bucket (Handoff 55 §5 / migration 074: Aspire's five
+   * buckets). Exhaustive over ComponentKind, so equipment / subcontractor /
+   * other cost is attributed to its own bucket, never to "unattributed".
+   */
+  byKindCents: Record<ComponentKind, number>
   /** Embedded cost not explained by the component roll-up. */
   unattributedCents: number
 }
 
-/** Per-unit component cost, integer cents. */
-function unitComponentCost(svc: SectionService, kind: 'labor' | 'material'): number {
+/**
+ * Per-unit component cost for one kind, integer cents (calc.componentCost per
+ * row). An unknown (null) unit cost reads as 0 here, on the same basis as
+ * install.unitCostBasisCents.
+ */
+function unitComponentCost(svc: SectionService, kind: ComponentKind): number {
   return svc.components
     .filter((c) => c.kind === kind)
-    .reduce((sum, c) => sum + Math.round(c.qty * c.unitCostCents), 0)
+    .reduce((sum, c) => sum + (c.unitCostCents === null ? 0 : componentCost(c.qty, c.unitCostCents)), 0)
 }
 
 /**
- * Install line cost, integer cents — qty × embedded cost, falling back to the
- * kit-component roll-up when no embedded cost is stored.
+ * Install line cost, integer cents — the SAME component-sum basis the install
+ * editor uses (install.ts `serviceSubCostCents` / `unitCostBasisCents`):
+ * qty × Σ component cost when components exist, else qty × the kit's embedded
+ * cost (null reads as 0).
+ *
+ * Handoff 55 §6: this used to prefer `embeddedCostCents` over the components,
+ * so a line whose components had been edited showed one GM in the editor and
+ * another here. Both now read one basis.
  */
 export function installLineCost(svc: SectionService): number {
-  const unitCost =
-    svc.embeddedCostCents ??
-    unitComponentCost(svc, 'material') + unitComponentCost(svc, 'labor')
-  return Math.round(svc.qty * unitCost)
+  return serviceSubCostCents(svc)
 }
 
-/** Materials-inclusive split of an install line's cost (BRD II-9.7). */
+/**
+ * Materials-inclusive split of an install line's cost (BRD II-9.7). With
+ * components, material + labor carry the cost (unattributed is only a
+ * rounding remainder, clamped at 0); without them, the kit's flat embedded
+ * cost is all unattributed.
+ */
 export function installLineCostSplit(svc: SectionService): InstallCostSplit {
-  const materialCents = Math.round(svc.qty * unitComponentCost(svc, 'material'))
-  const laborCents = Math.round(svc.qty * unitComponentCost(svc, 'labor'))
-  const unattributedCents = Math.max(0, installLineCost(svc) - materialCents - laborCents)
-  return { materialCents, laborCents, unattributedCents }
+  const byKindCents = Object.fromEntries(
+    COMPONENT_KINDS.map((k) => [k, Math.round(svc.qty * unitComponentCost(svc, k))]),
+  ) as Record<ComponentKind, number>
+  const attributed = COMPONENT_KINDS.reduce((sum, k) => sum + byKindCents[k], 0)
+  const unattributedCents = Math.max(0, installLineCost(svc) - attributed)
+  return {
+    materialCents: byKindCents.material,
+    laborCents: byKindCents.labor,
+    byKindCents,
+    unattributedCents,
+  }
 }
 
 // ----- Service-group pivot -------------------------------------------------------
@@ -242,6 +276,8 @@ export interface ServiceGroupMargin {
   /** Install only (0 for maintenance). */
   materialCostCents: number
   laborCostCents: number
+  /** Install only: equipment + subcontractor + other buckets (074). */
+  otherBucketsCostCents: number
   unattributedCostCents: number
   /** Maintenance only (0 for install): annualized labor hours. */
   hoursPerYear: number
@@ -281,6 +317,7 @@ export function serviceGroupMargins(
           costCents: 0,
           materialCostCents: 0,
           laborCostCents: 0,
+          otherBucketsCostCents: 0,
           unattributedCostCents: 0,
           hoursPerYear: 0,
           marginPct: 0,
@@ -307,6 +344,8 @@ export function serviceGroupMargins(
         g.costCents += installLineCost(svc)
         g.materialCostCents += split.materialCents
         g.laborCostCents += split.laborCents
+        g.otherBucketsCostCents +=
+          split.byKindCents.equipment + split.byKindCents.subcontractor + split.byKindCents.other
         g.unattributedCostCents += split.unattributedCents
       }
       g.maxQty = Math.max(g.maxQty, svc.qty)

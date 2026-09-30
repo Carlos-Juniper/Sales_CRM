@@ -20,6 +20,7 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest  # noqa: F401  (asyncio_mode=auto)
+from conftest import catalog_or_empty
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("MYSQL_HOST", "localhost")
@@ -211,7 +212,7 @@ class TestRfiStatusFirstClass:
     @patch("api.estimating.execute", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
     def test_create_persists_rfi_status(self, mock_query, mock_exec, mock_load, mock_bg, authed):
-        mock_query.return_value = []  # itb_scopes read (auto-gen)
+        mock_query.side_effect = catalog_or_empty  # seeded install catalog; [] for itb_scopes (auto-gen)
         mock_load.return_value = {"id": "est-1", "estimateType": "install"}
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield", "clientName": "LLC",

@@ -1104,6 +1104,22 @@ def detect_070(conn) -> bool:
     )
 
 
+def detect_072(conn) -> bool:
+    """072 applied ↔ materials.item_status is NOT NULL and active is generated from it."""
+    row = _fetch_one(
+        conn,
+        "SELECT IS_NULLABLE AS nullable FROM INFORMATION_SCHEMA.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'materials' AND COLUMN_NAME = 'item_status'",
+        (),
+    )
+    return (
+        row is not None
+        and row["nullable"] == "NO"
+        and column_is_generated(conn, "materials", "active")
+        and index_exists(conn, "materials", "idx_materials_bid_active")
+    )
+
+
 def detect_068(conn) -> bool:
     """068 applied ↔ admin and vp_sales have an unbounded approval tier.
 
@@ -1225,6 +1241,7 @@ _DETECT: dict = {
     "068_admin_equivalent_approval_tiers":        detect_068,
     "069_service_kits":                           detect_069,
     "070_materials_catalog":                      detect_070,
+    "072_materials_item_status":                  detect_072,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

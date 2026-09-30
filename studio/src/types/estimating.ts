@@ -296,6 +296,13 @@ export interface EstimateSection {
   /** Drives maintenance pricing. */
   squareFeet: number
   sortOrder: number
+  /**
+   * `service_categories.id` this section was built from (migration 073).
+   * Null for older sections. Accepted on section create/patch and estimate create.
+   * Optional in the type (the API always returns it) so existing section literals and
+   * create payloads compile unchanged.
+   */
+  serviceCategoryId?: string | null
   services: SectionService[]
 }
 
@@ -383,6 +390,81 @@ export interface ServiceKit {
   aspireBranchId: number | null
   active: boolean
   serviceType: string
+}
+
+// ----- Service catalog (Handoff 55 §1, migration 073) ----------------------
+
+/**
+ * Aspire's five cost buckets. `service_default_items.kind` uses all five from
+ * migration 073; `section_service_components.kind` widens to match in 074.
+ */
+export type CostBucketKind = 'labor' | 'material' | 'equipment' | 'subcontractor' | 'other'
+
+/**
+ * One D2 template row from `service_default_items`, copied into
+ * `section_service_components` when its service is added (§4).
+ */
+export interface ServiceDefaultItem {
+  id: string
+  serviceId: string
+  kind: CostBucketKind
+  label: string
+  /** `materials.inventory_id`; null for labor / sub / other lines. */
+  inventoryId: string | null
+  /** `service_kits.id` the line is driven by, when there is one. */
+  serviceKitId: string | null
+  qty: number
+  /** Template cost, integer cents. Null = resolve from the current material price. */
+  unitCostCents: number | null
+  /**
+   * `unitCostCents` when set, else the material's current `material_prices`
+   * cost at read time, else null. Snapshot THIS onto the new component's
+   * `unitCostCents`; never re-resolve a saved component.
+   */
+  resolvedUnitCostCents: number | null
+  hours: number | null
+  sortOrder: number
+}
+
+/** Level 2: an Aspire canonical Service (`services`). */
+export interface CatalogService {
+  id: string
+  serviceCategoryId: string
+  /** Aspire Service name verbatim, e.g. `IN: Irrigation Install`. */
+  name: string
+  displayName: string
+  sortOrder: number
+  /** Maintenance only (Handoff 54); null on install. */
+  defaultOccurrences: number | null
+  aspireServiceId: number | null
+  /** Always true in the catalog response (inactive services are omitted). */
+  active: boolean
+  defaultItems: ServiceDefaultItem[]
+}
+
+/**
+ * Level 1: the section an estimator picks (`service_categories`), from
+ * GET /api/estimating/service-catalog?estimateType=install, with services and
+ * default items nested.
+ */
+export interface ServiceCategory {
+  id: string
+  code: string
+  /** Written to `estimate_sections.name` (plus an optional ` - suffix`). */
+  name: string
+  estimateType: EstimateType
+  sortOrder: number
+  /**
+   * Aspire's Optional Services group. It owns no services of its own: in
+   * Aspire its lines come from the ordinary install catalog.
+   */
+  isOptional: boolean
+  aspireServiceGroupName: string | null
+  /** `item_classes.code` values for the materials-search soft prefilter. Null = unfiltered. */
+  itemClassCodes: number[] | null
+  /** Always true in the catalog response (inactive categories are omitted). */
+  active: boolean
+  services: CatalogService[]
 }
 
 // ----- Materials calculator (config-driven formulas) ------------------------

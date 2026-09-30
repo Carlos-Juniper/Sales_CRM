@@ -1130,6 +1130,21 @@ def detect_072(conn) -> bool:
     )
 
 
+def detect_073(conn) -> bool:
+    """073 applied ↔ service_default_items and its service_kits FK exist.
+
+    Keyed on the migration's own effect (Handoff 55 §1), not on a sibling
+    artifact. service_default_items and fk_default_items_service_kit are the
+    file's LAST statements, so True means everything before them landed too
+    (the catalog tables, both estimate-tree FK columns, the materials
+    FULLTEXT index). A partial apply stays False and the guarded file runs
+    again.
+    """
+    return table_exists(conn, "service_default_items") and foreign_key_exists(
+        conn, "service_default_items", "fk_default_items_service_kit"
+    )
+
+
 def detect_068(conn) -> bool:
     """068 applied ↔ admin and vp_sales have an unbounded approval tier.
 
@@ -1253,6 +1268,7 @@ _DETECT: dict = {
     "070_materials_catalog":                      detect_070,
     "071_item_classes":                           detect_071,
     "072_materials_item_status":                  detect_072,
+    "073_service_catalog":                        detect_073,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

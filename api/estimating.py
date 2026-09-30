@@ -38,6 +38,7 @@ from api.commission_service import cancel_for_estimate, create_on_won
 from api import properties as _props_mod
 from api.aspire_sync import OpportunityInput
 from api.aspire_config import ASPIRE_BRANCH_MAP, ASPIRE_BRANCH_INSTALL_FALLBACKS
+from api.service_catalog import validate_service_category
 from api.maintenance_pricing import _live_branch_crew_rate, annotate_maintenance_sections, apply_maintenance_crew_prices
 
 logger = logging.getLogger(__name__)
@@ -562,6 +563,7 @@ def _section_out(r: dict, services: list[dict]) -> dict:
         "name": r["name"],
         "squareFeet": _num(r["square_feet"]),
         "sortOrder": r["sort_order"],
+        "serviceCategoryId": r.get("service_category_id"),
         "services": services,
     }
 
@@ -1568,14 +1570,16 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
 async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
     section_id = _new_id("sec")
     await execute(
-        """INSERT INTO estimate_sections (id, estimate_id, name, square_feet, sort_order)
-           VALUES (%s, %s, %s, %s, %s)""",
+        """INSERT INTO estimate_sections
+             (id, estimate_id, name, square_feet, sort_order, service_category_id)
+           VALUES (%s, %s, %s, %s, %s, %s)""",
         [
             section_id,
             estimate_id,
             section.get("name", ""),
             section.get("squareFeet", 0),
             section.get("sortOrder", idx),
+            section.get("serviceCategoryId"),
         ],
     )
     for vi, svc in enumerate(section.get("services") or []):
@@ -1881,6 +1885,8 @@ def register(app, require_auth) -> None:
                 status_code=400,
                 detail="aspireBranchId is required — select a branch from the intake form",
             )
+        for section in body.get("sections") or []:  # migration 073, before any write
+            await validate_service_category(section, est_type, query)
         # Yearly occurrence counts are optional on maintenance create. Validate
         # before any INSERT so a 422 persists nothing. Install may omit them
         # (they store NULL); a value that is sent is held to the same range.
@@ -2387,6 +2393,7 @@ def register(app, require_auth) -> None:
         )
         if not est_rows:
             raise HTTPException(status_code=404, detail="Not found")
+        await validate_service_category(body, est_rows[0].get("estimate_type"), query)
         if est_rows[0].get("estimate_type") == "maintenance":
             await _require_resolvable_maintenance_lines(
                 annotate_maintenance_sections([body]),
@@ -2416,7 +2423,11 @@ def register(app, require_auth) -> None:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
-        cols = {"name": "name", "squareFeet": "square_feet", "sortOrder": "sort_order"}
+        if "serviceCategoryId" in body:
+            est = await query("SELECT estimate_type FROM estimates WHERE id = %s", [estimate_id])
+            await validate_service_category(body, est[0]["estimate_type"] if est else None, query)
+        cols = {"name": "name", "squareFeet": "square_feet", "sortOrder": "sort_order",
+                "serviceCategoryId": "service_category_id"}
         await _apply_updates("estimate_sections", cols, body, section_id)
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
         # A squareFeet edit changes every maintenance line's

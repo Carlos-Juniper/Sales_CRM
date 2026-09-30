@@ -23,6 +23,7 @@ import type {
   InstallEstimate,
   SectionService,
   SectionServiceComponent,
+  ServiceCategory,
 } from '@/types/estimating'
 import { componentCost, groupMargin, installLineTotal, sectionTotal } from './calc'
 
@@ -221,6 +222,63 @@ let opSeq = 0
 function newId(prefix: string): string {
   opSeq += 1
   return `${prefix}-${Date.now()}-${opSeq}`
+}
+
+// ----- Sections from the service catalog (Handoff 55 §3) -------------------------
+
+/**
+ * Normalize the optional area suffix: trimmed, with any leading dash the
+ * estimator typed ("- Amenity Center") removed so names never read "A - - B".
+ */
+export function normalizeSectionSuffix(raw: string): string {
+  return raw.trim().replace(/^[-–—\s]+/, '').trim()
+}
+
+/** "Landscape" + "Amenity Center" → "Landscape - Amenity Center". */
+export function sectionNameFor(categoryName: string, suffix = ''): string {
+  const s = normalizeSectionSuffix(suffix)
+  return s ? `${categoryName} - ${s}` : categoryName
+}
+
+/**
+ * True when the estimate already has a section for `category`: linked by
+ * serviceCategoryId, or — for an unlinked takeoff / legacy section — named
+ * exactly the category name (the same exact-match rule §3 uses to backfill
+ * service_category_id).
+ */
+export function sectionHasCategory(section: EstimateSection, category: ServiceCategory): boolean {
+  if (section.serviceCategoryId) return section.serviceCategoryId === category.id
+  return section.name === category.name
+}
+
+/** Picker options: active install categories not already on the estimate, by sortOrder. */
+export function availableInstallCategories(
+  categories: ServiceCategory[],
+  sections: EstimateSection[],
+): ServiceCategory[] {
+  return categories
+    .filter((c) => c.estimateType === 'install' && c.active)
+    .filter((c) => !sections.some((s) => sectionHasCategory(s, c)))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+}
+
+/** A new, empty install section linked to its catalog category. */
+export function buildInstallSection(
+  estimateId: string,
+  category: ServiceCategory,
+  suffix: string,
+  sortOrder: number,
+): EstimateSection {
+  return {
+    id: newId('sec'),
+    estimateId,
+    name: sectionNameFor(category.name, suffix),
+    // Square footage drives maintenance pricing only.
+    squareFeet: 0,
+    sortOrder,
+    services: [],
+    serviceCategoryId: category.id,
+  }
 }
 
 // ----- Components ("+ Add labor / cost line", II-9.7) ---------------------------

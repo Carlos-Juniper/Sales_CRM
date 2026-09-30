@@ -45,7 +45,12 @@ import {
   sectionRollup,
   serviceCostOrNull,
   serviceRollup,
+  availableInstallCategories,
+  buildInstallSection,
+  normalizeSectionSuffix,
+  sectionNameFor,
 } from '@/lib/estimating/install'
+import { SERVICE_CATALOG_FIXTURE } from '@/mocks/serviceCatalogData'
 
 function fixture() {
   return buildInstallEstimate()
@@ -303,5 +308,45 @@ describe('three-level roll-ups (item → service → section → estimate)', () 
   it('formatGmPctOrDash renders "—" for null', () => {
     expect(formatGmPctOrDash(null)).toBe('—')
     expect(formatGmPctOrDash(0.4498)).toBe('44.98%')
+  })
+})
+
+// ----- Handoff 55 §3: sections from the service catalog ------------------------
+
+describe('section picker helpers', () => {
+  it('names a section "Category - suffix", tolerating a typed leading dash', () => {
+    expect(sectionNameFor('Landscape')).toBe('Landscape')
+    expect(sectionNameFor('Landscape', '   ')).toBe('Landscape')
+    expect(sectionNameFor('Landscape', 'Amenity Center')).toBe('Landscape - Amenity Center')
+    expect(sectionNameFor('Landscape', '- Amenity Center')).toBe('Landscape - Amenity Center')
+    expect(normalizeSectionSuffix(' — Entry Median ')).toBe('Entry Median')
+  })
+
+  it('offers only active install categories not already present', () => {
+    const est = fixture()
+    est.sections[0].name = 'Irrigation' // unlinked takeoff section, exact name
+    est.sections[1].serviceCategoryId = 'cat-install-lighting'
+    const names = availableInstallCategories(SERVICE_CATALOG_FIXTURE, est.sections).map((c) => c.name)
+    expect(names).toEqual(['Landscape', 'Sod', 'Drainage', 'Optional Services'])
+  })
+
+  it('a suffixed or differently-cased takeoff name does not hide the category', () => {
+    const est = fixture()
+    est.sections[0].name = 'IRRIGATION'
+    const names = availableInstallCategories(SERVICE_CATALOG_FIXTURE, est.sections).map((c) => c.name)
+    expect(names).toContain('Irrigation')
+  })
+
+  it('builds an empty, category-linked section', () => {
+    const cat = SERVICE_CATALOG_FIXTURE[0]
+    const sec = buildInstallSection('est-1', cat, 'Amenity Center', 2)
+    expect(sec).toMatchObject({
+      estimateId: 'est-1',
+      name: 'Landscape - Amenity Center',
+      serviceCategoryId: cat.id,
+      sortOrder: 2,
+      squareFeet: 0,
+      services: [],
+    })
   })
 })

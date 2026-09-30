@@ -33,17 +33,21 @@ import type {
   MarginBands,
   SectionService,
   SectionServiceComponent,
+  ServiceCategory,
 } from '@/types/estimating'
 import { marginBand } from '@/lib/estimating/calc'
 import { formatCents } from '@/lib/money'
 import { persistEstimateTree } from '@/lib/estimating/persistTree'
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
+import { useServiceCatalog } from '@/hooks/useServiceCatalog'
 import {
   type InstallRollup,
   type InstallServiceKit,
   type ItemRollup,
   UNRESOLVED,
+  availableInstallCategories,
   buildComponent,
+  buildInstallSection,
   coerceNum,
   componentRollups,
   estimateHours,
@@ -53,6 +57,7 @@ import {
   installServiceKitsFromItems,
   kitToService,
   sectionHours,
+  sectionNameFor,
   sectionRollup,
   serviceRollup,
 } from '@/lib/estimating/install'
@@ -482,6 +487,84 @@ const GroupRows = memo(function GroupRows({
 })
 
 // ---------------------------------------------------------------------------
+// Handoff 55 §3 — "Add section" picks from the install service categories
+// instead of free text. estimate_sections.name keeps the (optionally
+// suffixed) category name; serviceCategoryId carries the real link.
+// ---------------------------------------------------------------------------
+
+function AddSectionPicker({
+  sections,
+  onAdd,
+}: {
+  sections: EstimateSection[]
+  onAdd: (category: ServiceCategory, suffix: string) => void
+}) {
+  const { data: categories, isLoading, isError } = useServiceCatalog('install')
+  const options = useMemo(
+    () => availableInstallCategories(categories ?? [], sections),
+    [categories, sections],
+  )
+  const [categoryId, setCategoryId] = useState('')
+  const [suffix, setSuffix] = useState('')
+  const selected = options.find((c) => c.id === categoryId) ?? null
+
+  function add() {
+    if (!selected) return
+    onAdd(selected, suffix)
+    setCategoryId('')
+    setSuffix('')
+  }
+
+  const unavailable = isError || (!isLoading && categories === undefined)
+  return (
+    <div data-testid="install-add-section" className="flex flex-wrap items-center gap-2">
+      <select
+        aria-label="Add section"
+        className="h-8 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 text-xs font-semibold text-[#2E7D52] cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+        value={selected ? selected.id : ''}
+        disabled={isLoading || unavailable || options.length === 0}
+        onChange={(e) => setCategoryId(e.target.value)}
+      >
+        <option value="">
+          {isLoading
+            ? 'Loading sections…'
+            : unavailable
+              ? 'Section catalog unavailable'
+              : options.length === 0
+                ? 'Every section is already on this estimate'
+                : '+ Add section…'}
+        </option>
+        {options.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      <input
+        type="text"
+        aria-label="Section area suffix (optional)"
+        placeholder="Area (optional), e.g. Amenity Center"
+        maxLength={120}
+        className="h-8 w-56 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 text-xs"
+        value={suffix}
+        onChange={(e) => setSuffix(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') add()
+        }}
+      />
+      <Button size="sm" variant="outline" onClick={add} disabled={!selected}>
+        Add section
+      </Button>
+      {selected && (
+        <span data-testid="install-add-section-preview" className="text-[11px] text-[hsl(var(--muted-fg))]">
+          {sectionNameFor(selected.name, suffix)}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 
 export function InstallEditor({ estimate }: InstallEditorProps) {
   const { setOpenEstimate } = useEstimatingShell()
@@ -588,6 +671,20 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
       toast.show(`${kit.description} added`)
     },
     [kitCatalog, toast],
+  )
+
+  const handleAddSection = useCallback(
+    (category: ServiceCategory, suffix: string) => {
+      setDraft((d) => ({
+        ...d,
+        sections: [
+          ...d.sections,
+          buildInstallSection(d.id, category, suffix, d.sections.length),
+        ],
+      }))
+      toast.show(`${sectionNameFor(category.name, suffix)} added`)
+    },
+    [toast],
   )
 
   const toggleService = useCallback(
@@ -698,10 +795,12 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
           data-testid="install-empty"
           className="rounded-xl border border-dashed border-[hsl(var(--border))] px-6 py-10 text-center"
         >
-          <p className="m-0 text-sm text-[hsl(var(--muted-fg))]">
-            No groups yet — install groups arrive from the takeoff / proposal request, or are added
-            from the kit catalog.
+          <p className="m-0 mb-3 text-sm text-[hsl(var(--muted-fg))]">
+            No sections yet — add one from the install service catalog.
           </p>
+          <div className="flex justify-center">
+            <AddSectionPicker sections={draft.sections} onAdd={handleAddSection} />
+          </div>
         </div>
       ) : (
         <div className="rounded-xl border border-[hsl(var(--border))] overflow-hidden shadow-sm bg-[hsl(var(--card))]">
@@ -781,6 +880,9 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
                 kits={kitCatalog}
               />
             ))}
+          <div className="py-2 px-3 border-t border-[hsl(var(--border))]">
+            <AddSectionPicker sections={draft.sections} onAdd={handleAddSection} />
+          </div>
         </div>
       )}
 

@@ -53,6 +53,7 @@ HEADERS = [
     "Item Status",
     "Last Cost",
     "Aspire Item Cost",
+    "Preferred Vendor Purchase UOM",
 ]
 
 
@@ -447,30 +448,48 @@ class TestStockOnly:
         assert plan.nonstock_rows == 3
         assert plan.nonstock_skipped == 3
 
-    def test_agronomy_is_held_by_default(self, tmp_path: Path):
+    def test_agronomy_loads_like_any_other_row(self, tmp_path: Path):
         path = _workbook(
             tmp_path / "ag.xlsx",
             stock=[
                 _stock_row("1010000001", "Barricade 50LB", classes=HERBICIDE),
-                _stock_row("1020000001", "Insecticide", classes=("102-AG-Insecticide", "AGRONOMY__-INSECTICID")),
-                # Loaded class alone marks agronomy.
                 _stock_row("1070000001", "Liquid fert", classes=("", "AGRONOMY__-LIQ_FERT__")),
                 _stock_row("6050000001", "Coupling", classes=FITTINGS),
-                # "AG" inside another word is not agronomy.
-                _stock_row("7000000001", "Bag", classes=("700-LS-Bags", "LANDSCAPE_-AGGREGATE_")),
             ],
             nonstock=[],
         )
         plan = loader.build_plan(path)
-        assert sorted(_by_id(plan)) == ["6050000001", "7000000001"]
-        held = sorted(rej.inventory_id for rej in plan.rejects if rej.reason == "held_agronomy")
-        assert held == ["1010000001", "1020000001", "1070000001"]
-        assert plan.reject_count("held_agronomy") == 3
+        assert sorted(_by_id(plan)) == ["1010000001", "1070000001", "6050000001"]
+        assert _by_id(plan)["1010000001"].item_class == "AGRONOMY__-HERBISIDE_"
+        assert plan.rejects == []
 
-        included = loader.build_plan(path, include_agronomy=True)
-        assert sorted(_by_id(included)) == ["1010000001", "1020000001", "1070000001", "6050000001", "7000000001"]
-        assert _by_id(included)["1010000001"].item_class == "AGRONOMY__-HERBISIDE_"
-        assert included.rejects == []
+    def test_unit_disagreements_warn_and_still_load(self, tmp_path: Path):
+        path = _workbook(
+            tmp_path / "units.xlsx",
+            stock=[
+                _stock_row("1070000077", "Hydrothol (20LB)", Unit_Conversion_Factor="2", UOM_Conversion="20"),
+                _stock_row("1020000136", "Packet", Purchase_UOM="PKG", Preferred_Vendor_Purchase_UOM="EA"),
+                # Same number, same unit in another case, one side blank: no warning.
+                _stock_row("1000000001", "Agrees", Unit_Conversion_Factor="1", UOM_Conversion="1.0",
+                           Purchase_UOM="Ea", Preferred_Vendor_Purchase_UOM="EA"),
+                _stock_row("1000000002", "Blank factor", UOM_Conversion="1", Purchase_UOM="EA"),
+            ],
+            nonstock=[],
+        )
+        plan = loader.build_plan(path)
+        assert len(plan.items) == 4
+        assert _by_id(plan)["1070000077"].purchase_to_base_factor == Decimal("2.000000")
+        assert _by_id(plan)["1000000002"].purchase_to_base_factor == Decimal("1.000000")
+        assert [(w.inventory_id, w.message) for w in plan.warnings] == [
+            ("1070000077", "Unit Conversion Factor 2 != UOM Conversion 20 (stored the factor)"),
+            ("1020000136", "Preferred Vendor Purchase UOM EA != Purchase UOM PKG"),
+        ]
+        summary = loader.format_summary(plan, dry_run=True, rejects_path=tmp_path / "r.csv")
+        assert "  unit warnings (loaded as given): 2 rows" in summary.splitlines()
+        assert (
+            "    warning: 1020000136 (row 3): Preferred Vendor Purchase UOM EA != Purchase UOM PKG"
+            in summary.splitlines()
+        )
 
     def test_invalid_id_boundary(self, tmp_path: Path):
         path = _workbook(
@@ -488,7 +507,7 @@ class TestStockOnly:
             ],
             nonstock=[],
         )
-        plan = loader.build_plan(path, include_agronomy=True)
+        plan = loader.build_plan(path)
         assert sorted(_by_id(plan)) == ["1234567890", "2000000001"]
         invalid = sorted(rej.inventory_id for rej in plan.rejects if rej.reason == "invalid_inventory_id")
         assert invalid == ["101", "101", "101", "123456789", "12345678901", "ABC1234567"]
@@ -539,10 +558,9 @@ class TestStockOnly:
         assert old.nonstock_skipped == 0
 
         default = loader.build_plan(path)
-        assert sorted(_by_id(default)) == ["1000000001"]
-        assert sorted((rej.inventory_id, rej.reason) for rej in default.rejects) == [
+        assert sorted(_by_id(default)) == ["1000000001", "1010000001"]
+        assert [(rej.inventory_id, rej.reason) for rej in default.rejects] == [
             ("101", "invalid_inventory_id"),
-            ("1010000001", "held_agronomy"),
         ]
         assert default.nonstock_skipped == 2
 
@@ -570,25 +588,19 @@ class TestStockOnly:
         assert loader.main([str(path), "--dry-run", "--rejects", str(rejects)]) == 0
         out = capsys.readouterr().out
         for line in (
-            "  mode: stock-only, agronomy held",
+            "  mode: stock-only",
             "  nonstock sheet: NONStock Items rows=1 (not loaded)",
-            "  loaded: 1",
-            "  held agronomy: 1",
+            "  loaded: 2",
             "  rejected conflicts: 2 rows (1 inventory ids)",
             "  rejected invalid ids: 2",
             "  skipped STENS: 2",
             "  skipped non-stock: 1",
         ):
             assert line in out.splitlines()
-        text = rejects.read_text(encoding="utf-8")
-        assert text.count("held_agronomy") == 1
-        assert text.count("invalid_inventory_id") == 2
-
-        assert loader.main([str(path), "--dry-run", "--rejects", str(rejects), "--include-agronomy"]) == 0
-        out = capsys.readouterr().out
-        assert "  mode: stock-only, agronomy included" in out.splitlines()
-        assert "  loaded: 2" in out.splitlines()
-        assert "  held agronomy: 0" in out.splitlines()
+        assert "  unit warnings (loaded as given): 0 rows" in out.splitlines()
+        assert rejects.read_text(encoding="utf-8").count("invalid_inventory_id") == 2
+        with pytest.raises(SystemExit):
+            loader.main([str(path), "--dry-run", "--include-agronomy"])
 
         assert loader.main([str(path), "--dry-run", "--rejects", str(rejects), "--include-nonstock"]) == 0
         out = capsys.readouterr().out

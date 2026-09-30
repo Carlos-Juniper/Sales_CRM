@@ -18,28 +18,28 @@ Usage (from repo root):
     venv/bin/python scripts/load_materials_catalog.py
     venv/bin/python scripts/load_materials_catalog.py workbook.xlsx --dry-run
     venv/bin/python scripts/load_materials_catalog.py workbook.xlsx --rejects /tmp/rejects.csv
-    venv/bin/python scripts/load_materials_catalog.py workbook.xlsx --dry-run --include-agronomy
     venv/bin/python scripts/load_materials_catalog.py workbook.xlsx --dry-run --include-nonstock
 
 Modes:
     --stock-only (default)
         Load the Stock Items sheet only. The NONStock Items sheet is not
         required. When it is present its row count is reported; it is never
-        loaded and never used to fill blanks on stock rows. In this mode:
-        - Agronomy is held: a stock row whose item class contains ``-AG-``
-          (the ``101-AG-Herbiside`` style class, classes 101-1xx) or whose
-          loaded "USE THIS ONE" class starts with ``AGRONOMY`` is not loaded.
-          It is written to the rejects file as ``held_agronomy``.
-          ``--include-agronomy`` loads those rows.
-        - ``inventory_id`` must be exactly 10 digits. Anything else (for
-          example the placeholder ``101`` on the herbicide rows, or a 9-digit
-          id) is written to the rejects file as ``invalid_inventory_id``. This
-          runs before the duplicate check, so a placeholder id shared by many
-          products is reported as invalid, not as a conflict.
+        loaded and never used to fill blanks on stock rows. In this mode
+        ``inventory_id`` must be exactly 10 digits. Anything else (for
+        example the placeholder ``101`` on the earlier export's herbicide
+        rows, or a 9-digit id) is written to the rejects file as
+        ``invalid_inventory_id``. This runs before the duplicate check, so a
+        placeholder id shared by many products is reported as invalid, not
+        as a conflict.
     --include-nonstock
         The earlier behavior, unchanged: read both sheets, Stock Items wins
-        over NONStock Items for the same id, short ids are stored as given,
-        and agronomy is not held. Both sheets are required.
+        over NONStock Items for the same id, and short ids are stored as
+        given. Both sheets are required.
+
+Unit warnings: a loaded row whose Unit Conversion Factor and UOM Conversion
+disagree (the factor stored is Unit Conversion Factor), or whose Preferred
+Vendor Purchase UOM differs from Purchase UOM, is loaded as given and listed
+under ``warnings`` in the output.
 
 Env vars (same as scripts/migrate.py), used only when not --dry-run:
     MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB
@@ -92,7 +92,6 @@ CONFLICT_REASONS = frozenset({
 # Default (stock-only) mode only. The Aspire item ids are 10 digits.
 VALID_INVENTORY_ID = re.compile(r"[0-9]{10}")
 INVALID_ID_REASON = "invalid_inventory_id"
-HELD_AGRONOMY_REASON = "held_agronomy"
 
 # Schema limits. A value past these is rejected rather than clipped.
 _LIMITS = {
@@ -127,13 +126,19 @@ class Reject:
     last_cost: str
 
 
+@dataclass(frozen=True)
+class UnitWarning:
+    inventory_id: str
+    row_number: int
+    message: str
+
+
 @dataclass
 class LoadPlan:
     stock_sheet: str
     nonstock_sheet: str | None
     ignored_sheets: list[tuple[str, int]] = field(default_factory=list)
     include_nonstock: bool = False
-    include_agronomy: bool = False
     # Rows with an inventory id on the ignored (STENS) sheets.
     ignored_ids: int = 0
     # Non-stock sheet rows not considered at all (default mode).
@@ -144,6 +149,7 @@ class LoadPlan:
     stock_overrides: int = 0
     items: list[MaterialItem] = field(default_factory=list)
     rejects: list[Reject] = field(default_factory=list)
+    warnings: list[UnitWarning] = field(default_factory=list)
     zero_costs: int = 0
     bad_costs: int = 0
     identical_duplicates: int = 0
@@ -291,16 +297,34 @@ def _decimal(values: list[str | None] | None) -> Decimal | None:
 
 
 def _factor(fields: dict[str, list[str | None]]) -> Decimal | None:
+    """Unit Conversion Factor, else UOM Conversion."""
     number = _decimal(fields.get("unit conversion factor"))
     if number is None:
-        raw = _first(fields.get("uom conversion"))
-        if raw is None:
-            return None
-        try:
-            number = Decimal(raw)
-        except InvalidOperation:
-            return None
+        number = _decimal(fields.get("uom conversion"))
+    if number is None:
+        return None
     return number.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
+
+def _unit_warnings(inventory_id: str, row_number: int, fields: dict[str, list[str | None]]) -> list[UnitWarning]:
+    """Unit disagreements on a loaded row. The row is loaded as given."""
+    warnings = []
+    factor = _decimal(fields.get("unit conversion factor"))
+    conversion = _decimal(fields.get("uom conversion"))
+    if factor is not None and conversion is not None and factor != conversion:
+        warnings.append(UnitWarning(
+            inventory_id, row_number,
+            f"Unit Conversion Factor {_first(fields.get('unit conversion factor'))} "
+            f"!= UOM Conversion {_first(fields.get('uom conversion'))} (stored the factor)",
+        ))
+    purchase = _first(fields.get("purchase uom"))
+    vendor_purchase = _first(fields.get("preferred vendor purchase uom"))
+    if purchase and vendor_purchase and purchase.strip().upper() != vendor_purchase.strip().upper():
+        warnings.append(UnitWarning(
+            inventory_id, row_number,
+            f"Preferred Vendor Purchase UOM {vendor_purchase} != Purchase UOM {purchase}",
+        ))
+    return warnings
 
 
 def _cost_cents(fields: dict[str, list[str | None]]) -> tuple[int | None, str]:
@@ -520,33 +544,18 @@ def _ids_of(kept: dict[str, _Kept], rejects: list[Reject]) -> set[str]:
     return ids
 
 
-def _is_agronomy(fields: dict[str, list[str | None]], item_class: str | None) -> bool:
-    """Agronomy by either Item Class column: ``1xx-AG-...`` or ``AGRONOMY__-...``.
-
-    The loaded class carries the Acumatica class id (``AGRONOMY__-HERBISIDE_``).
-    On the earlier export the ``-AG-`` marker (``101-AG-Herbiside``) is on the
-    first Item Class column of the same row. The stock item list has only the
-    class id column, so the prefix is what catches its agronomy rows.
-    """
-    for value in fields.get("item class") or []:
-        if value and "-AG-" in str(value).upper():
-            return True
-    return bool(item_class) and str(item_class).strip().upper().startswith("AGRONOMY")
-
-
-def _build_stock_only(workbook: Path, *, include_agronomy: bool) -> LoadPlan:
+def _build_stock_only(workbook: Path) -> LoadPlan:
     (stock_name, stock_rows), nonstock, ignored, ignored_ids = _open_sheets(
         workbook, require_nonstock=False,
     )
     stock, rejects, notes = _collapse(stock_name, stock_rows, is_stock=1, strict_ids=True)
     items: list[MaterialItem] = []
     statuses: dict[str, str] = {}
+    warnings: list[UnitWarning] = []
     for inventory_id, (item, status, row_number, fields) in stock.items():
-        if not include_agronomy and _is_agronomy(fields, item.item_class):
-            rejects.append(_reject(stock_name, row_number, fields, inventory_id, HELD_AGRONOMY_REASON))
-            continue
         items.append(item)
         statuses[inventory_id] = status
+        warnings.extend(_unit_warnings(inventory_id, row_number, fields))
     items.sort(key=lambda item: item.inventory_id)
     non_rows = nonstock[1] if nonstock else []
     return LoadPlan(
@@ -554,25 +563,23 @@ def _build_stock_only(workbook: Path, *, include_agronomy: bool) -> LoadPlan:
         nonstock_sheet=nonstock[0] if nonstock else None,
         ignored_sheets=ignored,
         include_nonstock=False,
-        include_agronomy=include_agronomy,
         ignored_ids=ignored_ids,
         nonstock_skipped=len(non_rows),
         stock_rows=len(stock_rows),
         nonstock_rows=len(non_rows),
         items=items,
         rejects=rejects,
+        warnings=sorted(warnings, key=lambda w: w.row_number),
         zero_costs=sum(1 for status in statuses.values() if status == "zero"),
         bad_costs=sum(1 for status in statuses.values() if status in {"bad", "no_uom"}),
         identical_duplicates=notes["identical_duplicates_collapsed"],
     )
 
 
-def build_plan(
-    workbook: Path, *, include_nonstock: bool = False, include_agronomy: bool = False,
-) -> LoadPlan:
+def build_plan(workbook: Path, *, include_nonstock: bool = False) -> LoadPlan:
     """Plan the load. Stock-only by default; ``include_nonstock`` is the earlier behavior."""
     if not include_nonstock:
-        return _build_stock_only(workbook, include_agronomy=include_agronomy)
+        return _build_stock_only(workbook)
     (stock_name, stock_rows), (non_name, non_rows), ignored, ignored_ids = _open_sheets(workbook)
     stock, stock_rejects, stock_notes = _collapse(stock_name, stock_rows, is_stock=1)
     non, non_rejects, non_notes = _collapse(non_name, non_rows, is_stock=0)
@@ -585,6 +592,7 @@ def build_plan(
     non_ids = _ids_of(non, non_rejects)
     items: list[MaterialItem] = []
     statuses: dict[str, str] = {}
+    warnings: list[UnitWarning] = []
     rejects = list(stock_rejects)
     overrides = 0
     for inventory_id in stock:
@@ -601,22 +609,23 @@ def build_plan(
             continue
         items.append(item)
         statuses[inventory_id] = status
+        warnings.extend(_unit_warnings(inventory_id, row_number, fields))
     for rej in non_rejects:
         # Stock already won this id. Drop the non-stock duplicate rejects.
         if rej.reason == "conflicting_duplicate_inventory_id" and rej.inventory_id in stock:
             continue
         rejects.append(rej)
 
-    for inventory_id, (item, status, _row_number, _fields) in stock.items():
+    for inventory_id, (item, status, row_number, fields) in stock.items():
         items.append(item)
         statuses[inventory_id] = status
+        warnings.extend(_unit_warnings(inventory_id, row_number, fields))
     items.sort(key=lambda item: item.inventory_id)
     plan = LoadPlan(
         stock_sheet=stock_name,
         nonstock_sheet=non_name,
         ignored_sheets=ignored,
         include_nonstock=True,
-        include_agronomy=True,
         ignored_ids=ignored_ids,
         stock_rows=len(stock_rows),
         nonstock_rows=len(non_rows),
@@ -624,6 +633,7 @@ def build_plan(
         stock_overrides=overrides,
         items=items,
         rejects=rejects,
+        warnings=warnings,
         zero_costs=sum(1 for status in statuses.values() if status == "zero"),
         bad_costs=sum(1 for status in statuses.values() if status in {"bad", "no_uom"}),
         identical_duplicates=(
@@ -638,10 +648,7 @@ def format_summary(plan: LoadPlan, *, dry_run: bool, rejects_path: Path, apply: 
     reasons = Counter(rej.reason for rej in plan.rejects)
     conflict_rows = [rej for rej in plan.rejects if rej.reason in CONFLICT_REASONS]
     conflict_ids = {rej.inventory_id for rej in conflict_rows}
-    if plan.include_nonstock:
-        mode = "include-nonstock"
-    else:
-        mode = "stock-only, " + ("agronomy included" if plan.include_agronomy else "agronomy held")
+    mode = "include-nonstock" if plan.include_nonstock else "stock-only"
     lines = [
         f"materials catalog load ({'dry-run' if dry_run else 'write'})",
         f"  mode: {mode}",
@@ -657,7 +664,6 @@ def format_summary(plan: LoadPlan, *, dry_run: bool, rejects_path: Path, apply: 
         lines.append(f"  ignored sheet: {name} rows={count} (not loaded)")
     lines.extend([
         f"  loaded: {len(plan.items)}",
-        f"  held agronomy: {plan.reject_count(HELD_AGRONOMY_REASON)}",
         f"  rejected conflicts: {len(conflict_rows)} rows ({len(conflict_ids)} inventory ids)",
         f"  rejected invalid ids: {plan.reject_count(INVALID_ID_REASON)}",
         f"  skipped STENS: {plan.ignored_ids}",
@@ -684,6 +690,9 @@ def format_summary(plan: LoadPlan, *, dry_run: bool, rejects_path: Path, apply: 
     for reason, count in sorted(reasons.items()):
         lines.append(f"    {reason}: {count}")
     lines.append(f"  rejects csv: {rejects_path}")
+    lines.append(f"  unit warnings (loaded as given): {len(plan.warnings)} rows")
+    for warning in plan.warnings:
+        lines.append(f"    warning: {warning.inventory_id} (row {warning.row_number}): {warning.message}")
     if apply is not None:
         lines.extend([
             f"  items upserted: {apply.items_upserted}",
@@ -792,22 +801,13 @@ def main(argv: list[str] | None = None) -> int:
         "--include-nonstock",
         dest="include_nonstock",
         action="store_true",
-        help="earlier behavior: load both sheets, stock wins on overlap, no id or agronomy filter",
+        help="earlier behavior: load both sheets, stock wins on overlap, no id filter",
     )
     parser.set_defaults(include_nonstock=False)
-    parser.add_argument(
-        "--include-agronomy",
-        action="store_true",
-        help="stock-only mode: load agronomy rows (item class -AG-) instead of holding them",
-    )
     args = parser.parse_args(argv)
     rejects_path = args.rejects or Path.cwd() / f"{args.workbook.stem}.rejects.csv"
 
-    plan = build_plan(
-        args.workbook,
-        include_nonstock=args.include_nonstock,
-        include_agronomy=args.include_agronomy,
-    )
+    plan = build_plan(args.workbook, include_nonstock=args.include_nonstock)
     write_rejects(rejects_path, plan.rejects)
     if args.conflicts is not None:
         args.conflicts.parent.mkdir(parents=True, exist_ok=True)

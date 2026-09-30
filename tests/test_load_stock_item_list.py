@@ -22,41 +22,38 @@ import scripts.load_materials_catalog as loader  # noqa: E402
 from tests.test_load_materials_catalog import SCRATCH_DB, _apply_070_072, _connect  # noqa: E402
 
 ROWS = 12_498
-AGRONOMY_ROWS = 149
 
 
 @pytest.fixture(scope="module")
-def stock_plan():
+def plan():
     return loader.build_plan(loader.DEFAULT_WORKBOOK)
-
-
-@pytest.fixture(scope="module")
-def full_plan():
-    return loader.build_plan(loader.DEFAULT_WORKBOOK, include_agronomy=True)
 
 
 def _item(plan, inventory_id):
     return next(i for i in plan.items if i.inventory_id == inventory_id)
 
 
-def test_default_holds_agronomy(stock_plan):
-    assert stock_plan.stock_sheet == "STOCK ITEMS"
-    assert stock_plan.stock_rows == ROWS
-    assert len(stock_plan.items) == ROWS - AGRONOMY_ROWS
-    assert stock_plan.reject_count(loader.HELD_AGRONOMY_REASON) == AGRONOMY_ROWS
-    assert len(stock_plan.rejects) == AGRONOMY_ROWS
-    assert not any((i.item_class or "").startswith("AGRONOMY") for i in stock_plan.items)
+def test_every_row_loads_with_a_cost(plan):
+    assert plan.stock_sheet == "STOCK ITEMS"
+    assert plan.stock_rows == ROWS
+    assert len(plan.items) == ROWS
+    assert plan.rejects == []
+    assert plan.without_cost == 0
+    assert len({i.item_class for i in plan.items}) == 26
+    assert sum(1 for i in plan.items if i.item_class.startswith("AGRONOMY")) == 149
 
 
-def test_include_agronomy_loads_every_row_with_a_cost(full_plan):
-    assert len(full_plan.items) == ROWS
-    assert full_plan.rejects == []
-    assert full_plan.without_cost == 0
-    assert len({i.item_class for i in full_plan.items}) == 26
+def test_unit_warnings(plan):
+    """One factor disagreement and seven vendor purchase units; all rows still load."""
+    by_id = {w.inventory_id: w.message for w in plan.warnings}
+    assert len(plan.warnings) == 8
+    assert by_id["1070000077"] == "Unit Conversion Factor 2 != UOM Conversion 20 (stored the factor)"
+    assert sum(1 for m in by_id.values() if m.startswith("Preferred Vendor Purchase UOM")) == 7
+    assert "1030000149" not in by_id  # Ea vs EA is the same unit
 
 
-def test_irrigation_row_mapping(stock_plan):
-    item = _item(stock_plan, "6010003441")
+def test_irrigation_row_mapping(plan):
+    item = _item(plan, "6010003441")
     assert item.item_class == "IRRIGATION-PARTS_____"
     assert item.aspire_category == "IRRIGATION-PARTS"
     assert item.posting_class == "DIRMATL"
@@ -72,8 +69,8 @@ def test_irrigation_row_mapping(stock_plan):
     assert item.is_stock_item == 1
 
 
-def test_purchase_uom_conversion(full_plan):
-    item = _item(full_plan, "1010000031")  # Avenue South (2.5 GAL)
+def test_purchase_uom_conversion(plan):
+    item = _item(plan, "1010000031")  # Avenue South (2.5 GAL)
     assert item.item_class == "AGRONOMY__-HERBISIDE_"
     assert (item.base_uom, item.sales_uom, item.purchase_uom) == ("OZ", "OZ", "EA")
     assert item.purchase_to_base_factor == Decimal("320.000000")
@@ -81,7 +78,7 @@ def test_purchase_uom_conversion(full_plan):
     assert item.preferred_vendor_id == "SITELAND26"
 
 
-def test_load_is_idempotent(full_plan):
+def test_load_is_idempotent(plan):
     try:
         conn = _connect()
     except pymysql.err.OperationalError as exc:
@@ -89,10 +86,10 @@ def test_load_is_idempotent(full_plan):
     try:
         _apply_070_072(conn)
         today = date(2026, 9, 30)
-        first = loader.apply_plan(conn, full_plan, today=today)
+        first = loader.apply_plan(conn, plan, today=today)
         conn.commit()
         assert (first.items_upserted, first.prices_inserted) == (ROWS, ROWS)
-        second = loader.apply_plan(conn, full_plan, today=today)
+        second = loader.apply_plan(conn, plan, today=today)
         conn.commit()
         assert (second.prices_inserted, second.prices_unchanged, second.prices_archived) == (0, ROWS, 0)
         with conn.cursor() as cur:

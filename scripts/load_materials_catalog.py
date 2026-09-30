@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Load the materials item master and cost history from an Aspire/Acumatica workbook.
 
-Reads the Stock Items sheet. Writes ``materials`` (item master, no cost) and
+Reads the Stock Items sheet. The default workbook is the stock item list
+committed at scripts/data/acumatica_stock_items.xlsx (one "STOCK ITEMS"
+sheet). The earlier Aspire export (Stock Items, NONStock Items and STENS
+sheets) still loads when its path is passed. Writes ``materials`` (item master, no cost) and
 cost history on ``material_prices``. The loader records history itself (070
 has no triggers): inside the load transaction it locks each item's current
 price row with ``SELECT ... FOR UPDATE``. A changed cost closes that row
@@ -10,11 +13,10 @@ and the new ``effective_from``) and inserts the new current row. An
 unchanged cost writes nothing, so re-running the same workbook adds no
 price rows.
 
-The workbook is not part of this repo. Pass its path.
-
 Usage (from repo root):
+    venv/bin/python scripts/load_materials_catalog.py --dry-run
+    venv/bin/python scripts/load_materials_catalog.py
     venv/bin/python scripts/load_materials_catalog.py workbook.xlsx --dry-run
-    venv/bin/python scripts/load_materials_catalog.py workbook.xlsx
     venv/bin/python scripts/load_materials_catalog.py workbook.xlsx --rejects /tmp/rejects.csv
     venv/bin/python scripts/load_materials_catalog.py workbook.xlsx --dry-run --include-agronomy
     venv/bin/python scripts/load_materials_catalog.py workbook.xlsx --dry-run --include-nonstock
@@ -50,6 +52,11 @@ that maps to more than one distinct product is skipped (every row for that
 id). A Stock Items row replacing a different NONStock Items row is not a
 conflict: the stock row is the one stored.
 
+Vendor columns ("Preferred Vendor - Only for purchase items"): with two
+columns the first is the vendor name and the second the vendor id (the
+earlier export). With one column it is the vendor id (HERILAND26), which is
+what the stock item list carries.
+
 A third sheet, "Template Stock Items STENS", is never loaded. Rows on it
 that carry an inventory id are counted as skipped.
 """
@@ -59,7 +66,6 @@ import argparse
 import csv
 import re
 import sys
-import uuid
 import zipfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -71,11 +77,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.materials_store import ApplyResult, MaterialItem, upsert_items  # noqa: E402
 from scripts.xlsx import shared_strings, sheet_rows, sheet_targets  # noqa: E402
+
+DEFAULT_WORKBOOK = REPO_ROOT / "scripts" / "data" / "acumatica_stock_items.xlsx"
 
 SOURCE = "aspire_import"
 ENTERED_BY = "scripts/load_materials_catalog.py"
-BATCH = 400
 INVENTORY_ID_MAX = 64
 CONFLICT_REASONS = frozenset({
     "conflicting_duplicate_inventory_id",
@@ -100,32 +108,9 @@ _LIMITS = {
     "preferred_vendor_id": 64,
     "preferred_vendor_name": 128,
     "vendor_sku": 128,
+    "item_status": 32,
     "cost_uom": 32,
 }
-
-
-@dataclass(frozen=True)
-class MaterialItem:
-    inventory_id: str
-    description: str
-    alternate_name: str | None
-    item_class: str | None
-    aspire_category: str | None
-    posting_class: str | None
-    manufacturer: str | None
-    base_uom: str | None
-    sales_uom: str | None
-    purchase_uom: str | None
-    purchase_to_base_factor: Decimal | None
-    preferred_vendor_id: str | None
-    preferred_vendor_name: str | None
-    vendor_sku: str | None
-    is_stock_item: int
-    available_to_bid: int
-    active: int
-    unit_cost_cents: int | None
-    cost_uom: str | None
-    sheet: str
 
 
 @dataclass(frozen=True)
@@ -173,14 +158,6 @@ class LoadPlan:
 
     def reject_count(self, *reasons: str) -> int:
         return sum(1 for rej in self.rejects if rej.reason in reasons)
-
-
-@dataclass
-class ApplyResult:
-    items_upserted: int = 0
-    prices_inserted: int = 0
-    prices_unchanged: int = 0
-    prices_archived: int = 0
 
 
 # ── workbook ──────────────────────────────────────────────────────────────────
@@ -343,6 +320,14 @@ def _cost_cents(fields: dict[str, list[str | None]]) -> tuple[int | None, str]:
     return cents, "ok"
 
 
+def _vendor(fields: dict[str, list[str | None]]) -> tuple[str | None, str | None]:
+    """(vendor name, vendor id). Two columns: name then id. One column: the id."""
+    vendors = fields.get("preferred vendor - only for purchase items") or []
+    if len(vendors) > 1:
+        return _first(vendors[:1]), _first(vendors[1:2])
+    return None, _first(vendors)
+
+
 def _cost_uom(item_uoms: tuple[str | None, str | None, str | None]) -> str | None:
     purchase, base, sales = item_uoms
     return purchase or base or sales
@@ -364,9 +349,7 @@ def _sheet_view(fields: dict[str, list[str | None]]) -> dict[str, str]:
     """Sheet text for the rejects file. Item class follows the loader's column choice."""
     classes = [str(v).strip() for v in (fields.get("item class") or []) if v and str(v).strip()]
     item_class = classes[1] if len(classes) > 1 else (classes[0] if classes else "")
-    vendors = fields.get("preferred vendor - only for purchase items") or []
-    vendor_name = _first(vendors[:1]) or ""
-    vendor_id = _first(vendors[1:2]) if len(vendors) > 1 else ""
+    vendor_name, vendor_id = _vendor(fields)
     if vendor_name and vendor_id:
         vendor = f"{vendor_name} ({vendor_id})"
     else:
@@ -416,12 +399,12 @@ def _map_row(
         return None, _reject(sheet, row_number, fields, inventory_id, "missing_description"), "missing_desc"
 
     classes = [v for v in (fields.get("item class") or []) if v and str(v).strip()]
-    # The stock sheet has two Item Class columns. The second is the current
-    # category ("USE THIS ONE" on the review row). Non-stock has one.
+    # The earlier export's stock sheet has two Item Class columns; the second
+    # is the current class ("USE THIS ONE" on the review row). Non-stock and
+    # the stock item list have one (the list's label column is headed "Item
+    # Class Working" and is not read).
     item_class_raw = str(classes[1]).strip() if len(classes) > 1 else (str(classes[0]).strip() if classes else None)
-    vendors = fields.get("preferred vendor - only for purchase items") or []
-    vendor_name = _first(vendors[:1])
-    vendor_id = _first(vendors[1:2]) if len(vendors) > 1 else None
+    vendor_name, vendor_id = _vendor(fields)
 
     texts: dict[str, str | None] = {}
     too_long: list[str] = []
@@ -438,6 +421,7 @@ def _map_row(
         ("preferred_vendor_id", [vendor_id] if vendor_id else [], _LIMITS["preferred_vendor_id"]),
         ("preferred_vendor_name", [vendor_name] if vendor_name else [], _LIMITS["preferred_vendor_name"]),
         ("vendor_sku", fields.get("item cross reference (vendor sku)"), _LIMITS["vendor_sku"]),
+        ("item_status", fields.get("item status"), _LIMITS["item_status"]),
     ):
         value, over = _text(source, limit)
         texts[key] = value
@@ -451,8 +435,6 @@ def _map_row(
     if cents is not None and uom is None:
         cents = None
         cost_status = "no_uom"
-    status = _first(fields.get("item status"))
-    active = 1 if status is None or status.casefold() == "active" else 0
     item = MaterialItem(
         inventory_id=inventory_id,
         description=texts["description"] or description,
@@ -470,10 +452,9 @@ def _map_row(
         vendor_sku=texts["vendor_sku"],
         is_stock_item=is_stock,
         available_to_bid=_flag(fields.get("available to bid"), 1),
-        active=active,
+        item_status=texts["item_status"] or "Active",
         unit_cost_cents=cents,
         cost_uom=uom if cents is not None else None,
-        sheet=sheet,
     )
     return item, None, cost_status
 
@@ -542,9 +523,10 @@ def _ids_of(kept: dict[str, _Kept], rejects: list[Reject]) -> set[str]:
 def _is_agronomy(fields: dict[str, list[str | None]], item_class: str | None) -> bool:
     """Agronomy by either Item Class column: ``1xx-AG-...`` or ``AGRONOMY__-...``.
 
-    The loaded class is the second ("USE THIS ONE") column, which carries the
-    Aspire category code (``AGRONOMY__-HERBISIDE_``). The ``-AG-`` marker
-    (``101-AG-Herbiside``) is on the first column of the same row.
+    The loaded class carries the Acumatica class id (``AGRONOMY__-HERBISIDE_``).
+    On the earlier export the ``-AG-`` marker (``101-AG-Herbiside``) is on the
+    first Item Class column of the same row. The stock item list has only the
+    class id column, so the prefix is what catches its agronomy rows.
     """
     for value in fields.get("item class") or []:
         if value and "-AG-" in str(value).upper():
@@ -777,157 +759,17 @@ def format_conflict_brief(plan: LoadPlan) -> str:
 
 # ── database ──────────────────────────────────────────────────────────────────
 
-# MySQL 8.0.19 row aliases (`INSERT ... AS new`) fail on MariaDB 10.11, which
-# is the local bootstrap server. VALUES() is deprecated on MySQL 8.4 and still
-# executes there. aspire_catalog_item_id is omitted: the workbook's Aspire
-# Item Code repeats inventory_id and is not Aspire's numeric CatalogItemID.
-_ITEM_SQL = """
-INSERT INTO materials (
-    inventory_id, description, alternate_name, item_class, aspire_category,
-    posting_class, manufacturer, base_uom, sales_uom, purchase_uom,
-    purchase_to_base_factor, preferred_vendor_id, preferred_vendor_name,
-    vendor_sku, is_stock_item, available_to_bid, active
-) VALUES (
-    %s, %s, %s, %s, %s,
-    %s, %s, %s, %s, %s,
-    %s, %s, %s,
-    %s, %s, %s, %s
-)
-ON DUPLICATE KEY UPDATE
-    description = VALUES(description),
-    alternate_name = VALUES(alternate_name),
-    item_class = VALUES(item_class),
-    aspire_category = VALUES(aspire_category),
-    posting_class = VALUES(posting_class),
-    manufacturer = VALUES(manufacturer),
-    base_uom = VALUES(base_uom),
-    sales_uom = VALUES(sales_uom),
-    purchase_uom = VALUES(purchase_uom),
-    purchase_to_base_factor = VALUES(purchase_to_base_factor),
-    preferred_vendor_id = VALUES(preferred_vendor_id),
-    preferred_vendor_name = VALUES(preferred_vendor_name),
-    vendor_sku = VALUES(vendor_sku),
-    is_stock_item = VALUES(is_stock_item),
-    available_to_bid = VALUES(available_to_bid),
-    active = VALUES(active)
-"""
-
-# material_prices.current_inventory_id is a generated column (070): it is
-# never written here. is_current drives it and the one-current unique key.
-_CLOSE_SQL = """
-UPDATE material_prices
-   SET is_current = 0, effective_to = %s
- WHERE id = %s AND is_current = 1
-"""
-
-_PRICE_SQL = """
-INSERT INTO material_prices (
-    id, inventory_id, unit_cost_cents, uom, vendor_id, vendor_name,
-    effective_from, is_current, source, entered_by
-) VALUES (%s, %s, %s, %s, %s, %s, %s, 1, %s, %s)
-"""
-
-
-def _chunks(rows: list, size: int):
-    for start in range(0, len(rows), size):
-        yield rows[start : start + size]
-
-
-def _item_params(item: MaterialItem) -> tuple:
-    return (
-        item.inventory_id, item.description, item.alternate_name, item.item_class,
-        item.aspire_category, item.posting_class, item.manufacturer, item.base_uom,
-        item.sales_uom, item.purchase_uom, item.purchase_to_base_factor,
-        item.preferred_vendor_id, item.preferred_vendor_name, item.vendor_sku,
-        item.is_stock_item, item.available_to_bid, item.active,
-    )
-
-
-def _lock_current_prices(cur, inventory_ids: list[str]) -> dict[str, dict]:
-    """Current price row per item, locked FOR UPDATE until the caller commits.
-
-    One query per batch of items; each returned row is locked, so a
-    concurrent loader or API write waits instead of racing the close/insert.
-    """
-    found: dict[str, dict] = {}
-    for batch in _chunks(inventory_ids, BATCH):
-        marks = ", ".join(["%s"] * len(batch))
-        cur.execute(
-            f"""SELECT id, inventory_id, unit_cost_cents, effective_from
-                  FROM material_prices
-                 WHERE is_current = 1 AND inventory_id IN ({marks})
-                   FOR UPDATE""",
-            batch,
-        )
-        for row in cur.fetchall():
-            found[row["inventory_id"]] = row
-    return found
-
-
-def _close_date(current_from: date | None, new_from: date) -> date:
-    """effective_to for the closed row: never before its own effective_from.
-
-    chk_material_prices_range requires effective_to >= effective_from. A row
-    that became current later than ``new_from`` (for example a backdated
-    re-run) closes on its own start date.
-    """
-    if current_from is None:
-        return new_from
-    return max(current_from, new_from)
-
-
 def apply_plan(conn, plan: LoadPlan, *, today: date | None = None) -> ApplyResult:
-    """Upsert items and record cost history on material_prices.
-
-    Runs in the caller's transaction; the caller commits or rolls back, so a
-    failed load leaves nothing half-written. For each priced item the
-    current row is locked (SELECT ... FOR UPDATE). No current row: insert
-    one. Same cost: nothing is written. Different cost: the current row is
-    closed (is_current = 0, effective_to = max(its effective_from, today))
-    before the new current row is inserted, so the one-current unique key
-    on the generated current_inventory_id always holds.
-    """
-    today = today or date.today()
-    result = ApplyResult(items_upserted=len(plan.items))
-    with conn.cursor() as cur:
-        for batch in _chunks(plan.items, BATCH):
-            cur.executemany(_ITEM_SQL, [_item_params(item) for item in batch])
-
-        priced = [item for item in plan.items if item.unit_cost_cents is not None and item.cost_uom]
-        for batch in _chunks(priced, BATCH):
-            current = _lock_current_prices(cur, [item.inventory_id for item in batch])
-            closes: list[tuple] = []
-            inserts: list[tuple] = []
-            for item in batch:
-                existing = current.get(item.inventory_id)
-                if existing is not None and int(existing["unit_cost_cents"]) == item.unit_cost_cents:
-                    result.prices_unchanged += 1
-                    continue
-                if existing is not None:
-                    closes.append((_close_date(existing["effective_from"], today), existing["id"]))
-                    result.prices_archived += 1
-                inserts.append((
-                    str(uuid.uuid4()),
-                    item.inventory_id,
-                    item.unit_cost_cents,
-                    item.cost_uom,
-                    item.preferred_vendor_id,
-                    item.preferred_vendor_name,
-                    today,
-                    SOURCE,
-                    ENTERED_BY,
-                ))
-                result.prices_inserted += 1
-            if closes:
-                cur.executemany(_CLOSE_SQL, closes)
-            if inserts:
-                cur.executemany(_PRICE_SQL, inserts)
-    return result
+    """Write the plan's items through materials_store.upsert_items (caller commits)."""
+    return upsert_items(conn, plan.items, source=SOURCE, entered_by=ENTERED_BY, today=today)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("workbook", type=Path, help="Aspire/Acumatica item workbook (.xlsx)")
+    parser.add_argument(
+        "workbook", type=Path, nargs="?", default=DEFAULT_WORKBOOK,
+        help=f"Aspire/Acumatica item workbook (.xlsx); default {DEFAULT_WORKBOOK.relative_to(REPO_ROOT)}",
+    )
     parser.add_argument("--dry-run", action="store_true", help="parse and print counts; do not write the database")
     parser.add_argument(
         "--rejects",

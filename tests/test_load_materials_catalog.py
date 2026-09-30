@@ -28,6 +28,7 @@ import scripts.load_materials_catalog as loader  # noqa: E402
 import scripts.migrate as migrate  # noqa: E402
 
 MIGRATION = REPO / "sql" / "migrations" / "070_materials_catalog.sql"
+MIGRATION_072 = REPO / "sql" / "migrations" / "072_materials_item_status.sql"
 SCRATCH_DB = "crm_materials_loader_test"
 TODAY = date(2026, 9, 28)
 
@@ -247,7 +248,7 @@ class TestPlan:
         assert stock.vendor_sku == "SKU-1"
         assert stock.alternate_name == "Pipe Alt"
         assert stock.available_to_bid == 1
-        assert stock.active == 1
+        assert stock.item_status == "Active"
         assert stock.unit_cost_cents == 1842
         assert stock.cost_uom == "EA"
         only = _by_id(plan)["1000000002"]
@@ -632,14 +633,15 @@ def _connect():
     )
 
 
-def _apply_070(conn) -> None:
+def _apply_070_072(conn) -> None:
     with conn.cursor() as cur:
         for stmt in migrate.split_statements(_RESET):
             cur.execute(stmt)
         for stmt in migrate.split_statements(PRE_070):
             cur.execute(stmt)
-        for stmt in migrate.split_statements(MIGRATION.read_text(encoding="utf-8")):
-            cur.execute(stmt)
+        for path in (MIGRATION, MIGRATION_072):
+            for stmt in migrate.split_statements(path.read_text(encoding="utf-8")):
+                cur.execute(stmt)
     conn.commit()
 
 
@@ -650,7 +652,7 @@ def materials_db():
     except pymysql.err.OperationalError as exc:
         pytest.skip(f"{SCRATCH_DB} is not reachable: {exc}")
     try:
-        _apply_070(conn)
+        _apply_070_072(conn)
     except Exception:
         conn.rollback()
         conn.close()
@@ -695,7 +697,7 @@ class TestApply:
             })],
             nonstock=[],
         )
-        # Single vendor column is the name. The id column is absent.
+        # Two vendor columns, only the first (name) filled: no vendor id.
         plan = loader.build_plan(path)
         item = plan.items[0]
         assert item.preferred_vendor_name == "HERITAGE"
@@ -1031,4 +1033,5 @@ class TestMigration070OnDatabase:
             # Leave the module fixture's schema in its applied state.
             self._reset(conn)
             self._run_file(conn, migration)
+            self._run_file(conn, MIGRATION_072.read_text(encoding="utf-8"))
 

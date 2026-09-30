@@ -22,6 +22,7 @@ import type {
   Property,
   SectionService,
   SectionServiceComponent,
+  ServiceCategory,
   TakeoffLine,
 } from '@/types/estimating'
 import type { EstimateLifecycle } from '@/types/estimating'
@@ -509,6 +510,16 @@ export const estimatingConfigApi = {
   /** Aspire-derived branch list for the intake dropdowns. */
   branches: (kind: 'install' | 'maintenance') =>
     apiClient.get<BranchOption[]>(`/estimating/config/branches?kind=${kind}`),
+  /**
+   * Handoff 55 service catalog: categories → services → default items.
+   * TODO(h55-service-catalog): PROVISIONAL — endpoint not built yet. Path and
+   * the camelCase `estimateType` query param are taken verbatim from the
+   * handoff (note the other config reads here use snake_case params).
+   */
+  serviceCatalog: (estimateType: EstimateType) =>
+    apiClient.get<ServiceCategory[]>(
+      `/estimating/service-catalog?estimateType=${encodeURIComponent(estimateType)}`,
+    ),
   serviceKits: (params?: ListServiceKitsParams) => {
     const qs = new URLSearchParams()
     if (params?.kitType) qs.set('kit_type', params.kitType)

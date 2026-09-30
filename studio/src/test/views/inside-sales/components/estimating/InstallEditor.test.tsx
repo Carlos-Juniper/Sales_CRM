@@ -287,9 +287,13 @@ describe('InstallEditor — install routes through the tier ladder (§4)', () =>
 })
 
 describe('InstallEditor — empty / saving / save-error states', () => {
-  it('renders "No groups yet" when the estimate has no sections', () => {
+  it('renders the empty state with the Add section picker when the estimate has no sections', async () => {
     renderInstall(buildInstallEstimate({ sections: [] }))
-    expect(screen.getByTestId('install-empty')).toHaveTextContent(/no groups yet/i)
+    const empty = screen.getByTestId('install-empty')
+    expect(empty).toHaveTextContent(/no sections yet/i)
+    expect(within(empty).getByLabelText('Add section')).toBeInTheDocument()
+    // the old "groups arrive from the takeoff" copy is gone
+    expect(empty).not.toHaveTextContent(/arrive from the takeoff/i)
   })
 
   it('shows a save error with retry when the API fails, then saves on retry', async () => {
@@ -398,6 +402,104 @@ describe('InstallEditor — item → service → section roll-ups (H55 §6)', ()
     expect(within(screen.getByTestId('install-parent-row')).getByText('$53,420.00')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Toggle all groups' }))
     expect(screen.getByTestId(`install-group-${est.sections[0].id}`)).toBeInTheDocument()
+  })
+})
+
+// ----- Handoff 55 §3: Add section picker ------------------------------------
+
+async function pickerOptions(): Promise<string[]> {
+  const select = screen.getByLabelText('Add section') as HTMLSelectElement
+  await waitFor(() => expect(select).not.toBeDisabled())
+  return Array.from(select.options)
+    .filter((o) => o.value !== '')
+    .map((o) => o.textContent ?? '')
+}
+
+describe('InstallEditor — Add section picker (H55 §3)', () => {
+  it('lists only active install categories, in catalog order', async () => {
+    renderInstall(buildInstallEstimate({ sections: [] }))
+    expect(await pickerOptions()).toEqual([
+      'Landscape',
+      'Irrigation',
+      'Sod',
+      'Drainage',
+      'Lighting',
+      'Optional Services',
+    ])
+  })
+
+  it('hides categories already present — linked by id, or a takeoff section named exactly the category', async () => {
+    const est = buildInstallEstimate()
+    est.sections[0].name = 'Landscape' // takeoff-created, no serviceCategoryId
+    est.sections[1].serviceCategoryId = 'cat-install-sod'
+    est.sections[1].name = 'Sod - Riding Academy'
+    renderInstall(est)
+    const opts = await pickerOptions()
+    expect(opts).not.toContain('Landscape')
+    expect(opts).not.toContain('Sod')
+    expect(opts).toContain('Irrigation')
+  })
+
+  it('adds a section named "Category - suffix" and hides that category afterwards', async () => {
+    const user = userEvent.setup()
+    renderInstall(buildInstallEstimate({ sections: [] }))
+    await pickerOptions()
+    await user.selectOptions(screen.getByLabelText('Add section'), 'Landscape')
+    await user.type(screen.getByLabelText(/section area suffix/i), '- Amenity Center')
+    expect(screen.getByTestId('install-add-section-preview')).toHaveTextContent(
+      'Landscape - Amenity Center',
+    )
+    await user.click(screen.getByRole('button', { name: 'Add section' }))
+    expect(await screen.findByText('Landscape - Amenity Center')).toBeInTheDocument()
+    expect(screen.queryByTestId('install-empty')).not.toBeInTheDocument()
+    expect(await pickerOptions()).not.toContain('Landscape')
+  })
+
+  it('a picked section with a suffix round-trips through Save and reload', async () => {
+    const user = userEvent.setup()
+    const created = (await estimatingApi.create(
+      toCreatePayload(buildInstallEstimate({ sections: [] })),
+    )) as InstallEstimate
+    const createSection = vi.spyOn(estimatingApi, 'createSection')
+    renderInstall(created)
+    await pickerOptions()
+    await user.selectOptions(screen.getByLabelText('Add section'), 'Irrigation')
+    await user.type(screen.getByLabelText(/section area suffix/i), 'Entry Median')
+    await user.click(screen.getByRole('button', { name: 'Add section' }))
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    expect(await screen.findByText(/estimate saved/i)).toBeInTheDocument()
+
+    expect(createSection).toHaveBeenCalledTimes(1)
+    expect(createSection.mock.calls[0][1]).toMatchObject({
+      name: 'Irrigation - Entry Median',
+      serviceCategoryId: 'cat-install-irrigation',
+    })
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.sections).toHaveLength(1)
+    expect(fetched.sections[0].name).toBe('Irrigation - Entry Median')
+    expect(fetched.sections[0].serviceCategoryId).toBe('cat-install-irrigation')
+  })
+
+  it('a takeoff-created section (no category link) still renders and saves unchanged', async () => {
+    const user = userEvent.setup()
+    const created = (await estimatingApi.create(
+      toCreatePayload(buildInstallEstimate()),
+    )) as InstallEstimate
+    expect(created.sections[0].serviceCategoryId).toBeUndefined()
+    const updateSection = vi.spyOn(estimatingApi, 'updateSection')
+    renderInstall(created)
+    expect(screen.getByText(created.sections[0].name)).toBeInTheDocument()
+    const svc = created.sections[0].services[0]
+    const qtyInput = screen.getByLabelText(`Qty for ${svc.label}`)
+    await user.clear(qtyInput)
+    await user.type(qtyInput, '25')
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    expect(await screen.findByText(/estimate saved/i)).toBeInTheDocument()
+    // nothing about the section itself changed → no section PATCH at all
+    expect(updateSection).not.toHaveBeenCalled()
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.sections[0].name).toBe(created.sections[0].name)
+    expect(fetched.sections[0].services[0].qty).toBe(25)
   })
 })
 

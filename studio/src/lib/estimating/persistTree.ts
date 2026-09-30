@@ -52,7 +52,8 @@ export type TreeOp =
   | { op: 'deleteComponent'; sectionId: string; serviceId: string; componentId: string }
 
 // Diffable scalar fields per level (ids/children handled structurally).
-const SECTION_FIELDS = ['name', 'squareFeet', 'sortOrder'] as const
+// serviceCategoryId: Handoff 55 §3 (estimate_sections.service_category_id).
+const SECTION_FIELDS = ['name', 'squareFeet', 'sortOrder', 'serviceCategoryId'] as const
 const SERVICE_FIELDS = [
   'serviceKitId',
   'discipline',
@@ -196,6 +197,10 @@ function toSectionPayload(s: EstimateSection): CreateSectionPayload {
     name: s.name,
     squareFeet: s.squareFeet,
     sortOrder: s.sortOrder,
+    // Handoff 55 §3: only sent when the draft carries the field, so sections
+    // that never had a category (maintenance, legacy takeoff) post exactly the
+    // body they did before the backend knows the column.
+    ...(s.serviceCategoryId !== undefined ? { serviceCategoryId: s.serviceCategoryId } : {}),
     services: s.services.map(toServicePayload),
   }
 }

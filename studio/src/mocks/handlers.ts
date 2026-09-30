@@ -6,6 +6,7 @@ import { mockLeads, mockBids, mockUsers, mockSummary, mockMonthlyRevenue, mockCo
 import { MOCK_BRANCH_COVERAGE } from './proposalRoster'
 import { rosterHandlers } from './rosterHandlers'
 import { SERVICE_KIT_SEED, mockEstimatesV2, buildTakeoffLines } from './estimatingData'
+import { SERVICE_CATALOG_FIXTURE } from './serviceCatalogData'
 import { commissionHandlers, commissionReps } from './commissionHandlers'
 import { PAGE_SIZE } from '../lib/constants'
 import type { Lead, Bid, UserRole } from '@/types'
@@ -782,6 +783,17 @@ const allHandlers = [
   // the workbook rows; mirrors the backend's kit_type/active filters).
   http.get(`${API}/estimating/service-kits`, listServiceKits),
 
+  // GET /api/estimating/service-catalog?estimateType=install — Handoff 55.
+  // TODO(h55-service-catalog): provisional mock of an endpoint not built yet.
+  http.get(`${API}/estimating/service-catalog`, async ({ request }) => {
+    await delay(50)
+    const estimateType = new URL(request.url).searchParams.get('estimateType')
+    const rows = estimateType
+      ? SERVICE_CATALOG_FIXTURE.filter((c) => c.estimateType === estimateType)
+      : SERVICE_CATALOG_FIXTURE
+    return HttpResponse.json(rows)
+  }),
+
   // ---------------------------------------------------------------------
   // Estimating — single-source estimate model
   // ---------------------------------------------------------------------
@@ -1120,6 +1132,8 @@ const allHandlers = [
       name: body.name,
       squareFeet: body.squareFeet,
       sortOrder: body.sortOrder ?? estimate.sections.length,
+      // Handoff 55 §3 — the category link round-trips (provisional).
+      ...(body.serviceCategoryId !== undefined ? { serviceCategoryId: body.serviceCategoryId } : {}),
       id: sectionId,
       estimateId: estimate.id,
       services: (body.services ?? []).map((svc, vi) => {

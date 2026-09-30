@@ -292,11 +292,23 @@ export type Estimate = MaintenanceEstimate | InstallEstimate
 export interface EstimateSection {
   id: string
   estimateId: string
+  /**
+   * Display name. For a picker-created install section this is the service
+   * category name, optionally suffixed ("Landscape - Amenity Center"); the
+   * contract generator / proposal pages keep reading it unchanged.
+   */
   name: string
   /** Drives maintenance pricing. */
   squareFeet: number
   sortOrder: number
   services: SectionService[]
+  /**
+   * `estimate_sections.service_category_id` (Handoff 55 §1/§3, migration 073).
+   * Null/absent for takeoff- or proposal-created sections whose name matches
+   * no category, and for maintenance sections. Optional until the backend
+   * serializer returns it.
+   */
+  serviceCategoryId?: string | null
 }
 
 export interface SectionService {
@@ -783,4 +795,66 @@ export interface MarginAnalysis {
   overhead_pct: number
   profit_pct: number
   total_margin_pct: number
+}
+
+// ----- Service catalog (Handoff 55 §1 Step 4 / §3) ---------------------------
+//
+// GET /api/estimating/service-catalog?estimateType=install
+//   → ServiceCategory[] with services and their default items nested.
+//
+// TODO(h55-service-catalog): PROVISIONAL SHAPES. The backend endpoint and its
+// serializer are not built yet. These types are transcribed from the
+// Handoff 55 §1 column lists and assume camelCase keys like every other
+// `_*_out` serializer in api/estimating.py. Id and aspire_service_id types
+// are guesses (ids as strings — VARCHAR(36) like service_default_items.id;
+// aspireServiceId as a number, like other Aspire ids). Reconcile field names,
+// nullability and id types once the backend posts the real response.
+
+/** Aspire's five cost buckets (migration 074 widens the component ENUM to these). */
+export type CatalogItemKind = 'labor' | 'material' | 'equipment' | 'subcontractor' | 'other'
+
+/** `crm.service_default_items` — the D2 template copied into components (§4). */
+export interface ServiceDefaultItem {
+  id: string
+  serviceId: string
+  kind: CatalogItemKind
+  label: string
+  /** FK → materials.inventory_id; null for labor / sub / other lines. */
+  inventoryId: string | null
+  /** FK → service_kits.id. */
+  serviceKitId: string | null
+  qty: number
+  /** Null = resolve live from material_prices at insert time (§4). */
+  unitCostCents: number | null
+  hours: number | null
+  sortOrder: number
+}
+
+/** `crm.services` — Aspire's canonical "IN:" Services (level 2, D1). */
+export interface CatalogService {
+  id: string
+  serviceCategoryId: string
+  name: string
+  displayName: string
+  sortOrder: number
+  /** Maintenance only; install leaves it null. */
+  defaultOccurrences: number | null
+  aspireServiceId: number | null
+  active: boolean
+  defaultItems: ServiceDefaultItem[]
+}
+
+/** `crm.service_categories` — the controlled section list (level 1). */
+export interface ServiceCategory {
+  id: string
+  code: string
+  name: string
+  estimateType: EstimateType
+  sortOrder: number
+  isOptional: boolean
+  aspireServiceGroupName: string | null
+  /** item_classes.code values for the §5 soft prefilter; null = unfiltered. */
+  itemClassCodes: string[] | null
+  active: boolean
+  services: CatalogService[]
 }

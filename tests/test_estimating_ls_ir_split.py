@@ -11,6 +11,7 @@ values directly rather than the POST body's `sections` key.
 from __future__ import annotations
 
 import os
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest  # noqa: F401  (asyncio_mode=auto)
@@ -340,7 +341,7 @@ class TestRecomputeEndToEnd:
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield", "clientName": "LLC",
             "aspireBranchId": 3579, "branchCity": "Orlando, FL", "contractValueCents": 100000,
-            "dueBackDate": "2026-12-31", "sections": [],  # real intake shape
+            "dueBackDate": (date.today() + timedelta(days=90)).isoformat(), "sections": [],  # real intake shape
         })
         assert resp.status_code == 201
         estimate_id = resp.json()["id"]
@@ -379,7 +380,7 @@ class TestRecomputeEndToEnd:
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield", "clientName": "LLC",
             "aspireBranchId": 3579, "branchCity": "Orlando, FL", "contractValueCents": 100000,
-            "dueBackDate": "2026-12-31", "sections": [],
+            "dueBackDate": (date.today() + timedelta(days=90)).isoformat(), "sections": [],
         })
         estimate_id = resp.json()["id"]
         section_id = resp.json()["sections"][0]["id"]  # auto-created from the seeded catalog

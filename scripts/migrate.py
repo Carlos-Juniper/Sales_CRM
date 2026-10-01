@@ -563,10 +563,17 @@ def detect_018(conn) -> bool:
 
 
 def detect_021(conn) -> bool:
-    """021 applied ↔ branch 1374 (Manatee) has lat set (geocode backfill)."""
+    """021 applied ↔ schema_migrations tracking row exists for this file.
+
+    021_backfill_branch_geocodes.sql is a multi-row UPDATE (31 branches) with
+    per-row AND lat IS NULL guards. Keying on a single branch risks a false
+    positive if that branch was hand-geocoded independently. Since each UPDATE
+    is fully idempotent (AND lat IS NULL guard), fall back to schema_migrations:
+    absent = run (safe re-apply; guarded rows skip themselves), present = skip.
+    """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT COUNT(*) FROM `branches` WHERE aspire_branch_id=1374 AND lat IS NOT NULL"
+            "SELECT COUNT(*) FROM schema_migrations WHERE id='021_backfill_branch_geocodes'"
         )
         row = cur.fetchone()
         return bool(row and row[0])
@@ -583,31 +590,49 @@ def detect_043(conn) -> bool:
 
 
 def detect_045(conn) -> bool:
-    """045 applied ↔ Mowing & Edging catalog item has scope_text set."""
+    """045 applied ↔ schema_migrations row exists (applied/skipped before).
+
+    045_catalog_scope_text.sql has a WHERE service_type='maintenance' bug that
+    matches zero rows — all UPDATEs are effective no-ops. Migration 047 corrects
+    the same scope-text updates with a valid WHERE kit_type='maintenance_hours'.
+    Since 045 can never produce a unique detectable side-effect, we rely on the
+    schema_migrations tracking row itself: if the runner has visited this file
+    (applied, detected, or skipped) the row is present. On a brand-new DB the
+    runner will apply 045 (the UPDATE matches 0 rows — safe) and record the row.
+    """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT COUNT(*) FROM `catalog_items` "
-            "WHERE description='Mowing & Edging' AND scope_text IS NOT NULL AND scope_text != ''"
+            "SELECT COUNT(*) FROM schema_migrations WHERE id='045_catalog_scope_text'"
         )
         row = cur.fetchone()
         return bool(row and row[0])
 
 
 def detect_046_commissions(conn) -> bool:
-    """046_commissions_schema applied ↔ commissions table exists."""
+    """046_commissions_schema applied ↔ commissions table exists.
+
+    046_commissions_schema.sql and 054_commissions_schema.sql are deliberate
+    duplicates — 054 is the canonical version; 046 is its predecessor from a
+    prior worktree branch. Both create the same tables so both share this
+    commissions-table check. A DB that has either applied is safe for both.
+    """
     return table_exists(conn, "commissions")
 
 
 def detect_047(conn) -> bool:
-    """047 applied ↔ maintenance_hours rows in catalog_items have scope_text set.
+    """047 applied ↔ schema_migrations tracking row exists for this file.
 
-    047 updates scope_text for all kit_type='maintenance_hours' rows. We key on
-    a specific well-known row (Mowing per Pointe Jupiter contract language).
+    047_contract_scope_text_pointe_jupiter.sql is a multi-row UPDATE of
+    scope_text and billing_type across ~15 catalog_items rows. Any single-row
+    check risks false-positive on a partial apply (autocommit, no transaction).
+    Since the updates are idempotent (SET x = same value), we fall back to the
+    schema_migrations tracking row: absent = run (harmless re-apply), present =
+    skip. Same reasoning as detect_045.
     """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT COUNT(*) FROM `catalog_items` "
-            "WHERE kit_type='maintenance_hours' AND scope_text IS NOT NULL AND scope_text != ''"
+            "SELECT COUNT(*) FROM schema_migrations "
+            "WHERE id='047_contract_scope_text_pointe_jupiter'"
         )
         row = cur.fetchone()
         return bool(row and row[0])
@@ -646,21 +671,32 @@ def detect_050(conn) -> bool:
 
 
 def detect_051(conn) -> bool:
-    """051 applied ↔ tm-bm-ftm-001 bio has been shortened (len ≤ 700 chars)."""
+    """051 applied ↔ schema_migrations tracking row exists for this file.
+
+    051 shortens three team_member bio strings that exceeded the 700-char cap.
+    The before/after strings differ only in length; keying on a character count
+    is fragile (bios can be edited via the UI). Since the UPDATEs are idempotent
+    (SET bio = same trimmed text each time), rely on schema_migrations: absent =
+    run (harmless re-apply), present = skip.
+    """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT LENGTH(bio) FROM `team_members` WHERE id='tm-bm-ftm-001' LIMIT 1"
+            "SELECT COUNT(*) FROM schema_migrations WHERE id='051_team_bio_length_cap'"
         )
         row = cur.fetchone()
-        return bool(row and row[0] is not None and row[0] <= 700)
+        return bool(row and row[0])
 
 
 def detect_052(conn) -> bool:
-    """052 applied ↔ Corporate branch has the new Metro Parkway address."""
+    """052 applied ↔ schema_migrations tracking row exists for this file.
+
+    052 sets address1/city/state/zip on the Corporate branch. Aspire reseeds
+    (migration 004 family) can overwrite these columns, so address content is
+    not a stable detection signal. Rely on schema_migrations instead.
+    """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT COUNT(*) FROM `branches` "
-            "WHERE branch_name='Corporate' AND address1='4415 Metro Parkway, Suite 300'"
+            "SELECT COUNT(*) FROM schema_migrations WHERE id='052_corporate_branch_address'"
         )
         row = cur.fetchone()
         return bool(row and row[0])

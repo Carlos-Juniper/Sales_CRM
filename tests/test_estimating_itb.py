@@ -26,6 +26,7 @@ Contract under test:
 from __future__ import annotations
 
 import os
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest  # noqa: F401  (asyncio_mode=auto)
@@ -136,7 +137,7 @@ class TestAutoGeneration:
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": est_type, "name": "Greenfield", "clientName": "LLC",
             "aspireBranchId": 3668, "branchCity": "Orlando, FL", "contractValueCents": 4500000,
-            "dueBackDate": "2026-12-31",
+            "dueBackDate": (date.today() + timedelta(days=90)).isoformat(),
         })
         assert resp.status_code == 201
         itb_inserts = [c for c in mock_exec.call_args_list

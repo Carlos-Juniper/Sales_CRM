@@ -42,6 +42,16 @@ CANONICAL_ROLES = frozenset({
     # Deliberately NOT an estimator or approver — see ESTIMATOR_ROLES /
     # APPROVER_ROLES below, which it is absent from.
     "marketing",
+    # Handoff 54 §5: queue owners. Each estimating manager assigns and
+    # reviews work for their own discipline (ESTIMATING_MANAGER_ROLES). They
+    # are estimators for line-item edits and see sales performance for the
+    # reps in their branches; they do not approve and are not cross-branch.
+    "maintenance_estimating_manager",
+    "install_estimating_manager",
+    # Handoff 54 §5/§9 (D5): sees the sales reps who share at least one of
+    # their user_branches rows (visible_rep_ids). Not an estimator, approver,
+    # field-sales rep, or cross-branch role.
+    "sales_manager",
 })
 
 # Stored values that still authorize. They are not assignable: create/PATCH
@@ -129,9 +139,24 @@ _INTAKE_TYPE_LOCK = {
     "install_sales": "install",
 }
 
+# Handoff 54 §5: the two estimating managers. They own their discipline's
+# queue (assignment is Handoff 54 §6). Members of ESTIMATOR_ROLES (and so
+# LINE_ITEM_EDIT_ROLES) and REP_VIEWER_ROLES. Not in ESTIMATING_ONLY_ROLES,
+# APPROVER_ROLES, MANAGEMENT_ROLES or CROSS_BRANCH_ROLES: a manager sees its
+# own user_branches, nothing wider.
+ESTIMATING_MANAGER_ROLES = frozenset({
+    "maintenance_estimating_manager",
+    "install_estimating_manager",
+})
+
 # Estimator-owned scope: line items / sections / services / components / takeoff.
-# Admin-equivalent roles (admin, vp_sales) are included.
-ESTIMATOR_ROLES = frozenset({"maintenance_estimating", "install_estimating"}) | ADMIN_EQUIVALENT_ROLES
+# Admin-equivalent roles (admin, vp_sales) and the estimating managers are
+# included.
+ESTIMATOR_ROLES = (
+    frozenset({"maintenance_estimating", "install_estimating"})
+    | ESTIMATING_MANAGER_ROLES
+    | ADMIN_EQUIVALENT_ROLES
+)
 
 # Approver-owned scope: complexity/margin adjustments + approve/hand-back.
 # regional_director and vice_president stay on this ladder. vp_sales joins
@@ -157,9 +182,14 @@ CROSS_BRANCH_ROLES = frozenset({"vice_president", "ceo"}) | ADMIN_EQUIVALENT_ROL
 # Broader than CROSS_BRANCH_ROLES — adds manager and regional_director so
 # branch-level leaders can see their team's numbers without gaining full
 # cross-branch write privileges (mark-paid, etc. remain CROSS_BRANCH_ROLES).
+#
+# Handoff 54 §5 adds sales_manager and the estimating managers. Which reps a
+# viewer actually sees is visible_rep_ids (Handoff 54 §9): CROSS_BRANCH_ROLES
+# see every rep, everyone else here only the reps sharing one of their
+# user_branches rows.
 REP_VIEWER_ROLES = frozenset({
-    "vice_president", "ceo", "manager", "regional_director",
-}) | ADMIN_EQUIVALENT_ROLES
+    "vice_president", "ceo", "manager", "regional_director", "sales_manager",
+}) | ESTIMATING_MANAGER_ROLES | ADMIN_EQUIVALENT_ROLES
 
 # Estimating disciplines only. Admin-equivalent roles are estimators for
 # line-item edits but remain super-roles for every other surface — do not
@@ -230,6 +260,11 @@ def ensure_assignable_role(role: str) -> str:
 
 def is_estimator(role: Optional[str]) -> bool:
     return normalize_role(role) in ESTIMATOR_ROLES
+
+
+def is_estimating_manager(role: Optional[str]) -> bool:
+    """True for maintenance_estimating_manager and install_estimating_manager."""
+    return normalize_role(role) in ESTIMATING_MANAGER_ROLES
 
 
 def is_approver(role: Optional[str]) -> bool:

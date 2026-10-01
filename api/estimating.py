@@ -592,27 +592,18 @@ def _estimate_out(
         # NULL when aspire_branch_id is not set or matches no branches row.
         "aspireBranchId": r.get("aspire_branch_id"),
         "branchCity": r.get("branch_city"),
-        # Frozen crew-rate snapshot (cents/hr) captured at submission (Slice 7);
-        # NULL for in_progress / pre-migration rows. Slice 11b: the Margin
-        # Analysis panel prices maintenance margin off THIS when present, so a
-        # later branch-rate change never moves a frozen estimate's margin. Never
-        # substitutes an invented number — null flows straight through (§2.3).
+        # Crew-rate snapshot (cents/hr) at submission (Slice 7/11b §2.3).
+        # NULL for in_progress / pre-migration rows; never an invented fallback.
         "crewRateCentsPerHour": r.get("crew_rate_cents_per_hour"),
-        # Submitted-at crew rate preserved when clearing on hand-back (§2.6).
-        # Non-null when an estimate was handed back after a freeze; null for fresh
-        # in_progress estimates and pre-migration rows. The frontend uses this to
-        # show "Crew rate changed $X → $Y since this was submitted".
+        # Submitted-at rate, preserved on hand-back (§2.6). Non-null when handed
+        # back after a freeze; frontend shows "$X → $Y since last submitted".
         "priorCrewRateCentsPerHour": r.get("prior_crew_rate_cents_per_hour"),
         "customerType": r["customer_type"],
-        # Split-contract budgets in dollars. Null is unknown (the rep did not
-        # have the number), distinct from a known zero. Single-structure
-        # contracts and pre-migration rows come back null.
+        # Split-contract budgets. Null = unknown (distinct from zero).
         "homesBudget": _budget_out(r.get("homes_budget")),
         "commonAreaBudget": _budget_out(r.get("common_area_budget")),
         "acreage": _num(r["acreage"]),
-        # Yearly maintenance visit counts (migration 064). Null when the rep
-        # left the field blank, on install estimates, and on rows created
-        # before the columns existed (.get keeps those rows working).
+        # Yearly occurrence counts (migration 064). Null when omitted or pre-migration.
         "mowingOccurrences": _int_or_none(r.get("mowing_occurrences")),
         "pruningOccurrences": _int_or_none(r.get("pruning_occurrences")),
         "turfFertOccurrences": _int_or_none(r.get("turf_fert_occurrences")),
@@ -628,9 +619,7 @@ def _estimate_out(
         "winProbability": _num(r["win_probability"]),
         "siteWalkDate": _iso(r["site_walk_date"]),
         "dueBackDate": _iso(r["due_back_date"]),
-        # Computed, not stored. True when dueBackDate (the intake needed-back
-        # date) is inside the SLA window. The queue sorts by that date, so a
-        # rush row already surfaces ahead of a longer lead time.
+        # Computed: true when dueBackDate is inside the SLA window (rush).
         "isRush": _is_rush(r.get("due_back_date"), sla_window_days),
         "anticipatedCloseDate": _iso(r["anticipated_close_date"]),
         "serviceStartDate": _iso(r["service_start_date"]),
@@ -643,23 +632,21 @@ def _estimate_out(
         "notes": r.get("notes"),
         # Aspire integration fields (.get keeps pre-migration rows working).
         "propertyId": r.get("property_id"),
-        # Pipeline kanban redesign — logical ref to the originating lead; drives
-        # the lead→estimate status write-back. (.get keeps pre-migration rows working.)
+        # Logical ref to the originating lead; drives lead→estimate write-back.
         "leadId": r.get("lead_id"),
         "aspireOpportunityId": r.get("aspire_opportunity_id"),
         "aspireSyncStatus": r.get("aspire_sync_status"),
-        # Install RFI status, tracked first-class. Capture and
-        # display only: nothing gates approval on it. (.get keeps pre-migration
-        # rows working.)
+        # Install RFI status (capture/display only; nothing gates on it).
         "rfiStatus": r.get("rfi_status"),
-        # Takeoff metadata (turf/curb). Estimator-entered, and also written by
-        # Beam ingest after unit conversion — Beam returns sq ft and ft, these
-        # columns are acres and miles. (.get keeps pre-migration rows working.)
+        # Takeoff metadata (turf/curb). Estimator-entered; also written by Beam
+        # after unit conversion (sq ft→acres, ft→miles).
         "turfAreaAcres": _num(r.get("turf_area_acres")),
         "curbMiles": _num(r.get("curb_miles")),
-        # Set when Attentive redelivered measurements after this estimate was
-        # priced. Non-null means the price on screen may be stale.
+        # Non-null when Attentive re-delivered measurements after pricing.
         "takeoffChangedAt": _iso(r["takeoff_changed_at"]) if r.get("takeoff_changed_at") else None,
+        # Maintenance tracker fields (migration 078). .get keeps pre-migration rows working.
+        "trackingStatus": r.get("tracking_status"),
+        "trackerComment": r.get("tracker_comment"),
         "sections": sections,
         "createdAt": _iso(r["created_at"]),
         "updatedAt": _iso(r["updated_at"]),
@@ -1731,6 +1718,8 @@ _UPDATABLE = {
     # Captured at the lost transition so the durability sweep can re-send the same
     # reason on a retry (otherwise a re-push would drop it).
     "lostReasonId": "aspire_lost_reason_id",
+    "trackingStatus": "tracking_status",    # migration 078 — tracker
+    "trackerComment": "tracker_comment",    # migration 078 — tracker
 }
 
 # Refined estimate-header PATCH ownership:
@@ -1746,7 +1735,7 @@ _UPDATABLE = {
 #   * everything else — estimator-owned (same convention as
 #     section/service/component mutations).
 _APPROVER_ONLY_FIELDS = frozenset({"targetMargin"})
-_ESTIMATOR_OR_APPROVER_FIELDS = frozenset({"contractValueCents"})
+_ESTIMATOR_OR_APPROVER_FIELDS = frozenset({"contractValueCents", "trackingStatus", "trackerComment"})
 _ANY_ROLE_FIELDS = frozenset({"status"})
 
 
@@ -1771,6 +1760,9 @@ async def _require_estimate_patch_ownership(body: dict, user: dict) -> None:
     if keys - _APPROVER_ONLY_FIELDS - _ESTIMATOR_OR_APPROVER_FIELDS - _ANY_ROLE_FIELDS:
         authz.require_estimator(user)
 
+
+# Maintenance tracker status ENUM (migration 078).
+_TRACKING_STATUS_ENUM = frozenset({"not_started", "in_progress", "drafted", "ai_scanning", "takeoff_comp", "on_hold", "passed", "delivered", "completed"})
 
 class ApproveHandBackBody(BaseModel):
     # Actor identity comes from the JWT — the field is accepted
@@ -1835,6 +1827,7 @@ def register(app, require_auth) -> None:
         lead_id: Optional[str] = Query(default=None, alias="leadId"),
         mine: bool = Query(default=False),  # §6 post-query OR filter (FakeDb limit)
         assigned_to: Optional[str] = Query(default=None, alias="assignedTo"),  # §6
+        tracking_status: Optional[str] = Query(default=None, alias="trackingStatus"),  # §8 tracker
         _user: dict = Depends(require_auth),
     ) -> list:
         scope = await authz.resolve_branch_scope(_user)
@@ -1859,6 +1852,9 @@ def register(app, require_auth) -> None:
         if assigned_to:
             conditions.append("assigned_ls_estimator = %s")
             params.append(assigned_to)
+        if tracking_status:
+            conditions.append("tracking_status = %s")
+            params.append(tracking_status)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         rows = await query(
             f"SELECT id FROM estimates {where} ORDER BY created_at DESC", params
@@ -2156,6 +2152,13 @@ def register(app, require_auth) -> None:
         # leaves the row untouched. Applies to every estimate type — the
         # columns live on estimates, and install clients simply omit them.
         _validate_occurrence_counts(body)
+        # Tracker ENUM (078): null clears; absent key is left unchanged.
+        if "trackingStatus" in body and body["trackingStatus"] is not None:
+            if body["trackingStatus"] not in _TRACKING_STATUS_ENUM:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid trackingStatus: {body['trackingStatus']!r}",
+                )
         # Blank budget strings become NULL before the UPDATE so MySQL cannot
         # coerce "" to 0 on the DECIMAL columns.
         _coerce_budget_patch(body)

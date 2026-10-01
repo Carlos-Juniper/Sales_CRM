@@ -302,10 +302,13 @@ class TestTrackingStatusFilter:
     @patch("api.estimating._sla_return_window_days", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
+    @patch("api.authz.resolve_branch_scope", new_callable=AsyncMock)
     def test_tracking_status_filter(
-        self, mock_query, mock_load, mock_window, authed_estimator
+        self, mock_scope, mock_query, mock_load, mock_window, authed_estimator
     ):
         """GET /estimates?trackingStatus=in_progress adds a WHERE clause."""
+        from api.authz import BranchScope
+        mock_scope.return_value = BranchScope(kind="all", ids=set())
         mock_window.return_value = 14
         mock_query.return_value = [{"id": "est-1"}]
         mock_load.return_value = {"id": "est-1", "trackingStatus": "in_progress"}
@@ -321,10 +324,13 @@ class TestTrackingStatusFilter:
     @patch("api.estimating._sla_return_window_days", new_callable=AsyncMock)
     @patch("api.estimating._load_estimate", new_callable=AsyncMock)
     @patch("api.estimating.query", new_callable=AsyncMock)
+    @patch("api.authz.resolve_branch_scope", new_callable=AsyncMock)
     def test_no_tracking_status_filter_omits_clause(
-        self, mock_query, mock_load, mock_window, authed_estimator
+        self, mock_scope, mock_query, mock_load, mock_window, authed_estimator
     ):
         """GET /estimates without trackingStatus does not add the WHERE clause."""
+        from api.authz import BranchScope
+        mock_scope.return_value = BranchScope(kind="all", ids=set())
         mock_window.return_value = 14
         mock_query.return_value = []
         resp = client.get("/api/estimating/estimates")

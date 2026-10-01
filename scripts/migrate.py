@@ -1282,6 +1282,16 @@ def detect_077(conn) -> bool:
     return table_exists(conn, "estimate_assignments")
 
 
+def detect_078(conn) -> bool:
+    """078 applied ↔ tracking_status column exists on estimates.
+
+    078 adds tracking_status (ENUM, NULL) and tracker_comment (TEXT, NULL).
+    tracking_status is the sentinel — it is the first column added and its
+    presence means both were applied (the file is idempotent per column).
+    """
+    return column_exists(conn, "estimates", "tracking_status")
+
+
 def detect_075(conn) -> bool:
     """075 applied ↔ services.occurrence_source (the file's last statement),
     service_kit_links.sort_order and all six maintenance service_categories
@@ -1352,6 +1362,7 @@ _DETECT: dict = {
     "075_maintenance_service_catalog":            detect_075,
     "076_service_kit_rates":                      detect_076,
     "077_estimate_assignment_audit":              detect_077,
+    "078_estimate_tracking_status":               detect_078,
     "044_contract_generator":                     detect_044,
     "046_section_services_billing_type":          detect_046,
     "054_commissions_schema":                     detect_054,

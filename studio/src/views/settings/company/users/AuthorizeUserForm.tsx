@@ -44,12 +44,6 @@ export function AuthorizeUserForm({ branches }: { branches: ManageableBranch[] }
     setBlockCopy(null)
   }
 
-  function toggleBranch(id: number) {
-    setSelectedBranches((prev) =>
-      prev.includes(id) ? prev.filter((b) => b !== id) : [...prev, id],
-    )
-  }
-
   function submit() {
     if (!picked) return
     setBlockCopy(null)
@@ -148,7 +142,7 @@ export function AuthorizeUserForm({ branches }: { branches: ManageableBranch[] }
             <BranchMultiSelect
               branches={branches}
               selected={selectedBranches}
-              onToggle={toggleBranch}
+              onChange={setSelectedBranches}
               idPrefix="authorize-branch"
             />
           </div>

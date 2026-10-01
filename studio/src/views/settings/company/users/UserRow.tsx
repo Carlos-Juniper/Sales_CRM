@@ -106,12 +106,6 @@ function UserRowEditor({
   const [role, setRole] = useState<UserRole | LegacyUserRole>(storedEditorRole(user.role))
   const [selected, setSelected] = useState<number[]>(user.branches ?? [])
 
-  function toggleBranch(id: number) {
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((b) => b !== id) : [...prev, id],
-    )
-  }
-
   return (
     <div className="mt-3 space-y-3 border-t border-[var(--border)] pt-3">
       <div>
@@ -135,7 +129,7 @@ function UserRowEditor({
         <BranchMultiSelect
           branches={branches}
           selected={selected}
-          onToggle={toggleBranch}
+          onChange={setSelected}
           idPrefix={`edit-branch-${user.id}`}
         />
       </div>

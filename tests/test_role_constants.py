@@ -125,6 +125,9 @@ def test_canonical_roles():
         "inside_sales", "admin", "vp_sales", "manager",
         "regional_director", "maintenance_estimating", "install_estimating",
         "vice_president", "ceo", "marketing",
+        # Handoff 54 §5
+        "maintenance_estimating_manager", "install_estimating_manager",
+        "sales_manager",
     })
     assert "marketing" not in authz.ESTIMATOR_ROLES
     assert "marketing" not in authz.APPROVER_ROLES
@@ -153,6 +156,9 @@ def test_rep_viewer_roles():
     assert authz.REP_VIEWER_ROLES == frozenset({
         "admin", "vp_sales",
         "vice_president", "ceo", "manager", "regional_director",
+        # Handoff 54 §5
+        "sales_manager",
+        "maintenance_estimating_manager", "install_estimating_manager",
     })
     for role in ("sales", "maintenance_sales", "install_sales"):
         assert role not in authz.REP_VIEWER_ROLES

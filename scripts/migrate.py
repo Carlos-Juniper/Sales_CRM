@@ -1254,6 +1254,33 @@ def detect_062(conn) -> bool:
     )
 
 
+MAINTENANCE_CATEGORY_IDS_075 = (
+    "maint-cat-turf", "maint-cat-bed_maint", "maint-cat-irrigation",
+    "maint-cat-fertilizer", "maint-cat-pest_control", "maint-cat-optional",
+)
+
+
+def detect_075(conn) -> bool:
+    """075 applied ↔ services.occurrence_source (the file's last statement),
+    service_kit_links.sort_order and all six maintenance service_categories
+    rows exist. Keyed on the migration's own effects; a partial apply stays
+    False and the guarded file runs again.
+    """
+    if not (
+        column_exists(conn, "services", "occurrence_source")
+        and column_exists(conn, "service_kit_links", "sort_order")
+    ):
+        return False
+    placeholders = ", ".join(["%s"] * len(MAINTENANCE_CATEGORY_IDS_075))
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM service_categories "
+        f"WHERE estimate_type = 'maintenance' AND id IN ({placeholders})",
+        MAINTENANCE_CATEGORY_IDS_075,
+    )
+    return bool(row) and int(row["cnt"]) == len(MAINTENANCE_CATEGORY_IDS_075)
+
+
 # ── Detection dispatch table ──────────────────────────────────────────────────
 
 _DETECT: dict = {
@@ -1300,6 +1327,7 @@ _DETECT: dict = {
     "072_materials_item_status":                  detect_072,
     "073_service_catalog":                        detect_073,
     "074_component_material_link":                detect_074,
+    "075_maintenance_service_catalog":            detect_075,
     "044_contract_generator":                     detect_044,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,

@@ -310,7 +310,8 @@ class TestRepViewerScope:
 
         async def fake_query(sql, params=None):
             captured.append(list(params or []))
-            return []
+            # Handoff 54 §9: rep-9 shares a branch with mgr-1.
+            return [{"id": "rep-9"}] if "user_branches" in sql else []
 
         with patch("api.sales_performance.query", new=AsyncMock(side_effect=fake_query)):
             summary = client.get("/api/sales-performance/summary?user_id=rep-9")

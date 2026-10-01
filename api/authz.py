@@ -12,7 +12,7 @@ decoded JWT payload, and `resolve_branch_scope(user)` to build row-level scope.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from fastapi import HTTPException, Query
 
@@ -644,6 +644,65 @@ async def require_approval_authority(
                 "route to the next approval tier."
             ),
         )
+
+
+# ── Rep visibility (Handoff 54 §9, D5) ───────────────────────────────────────
+
+# Every sales rep sharing at least one user_branches row with the caller.
+_VISIBLE_REPS_SQL = """
+SELECT DISTINCT ub.user_id AS id
+  FROM user_branches ub
+  JOIN users u ON u.id = ub.user_id
+ WHERE ub.aspire_branch_id IN (
+         SELECT mine.aspire_branch_id FROM user_branches mine WHERE mine.user_id = %s
+       )
+   AND u.role IN ({roles})
+"""
+
+
+async def visible_rep_ids(
+    user: dict,
+    query_fn: Optional[Callable[..., Awaitable[list]]] = None,
+) -> Optional[frozenset[str]]:
+    """Which sales reps' performance and commissions the caller may see.
+
+    None means every rep (CROSS_BRANCH_ROLES: admin, vp_sales,
+    vice_president, ceo). Other REP_VIEWER_ROLES (manager, regional_director,
+    sales_manager, the estimating managers) get the sales reps
+    (SALES_REP_DB_ROLES) who share at least one of their user_branches rows,
+    plus themselves. A rep in two managers' branches appears for both (D5).
+    A viewer with no user_branches rows sees only themselves. Every other
+    role sees only themselves.
+
+    The caller's id is the JWT subject, never a query param (BRD I-9.5): a
+    rep id from the client may only narrow this set, never widen it.
+    query_fn is the caller module's query, so a test patch on that module
+    covers this read too.
+    """
+    role = normalize_role(user.get("role"))
+    if role in CROSS_BRANCH_ROLES:
+        return None
+    me = user.get("id")
+    own = frozenset({me}) if me else frozenset()
+    if role not in REP_VIEWER_ROLES or not me:
+        return own
+    run = query_fn if query_fn is not None else query
+    placeholders = ", ".join(["%s"] * len(SALES_REP_DB_ROLES))
+    rows = await run(
+        _VISIBLE_REPS_SQL.format(roles=placeholders),
+        [me, *SALES_REP_DB_ROLES],
+    )
+    return own | frozenset(str(r["id"]) for r in rows if r.get("id"))
+
+
+def rep_id_clause(column: str, rep_ids) -> tuple[str, list]:
+    """`AND column IN (...)` for an explicit rep-id set; ("", []) for None (all)."""
+    if rep_ids is None:
+        return "", []
+    ids = sorted(rep_ids)
+    if not ids:
+        return "AND 1 = 0", []
+    return f"AND {column} IN ({', '.join(['%s'] * len(ids))})", ids
 
 
 # ── Branch scoping (derived from the JWT, never the client) ─────────────────

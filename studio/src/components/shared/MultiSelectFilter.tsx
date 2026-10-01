@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { ChevronDown, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toggleId } from '@/lib/selection'
 
 interface MultiSelectFilterProps {
   label: string
@@ -34,13 +35,7 @@ export function MultiSelectFilter({ label, options, selected, onChange }: MultiS
   }, [open])
 
   function toggle(value: string) {
-    const next = new Set(selected)
-    if (next.has(value)) {
-      next.delete(value)
-    } else {
-      next.add(value)
-    }
-    onChange(next)
+    onChange(new Set(toggleId([...selected], value)))
   }
 
   function clearAll() {

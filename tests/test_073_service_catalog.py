@@ -287,6 +287,7 @@ def test_service_catalog_nests_categories_services_items(as_role):
             }],
             # Handoff 54 §1: install links no kits (Handoff 55 D1).
             "kits": [],
+            "pricingKitId": None,
         }],
     }]
     assert q.await_args_list[0].args[1] == ["install"]
@@ -534,7 +535,7 @@ def test_catalog_keys_match_frontend_contract(as_role):
     svc = cat["services"][0]
     assert set(svc) == {"id", "serviceCategoryId", "name", "displayName", "sortOrder",
                         "defaultOccurrences", "occurrenceSource", "aspireServiceId", "active",
-                        "defaultItems", "kits"}
+                        "defaultItems", "kits", "pricingKitId"}
     assert set(svc["defaultItems"][0]) == {
         "id", "serviceId", "kind", "label", "inventoryId", "serviceKitId", "qty",
         "unitCostCents", "hours", "sortOrder", "resolvedUnitCostCents"}

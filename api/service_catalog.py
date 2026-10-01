@@ -72,6 +72,8 @@ def _catalog_service_out(
     its kits (D8); install links none (Handoff 55 D1), so install's list is
     empty. occurrenceSource is migration 075's services.occurrence_source:
     the migration-064 estimates count that seeds the service's occurrences.
+    ``kits`` is always a list ([] when none); ``pricingKitId`` names the
+    primary kit explicitly so clients need not rely on order.
     """
     return {
         "id": r["id"],
@@ -85,6 +87,8 @@ def _catalog_service_out(
         "active": bool(r["active"]),
         "defaultItems": default_items,
         "kits": kits if kits is not None else [],
+        # The kit a maintenance line prices from (== kits[0]); null without kits.
+        "pricingKitId": kits[0]["id"] if kits else None,
     }
 
 

@@ -118,6 +118,7 @@ def test_catalog_nests_categories_services_kits(as_role):
     assert res.status_code == 200, res.text
     svc = res.json()[0]["services"][0]
     assert svc["occurrenceSource"] == "mowing_occurrences"
+    assert svc["pricingKitId"] == "kit-maint-3422" == svc["kits"][0]["id"]
     assert svc["defaultOccurrences"] == 40
     assert svc["kits"] == [
         {"id": "kit-maint-3422", "name": "Standard Production Mowing",
@@ -148,7 +149,18 @@ def test_each_service_marks_only_its_first_kit_primary(as_role):
         res = client.get("/api/estimating/service-catalog?estimateType=maintenance")
     services = res.json()[0]["services"]
     assert [[k["isPrimary"] for k in s["kits"]] for s in services] == [[True, False], [True]]
+    assert [s["pricingKitId"] for s in services] == ["kit-maint-3422", "kit-maint-3434"]
     assert services[0]["defaultItems"] == []
+
+
+def test_service_without_links_has_empty_kits_and_null_pricing_kit(as_role):
+    as_role("maintenance_estimating")
+    with patch("api.service_catalog.query", new_callable=AsyncMock) as q:
+        q.side_effect = [[_CAT], [_SVC], [], []]
+        res = client.get("/api/estimating/service-catalog?estimateType=maintenance")
+    svc = res.json()[0]["services"][0]
+    assert svc["kits"] == [] and svc["pricingKitId"] is None
+    assert "serviceKitId" not in str(svc["defaultItems"])
 
 
 def test_catalog_skips_the_kit_query_without_services(as_role):

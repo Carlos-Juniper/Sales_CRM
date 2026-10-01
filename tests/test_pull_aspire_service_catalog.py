@@ -32,9 +32,10 @@ def _odata_filter(rows: list[dict], expr: str | None) -> list[dict]:
         return rows
     out = rows
     for clause in expr.split(" and "):
-        m = re.fullmatch(r"(\w+) eq (\d+)", clause.strip())
+        m = re.fullmatch(r"(\w+) eq (\d+|'[^']*')", clause.strip())
         assert m, f"fake cannot evaluate {clause!r}"
-        out = [r for r in out if r.get(m[1]) == int(m[2])]
+        want = m[2][1:-1] if m[2].startswith("'") else int(m[2])
+        out = [r for r in out if r.get(m[1]) == want]
     return out
 
 
@@ -120,7 +121,8 @@ def build_data(n_opps: int = 3) -> dict[str, list[dict]]:
     gid, osid, kid = 1000, 5000, 9000
     for i in range(n_opps):
         opp_id = 655100 + i
-        opps.append({"OpportunityID": opp_id, "DivisionID": DIV, "OpportunityStatusID": WON})
+        opps.append({"OpportunityID": opp_id, "DivisionID": DIV, "OpportunityStatusID": WON,
+                     "OpportunityStatusName": "Won"})
         gids = {}
         for g, name in GROUP_NAMES.items():
             gid += 1
@@ -153,7 +155,11 @@ def build_data(n_opps: int = 3) -> dict[str, list[dict]]:
             if sid in (501, 502):
                 item(3440, 30000, False)
                 item(77777, 5, True)                            # no service_kits row
-    opps.append({"OpportunityID": 655000, "DivisionID": DIV, "OpportunityStatusID": 1659})  # lost
+    opps.append({"OpportunityID": 655000, "DivisionID": DIV, "OpportunityStatusID": 1659,
+                 "OpportunityStatusName": "Lost"})
+    # Won, newest, but another division: matched out locally.
+    opps.append({"OpportunityID": 699999, "DivisionID": 1577, "OpportunityStatusID": WON,
+                 "OpportunityStatusName": "Won"})
     return {"ServiceTypes": SERVICE_TYPES, "Services": SERVICES, "Opportunities": opps,
             "OpportunityServiceGroups": groups, "OpportunityServices": osvcs,
             "OpportunityServiceKitItems": items}
@@ -208,7 +214,9 @@ def test_pull_is_get_only_and_samples_won_maintenance_opportunities():
     assert [o["OpportunityID"] for o in raw.opportunities] == [655103, 655102, 655101]
     assert {s["ServiceID"] for s in raw.services} == {s["ServiceID"] for s in SERVICES} - {990}
     opp_calls = [p for path, p in client.calls if path == "/Opportunities"]
-    assert opp_calls[0]["$filter"] == f"DivisionID eq {DIV}"
+    # A DivisionID filter 504s in Aspire: filter on status, match division locally.
+    assert opp_calls[0]["$filter"] == "OpportunityStatusName eq 'Won'"
+    assert opp_calls[0]["$orderby"] == "OpportunityID desc"
 
 
 def test_pull_falls_back_when_an_endpoint_rejects_the_opportunity_filter():

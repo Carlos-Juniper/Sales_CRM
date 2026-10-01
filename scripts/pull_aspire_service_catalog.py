@@ -15,7 +15,9 @@ Aspire returns no $count, so a page with no rows ends the walk):
     Services                   for those ServiceTypes (ServiceID, ServiceName,
                                DisplayName, ServiceTypeID, SortOrder, Active,
                                ContractService)
-    Opportunities              recent WON opportunities in the division
+    Opportunities              recent WON opportunities (status filter; the
+                               division is matched locally because a
+                               DivisionID filter times out in Aspire)
     OpportunityServiceGroups   per opportunity: GroupName, OptionalServiceGroup
     OpportunityServices        per opportunity: ServiceID, Occur, ...
     OpportunityServiceKitItems per opportunity: TakeOffItemID, ItemFactor,
@@ -95,6 +97,8 @@ MAINTENANCE_DIVISION_ID = ASPIRE_DIVISION_MAP["Maintenance: Contract"]  # 1574
 DEFAULT_OUT_ROOT = REPO_ROOT / "scripts" / "data" / "aspire_review"
 SEED_009 = REPO_ROOT / "sql" / "migrations" / "009_seed_catalog_items.sql"
 DEFAULT_PAGE_SIZE = 100
+WON_FILTER = "OpportunityStatusName eq 'Won'"
+DEFAULT_TIMEOUT_S = 120.0
 MAX_PAGES = 500
 
 ENDPOINTS = (
@@ -244,17 +248,20 @@ async def pull(
     raw.services = [s for s in all_services if as_int(f(s, "ServiceTypeID")) in type_ids]
     log(f"ServiceTypes in division {division_id}: {len(raw.service_types)}; services: {len(raw.services)}")
 
-    # Recent won opportunities in the division, newest first.
+    # Recent won opportunities in the division, newest first. Aspire answers a
+    # DivisionID filter on /Opportunities with a 504 (probed 2026-10-01), so
+    # the server filters on status and the division is matched here.
     won: list[dict] = []
     skip = 0
     for _ in range(MAX_PAGES):
         page = _rows(await client.get("/Opportunities", params={
-            "$filter": f"DivisionID eq {division_id}", "$orderby": "OpportunityID desc",
+            "$filter": WON_FILTER, "$orderby": "OpportunityID desc",
             "$top": page_size, "$skip": skip,
         }))
         if not page:
             break
-        won.extend(o for o in page if is_won(o))
+        won.extend(o for o in page
+                   if is_won(o) and as_int(f(o, "DivisionID")) == division_id)
         skip += len(page)
         if len(won) >= opportunity_limit:
             break
@@ -307,7 +314,7 @@ async def probe(client, page_size: int = 2) -> dict[str, list[str]]:
     for endpoint in ENDPOINTS:
         params: dict[str, Any] = {"$top": page_size, "$skip": 0}
         if endpoint == "Opportunities":
-            params["$filter"] = f"DivisionID eq {MAINTENANCE_DIVISION_ID}"
+            params["$filter"] = WON_FILTER
         rows = _rows(await client.get(f"/{endpoint}", params=params))
         out[endpoint] = sorted({k for r in rows for k in r})
     return out
@@ -877,6 +884,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--opportunities", type=int, default=40,
                     help="recent won maintenance opportunities to sample (default 40)")
     ap.add_argument("--page-size", type=int, default=DEFAULT_PAGE_SIZE)
+    ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S,
+                    help="seconds per Aspire request (wide tables are slow)")
     ap.add_argument("--out", type=Path, default=None,
                     help="review folder (default scripts/data/aspire_review/maintenance_catalog_<stamp>)")
     ap.add_argument("--kits-csv", type=Path, default=None,
@@ -889,7 +898,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     from api.aspire_client import AspireClient
 
     async def run() -> int:
-        async with AspireClient() as client:
+        import httpx
+        async with AspireClient(client=httpx.AsyncClient(timeout=args.timeout)) as client:
             if args.probe:
                 for endpoint, fields in (await probe(client)).items():
                     print(f"{endpoint}: {', '.join(fields)}")

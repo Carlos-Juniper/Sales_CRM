@@ -1260,6 +1260,18 @@ MAINTENANCE_CATEGORY_IDS_075 = (
 )
 
 
+def detect_076(conn) -> bool:
+    """076 applied ↔ service_kit_rates table exists.
+
+    076 creates two append-only rate-history tables (service_kit_rates and
+    branch_crew_rate_history). Keyed on service_kit_rates — the first CREATE
+    in the file — which is the primary new artifact. CREATE TABLE IF NOT EXISTS
+    makes a re-run of the file harmless; the table's presence is an unambiguous
+    "already ran" signal.
+    """
+    return table_exists(conn, "service_kit_rates")
+
+
 def detect_075(conn) -> bool:
     """075 applied ↔ services.occurrence_source (the file's last statement),
     service_kit_links.sort_order and all six maintenance service_categories
@@ -1328,6 +1340,7 @@ _DETECT: dict = {
     "073_service_catalog":                        detect_073,
     "074_component_material_link":                detect_074,
     "075_maintenance_service_catalog":            detect_075,
+    "076_service_kit_rates":                      detect_076,
     "044_contract_generator":                     detect_044,
     "046_section_services_billing_type":          detect_046,
     "054_commissions_schema":                     detect_054,

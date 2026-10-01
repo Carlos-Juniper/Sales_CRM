@@ -44,6 +44,7 @@ import pymysql
 from pymysql.constants import ER
 
 from db import execute, query, transaction
+from api.maintenance_catalog import resolve_kit_rate
 from api.maintenance_pricing import reprice_open_drafts
 import api.attachments as _att_mod
 from api import authz
@@ -521,14 +522,30 @@ class BranchSettingsPatch(BaseModel):
     IGNORED for authorization — scope comes from user_branches, never the body
     (critical AC). crew_rate_cents_per_hour writes branch_settings; production
     rate writes service_kits; material factors write material_calcs.factors.
+    crewRateNote is optional free-text written to branch_crew_rate_history when
+    the crew rate changes (Handoff 54 §4).
     """
     aspire_branch_id: Optional[int] = None
     crew_rate_cents_per_hour: Optional[int] = None
+    crewRateNote: Optional[str] = None
     # {service kit id: production_rate}
     production_rates: Optional[dict[str, float]] = None
     # {material_key: {factor_name: value, ...}} — factor columns only, never
     # unit_cost/unit_sell.
     material_factors: Optional[dict[str, dict]] = None
+
+
+class KitRatePatch(BaseModel):
+    """Partial update for a service kit's pricing at a specific branch (Handoff 54 §4).
+
+    All pricing fields are optional — only submitted fields are compared against
+    the current resolved rate and written to service_kit_rates. A no-op guard
+    skips the INSERT when all submitted values already match the resolved rate.
+    """
+    productionRate: Optional[float] = None
+    unitCostCents: Optional[int] = None
+    targetGm: Optional[float] = None
+    note: Optional[str] = None
 
 
 class AuthorizeUserBody(BaseModel):
@@ -1101,6 +1118,20 @@ def register(app, require_auth) -> None:
             new_rate = int(body.crew_rate_cents_per_hour)
             if prior_rate != new_rate:
                 await reprice_open_drafts(aspire_branch_id, prior_rate, new_rate)
+                # Append one row to the crew-rate history ledger (Handoff 54 §4).
+                await execute(
+                    """INSERT INTO branch_crew_rate_history
+                         (id, aspire_branch_id, crew_rate_cents_per_hour,
+                          effective_from, entered_by, note)
+                       VALUES (%s, %s, %s, NOW(), %s, %s)""",
+                    [
+                        str(uuid.uuid4()),
+                        aspire_branch_id,
+                        new_rate,
+                        user.get("id"),
+                        body.crewRateNote or None,
+                    ],
+                )
             await _audit(
                 scope_type="branch",
                 scope_id=scope_id,
@@ -1150,6 +1181,79 @@ def register(app, require_auth) -> None:
             raise HTTPException(status_code=400, detail="No branch settings to update")
 
         return await get_branch_settings_payload(aspire_branch_id)
+
+    # ── Handoff 54 §4: per-branch service-kit rate history ───────────────────
+
+    @app.patch("/api/settings/branch/{aspire_branch_id}/kit-rates/{kit_id}", status_code=204)
+    async def patch_kit_rate(
+        aspire_branch_id: int,
+        kit_id: str,
+        body: KitRatePatch,
+        user: dict = Depends(require_auth),
+    ) -> None:
+        """Append one service_kit_rates row for a branch-kit combination.
+
+        Scope guard matches patch_branch_settings — admin (kind='all') or a BM/RD
+        in whose user_branches this branch appears. An out-of-scope caller 403s
+        before any read.
+
+        No-op guard: resolve the current effective rate for (kit_id,
+        aspire_branch_id) via resolve_kit_rate; if ALL submitted fields already
+        match, return 204 immediately without writing. On any actual change,
+        INSERT one append-only row into service_kit_rates.
+
+        Returns 204 No Content.
+        """
+        await _require_branch_write_scope(user, aspire_branch_id)
+
+        # Resolve all three pricing fields from the current effective rate.
+        current = await resolve_kit_rate(kit_id, aspire_branch_id)
+
+        # Build the set of submitted fields (exclude note — it's not a rate field).
+        submitted: dict = {}
+        if body.productionRate is not None:
+            submitted["productionRate"] = body.productionRate
+        if body.unitCostCents is not None:
+            submitted["unitCostCents"] = body.unitCostCents
+        if body.targetGm is not None:
+            submitted["targetGm"] = body.targetGm
+
+        if not submitted:
+            # No pricing fields submitted — nothing to do.
+            return
+
+        # No-op guard: check if all submitted fields already match current values.
+        def _approx_equal(a, b) -> bool:
+            if a is None or b is None:
+                return a is b
+            if isinstance(a, float) or isinstance(b, float):
+                return abs(float(a) - float(b)) < 1e-9
+            return a == b
+
+        all_match = all(
+            _approx_equal(submitted.get(k), current.get(k))
+            for k in submitted
+        )
+        if all_match:
+            return
+
+        # Actual change: INSERT one append-only row.
+        await execute(
+            """INSERT INTO service_kit_rates
+                 (id, service_kit_id, aspire_branch_id, production_rate,
+                  unit_cost_cents, target_gm, effective_from, entered_by, note)
+               VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, %s)""",
+            [
+                str(uuid.uuid4()),
+                kit_id,
+                aspire_branch_id,
+                submitted.get("productionRate"),
+                submitted.get("unitCostCents"),
+                submitted.get("targetGm"),
+                user.get("id"),
+                body.note or None,
+            ],
+        )
 
     # ── Handoff 43 §3.1: the caller's own profile ────────────────────────────
     # users.phone and users.title back the signer block on a client-facing

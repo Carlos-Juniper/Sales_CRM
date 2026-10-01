@@ -7,7 +7,9 @@ which has a size guard (tests/test_maintenance_crew_rate.py).
 from __future__ import annotations
 
 import uuid
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
+
+from db import query
 
 # The six maintenance service_categories rows migration 075 seeds, in render
 # order: code -> (id, name, is_optional). The names are Aspire's
@@ -146,3 +148,83 @@ async def seed_standard_maintenance_services(
                VALUES (%s, %s, %s, %s, NULL, NULL, %s, %s, NULL, NULL, NULL, NULL, NULL, NULL, %s)""",
             [svc_id, section_id, kit_id, svc["id"], label, qty, sort_idx],
         )
+
+
+async def resolve_kit_rate(kit_id: str, aspire_branch_id: Optional[int]) -> dict:
+    """Return the effective pricing fields for a service kit at a given branch.
+
+    Three-step fallback (Handoff 54 §4):
+      1. Newest service_kit_rates row WHERE service_kit_id=%s AND aspire_branch_id=%s
+      2. Newest service_kit_rates row WHERE service_kit_id=%s AND aspire_branch_id IS NULL
+      3. service_kits baseline: production_rate, unit_cost_cents, target_gm
+
+    Returns {"productionRate": ..., "unitCostCents": ..., "targetGm": ...}.
+    Fields are merged per-field across steps — a branch row may override some
+    but not all fields, so the fallback applies per-field, not per-row.
+
+    FakeDb limitation: IS NULL in WHERE is not supported alongside other
+    conditions. Steps 1 and 2 are therefore issued as two separate queries.
+    """
+    result: dict = {}
+
+    # Step 1: branch-specific rate row.
+    if aspire_branch_id is not None:
+        branch_rows = await query(
+            "SELECT production_rate, unit_cost_cents, target_gm"
+            " FROM service_kit_rates"
+            " WHERE service_kit_id = %s AND aspire_branch_id = %s"
+            " ORDER BY effective_from DESC LIMIT 1",
+            [kit_id, aspire_branch_id],
+        )
+        if branch_rows:
+            r = branch_rows[0]
+            if r.get("production_rate") is not None:
+                result["productionRate"] = float(r["production_rate"])
+            if r.get("unit_cost_cents") is not None:
+                result["unitCostCents"] = int(r["unit_cost_cents"])
+            if r.get("target_gm") is not None:
+                result["targetGm"] = float(r["target_gm"])
+
+    # Step 2: company-wide row (aspire_branch_id IS NULL).
+    # Issued as a separate query — FakeDb does not support IS NULL in a WHERE
+    # clause that also has other conditions; real MySQL handles both forms fine.
+    needs_any = not result or any(
+        k not in result for k in ("productionRate", "unitCostCents", "targetGm")
+    )
+    if needs_any:
+        company_rows = await query(
+            "SELECT production_rate, unit_cost_cents, target_gm"
+            " FROM service_kit_rates"
+            " WHERE service_kit_id = %s AND aspire_branch_id IS NULL"
+            " ORDER BY effective_from DESC LIMIT 1",
+            [kit_id],
+        )
+        if company_rows:
+            r = company_rows[0]
+            if "productionRate" not in result and r.get("production_rate") is not None:
+                result["productionRate"] = float(r["production_rate"])
+            if "unitCostCents" not in result and r.get("unit_cost_cents") is not None:
+                result["unitCostCents"] = int(r["unit_cost_cents"])
+            if "targetGm" not in result and r.get("target_gm") is not None:
+                result["targetGm"] = float(r["target_gm"])
+
+    # Step 3: service_kits baseline.
+    needs_any = not result or any(
+        k not in result for k in ("productionRate", "unitCostCents", "targetGm")
+    )
+    if needs_any:
+        kit_rows = await query(
+            "SELECT production_rate, unit_cost_cents, target_gm"
+            " FROM service_kits WHERE id = %s",
+            [kit_id],
+        )
+        if kit_rows:
+            r = kit_rows[0]
+            if "productionRate" not in result and r.get("production_rate") is not None:
+                result["productionRate"] = float(r["production_rate"])
+            if "unitCostCents" not in result and r.get("unit_cost_cents") is not None:
+                result["unitCostCents"] = int(r["unit_cost_cents"])
+            if "targetGm" not in result and r.get("target_gm") is not None:
+                result["targetGm"] = float(r["target_gm"])
+
+    return result

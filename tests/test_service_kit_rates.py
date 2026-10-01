@@ -1,4 +1,4 @@
-"""RED tests for Handoff 54 §4 — Branch kit pricing + rate history.
+"""Tests for Handoff 54 §4 — Branch kit pricing + rate history.
 
 Covers:
   - resolve_kit_rate: three-step fallback (branch override -> company-wide -> baseline)
@@ -8,7 +8,7 @@ Covers:
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -171,42 +171,15 @@ class TestResolveKitRate:
 
 # ── PATCH /api/settings/branch/{id}/kit-rates/{kit_id} tests ──────────────────
 
+_ADMIN_USER = {"id": "user-001", "email": "test@juniperlandscaping.com", "role": "admin"}
+
+
 class TestPatchKitRate:
     """Integration-style tests for the kit-rate PATCH endpoint."""
-
-    def _make_app(self, table_data: dict, captured_executes: list):
-        """Build a minimal FastAPI test client wired to fake DB."""
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        import api.settings as settings_mod
-
-        app = FastAPI()
-
-        async def fake_require_auth():
-            return {"id": "user-001", "email": "test@juniperlandscaping.com", "role": "admin"}
-
-        q = _fake_query(table_data)
-        e = _fake_execute(captured_executes)
-
-        # Patch authz.resolve_branch_scope to allow-all
-        async def fake_resolve_scope(user):
-            from api.authz import BranchScope
-            return BranchScope(kind="all", ids=set())
-
-        with patch("api.settings.query", new=q), \
-             patch("api.settings.execute", new=e), \
-             patch("api.maintenance_catalog.query", new=q), \
-             patch("api.authz.resolve_branch_scope", side_effect=fake_resolve_scope), \
-             patch("api.authz._live_role", new=AsyncMock(return_value="admin")):
-            settings_mod.register(app, lambda: fake_require_auth())
-            client = TestClient(app, raise_server_exceptions=True)
-            return client
 
     @pytest.mark.asyncio
     async def test_patch_kit_rate_inserts_row(self):
         """PATCH with a new production rate inserts one service_kit_rates row."""
-        from api.maintenance_catalog import resolve_kit_rate
-
         table_data = {
             "service_kit_rates": [],
             "service_kits": [
@@ -227,8 +200,8 @@ class TestPatchKitRate:
 
         app = FastAPI()
 
-        async def fake_require_auth():
-            return {"id": "user-001", "email": "test@juniperlandscaping.com", "role": "admin"}
+        def sync_require_auth():
+            return _ADMIN_USER
 
         q = _fake_query(table_data)
         e = _fake_execute(captured)
@@ -242,7 +215,7 @@ class TestPatchKitRate:
              patch("api.maintenance_catalog.query", new=q), \
              patch("api.authz.resolve_branch_scope", side_effect=fake_resolve_scope), \
              patch("api.authz._live_role", new=AsyncMock(return_value="admin")):
-            settings_mod.register(app, lambda: fake_require_auth())
+            settings_mod.register(app, sync_require_auth)
             client = TestClient(app, raise_server_exceptions=True)
             resp = client.patch(
                 "/api/settings/branch/42/kit-rates/kit-maint-200",
@@ -263,8 +236,6 @@ class TestPatchKitRate:
     @pytest.mark.asyncio
     async def test_patch_kit_rate_noop_skips_insert(self):
         """Submitting the same production rate as the current baseline is a no-op."""
-        from api.maintenance_catalog import resolve_kit_rate
-
         table_data = {
             "service_kit_rates": [],
             "service_kits": [
@@ -285,8 +256,8 @@ class TestPatchKitRate:
 
         app = FastAPI()
 
-        async def fake_require_auth():
-            return {"id": "user-001", "email": "test@juniperlandscaping.com", "role": "admin"}
+        def sync_require_auth():
+            return _ADMIN_USER
 
         q = _fake_query(table_data)
         e = _fake_execute(captured)
@@ -300,7 +271,7 @@ class TestPatchKitRate:
              patch("api.maintenance_catalog.query", new=q), \
              patch("api.authz.resolve_branch_scope", side_effect=fake_resolve_scope), \
              patch("api.authz._live_role", new=AsyncMock(return_value="admin")):
-            settings_mod.register(app, lambda: fake_require_auth())
+            settings_mod.register(app, sync_require_auth)
             client = TestClient(app, raise_server_exceptions=True)
             resp = client.patch(
                 "/api/settings/branch/42/kit-rates/kit-maint-300",
@@ -320,45 +291,44 @@ class TestCrewRateHistory:
     @pytest.mark.asyncio
     async def test_crew_rate_patch_appends_history(self):
         """Changing crew_rate_cents_per_hour inserts one branch_crew_rate_history row."""
-        table_data = {
-            "branch_settings": [
-                {"aspire_branch_id": 10, "crew_rate_cents_per_hour": 5000},
-            ],
-            "service_kit_rates": [],
-            "service_kits": [],
-            "branch_crew_rate_history": [],
-        }
-        captured: list = []
-
         import api.settings as settings_mod
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        app = FastAPI()
+        captured: list = []
 
-        async def fake_require_auth():
-            return {"id": "user-abc", "email": "admin@juniperlandscaping.com", "role": "admin"}
+        _crew_user = {"id": "user-abc", "email": "admin@juniperlandscaping.com", "role": "admin"}
 
-        q = _fake_query(table_data)
-        e = _fake_execute(captured)
+        def sync_require_auth():
+            return _crew_user
+
+        async def fake_query(sql, params=None):
+            sql_n = " ".join(sql.split())
+            if "branch_settings" in sql_n and "aspire_branch_id = %s" in sql_n:
+                # Initial read returns 5000; re-read after write returns 6000.
+                return [{"id": "bs-10", "aspire_branch_id": 10, "crew_rate_cents_per_hour": 5000}]
+            if "material_calcs" in sql_n:
+                return []
+            if "service_kits" in sql_n:
+                return []
+            return []
+
+        async def fake_execute(sql, params=None):
+            captured.append({"sql": " ".join(sql.split()), "params": list(params or [])})
 
         async def fake_resolve_scope(user):
             from api.authz import BranchScope
             return BranchScope(kind="all", ids=set())
 
-        with patch("api.settings.query", new=q), \
-             patch("api.settings.execute", new=e), \
-             patch("api.maintenance_catalog.query", new=q), \
+        app = FastAPI()
+
+        with patch("api.settings.query", new=fake_query), \
+             patch("api.settings.execute", new=fake_execute), \
+             patch("api.maintenance_catalog.query", new=fake_query), \
              patch("api.authz.resolve_branch_scope", side_effect=fake_resolve_scope), \
              patch("api.authz._live_role", new=AsyncMock(return_value="admin")), \
-             patch("api.settings.reprice_open_drafts", new=AsyncMock()), \
-             patch("api.settings.get_branch_settings_payload", new=AsyncMock(return_value={
-                 "aspireBranchId": 10,
-                 "crewRateCentsPerHour": 6000,
-                 "materialFactors": [],
-                 "productionRates": [],
-             })):
-            settings_mod.register(app, lambda: fake_require_auth())
+             patch("api.settings.reprice_open_drafts", new=AsyncMock()):
+            settings_mod.register(app, sync_require_auth)
             client = TestClient(app, raise_server_exceptions=True)
             resp = client.patch(
                 "/api/settings/branch/10",

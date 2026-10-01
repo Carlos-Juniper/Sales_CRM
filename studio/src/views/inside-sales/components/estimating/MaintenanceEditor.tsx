@@ -11,7 +11,7 @@
 //     Aspire ownership (aspireOwnerFor derivation) and writes the audit record.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Info, Plus, RotateCcw, Save, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -24,7 +24,13 @@ import {
 } from '@/components/ui/dialog'
 import { estimatingApi, type UpdateEstimatePayload } from '@/api/estimating'
 import { ApiError } from '@/api/client'
-import type { EstimateLifecycle, MaintenanceEstimate, SectionService } from '@/types/estimating'
+import type {
+  CatalogService,
+  EstimateLifecycle,
+  EstimateSection,
+  MaintenanceEstimate,
+  SectionService,
+} from '@/types/estimating'
 import { LostTransition } from './LostTransition'
 import { acresFromSqft, contractTotal, tierForValue } from '@/lib/estimating/calc'
 import { formatCents } from '@/lib/money'
@@ -34,13 +40,18 @@ import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 import { useResolvedCrewRate } from '@/hooks/useResolvedCrewRate'
 import {
   buildDefaultSection,
-  catalogToService,
   duplicateSection,
   maintenanceRowsFromServiceKits,
   removeSection,
   unresolvedProductionRateLabels,
 } from '@/lib/estimating/maintenance'
-import { OCCURRENCE_COUNT_FIELDS } from '@/lib/estimating/occurrences'
+import { catalogStatus, maintenanceCategories } from '@/lib/estimating/maintenanceCatalogAdapter'
+import {
+  appendService,
+  catalogServiceLine,
+  removeService,
+} from '@/lib/estimating/maintenanceCategories'
+import { useServiceCatalog } from '@/hooks/useServiceCatalog'
 import { persistEstimateTree } from '@/lib/estimating/persistTree'
 import {
   type CrewRateBlockedLine,
@@ -54,76 +65,11 @@ import { useEstimatingShell } from './useEstimatingShell'
 import { CrewRateProvenance, NoCrewRateState } from './CrewRateNotice'
 import { SectionCard } from './SectionCard'
 import { IntakeAttachmentsPanel } from './IntakeAttachmentsPanel'
+import { MaintenanceScopeSummary } from './MaintenanceScopeSummary'
 import { RushBadge } from './RushIndicators'
 import { cn } from '@/lib/utils'
 
 const TARGET_MARGIN_DEFAULT = 0.22
-
-function scopeNotesFromIntake(rows: { payload: Record<string, unknown> }[]): string | null {
-  let found: string | null = null
-  for (const row of rows) {
-    const value = row.payload?.scopeOfWork
-    if (typeof value === 'string' && value.trim() !== '') found = value
-  }
-  return found
-}
-
-/** Yearly visit counts plus any legacy free-text scope still stored on intake. */
-function MaintenanceScopeSummary({ estimate }: { estimate: MaintenanceEstimate }) {
-  const [scopeNotes, setScopeNotes] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    estimatingApi
-      .listIntake(estimate.id)
-      .then((rows) => {
-        if (cancelled) return
-        const notes = scopeNotesFromIntake(rows)
-        if (notes) setScopeNotes(notes)
-      })
-      .catch(() => {
-        /* Intake is optional context — a miss just hides the legacy notes. */
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [estimate.id])
-
-  return (
-    <div
-      data-testid="maintenance-occurrence-summary"
-      className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-3"
-    >
-      <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))]">
-        Occurrences per year
-      </p>
-      <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
-        {OCCURRENCE_COUNT_FIELDS.map(({ key, label }) => {
-          const value = estimate[key]
-          return (
-            <div key={key}>
-              <dt className="text-[10px] text-[hsl(var(--muted-fg))]">{label}</dt>
-              <dd
-                data-testid={`occurrence-count-${key}`}
-                className="m-0 text-sm font-medium tabular-nums text-[hsl(var(--fg))]"
-              >
-                {value == null ? 'Not set' : value}
-              </dd>
-            </div>
-          )
-        })}
-      </dl>
-      {scopeNotes && (
-        <div data-testid="legacy-scope-notes" className="mt-3 border-t border-[hsl(var(--border))] pt-3">
-          <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-fg))]">
-            Scope of work
-          </p>
-          <p className="m-0 mt-1 whitespace-pre-wrap text-xs text-[hsl(var(--fg))]">{scopeNotes}</p>
-        </div>
-      )}
-    </div>
-  )
-}
 
 export interface MaintenanceEditorProps {
   estimate: MaintenanceEstimate
@@ -148,8 +94,6 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   /** Lines the last save response refused because they need a crew rate. */
   const [blockedLines, setBlockedLines] = useState<CrewRateBlockedLine[]>([])
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null)
-  /** UI-only kit granularity picks (I-9.7); persistence is a kit-config open item. */
-  const [granularity, setGranularity] = useState<Record<string, string>>({})
 
   const contractCents = contractTotal(draft)
   const totalSqft = draft.sections.reduce((s, sec) => s + sec.squareFeet, 0)
@@ -164,25 +108,40 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
     () => maintenanceRowsFromServiceKits(serviceKits, crew.crewRateCents),
     [serviceKits, crew.crewRateCents],
   )
+  // Category blocks + optional services come from the maintenance catalog
+  // (Handoff 54 §3); kit links are read through maintenanceCatalogAdapter.
+  const catalog = useServiceCatalog('maintenance')
+  const categories = useMemo(() => maintenanceCategories(catalog.data), [catalog.data])
   const tier = tierForValue(contractCents, maintenanceTiers)
   const removeTarget = draft.sections.find((s) => s.id === confirmRemoveId) ?? null
 
-  function patchSection(sectionId: string, patch: Partial<(typeof draft.sections)[number]>) {
+  function editSection(sectionId: string, edit: (s: EstimateSection) => EstimateSection) {
     setDraft((d) => ({
       ...d,
-      sections: d.sections.map((s) => (s.id === sectionId ? { ...s, ...patch } : s)),
+      sections: d.sections.map((s) => (s.id === sectionId ? edit(s) : s)),
     }))
   }
 
+  function patchSection(sectionId: string, patch: Partial<EstimateSection>) {
+    editSection(sectionId, (s) => ({ ...s, ...patch }))
+  }
+
   function patchService(sectionId: string, serviceId: string, patch: Partial<SectionService>) {
-    setDraft((d) => ({
-      ...d,
-      sections: d.sections.map((s) =>
-        s.id === sectionId
-          ? { ...s, services: s.services.map((v) => (v.id === serviceId ? { ...v, ...patch } : v)) }
-          : s,
-      ),
+    editSection(sectionId, (s) => ({
+      ...s,
+      services: s.services.map((v) => (v.id === serviceId ? { ...v, ...patch } : v)),
     }))
+  }
+
+  function handleAddOptionalService(section: EstimateSection, service: CatalogService) {
+    const line = catalogServiceLine(service, section.id, section.services.length, maintCatalog)
+    editSection(section.id, (s) => appendService(s, line))
+    toast.show(`${line.label} added`)
+  }
+
+  function handleRemoveService(section: EstimateSection, svc: SectionService) {
+    editSection(section.id, (s) => removeService(s, svc.id))
+    toast.show(`${svc.label} removed`)
   }
 
   async function handleLifecycle(to: EstimateLifecycle) {
@@ -456,7 +415,9 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
             onRename={(name) => patchSection(section.id, { name })}
             onSqftChange={(squareFeet) => patchSection(section.id, { squareFeet })}
             onServiceChange={(serviceId, patch) => patchService(section.id, serviceId, patch)}
-            catalog={maintCatalog}
+            categories={categories}
+            catalogStatus={catalogStatus(catalog)}
+            serviceKits={serviceKits}
             blockedServiceIds={
               new Set(
                 section.services
@@ -464,26 +425,13 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
                   .map((svc) => svc.id),
               )
             }
-            onAddLineItem={(catalogKey) => {
-              const row = maintCatalog.find((r) => r.key === catalogKey)
-              if (!row) return
-              patchSection(section.id, {
-                services: [
-                  ...section.services,
-                  catalogToService(row, section.id, section.services.length),
-                ],
-              })
-              toast.show(`${row.label} added`)
-            }}
+            onAddOptionalService={(service) => handleAddOptionalService(section, service)}
+            onRemoveService={(svc) => handleRemoveService(section, svc)}
             onDuplicate={() => {
               setDraft((d) => ({ ...d, sections: duplicateSection(d.sections, section.id) }))
               toast.show('Section duplicated')
             }}
             onRemoveRequest={() => setConfirmRemoveId(section.id)}
-            granularity={granularity}
-            onGranularityChange={(serviceId, value) =>
-              setGranularity((g) => ({ ...g, [serviceId]: value }))
-            }
           />
         ))
       )}

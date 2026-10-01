@@ -267,7 +267,7 @@ _ITEM = {"id": "sdi-1", "service_id": "install-svc-18878", "kind": "material", "
 def test_service_catalog_nests_categories_services_items(as_role):
     as_role("install_estimating")
     with patch("api.service_catalog.query", new_callable=AsyncMock) as q:
-        q.side_effect = [[_CAT], [_SVC], [_ITEM]]
+        q.side_effect = [[_CAT], [_SVC], [_ITEM], []]
         res = client.get("/api/estimating/service-catalog", params={"estimateType": "install"})
     assert res.status_code == 200
     assert res.json() == [{
@@ -278,13 +278,15 @@ def test_service_catalog_nests_categories_services_items(as_role):
         "services": [{
             "id": "install-svc-18878", "serviceCategoryId": "install-cat-irrigation",
             "name": "IN: Irrigation Install", "displayName": "Irrigation Install",
-            "sortOrder": 10, "defaultOccurrences": None, "aspireServiceId": 18878,
-            "active": True,
+            "sortOrder": 10, "defaultOccurrences": None, "occurrenceSource": None,
+            "aspireServiceId": 18878, "active": True,
             "defaultItems": [{
                 "id": "sdi-1", "serviceId": "install-svc-18878", "kind": "material",
                 "label": "PVC", "inventoryId": "1000000001", "serviceKitId": None, "qty": 2,
                 "unitCostCents": None, "resolvedUnitCostCents": 345, "hours": None, "sortOrder": 0,
             }],
+            # Handoff 54 §1: install links no kits (Handoff 55 D1).
+            "kits": [],
         }],
     }]
     assert q.await_args_list[0].args[1] == ["install"]
@@ -294,7 +296,7 @@ def test_service_catalog_nests_categories_services_items(as_role):
 def test_template_cost_wins_over_current_price(as_role):
     as_role("install_estimating")
     with patch("api.service_catalog.query", new_callable=AsyncMock) as q:
-        q.side_effect = [[_CAT], [_SVC], [{**_ITEM, "unit_cost_cents": 900}]]
+        q.side_effect = [[_CAT], [_SVC], [{**_ITEM, "unit_cost_cents": 900}], []]
         item = client.get("/api/estimating/service-catalog?estimateType=install").json()[0]["services"][0]["defaultItems"][0]
     assert item["unitCostCents"] == 900 and item["resolvedUnitCostCents"] == 900
 
@@ -520,17 +522,19 @@ def test_073_rerun_upgrades_plain_aspire_index_to_unique(base_db):
 
 def test_catalog_keys_match_frontend_contract(as_role):
     """Key sets the CRM frontend builds against (resolvedUnitCostCents is the
-    one additive extra on default items)."""
+    one additive extra on default items; Handoff 54 §1 adds occurrenceSource
+    and kits on services)."""
     as_role("install_estimating")
     with patch("api.service_catalog.query", new_callable=AsyncMock) as q:
-        q.side_effect = [[_CAT], [_SVC], [_ITEM]]
+        q.side_effect = [[_CAT], [_SVC], [_ITEM], []]
         cat = client.get("/api/estimating/service-catalog",
                          params={"estimateType": "install"}).json()[0]
     assert set(cat) == {"id", "code", "name", "estimateType", "sortOrder", "isOptional",
                         "aspireServiceGroupName", "itemClassCodes", "active", "services"}
     svc = cat["services"][0]
     assert set(svc) == {"id", "serviceCategoryId", "name", "displayName", "sortOrder",
-                        "defaultOccurrences", "aspireServiceId", "active", "defaultItems"}
+                        "defaultOccurrences", "occurrenceSource", "aspireServiceId", "active",
+                        "defaultItems", "kits"}
     assert set(svc["defaultItems"][0]) == {
         "id", "serviceId", "kind", "label", "inventoryId", "serviceKitId", "qty",
         "unitCostCents", "hours", "sortOrder", "resolvedUnitCostCents"}

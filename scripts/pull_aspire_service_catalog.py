@@ -458,7 +458,11 @@ class Plan:
     notes: list[str]
 
 
-def derive(raw: RawPull, kits: dict[str, dict]) -> Plan:
+def derive(raw: RawPull, kits: dict[str, dict], min_opportunities: int = 1) -> Plan:
+    """`min_opportunities`: a division service must appear in at least this many
+    sampled won opportunities to be proposed (Aspire keeps hundreds of
+    one-off services); Fertilizer quarters and the services Carlos named
+    optional are always kept. 0 proposes every active service."""
     notes: list[str] = []
     types = {as_int(f(t, "ServiceTypeID")): t for t in raw.service_types}
     groups = {as_int(f(g, "OpportunityServiceGroupID")): g for g in raw.groups}
@@ -535,6 +539,14 @@ def derive(raw: RawPull, kits: dict[str, dict]) -> Plan:
         if category is None:
             unassigned.append({"aspire_service_id": sid, "name": name, "service_type": type_name,
                                "reason": "no sampled group and no type mapping"})
+            continue
+        # Decision-named services: Fertilizer quarters, the always-optional
+        # ones, and peak/off-peak mowing (kept as separate services).
+        named = (bool(fertilizer_slot(name)) or source.startswith("Carlos")
+                 or (category == "turf" and "peak" in norm(name)))
+        if len(svc_opps.get(sid, set())) < min_opportunities and not named:
+            unassigned.append({"aspire_service_id": sid, "name": name, "service_type": type_name,
+                               "reason": f"in fewer than {min_opportunities} sampled won opportunities"})
             continue
         occ_values = svc_occ.get(sid, [])
         default_occ = round(statistics.median(occ_values)) if occ_values else None
@@ -884,6 +896,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--opportunities", type=int, default=40,
                     help="recent won maintenance opportunities to sample (default 40)")
     ap.add_argument("--page-size", type=int, default=DEFAULT_PAGE_SIZE)
+    ap.add_argument("--min-opportunities", type=int, default=1,
+                    help="propose only services used in at least this many sampled won "
+                         "opportunities (0 = every active division service)")
     ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S,
                     help="seconds per Aspire request (wide tables are slow)")
     ap.add_argument("--out", type=Path, default=None,
@@ -908,7 +923,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "maintenance_catalog_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
             ensure_ignored(out)
             raw = await pull(client, opportunity_limit=args.opportunities, page_size=args.page_size)
-            plan = derive(raw, load_baseline_kits(kits_csv=args.kits_csv))
+            plan = derive(raw, load_baseline_kits(kits_csv=args.kits_csv),
+                          min_opportunities=args.min_opportunities)
             for p in write_review(plan, raw, out):
                 print(p)
             print(f"services: {len(plan.services)}; links: {len(plan.links)}; "

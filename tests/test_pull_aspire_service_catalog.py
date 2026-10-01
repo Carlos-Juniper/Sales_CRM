@@ -90,6 +90,7 @@ SERVICES = [
     _svc(101, "MC: Mowing Service", 1),
     _svc(102, "MC: PEAK Mowing", 1),
     _svc(103, "MC: OFF-PEAK Mowing", 1),
+    _svc(104, "MC: Bid Item #1", 1),  # never sold in the sample: not proposed
     _svc(201, "MC: Pruning", 2),
     _svc(301, "MC: Wet Check", 3),
     _svc(401, "Fertilizer Shrub - Quarter 1", 4),
@@ -276,7 +277,27 @@ def test_do_not_use_and_inactive_services_are_not_seeded(plan):
     names = {s["name"] for s in plan.services}
     assert "Mulch DO NOT USE" not in names and "Old Mulch" not in names
     reasons = {u["name"]: u["reason"] for u in plan.unassigned_services}
-    assert reasons == {"Mulch DO NOT USE": "DO NOT USE", "Old Mulch": "inactive in Aspire"}
+    assert reasons["Mulch DO NOT USE"] == "DO NOT USE"
+    assert reasons["Old Mulch"] == "inactive in Aspire"
+
+
+def test_unsampled_services_are_not_proposed_unless_a_decision_names_them():
+    raw = _pull(FakeAspire(build_data()))
+    plan = P.derive(raw, P.load_baseline_kits())
+    names = {s["name"] for s in plan.services}
+    unsampled = {s["ServiceName"] for s in raw.services} - {
+        s["name"] for s in plan.services if s["sample_opportunities"]}
+    reasons = {u["name"]: u["reason"] for u in plan.unassigned_services}
+    for name in unsampled - {"Mulch DO NOT USE", "Old Mulch"}:
+        kept = name in names
+        named = "peak" in name.lower() or name in {"Debris Removal", "Round-up", "Warranty"} \
+            or "Quarter" in name or "Fert" in name
+        assert kept == named, name
+        if not kept:
+            assert reasons[name] == "in fewer than 1 sampled won opportunities"
+    assert reasons["MC: Bid Item #1"] == "in fewer than 1 sampled won opportunities"
+    everything = P.derive(raw, P.load_baseline_kits(), min_opportunities=0)
+    assert "MC: Bid Item #1" in {s["name"] for s in everything.services}
 
 
 def test_standard_categories_carry_their_services_and_occurrence_sources(plan):

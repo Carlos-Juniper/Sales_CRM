@@ -32,6 +32,7 @@ import './proposal-generator.css'
 import { useAuthStore } from '@/store/authStore'
 import { teamMemberTitleLabel } from '@/lib/proposal/titleLabels'
 import { regionsFromCoverage } from '@/lib/proposal/regionFilter'
+import { toggleId } from '@/lib/selection'
 import { AllRegionsBadge, RegionSwitcher } from '@/components/proposal/RegionSwitcher'
 import { ProposalDocumentsSection } from './ProposalDocumentsSection'
 import { ProposalAnchorFields } from './ProposalAnchorFields'
@@ -192,13 +193,6 @@ function MultiSelect<T extends { id: string }>({
   onChange: (ids: string[]) => void
   'data-testid'?: string
 }) {
-  function toggle(id: string) {
-    if (selected.includes(id)) {
-      onChange(selected.filter((s) => s !== id))
-    } else {
-      onChange([...selected, id])
-    }
-  }
   if (items.length === 0) {
     return <p className="text-[11px] text-[hsl(var(--muted-fg))]">No items available.</p>
   }
@@ -209,7 +203,7 @@ function MultiSelect<T extends { id: string }>({
           <input
             type="checkbox"
             checked={selected.includes(item.id)}
-            onChange={() => toggle(item.id)}
+            onChange={() => onChange(toggleId(selected, item.id))}
             className="h-3.5 w-3.5 accent-[#2E7D52]"
           />
           <span className="text-xs text-[hsl(var(--fg))]">{renderLabel(item)}</span>

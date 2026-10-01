@@ -120,20 +120,35 @@ def test_catalog_nests_categories_services_kits(as_role):
     assert svc["occurrenceSource"] == "mowing_occurrences"
     assert svc["defaultOccurrences"] == 40
     assert svc["kits"] == [
-        {"id": "kit-maint-3422", "description": "Standard Production Mowing", "uom": "Sq. Ft.",
+        {"id": "kit-maint-3422", "name": "Standard Production Mowing",
+         "description": "Standard Production Mowing", "unit": "Sq. Ft.", "uom": "Sq. Ft.",
          "unitCostCents": 1750, "unitSellCents": 0, "targetGm": 0.22, "kitType": "maintenance_hours",
          "productionRate": 67650, "aspireBranchId": None, "active": True, "serviceType": "Turf Area",
-         "basis": "takeoff", "sortOrder": 10},
-        {"id": "kit-maint-3434", "description": "Prune Medium", "uom": "Sq. Ft.",
+         "basis": "takeoff", "sortOrder": 10, "isPrimary": True},
+        {"id": "kit-maint-3434", "name": "Prune Medium", "description": "Prune Medium",
+         "unit": "Sq. Ft.", "uom": "Sq. Ft.",
          "unitCostCents": 1750, "unitSellCents": 0, "targetGm": 0.22, "kitType": "maintenance_hours",
          # No defensible rate: null, never a default (the UI renders "—").
          "productionRate": None, "aspireBranchId": None, "active": True, "serviceType": "Bed Area",
-         "basis": "takeoff", "sortOrder": 20},
+         "basis": "takeoff", "sortOrder": 20, "isPrimary": False},
     ]
     kit_sql, kit_params = q.await_args_list[3].args
     assert "FROM service_kit_links l" in kit_sql and "JOIN service_kits k" in kit_sql
-    assert "ORDER BY l.sort_order" in kit_sql
+    # Primary (pricing) kit first: active kits, then the lowest link sort_order.
+    assert "ORDER BY l.service_id, k.active DESC, l.sort_order, k.id" in kit_sql
     assert kit_params == ["maint-svc-101"]
+
+
+def test_each_service_marks_only_its_first_kit_primary(as_role):
+    as_role("maintenance_estimating")
+    other_svc = {**_SVC, "id": "maint-svc-102", "aspire_service_id": 102, "sort_order": 20}
+    other_kit = {**_UNRATED, "service_id": "maint-svc-102", "link_sort_order": 10}
+    with patch("api.service_catalog.query", new_callable=AsyncMock) as q:
+        q.side_effect = [[_CAT], [_SVC, other_svc], [], [_KIT, _UNRATED, other_kit]]
+        res = client.get("/api/estimating/service-catalog?estimateType=maintenance")
+    services = res.json()[0]["services"]
+    assert [[k["isPrimary"] for k in s["kits"]] for s in services] == [[True, False], [True]]
+    assert services[0]["defaultItems"] == []
 
 
 def test_catalog_skips_the_kit_query_without_services(as_role):
@@ -167,7 +182,7 @@ def test_kit_serializers_match_the_studio_service_kit_type():
     plain = _service_kit_out({k: v for k, v in _KIT.items()})
     assert set(plain) == ts
     linked = SC._linked_kit_out(_KIT)
-    assert set(linked) - {"basis", "sortOrder"} == ts
+    assert set(linked) - {"basis", "sortOrder", "isPrimary", "name", "unit"} == ts
 
 
 # ── DB checks (opt-in) ───────────────────────────────────────────────────────

@@ -650,7 +650,7 @@ def derive(raw: RawPull, kits: dict[str, dict]) -> Plan:
         for i, (kit_id, n) in enumerate(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])), start=1):
             links.append({"service_id": service_id, "service_kit_id": kit_id,
                           "kit_description": kits[kit_id]["description"], "basis": KIT_LINK_BASIS_TAKEOFF,
-                          "sort_order": i * 10, "sample_lines": n})
+                          "sort_order": i * 10, "is_primary": i == 1, "sample_lines": n})
 
     rates = []
     for kit_id, kit in sorted(kits.items()):

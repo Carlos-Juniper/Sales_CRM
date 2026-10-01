@@ -92,13 +92,17 @@ def _linked_kit_out(r: dict) -> dict:
     """One service_kits row as linked to a service (Handoff 54 §1).
 
     The same keys as GET /api/estimating/service-kits (studio ServiceKit type)
-    plus the link's basis and sortOrder. productionRate is null when the
-    Aspire baseline has no rate: the UI renders "—" and the save guard
-    rejects the line; it is never defaulted.
+    plus the link's basis and sortOrder, and ``name``/``unit`` aliases of
+    description/uom for the maintenance line adapter. productionRate is null
+    when the Aspire baseline has no rate: the UI renders "—" and the save
+    guard rejects the line; it is never defaulted. ``isPrimary`` is set by
+    the caller on the first kit (the one a maintenance line prices from).
     """
     return {
         "id": r["id"],
+        "name": r["description"],
         "description": r["description"],
+        "unit": r["uom"],
         "uom": r["uom"],
         "unitCostCents": int(r["unit_cost_cents"]),
         "unitSellCents": int(r["unit_sell_cents"]),
@@ -110,6 +114,7 @@ def _linked_kit_out(r: dict) -> dict:
         "serviceType": r["service_type"],
         "basis": r.get("basis"),
         "sortOrder": int(r.get("link_sort_order") or 0),
+        "isPrimary": False,
     }
 
 
@@ -227,12 +232,16 @@ def register(app, require_auth) -> None:
                       FROM service_kit_links l
                       JOIN service_kits k ON k.id = l.service_kit_id
                      WHERE l.service_id IN ({', '.join(['%s'] * len(svc_ids))})
-                     ORDER BY l.sort_order, k.description, k.id""",
+                     ORDER BY l.service_id, k.active DESC, l.sort_order, k.id""",
                 svc_ids,
             )
         kits_by_service: dict[str, list[dict]] = {}
         for kr in kit_rows:
             kits_by_service.setdefault(kr["service_id"], []).append(_linked_kit_out(kr))
+        # kits[0] is the primary/pricing kit: active first, then the lowest
+        # link sort_order (the pull script gives the most-used kit 10).
+        for kits in kits_by_service.values():
+            kits[0]["isPrimary"] = True
         items_by_service: dict[str, list[dict]] = {}
         for it in item_rows:
             items_by_service.setdefault(it["service_id"], []).append(_default_item_out(it))

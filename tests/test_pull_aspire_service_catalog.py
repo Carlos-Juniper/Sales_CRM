@@ -431,3 +431,61 @@ def test_script_never_touches_the_database():
     src = (REPO / "scripts" / "pull_aspire_service_catalog.py").read_text()
     for forbidden in ("pymysql", "import db", "from db", "aiomysql", "execute("):
         assert forbidden not in src
+
+
+def _mini_raw(**over) -> "P.RawPull":
+    raw = P.RawPull(pulled_at="2026-10-01T00:00:00+00:00", division_id=DIV)
+    raw.service_types = [
+        {"ServiceTypeID": 3, "ServiceTypeName": "Maintenance Contract Wet Check", "DivisionID": DIV},
+        {"ServiceTypeID": 4, "ServiceTypeName": "Maintenance Contract Fertilize", "DivisionID": DIV},
+        {"ServiceTypeID": 7, "ServiceTypeName": "Maintenance Contract Round-up", "DivisionID": DIV},
+    ]
+    raw.services = [_svc(301, "MC: Irrigation Wet Checks", 3), _svc(420, "MC: Fertilize Shrub", 4),
+                    _svc(421, "MC: Fertilize Shrub - Quarter 1 DO NOT USE", 4),
+                    _svc(701, "MC: Spot Spray Bed Area", 7)]
+    raw.groups, raw.opportunity_services, raw.kit_items = [], [], []
+    for opp in range(1, 6):
+        gid = opp * 10
+        optional = opp == 1
+        raw.opportunities.append({"OpportunityID": opp, "DivisionID": DIV, "OpportunityStatusID": WON})
+        raw.groups.append({"OpportunityServiceGroupID": gid, "OpportunityID": opp,
+                           "GroupName": "Optional Services" if optional else "Maintenance Contract",
+                           "OptionalServiceGroup": optional})
+        for sid in (301, 420):
+            osid = opp * 1000 + sid
+            raw.opportunity_services.append({"OpportunityServiceID": osid, "OpportunityID": opp,
+                                             "OpportunityServiceGroupID": gid, "ServiceID": sid, "Occur": 4})
+            if sid == 420:
+                raw.kit_items.append({"OpportunityServiceKitItemID": osid, "OpportunityID": opp,
+                                      "OpportunityServiceID": osid, "TakeOffItemID": 3439,
+                                      "ItemFactor": 20000, "InvertFactor": True, "ItemName": "Bed Fert"})
+    for k, v in over.items():
+        setattr(raw, k, v)
+    return raw
+
+
+def test_unmapped_live_groups_vote_for_the_service_type_category():
+    """Most live groups are just "Maintenance Contract": those lines vote for
+    the service type's category, so one optional appearance cannot make
+    wet checks optional."""
+    plan = P.derive(_mini_raw(), P.load_baseline_kits())
+    cats = {s["name"]: s["category_code"] for s in plan.services}
+    assert cats["MC: Irrigation Wet Checks"] == "irrigation"
+    assert cats["MC: Fertilize Shrub"] == "fertilizer"
+
+
+def test_round_up_type_alone_does_not_keep_an_unsold_service():
+    plan = P.derive(_mini_raw(), P.load_baseline_kits())
+    reasons = {u["name"]: u["reason"] for u in plan.unassigned_services}
+    assert reasons["MC: Spot Spray Bed Area"] == "in fewer than 1 sampled won opportunities"
+    assert reasons["MC: Fertilize Shrub - Quarter 1 DO NOT USE"] == "DO NOT USE"
+
+
+def test_quarters_without_live_siblings_take_the_plain_same_kind_service_kits():
+    plan = P.derive(_mini_raw(), P.load_baseline_kits())
+    links = {(l["service_id"], l["service_kit_id"]) for l in plan.links}
+    for q in (1, 2, 3, 4):
+        assert (f"maint-svc-fert-shrub-q{q}", "kit-maint-3439") in links
+        assert not any(sid == f"maint-svc-fert-turf-q{q}" for sid, _ in links)  # no turf source
+    shrub_q1 = next(s for s in plan.services if s["id"] == "maint-svc-fert-shrub-q1")
+    assert "kits from MC: Fertilize Shrub" in shrub_q1["flag"]

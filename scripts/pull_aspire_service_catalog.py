@@ -500,6 +500,12 @@ def derive(raw: RawPull, kits: dict[str, dict], min_opportunities: int = 1) -> P
     svc_occ: dict[int, list[float]] = defaultdict(list)
     svc_opps: dict[int, set] = defaultdict(set)
     opp_service_to_service: dict[int, int] = {}
+    # A line in an unmapped group (most live groups are just "Maintenance
+    # Contract") votes for its service type's category, so a few optional
+    # appearances cannot outvote the service's everyday use.
+    type_of_service = {as_int(f(s, "ServiceID")): f(types.get(as_int(f(s, "ServiceTypeID")), {}),
+                                                      "ServiceTypeName", "Name", default="")
+                       for s in raw.services}
     for os_row in raw.opportunity_services:
         sid = as_int(f(os_row, "ServiceID"))
         if sid is None:
@@ -509,6 +515,7 @@ def derive(raw: RawPull, kits: dict[str, dict], min_opportunities: int = 1) -> P
         if g is not None:
             cat = category_for_group(f(g, "GroupName", "OpportunityServiceGroupName"),
                                      as_bool(f(g, "OptionalServiceGroup")))
+            cat = cat or category_for_type(type_of_service.get(sid))
             if cat:
                 svc_cat_votes[sid][cat] += 1
         occ = as_float(f(os_row, "Occur", "Occurrences"))
@@ -542,7 +549,7 @@ def derive(raw: RawPull, kits: dict[str, dict], min_opportunities: int = 1) -> P
             continue
         # Decision-named services: Fertilizer quarters, the always-optional
         # ones, and peak/off-peak mowing (kept as separate services).
-        named = (bool(fertilizer_slot(name)) or source.startswith("Carlos")
+        named = (bool(fertilizer_slot(name)) or bool(_ALWAYS_OPTIONAL.search(norm(name)))
                  or (category == "turf" and "peak" in norm(name)))
         if len(svc_opps.get(sid, set())) < min_opportunities and not named:
             unassigned.append({"aspire_service_id": sid, "name": name, "service_type": type_name,
@@ -656,6 +663,15 @@ def derive(raw: RawPull, kits: dict[str, dict], min_opportunities: int = 1) -> P
                 slot = fertilizer_slot(other["name"])
                 if other is not s and slot and slot[0] == kind and other["aspire_service_id"] is not None:
                     link_counts[s["id"]].update(link_counts.get(other["id"], Counter()))
+            if not link_counts.get(s["id"]):
+                # No live quarter at all (Aspire's quarter services are DO NOT
+                # USE): take the kits of the plain same-kind fertilizer service.
+                for other in ordered:
+                    n = norm(other["name"])
+                    if (other["category_code"] == "fertilizer" and other["aspire_service_id"] is not None
+                            and kind in n and "additional" not in n):
+                        link_counts[s["id"]].update(link_counts.get(other["id"], Counter()))
+                        s["flag"] += f"; kits from {other['name']}"
 
     links = []
     for service_id, counts in sorted(link_counts.items()):

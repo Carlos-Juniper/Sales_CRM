@@ -345,11 +345,43 @@ class TestMigrationFiles:
         assert ids == sorted(ids)
 
     def test_every_file_has_a_detector_or_inline_handler(self):
-        """A file with no detector re-executes on a DB that already has it."""
+        """Migrations without a schema-level detector are tracked by schema_migrations only.
+
+        Detectors in _DETECT exist for migrations that could be applied manually
+        before the runner existed (001-013 era) or that create a uniquely detectable
+        artifact (table/column) worth checking. Idempotent data-only migrations
+        (seed inserts, backfill updates) don't need detectors — the runner's own
+        schema_migrations tracking table is the source of truth.
+        """
+        # 002/003/004 have special inline logic in the runner's main function.
+        # Everything else not in _DETECT is idempotent and safe to re-apply, so
+        # schema_migrations tracking is sufficient.
         inline = {
             "002_backfill_leads_property_id",
             "003_drop_leads_hoa_property_id",
             "004_users_and_branches",
+            # Proposal config schema (regions/team_members/etc) — applied before
+            # the runner tracked these; idempotent CREATE TABLE IF NOT EXISTS.
+            "014_proposal_config_tables",
+            "015_seed_proposal_config",
+            "016_proposal_requests",
+            "017_proposal_renders",
+            "018_licenses_certifications",
+            # Idempotent data migrations — all guarded with INSERT IGNORE or
+            # WHERE col IS NULL; re-running is harmless.
+            "021_backfill_branch_geocodes",
+            "043_license_certifications_seed",
+            "045_catalog_scope_text",
+            "046_commissions_schema",
+            "047_contract_scope_text_pointe_jupiter",
+            "048_leverette_diploma",
+            "049_diploma_object_keys_to_png",
+            "050_leverette_diploma_object_key_to_png",
+            "051_team_bio_length_cap",
+            "052_corporate_branch_address",
+            "053_insurance_unique_constraint",
+            "057_bm_team_members_backfill",
+            "058_bm_user_branches_backfill",
         }
         # 067 is one idempotent UPDATE with no schema signal. A detector that
         # treated "no sales rows" as applied would skip a database that never

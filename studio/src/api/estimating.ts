@@ -232,6 +232,11 @@ export interface ListEstimatesParams {
    * only the approved estimate for a given lead.
    */
   leadId?: string
+  /**
+   * Filter by tracker status (§8, migration 078). Used by the Maintenance
+   * Estimating Tracker to show e.g. only in_progress rows.
+   */
+  trackingStatus?: string
 }
 
 /** Runtime guard backing the compile-time omission of `estimateType`. */
@@ -257,6 +262,8 @@ export const estimatingApi = {
     if (params?.branch) qs.set('branch', params.branch)
     // Handoff 37 §7: backend added leadId filter in Slice 4 (api/estimating.py list_estimates)
     if (params?.leadId) qs.set('leadId', params.leadId)
+    // §8: Maintenance Tracker trackingStatus filter
+    if (params?.trackingStatus) qs.set('trackingStatus', params.trackingStatus)
     const q = qs.toString()
     return apiClient.get<Estimate[]>(`/estimating/estimates${q ? `?${q}` : ''}`)
   },

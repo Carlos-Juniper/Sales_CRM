@@ -1,5 +1,7 @@
-// H54 §7 — BranchMultiSelect: search, Select all / Clear all over the filtered
-// set, tri-state header checkbox, "n of m selected" chip, keyboard access.
+// H54 §7 — BranchMultiSelect (a thin wrapper over the shared CheckboxList):
+// search, Select all / Clear all over the filtered set, tri-state header
+// checkbox, "n of m selected" chip, keyboard access. The backend treats the
+// branch list as a replace-SET, so selections are compared as sets.
 import { useState } from 'react'
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
@@ -36,9 +38,11 @@ function Harness({
   )
 }
 
+const asSet = (ids: number[]) => [...ids].sort((a, b) => a - b)
+/** The current selection, sorted: order is not part of the contract. */
 const selectedIds = () =>
-  JSON.parse(screen.getByTestId('selected').textContent ?? '[]') as number[]
-const header = () => screen.getByTestId('bms-header') as HTMLInputElement
+  asSet(JSON.parse(screen.getByTestId('selected').textContent ?? '[]') as number[])
+const header = () => screen.getByTestId('bms-header')
 const search = (value: string) =>
   fireEvent.change(screen.getByTestId('bms-search'), { target: { value } })
 
@@ -72,20 +76,20 @@ describe('BranchMultiSelect — select all / clear all', () => {
     render(<Harness initial={[303]} />)
     search('naples')
     fireEvent.click(screen.getByTestId('bms-select-all'))
-    expect(selectedIds()).toEqual([303, 101, 102])
+    expect(selectedIds()).toEqual(asSet([101, 102, 303]))
   })
 
   it('Clear all with a filter active clears only the filtered branches', () => {
     render(<Harness initial={[101, 102, 202, 303]} />)
     search('naples')
     fireEvent.click(screen.getByTestId('bms-clear-all'))
-    expect(selectedIds()).toEqual([202, 303])
+    expect(selectedIds()).toEqual(asSet([202, 303]))
   })
 
   it('Select all with no filter writes every branch id explicitly', () => {
     render(<Harness />)
     fireEvent.click(screen.getByTestId('bms-select-all'))
-    expect(selectedIds()).toEqual([101, 102, 202, 303])
+    expect(selectedIds()).toEqual(asSet([101, 102, 202, 303]))
     expect(screen.getByTestId('bms-select-all')).toBeDisabled()
   })
 
@@ -97,28 +101,31 @@ describe('BranchMultiSelect — select all / clear all', () => {
 })
 
 describe('BranchMultiSelect — tri-state header checkbox', () => {
-  it('is unchecked, then indeterminate, then checked over the filtered set', () => {
+  it('is unchecked, then partially checked, then checked over the filtered set', () => {
     render(<Harness />)
     search('naples')
-    expect(header().checked).toBe(false)
-    expect(header().indeterminate).toBe(false)
+    expect(header()).not.toBeChecked()
+    expect(header()).not.toBePartiallyChecked()
 
     fireEvent.click(screen.getByTestId('bms-101'))
-    expect(header().checked).toBe(false)
-    expect(header().indeterminate).toBe(true)
+    expect(header()).not.toBeChecked()
+    expect(header()).toBePartiallyChecked()
 
     fireEvent.click(screen.getByTestId('bms-102'))
-    expect(header().checked).toBe(true)
-    expect(header().indeterminate).toBe(false)
+    expect(header()).toBeChecked()
+    expect(header()).not.toBePartiallyChecked()
   })
 
   it('selects the filtered set from none/some and clears it from all', () => {
     render(<Harness initial={[101, 303]} />)
     search('naples')
     fireEvent.click(header())
-    expect(selectedIds()).toEqual([101, 303, 102])
+    expect(selectedIds()).toEqual(asSet([101, 102, 303]))
+    expect(header()).toBeChecked()
     fireEvent.click(header())
     expect(selectedIds()).toEqual([303])
+    expect(header()).not.toBeChecked()
+    expect(header()).not.toBePartiallyChecked()
   })
 })
 
@@ -134,6 +141,24 @@ describe('BranchMultiSelect — count chip', () => {
     render(<Harness initial={[101, 999]} />)
     expect(screen.getByTestId('bms-count')).toHaveTextContent('1 of 4 selected')
   })
+
+  it('is not a live region; only bulk actions are announced, politely', () => {
+    render(<Harness />)
+    expect(screen.getByTestId('bms-count')).not.toHaveAttribute('role')
+    expect(screen.getByTestId('bms-count')).not.toHaveAttribute('aria-live')
+    const live = screen.getByTestId('bms-announcement')
+    expect(live).toHaveAttribute('aria-live', 'polite')
+    expect(live).toHaveAttribute('aria-atomic', 'true')
+
+    fireEvent.click(screen.getByTestId('bms-101'))
+    expect(live).toBeEmptyDOMElement()
+
+    fireEvent.click(screen.getByTestId('bms-select-all'))
+    expect(live).toHaveTextContent('4 of 4 selected')
+    search('naples')
+    fireEvent.click(screen.getByTestId('bms-clear-all'))
+    expect(live).toHaveTextContent('2 of 4 selected')
+  })
 })
 
 describe('BranchMultiSelect — accessibility', () => {
@@ -146,11 +171,28 @@ describe('BranchMultiSelect — accessibility', () => {
     expect(screen.getByRole('searchbox', { name: /search branches/i })).toBeInTheDocument()
   })
 
-  it('names the bulk controls after the filtered scope', () => {
+  it('gives the header a stable name that does not change with its state', () => {
     render(<Harness />)
+    expect(header()).toHaveAccessibleName('All branches')
+    fireEvent.click(header())
+    expect(header()).toBeChecked()
+    expect(header()).toHaveAccessibleName('All branches')
+
     search('naples')
-    expect(header()).toHaveAccessibleName('Select all matching branches')
-    expect(screen.getByRole('button', { name: 'Select all matching branches' })).toBeInTheDocument()
+    expect(header()).toHaveAccessibleName('All matching branches')
+    fireEvent.click(header())
+    expect(header()).not.toBeChecked()
+    expect(header()).toHaveAccessibleName('All matching branches')
+  })
+
+  it('does not share a name with the Select all / Clear all buttons', () => {
+    render(<Harness initial={[101]} />)
+    search('naples')
+    expect(header()).toHaveAccessibleName('All matching branches')
+    expect(screen.getByTestId('bms-select-all')).toHaveAccessibleName('Select all matching branches')
+    expect(screen.getByTestId('bms-clear-all')).toHaveAccessibleName('Clear all matching branches')
+    expect(screen.queryByRole('button', { name: 'All matching branches' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /select all|clear all/i })).not.toBeInTheDocument()
   })
 
   it('is operable from the keyboard alone', async () => {

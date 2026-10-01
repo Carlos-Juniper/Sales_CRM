@@ -422,6 +422,8 @@ describe('UsersSection — bulk branch selection (H54 §7)', () => {
   }))
   const ALL_IDS = MANY.map((b) => b.aspireBranchId)
   const GULF_IDS = ALL_IDS.slice(0, 10)
+  // The backend treats branches as a replace-set: compare sorted, not by order.
+  const asSet = (ids: unknown) => [...(ids as number[])].sort((a, b) => a - b)
 
   it('authorizes with only the filtered branches after Select all', async () => {
     mockBranches(MANY)
@@ -449,7 +451,7 @@ describe('UsersSection — bulk branch selection (H54 §7)', () => {
     fireEvent.click(screen.getByRole('button', { name: /authorize user/i }))
 
     await waitFor(() => expect(body).not.toBeNull())
-    expect(body!.branches).toEqual(GULF_IDS)
+    expect(asSet(body!.branches)).toEqual(asSet(GULF_IDS))
   })
 
   it('assigns 20 branches in one gesture as 20 explicit ids', async () => {
@@ -470,7 +472,7 @@ describe('UsersSection — bulk branch selection (H54 §7)', () => {
 
     await waitFor(() => expect(patchBody).not.toBeNull())
     // Carla's stored 101 is outside the manageable list; replace-set keeps it.
-    expect(patchBody!.branches).toEqual([101, ...ALL_IDS])
+    expect(asSet(patchBody!.branches)).toEqual(asSet([101, ...ALL_IDS]))
   })
 
   it('clears only the filtered branches and PATCHes the remaining set', async () => {
@@ -494,6 +496,6 @@ describe('UsersSection — bulk branch selection (H54 §7)', () => {
     fireEvent.click(screen.getByRole('button', { name: /save carla reyes/i }))
 
     await waitFor(() => expect(patchBody).not.toBeNull())
-    expect(patchBody!.branches).toEqual(GULF_IDS)
+    expect(asSet(patchBody!.branches)).toEqual(asSet(GULF_IDS))
   })
 })

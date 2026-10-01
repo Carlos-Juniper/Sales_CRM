@@ -41,10 +41,10 @@ from api.aspire_config import ASPIRE_BRANCH_MAP, ASPIRE_BRANCH_INSTALL_FALLBACKS
 from api.catalog_links import (prepare_component, validate_estimate_tree, validate_section_category,
                                validate_service_ref)
 from api.install_sections import plan_install_create_sections
+from api.maintenance_catalog import seed_standard_maintenance_services  # §2
 from api.maintenance_pricing import _live_branch_crew_rate, annotate_maintenance_sections, apply_maintenance_crew_prices
 
 logger = logging.getLogger(__name__)
-
 
 # ── Status transition machine (port of transitions.ts) ───────────────────────
 
@@ -1576,7 +1576,7 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
     return service_id
 
 
-async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
+async def _insert_section(estimate_id: str, section: dict, idx: int, estimate_type: str | None = None) -> str:
     section_id = _new_id("sec")
     await execute(
         """INSERT INTO estimate_sections
@@ -1593,6 +1593,8 @@ async def _insert_section(estimate_id: str, section: dict, idx: int) -> str:
     )
     for vi, svc in enumerate(section.get("services") or []):
         await _insert_service(section_id, svc, vi)
+    if estimate_type is not None:  # §2: auto-seed maintenance services
+        await seed_standard_maintenance_services(estimate_id, estimate_type, section_id, query, execute)
     return section_id
 
 
@@ -1981,7 +1983,7 @@ def register(app, require_auth) -> None:
                 ],
             )
             for si, section in enumerate(body.get("sections") or []):
-                await _insert_section(estimate_id, section, si)
+                await _insert_section(estimate_id, section, si, est_type)
         # Structured intake payload lands in its own table (never estimate.notes).
         # Maintenance scopeOfWork inside intake.payload is optional free text.
         # When a rep still sends it, it is stored verbatim with the rest of the
@@ -2411,7 +2413,7 @@ def register(app, require_auth) -> None:
                 await _live_branch_crew_rate(est_rows[0].get("aspire_branch_id")),
             )
         idx = await _next_sort_order("estimate_sections", "estimate_id", estimate_id, body)
-        section_id = await _insert_section(estimate_id, {**body, "sortOrder": idx}, idx)
+        section_id = await _insert_section(estimate_id, {**body, "sortOrder": idx}, idx, est_rows[0].get("estimate_type"))
         await execute("UPDATE estimates SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", [estimate_id])
         # A newly added section may carry lines, which shift
         # the ITB LS/IR split.

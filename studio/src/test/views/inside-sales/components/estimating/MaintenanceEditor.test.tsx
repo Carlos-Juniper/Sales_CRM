@@ -19,7 +19,8 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/server'
 import { render } from '@/test/utils'
-import type { ServiceKit, Estimate, MaintenanceEstimate } from '@/types/estimating'
+import type { ServiceCategory, ServiceKit, Estimate, MaintenanceEstimate } from '@/types/estimating'
+import { catalogService } from '@/test/fixtures/maintenanceCatalog'
 import { buildInstallEstimate, buildMaintenanceEstimate, mockEstimatesV2, toCreatePayload } from '@/mocks/estimatingData'
 import { estimatingApi } from '@/api/estimating'
 import { LineItemEditor } from '@/views/inside-sales/components/estimating/LineItemEditor'
@@ -62,6 +63,54 @@ beforeEach(() => {
   // bottom override this handler per test.
   server.use(http.get('/api/estimating/service-kits', () => HttpResponse.json([])))
 })
+
+/**
+ * Points the first Common Area line at `kitId` with no hours of its own, so
+ * its TH cell resolves only once GET /service-kits has loaded that kit.
+ */
+function kitDriven(est: MaintenanceEstimate, kitId: string, index = 0): MaintenanceEstimate {
+  est.sections[0].services[index] = { ...est.sections[0].services[index], hours: null, serviceKitId: kitId }
+  return est
+}
+
+/** Waits until the kit catalog has loaded, read from a kit-driven line's TH. */
+async function waitForKitHours(label: string) {
+  await waitFor(() =>
+    expect(
+      within(within(sectionCard('Common Area')).getByTestId(`service-row-${label}`)).getByTestId(
+        'line-total-hours',
+      ),
+    ).not.toHaveTextContent('—'),
+  )
+}
+
+/** A maintenance catalog whose one optional category offers a service per kit. */
+function optionalCatalog(kits: ServiceKit[]): ServiceCategory[] {
+  const id = 'cat-m-optional'
+  return [
+    {
+      id,
+      code: 'optional',
+      name: 'Optional Services',
+      estimateType: 'maintenance',
+      sortOrder: 0,
+      isOptional: true,
+      aspireServiceGroupName: null,
+      itemClassCodes: null,
+      active: true,
+      services: kits.map((k, i) =>
+        catalogService(id, k.id, k.description, i, { kitId: k.id, defaultOccurrences: 1 }),
+      ),
+    },
+  ]
+}
+
+/** Adds the optional service priced by `kit` through the instant-add select. */
+async function addOptional(user: ReturnType<typeof userEvent.setup>, card: HTMLElement, kit: ServiceKit) {
+  const select = () => within(card).getByLabelText(/add optional service/i)
+  await waitFor(() => expect(within(select()).getByRole('option', { name: kit.description })).toBeInTheDocument())
+  await user.selectOptions(select(), `svc-m-${kit.id}`)
+}
 
 /** A production-rated maintenance kit, as GET /service-kits returns it. */
 const RATED_KIT: ServiceKit = {
@@ -106,7 +155,9 @@ describe('MaintenanceEditor — structure', () => {
 
   it('shares one column template between hours-driven headers and line rows', () => {
     renderMaint()
-    const headerLabels = ['Service', 'Occurrences', 'Complexity', 'Discipline', 'Billing', 'Line total']
+    const headerLabels = [
+      'Service', 'Occurrences', 'Complexity', 'P/H', 'TH', 'Discipline', 'Billing', 'P/P', 'Line total', '',
+    ]
 
     for (const name of ['Common Area', 'Entry & Medians']) {
       const card = sectionCard(name)
@@ -131,11 +182,11 @@ describe('MaintenanceEditor — structure', () => {
   it('shows section totals, unit reads, and the contract roll-up from calc.ts', () => {
     renderMaint()
     const s1 = sectionCard('Common Area')
-    expect(within(s1).getByText('$38,023.20')).toBeInTheDocument()
+    expect(within(s1).getByTestId('section-total')).toHaveTextContent('$38,023.20')
     // unit read: 3,802,320¢ / 120 = $316.86 / 1,000 SF
     expect(within(s1).getByText(/\$316\.86 \/ 1,000 SF/)).toBeInTheDocument()
     const s2 = sectionCard('Entry & Medians')
-    expect(within(s2).getByText('$12,750.75')).toBeInTheDocument()
+    expect(within(s2).getByTestId('section-total')).toHaveTextContent('$12,750.75')
     expect(screen.getByTestId('contract-total')).toHaveTextContent('$50,773.95')
   })
 
@@ -256,7 +307,7 @@ describe('MaintenanceEditor — live recompute (hours-driven)', () => {
     // 120 × 450 × 21 × 1.1 = 1,247,400
     expect(within(mowRow).getByText('$12,474.00')).toBeInTheDocument()
     // section: 3,802,320 − 1,247,400 = 2,554,920
-    expect(within(s1).getByText('$25,549.20')).toBeInTheDocument()
+    expect(within(s1).getByTestId('section-total')).toHaveTextContent('$25,549.20')
     // contract: 2,554,920 + 1,275,075 = 3,829,995
     expect(screen.getByTestId('contract-total')).toHaveTextContent('$38,299.95')
   })
@@ -314,44 +365,19 @@ describe('MaintenanceEditor — complexity (I-9.7)', () => {
   })
 })
 
-describe('MaintenanceEditor — granularity + add line item (I-9.7)', () => {
-  it('mowing rows expose a kit granularity dropdown with mower sizes', async () => {
-    const user = userEvent.setup()
+describe('MaintenanceEditor — mower deck size removed (Handoff 54 §3.1)', () => {
+  it('mowing rows no longer render the UI-only mower size select', () => {
     renderMaint()
-    const s1 = sectionCard('Common Area')
-    const mowRow = within(s1).getByTestId('service-row-Mowing')
-    const size = within(mowRow).getByLabelText(/mower size/i)
-    expect(within(size).getByRole('option', { name: '36"' })).toBeInTheDocument()
-    expect(within(size).getByRole('option', { name: '72"' })).toBeInTheDocument()
-    await user.selectOptions(size, '72"')
-    expect((size as HTMLSelectElement).value).toBe('72"')
+    const mowRow = within(sectionCard('Common Area')).getByTestId('service-row-Mowing')
+    expect(within(mowRow).queryByLabelText(/mower size/i)).not.toBeInTheDocument()
+    expect(within(mowRow).getAllByRole('combobox')).toHaveLength(3) // complexity, discipline, billing
   })
 
-  it('"Add line item" adds a catalog service not in the original spec', async () => {
-    const user = userEvent.setup()
-    const priced: ServiceKit = {
-      ...RATED_KIT,
-      id: 'kit-fert',
-      description: 'Fertilizer & pest',
-      unitSellCents: 135,
-      productionRate: 5000,
-    }
-    server.use(http.get('/api/estimating/service-kits', () => HttpResponse.json([priced])))
+  it('has no select-then-click "Add line item" control', () => {
     renderMaint()
     const s1 = sectionCard('Common Area')
-    expect(within(s1).queryByTestId('service-row-Fertilizer & pest')).not.toBeInTheDocument()
-    await waitFor(() =>
-      expect(within(s1).getByRole('option', { name: 'Fertilizer & pest' })).toBeInTheDocument(),
-    )
-
-    await user.selectOptions(within(s1).getByLabelText(/add line item/i), priced.id)
-    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
-
-    const fertRow = within(s1).getByTestId('service-row-Fertilizer & pest')
-    expect(fertRow).toBeInTheDocument()
-    // catalog unit sell 135¢ / 1,000 SF, qty 1, complexity 10%:
-    // 120 × 135 × 1 × 1.10 = 17,820 → $178.20
-    expect(within(fertRow).getByText('$178.20')).toBeInTheDocument()
+    expect(within(s1).queryByLabelText(/add line item/i)).not.toBeInTheDocument()
+    expect(within(s1).queryByRole('button', { name: /add line item/i })).not.toBeInTheDocument()
   })
 })
 
@@ -382,7 +408,7 @@ describe('MaintenanceEditor — section CRUD', () => {
     const user = userEvent.setup()
     renderMaint()
     const s2 = sectionCard('Entry & Medians')
-    await user.click(within(s2).getByRole('button', { name: /remove/i }))
+    await user.click(within(s2).getByRole('button', { name: /^remove section/i }))
 
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent(/remove section/i)
@@ -396,7 +422,7 @@ describe('MaintenanceEditor — section CRUD', () => {
     const user = userEvent.setup()
     renderMaint()
     const s2 = sectionCard('Entry & Medians')
-    await user.click(within(s2).getByRole('button', { name: /remove/i }))
+    await user.click(within(s2).getByRole('button', { name: /^remove section/i }))
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: /remove section/i }))
 
@@ -503,14 +529,10 @@ describe('MaintenanceEditor — Reset / Save', () => {
       http.get('/api/estimating/service-kits', () => HttpResponse.json([RATED_KIT])),
     )
     const created = (await estimatingApi.create(
-      toCreatePayload(buildMaintenanceEstimate()),
+      toCreatePayload(kitDriven(buildMaintenanceEstimate(), RATED_KIT.id)),
     )) as MaintenanceEstimate
     renderMaint(created)
-    await waitFor(() =>
-      expect(
-        within(sectionCard('Common Area')).getByRole('option', { name: 'Standard Production Mowing' }),
-      ).toBeInTheDocument(),
-    )
+    await waitForKitHours('Mowing')
 
     await user.click(screen.getByRole('button', { name: /add section/i }))
     await user.click(screen.getByRole('button', { name: /save/i }))
@@ -577,31 +599,23 @@ describe('MaintenanceEditor — Reset / Save', () => {
 // ---------------------------------------------------------------------------
 
 describe('MaintenanceEditor — kit catalog + production-rate save guard', () => {
-  it('feeds the add-line dropdown from GET /service-kits, not the literal', async () => {
+  it('resolves kit-driven line hours from GET /service-kits', async () => {
     server.use(
       http.get('/api/estimating/service-kits', () => HttpResponse.json([RATED_KIT])),
     )
-    renderMaint()
-    const s1 = sectionCard('Common Area')
-    const select = within(s1).getByLabelText(/add line item/i)
-    await waitFor(() =>
-      expect(
-        within(select).getByRole('option', { name: 'Standard Production Mowing' }),
-      ).toBeInTheDocument(),
-    )
-    // the literal-only demo rows are gone once the API catalog loads
-    expect(
-      within(select).queryByRole('option', { name: 'Fertilizer & pest' }),
-    ).not.toBeInTheDocument()
+    renderMaint(kitDriven(buildMaintenanceEstimate(), RATED_KIT.id))
+    await waitForKitHours('Mowing')
+    // 120,000 SF ÷ 67,650 SF/h × 42 occ × 1.10 = 81.95 h
+    const row = within(sectionCard('Common Area')).getByTestId('service-row-Mowing')
+    expect(within(row).getByTestId('line-total-hours')).toHaveTextContent('81.95')
   })
 
-  it('does not fall back to the literal catalog when the API returns no kits', () => {
+  it('does not fall back to the literal catalog when the API returns no kits', async () => {
+    const user = userEvent.setup()
     renderMaint()
-    const s1 = sectionCard('Common Area')
-    const select = within(s1).getByLabelText(/add line item/i)
-    expect(
-      within(select).queryByRole('option', { name: 'Fertilizer & pest' }),
-    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /add section/i }))
+    const added = sectionCard('New region')
+    expect(within(added).queryAllByTestId(/^service-row-/)).toHaveLength(0)
   })
 
   it('blocks Save with a clear message when a line resolves no production rate', async () => {
@@ -636,20 +650,12 @@ describe('MaintenanceEditor — kit catalog + production-rate save guard', () =>
       ),
     )
     const user = userEvent.setup()
-    const est = buildMaintenanceEstimate()
-    est.sections[0].services[0] = {
-      ...est.sections[0].services[0],
-      hours: null,
-      serviceKitId: unrated.id,
-    }
+    const est = kitDriven(kitDriven(buildMaintenanceEstimate(), unrated.id), RATED_KIT.id, 1)
     renderMaint(est)
     // wait for the catalog fetch so the client guard can resolve the kit
-    const s1 = sectionCard('Common Area')
-    await waitFor(() =>
-      expect(
-        within(s1).getByRole('option', { name: 'Standard Production Mowing' }),
-      ).toBeInTheDocument(),
-    )
+    await waitForKitHours('Detail / Bed Maintenance')
+    const mowRow = within(sectionCard('Common Area')).getByTestId('service-row-Mowing')
+    expect(within(mowRow).getByTestId('line-total-hours')).toHaveTextContent('—')
     await user.click(screen.getByRole('button', { name: /^save$/i }))
     const err = await screen.findByTestId('save-error')
     expect(err).toHaveTextContent(/production rate/i)
@@ -684,29 +690,30 @@ describe('MaintenanceEditor — branch crew rate', () => {
         HttpResponse.json({ aspireBranchId: 3696, crewRateCentsPerHour: 22_500 }),
       ),
     )
+    server.use(
+      http.get('/api/estimating/service-catalog', () => HttpResponse.json(optionalCatalog([RATED_KIT]))),
+    )
     renderMaint(
-      buildMaintenanceEstimate({
-        crewRateCentsPerHour: null,
-        aspireBranchId: 3696,
-        branchCity: 'Fort Myers, FL',
-      }),
+      kitDriven(
+        buildMaintenanceEstimate({
+          crewRateCentsPerHour: null,
+          aspireBranchId: 3696,
+          branchCity: 'Fort Myers, FL',
+        }),
+        RATED_KIT.id,
+      ),
     )
     const rate = await screen.findByTestId('crew-rate-provenance')
     expect(rate).toHaveTextContent('Priced at $225.00/hr loaded crew rate')
     expect(rate).toHaveTextContent('Fort Myers, FL')
     expect(rate).toHaveAttribute('data-source', 'live')
     const s1 = sectionCard('Common Area')
-    await waitFor(() =>
-      expect(
-        within(s1).getByRole('option', { name: 'Standard Production Mowing' }),
-      ).toBeInTheDocument(),
-    )
-    await user.selectOptions(within(s1).getByLabelText(/add line item/i), RATED_KIT.id)
-    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
+    await waitForKitHours('Mowing')
+    await addOptional(user, s1, RATED_KIT)
     // 1000/67650 × 22500¢ / 0.78 = 426¢ per 1,000 SF
     // 120,000 SF × 426¢ × qty 1 × 1.10 complexity = $562.32
     const row = within(s1).getByTestId('service-row-Standard Production Mowing')
-    expect(within(row).getByText('$562.32')).toBeInTheDocument()
+    expect(within(row).getByTestId('line-total-price')).toHaveTextContent('$562.32')
   })
 
   it('uses a frozen snapshot and labels it as frozen at submission', () => {
@@ -862,6 +869,9 @@ describe('MaintenanceEditor — branch crew rate', () => {
       http.get('/api/estimating/service-kits', () =>
         HttpResponse.json([derivedKit, catalogKit]),
       ),
+      http.get('/api/estimating/service-catalog', () =>
+        HttpResponse.json(optionalCatalog([derivedKit, catalogKit])),
+      ),
       http.post('/api/estimating/estimates/:id/sections/:sectionId/services', () =>
         HttpResponse.json(
           { detail: { code: 'crew_rate_required', blockedLines: [] } },
@@ -870,14 +880,12 @@ describe('MaintenanceEditor — branch crew rate', () => {
       ),
     )
 
-    renderMaint(estimate)
+    renderMaint(kitDriven(estimate, derivedKit.id, 1))
     const s1 = sectionCard('Common Area')
-    const add = () => within(s1).getByLabelText(/add line item/i)
-    await waitFor(() => expect(within(add()).getByRole('option', { name: 'Derived Mowing' })).toBeInTheDocument())
-    await user.selectOptions(add(), derivedKit.id)
-    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
-    await user.selectOptions(add(), catalogKit.id)
-    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
+    await screen.findByTestId('crew-rate-provenance')
+    await waitForKitHours('Detail / Bed Maintenance')
+    await addOptional(user, s1, derivedKit)
+    await addOptional(user, s1, catalogKit)
     await user.click(screen.getByRole('button', { name: /^save$/i }))
 
     expect(await screen.findByTestId('save-error')).toHaveTextContent(/set a crew rate/i)

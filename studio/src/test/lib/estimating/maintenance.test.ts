@@ -49,11 +49,6 @@ describe('maintenance service catalog (sq-ft basis, BRD I-6.5)', () => {
       assertSqftBasis({ key: 'fert', label: 'Fertilizer', basis: 'acre' } as never),
     ).toThrow(/square-footage/i)
   })
-
-  it('mowing exposes kit granularity options (mower sizes, I-9.7)', () => {
-    const mow = MAINTENANCE_SERVICE_CATALOG.find((r) => r.key === 'mow')
-    expect(mow?.granularity?.options).toEqual(['36"', '52–60"', '72"'])
-  })
 })
 
 describe('complexity company default (I-9.7)', () => {

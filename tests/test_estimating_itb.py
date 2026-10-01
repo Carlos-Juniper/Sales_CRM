@@ -136,7 +136,7 @@ class TestAutoGeneration:
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": est_type, "name": "Greenfield", "clientName": "LLC",
             "aspireBranchId": 3668, "branchCity": "Orlando, FL", "contractValueCents": 4500000,
-            "dueBackDate": "2026-09-30",
+            "dueBackDate": "2026-12-31",
         })
         assert resp.status_code == 201
         itb_inserts = [c for c in mock_exec.call_args_list

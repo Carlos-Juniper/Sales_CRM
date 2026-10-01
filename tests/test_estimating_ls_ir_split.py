@@ -340,7 +340,7 @@ class TestRecomputeEndToEnd:
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield", "clientName": "LLC",
             "aspireBranchId": 3579, "branchCity": "Orlando, FL", "contractValueCents": 100000,
-            "dueBackDate": "2026-09-30", "sections": [],  # real intake shape
+            "dueBackDate": "2026-12-31", "sections": [],  # real intake shape
         })
         assert resp.status_code == 201
         estimate_id = resp.json()["id"]
@@ -379,7 +379,7 @@ class TestRecomputeEndToEnd:
         resp = client.post("/api/estimating/estimates", json={
             "estimateType": "install", "name": "Greenfield", "clientName": "LLC",
             "aspireBranchId": 3579, "branchCity": "Orlando, FL", "contractValueCents": 100000,
-            "dueBackDate": "2026-09-30", "sections": [],
+            "dueBackDate": "2026-12-31", "sections": [],
         })
         estimate_id = resp.json()["id"]
         section_id = resp.json()["sections"][0]["id"]  # auto-created from the seeded catalog

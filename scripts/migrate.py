@@ -534,6 +534,165 @@ def detect_013(conn) -> bool:
     return column_exists(conn, "section_services", "discipline")
 
 
+def detect_014(conn) -> bool:
+    """014 applied ↔ regions table exists (first table created by this migration)."""
+    return table_exists(conn, "regions")
+
+
+def detect_015(conn) -> bool:
+    """015 applied ↔ regions table has seeded rows (seed-only migration)."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM `regions` WHERE id='east-coast'")
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def detect_016(conn) -> bool:
+    """016 applied ↔ proposal_requests table exists."""
+    return table_exists(conn, "proposal_requests")
+
+
+def detect_017(conn) -> bool:
+    """017 applied ↔ proposal_renders table exists."""
+    return table_exists(conn, "proposal_renders")
+
+
+def detect_018(conn) -> bool:
+    """018 applied ↔ licenses_certifications table exists."""
+    return table_exists(conn, "licenses_certifications")
+
+
+def detect_021(conn) -> bool:
+    """021 applied ↔ branch 1374 (Manatee) has lat set (geocode backfill)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM `branches` WHERE aspire_branch_id=1374 AND lat IS NOT NULL"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def detect_043(conn) -> bool:
+    """043 applied ↔ lc-jb-diploma row exists in licenses_certifications."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM `licenses_certifications` WHERE id='lc-jb-diploma'"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def detect_045(conn) -> bool:
+    """045 applied ↔ Mowing & Edging catalog item has scope_text set."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM `catalog_items` "
+            "WHERE description='Mowing & Edging' AND scope_text IS NOT NULL AND scope_text != ''"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def detect_046_commissions(conn) -> bool:
+    """046_commissions_schema applied ↔ commissions table exists."""
+    return table_exists(conn, "commissions")
+
+
+def detect_047(conn) -> bool:
+    """047 applied ↔ maintenance_hours rows in catalog_items have scope_text set.
+
+    047 updates scope_text for all kit_type='maintenance_hours' rows. We key on
+    a specific well-known row (Mowing per Pointe Jupiter contract language).
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM `catalog_items` "
+            "WHERE kit_type='maintenance_hours' AND scope_text IS NOT NULL AND scope_text != ''"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def detect_048(conn) -> bool:
+    """048 applied ↔ lc-kl-diploma row exists in licenses_certifications."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM `licenses_certifications` WHERE id='lc-kl-diploma'"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def detect_049(conn) -> bool:
+    """049 applied ↔ lc-jb-diploma object_key ends in .png."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM `licenses_certifications` "
+            "WHERE id='lc-jb-diploma' AND object_key LIKE '%.png'"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def detect_050(conn) -> bool:
+    """050 applied ↔ lc-kl-diploma object_key ends in .png."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM `licenses_certifications` "
+            "WHERE id='lc-kl-diploma' AND object_key LIKE '%.png'"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def detect_051(conn) -> bool:
+    """051 applied ↔ tm-bm-ftm-001 bio has been shortened (len ≤ 700 chars)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT LENGTH(bio) FROM `team_members` WHERE id='tm-bm-ftm-001' LIMIT 1"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0] is not None and row[0] <= 700)
+
+
+def detect_052(conn) -> bool:
+    """052 applied ↔ Corporate branch has the new Metro Parkway address."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM `branches` "
+            "WHERE branch_name='Corporate' AND address1='4415 Metro Parkway, Suite 300'"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def detect_053(conn) -> bool:
+    """053 applied ↔ licenses_certifications.insurance_sentinel generated column exists."""
+    return column_exists(conn, "licenses_certifications", "insurance_sentinel")
+
+
+def detect_057(conn) -> bool:
+    """057 applied ↔ branch-manager team_member 090a645b exists (Alberto Toucet)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM `team_members` "
+            "WHERE id='090a645b-0829-4c41-8456-37ac36ab8440'"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def detect_058(conn) -> bool:
+    """058 applied ↔ user_branches has a row for Alberto Toucet at branch 1403."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM `user_branches` "
+            "WHERE user_id='398230da-4334-4963-880c-a34ba16d5cbc' AND aspire_branch_id=1403"
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
 def detect_046(conn) -> bool:
     """046 applied ↔ section_services.billing_type column exists."""
     return column_exists(conn, "section_services", "billing_type")
@@ -1296,8 +1455,14 @@ _DETECT: dict = {
     "011_leads_status_estimating_rename":        detect_011,
     "012_takeoff_scan_and_manual_metadata":      detect_012,
     "013_section_services_discipline":           detect_013,
+    "014_proposal_config_tables":                detect_014,
+    "015_seed_proposal_config":                  detect_015,
+    "016_proposal_requests":                     detect_016,
+    "017_proposal_renders":                      detect_017,
+    "018_licenses_certifications":               detect_018,
     "019_branch_model":                          detect_019,
     "020_settings_storage":                      detect_020,
+    "021_backfill_branch_geocodes":              detect_021,
     "022_contract_drop_branch_columns":          detect_022,
     "023_config_soft_delete":                    detect_023,
     "024_estimate_prior_crew_rate":              detect_024,
@@ -1318,6 +1483,7 @@ _DETECT: dict = {
     "040_proposal_chapter_order":                 detect_040,
     "041_property_acreage_units":                 detect_041,
     "042_signer_contact_and_render_overflow":     detect_042,
+    "043_license_certifications_seed":            detect_043,
     "064_estimate_maintenance_occurrence_counts": detect_064,
     "065_commission_cadence_and_plans":           detect_065,
     "068_admin_equivalent_approval_tiers":        detect_068,
@@ -1329,9 +1495,20 @@ _DETECT: dict = {
     "074_component_material_link":                detect_074,
     "075_maintenance_service_catalog":            detect_075,
     "044_contract_generator":                     detect_044,
+    "045_catalog_scope_text":                     detect_045,
+    "046_commissions_schema":                     detect_046_commissions,
+    "046_section_services_billing_type":          detect_046,
+    "047_contract_scope_text_pointe_jupiter":     detect_047,
+    "048_leverette_diploma":                      detect_048,
+    "049_diploma_object_keys_to_png":             detect_049,
+    "050_leverette_diploma_object_key_to_png":    detect_050,
+    "051_team_bio_length_cap":                    detect_051,
+    "052_corporate_branch_address":               detect_052,
+    "053_insurance_unique_constraint":            detect_053,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
-    "046_section_services_billing_type":          detect_046,
+    "057_bm_team_members_backfill":               detect_057,
+    "058_bm_user_branches_backfill":              detect_058,
     "063_estimate_optional_contract_budgets":     detect_063,
     "062_rep_owned_proposal_roster":              detect_062,
 }

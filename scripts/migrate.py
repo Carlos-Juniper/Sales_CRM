@@ -1272,6 +1272,16 @@ def detect_076(conn) -> bool:
     return table_exists(conn, "service_kit_rates")
 
 
+def detect_077(conn) -> bool:
+    """077 applied ↔ estimate_assignments table exists.
+
+    077 creates the append-only estimate_assignments audit table. Keyed on
+    the table's presence — CREATE TABLE IF NOT EXISTS makes re-runs harmless;
+    the table existing is an unambiguous "already ran" signal.
+    """
+    return table_exists(conn, "estimate_assignments")
+
+
 def detect_075(conn) -> bool:
     """075 applied ↔ services.occurrence_source (the file's last statement),
     service_kit_links.sort_order and all six maintenance service_categories
@@ -1341,6 +1351,7 @@ _DETECT: dict = {
     "074_component_material_link":                detect_074,
     "075_maintenance_service_catalog":            detect_075,
     "076_service_kit_rates":                      detect_076,
+    "077_estimate_assignment_audit":              detect_077,
     "044_contract_generator":                     detect_044,
     "046_section_services_billing_type":          detect_046,
     "054_commissions_schema":                     detect_054,

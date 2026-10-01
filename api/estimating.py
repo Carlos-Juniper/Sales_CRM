@@ -1832,20 +1832,15 @@ def register(app, require_auth) -> None:
     async def list_estimates(
         estimate_type: Optional[str] = Query(default=None),
         status: Optional[str] = Query(default=None),
-        # Slice 14: the `branch` city-string convenience filter is removed.
-        # Cross-branch roles should pass aspireBranchId for narrower views once
-        # that query param is added (pending follow-up). Branch-scoped users are
-        # already filtered via aspire_branch_id from their user_branches rows.
-        # Slice 4 (Handoff 37): filter by the lead that originated the estimate.
-        # Uses estimates.lead_id (added in migration 010). Allows BidTab to fetch
-        # only the approved estimate for this lead without client-side filtering.
         lead_id: Optional[str] = Query(default=None, alias="leadId"),
+        mine: bool = Query(default=False),  # §6 post-query OR filter (FakeDb limit)
+        assigned_to: Optional[str] = Query(default=None, alias="assignedTo"),  # §6
         _user: dict = Depends(require_auth),
     ) -> list:
-        # Branch scope is derived from the AUTHENTICATED user (BRD I-9.5).
         scope = await authz.resolve_branch_scope(_user)
         if scope.kind == "none":
             return []
+        user_id = _user.get("id")
         conditions: list[str] = []
         params: list[Any] = []
         if estimate_type:
@@ -1855,20 +1850,16 @@ def register(app, require_auth) -> None:
             conditions.append("status = %s")
             params.append(status)
         if scope.kind == "branch":
-            # Scope to the user's aspire_branch_id list (Amendment B.1). One
-            # parameterized placeholder per id — the ids are NEVER interpolated.
             placeholders = ", ".join(["%s"] * len(scope.ids))
             conditions.append(f"aspire_branch_id IN ({placeholders})")
             params.extend(scope.ids)
         if lead_id:
-            # Filter to estimates linked to the given lead (migration 010 column).
             conditions.append("lead_id = %s")
             params.append(lead_id)
+        if assigned_to:
+            conditions.append("assigned_ls_estimator = %s")
+            params.append(assigned_to)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        # created_at order is the API default. The estimating queue re-sorts
-        # by priority or by dueBackDate. Rush is derived from that due date
-        # (sooner than the SLA window), so a deadline sort already places
-        # rush estimates ahead of longer lead times. Nothing is stored.
         rows = await query(
             f"SELECT id FROM estimates {where} ORDER BY created_at DESC", params
         )
@@ -1876,6 +1867,13 @@ def register(app, require_auth) -> None:
             return []
         window = await _sla_return_window_days()
         loaded = [await _load_estimate(r["id"], sla_window_days=window) for r in rows]
+        if mine:
+            # Post-query OR filter — FakeDb cannot handle OR in WHERE (§6).
+            uid = user_id
+            loaded = [e for e in loaded
+                      if e is not None
+                      and (e.get("assignedLsEstimator") == uid
+                           or e.get("assignedIrrEstimator") == uid)]
         return [est for est in loaded if est is not None]
 
     @app.post("/api/estimating/estimates", status_code=201)
@@ -3062,11 +3060,7 @@ def register(app, require_auth) -> None:
         body: dict,
         _user: dict = Depends(require_auth),
     ) -> dict:
-        """Update an attachment's sort_order (reordering 'other' proposal docs, §4).
-
-        Accepts sortOrder only — the render orders 'other' attachments by this
-        column, so writing it reorders them in the output PDF.
-        """
+        """Update an attachment's sort_order (reordering 'other' proposal docs, §4)."""
         raw = body.get("sortOrder")
         if raw is None:
             raise HTTPException(status_code=400, detail="sortOrder is required")
@@ -3099,13 +3093,7 @@ def register(app, require_auth) -> None:
         attachment_id: str,
         _user: dict = Depends(require_auth),
     ):
-        """Soft-delete an attachment and remove its GCS object (§4).
-
-        Per api/attachments.py::delete's docstring, the row is soft-deleted
-        (status='deleted') to preserve the corpus, and the stored object is
-        deleted from GCS. A GCS failure (object already gone) does not fail the
-        soft-delete — the row must still be retired.
-        """
+        """Soft-delete an attachment and remove its GCS object (§4)."""
         rows = await query(
             _ATTACHMENT_BY_ID_SQL,
             [attachment_id, estimate_id, estimate_id],
@@ -3150,11 +3138,7 @@ def register(app, require_auth) -> None:
         request: Request,
         user: dict = Depends(require_auth),
     ) -> dict:
-        """Mint a pending lead-scoped proposal attachment and return the GCS session URI.
-
-        Only the three proposal document kinds are accepted; intake/takeoff kinds
-        must be uploaded against an estimate (estimate-scoped presign endpoint).
-        """
+        """Mint a pending lead-scoped proposal attachment and return the GCS session URI."""
         # Estimator deny, public-queue allowlist, and own-lead scope. A missing
         # lead is 404. Field sales may only attach to a lead they own.
         await _assert_lead_visible(user, lead_id)
@@ -3222,11 +3206,7 @@ def register(app, require_auth) -> None:
         attachment_id: str,
         _user: dict = Depends(require_auth),
     ) -> dict:
-        """Verify the blob landed in GCS and flip status to 'stored' (or 'failed').
-
-        Looks up the attachment by both id AND lead_id so a rep cannot confirm
-        an attachment belonging to a different lead.
-        """
+        """Verify the blob landed in GCS and flip status to 'stored' (or 'failed')."""
         await _assert_lead_visible(_user, lead_id)
         rows = await query(
             "SELECT ia.* FROM intake_attachments ia WHERE ia.id = %s AND ia.lead_id = %s",
@@ -3385,16 +3365,7 @@ def register(app, require_auth) -> None:
         kind: str = Query(...),
         _user: dict = Depends(require_auth),
     ) -> list:
-        """Return Aspire-derived branch options for the intake branch dropdown.
-
-        kind=install:      cities with a dedicated install branch (excludes
-                           ASPIRE_BRANCH_INSTALL_FALLBACKS which share the
-                           maintenance branch).
-        kind=maintenance:  all cities (every city has a maintenance branch).
-
-        Returns [{city, aspire_branch_id}] sorted by city name.  Auth-only;
-        no role or branch scoping (this is reference/config data).
-        """
+        """Branch options for the intake dropdown. kind=install|maintenance."""
         if kind not in ("install", "maintenance"):
             raise HTTPException(
                 status_code=400, detail="kind must be 'install' or 'maintenance'"
@@ -3421,23 +3392,13 @@ def register(app, require_auth) -> None:
 
     @app.get("/api/estimating/itb/projects")
     async def list_itb_projects(_user: dict = Depends(require_auth)) -> list:
-        """All ACTIVE estimates' ITB projects, branch-scoped.
-
-        "Active" = the linked estimate's status is NOT terminal — NOT IN
-        ('won', 'lost'). handed_back/approved estimates stay visible by default
-        (LOCKED: confirmed with Carlos). Every estimate appears
-        (LOCKED: one estimate → one ITB project). Scope definitions come from
-        GET /config/itb-scopes; this returns projects + their scope statuses.
-        """
+        """Active (non-terminal) ITB projects, branch-scoped. 1 project per estimate."""
         scope = await authz.resolve_branch_scope(_user)
         if scope.kind == "none":
             return []
         conditions = ["e.status NOT IN ('won', 'lost')"]
         params: list[Any] = []
         if scope.kind == "branch":
-            # Filter on the linked estimate's aspire_branch_id (Amendment B.1);
-            # the JOIN already brings `estimates e` into scope. Parameterized
-            # placeholders only — ids are never string-interpolated.
             placeholders = ", ".join(["%s"] * len(scope.ids))
             conditions.append(f"e.aspire_branch_id IN ({placeholders})")
             params.extend(scope.ids)
@@ -3466,11 +3427,7 @@ def register(app, require_auth) -> None:
     async def update_itb_scope_status(
         project_id: str, scope_id: str, body: dict, _user: dict = Depends(require_auth)
     ) -> dict:
-        """Update one scope's status code for one ITB project.
-
-        Upserts, so scopes added to itb_scopes AFTER a project was auto-created
-        still accept a status (the tracker renders missing cells as N/A).
-        """
+        """Update a scope's status code for an ITB project. Upserts."""
         code = body.get("statusCode")
         if code not in ITB_STATUS_CODES:
             raise HTTPException(
@@ -3489,10 +3446,48 @@ def register(app, require_auth) -> None:
         )
         return {"projectId": project_id, "scopeId": scope_id, "statusCode": code}
 
+    # ── Estimate assignment (Handoff 54 §6) ──────────────────────────────────
+
+    @app.post("/api/estimating/estimates/{estimate_id}/assign", status_code=204)
+    async def assign_estimate(
+        estimate_id: str, body: dict, _user: dict = Depends(require_auth)
+    ):
+        """Assign LS/IRR estimator slots. Managers only; branch-scoped."""
+        if not authz.is_estimating_manager(_user.get("role")):
+            raise HTTPException(status_code=403, detail="Only estimating managers may assign")
+        rows = await query(
+            "SELECT id, aspire_branch_id, assigned_ls_estimator, assigned_irr_estimator"
+            " FROM estimates WHERE id = %s",
+            [estimate_id],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Estimate not found")
+        est = rows[0]
+        scope = await authz.resolve_branch_scope(_user)
+        if scope.kind == "branch" and est.get("aspire_branch_id") not in scope.ids:
+            raise HTTPException(status_code=403, detail="Estimate is outside your branch scope")
+        note = body.get("note")
+        slots = [
+            ("lsEstimatorId", "assigned_ls_estimator", "ls"),
+            ("irrEstimatorId", "assigned_irr_estimator", "irr"),
+        ]
+        for body_key, col, role in slots:
+            new_val = body.get(body_key)
+            if new_val is None:
+                continue
+            old_val = est.get(col)
+            if new_val == old_val:
+                continue
+            await execute(f"UPDATE estimates SET {col} = %s WHERE id = %s", [new_val, estimate_id])
+            await execute(
+                "INSERT INTO estimate_assignments"
+                " (id, estimate_id, from_user_id, to_user_id, role, assigned_by, note)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                [str(uuid.uuid4()), estimate_id, old_val, new_val, role, _user["id"], note],
+            )
+
     @app.get("/api/estimating/service-kits")
     async def list_service_kits(
-        # Slice 14: the `branch` city-string filter is removed; callers should
-        # filter by aspireBranchId (int) once that param is wired (follow-up).
         kit_type: Optional[str] = Query(default=None),
         active: Optional[str] = Query(default=None),
         _user: dict = Depends(require_auth),

@@ -226,7 +226,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
               </div>
 
               {/* Sticky bottom action bar */}
-              <div className="flex-shrink-0 border-t border-gray-100 bg-white px-4 py-3 flex items-center gap-2 max-md:px-3">
+              <div className="flex-shrink-0 border-t border-gray-100 bg-white px-4 py-3 flex flex-wrap items-center gap-2 max-md:px-3">
                 <Button
                   variant="outline"
                   size="sm"
@@ -242,7 +242,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                   <Button
                     variant="outline"
                     size="sm"
-                    className="flex items-center gap-1.5 text-gray-700"
+                    className="flex items-center gap-1.5 text-gray-700 max-md:flex-1"
                     onClick={handleGenerateProposal}
                     data-testid="generate-proposal-action"
                   >
@@ -252,7 +252,7 @@ export function LeadDetailPanel({ leadId, onClose, onPrev, onNext }: LeadDetailP
                 )}
                 <Button
                   size="sm"
-                  className="flex items-center gap-1.5 bg-[#2E7D52] hover:bg-[#256644] text-white"
+                  className="flex items-center gap-1.5 bg-[#2E7D52] hover:bg-[#256644] text-white max-md:flex-1"
                   onClick={() => setAssignOpen(true)}
                   disabled={!!lead.assigned_to}
                 >

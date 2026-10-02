@@ -528,8 +528,7 @@ class BranchSettingsPatch(BaseModel):
     aspire_branch_id: Optional[int] = None
     crew_rate_cents_per_hour: Optional[int] = None
     crewRateNote: Optional[str] = None
-    # {service kit id: production_rate}
-    production_rates: Optional[dict[str, float]] = None
+    # production_rates removed (Handoff 54 §4): use PATCH /kit-rates/{kit_id}.
     # {material_key: {factor_name: value, ...}} — factor columns only, never
     # unit_cost/unit_sell.
     material_factors: Optional[dict[str, dict]] = None
@@ -1142,31 +1141,11 @@ def register(app, require_auth) -> None:
             )
             changed += 1
 
-        # ── production rates → service_kits.production_rate ──────────────────
-        for service_kit_id, rate in (body.production_rates or {}).items():
-            rows = await query(
-                "SELECT production_rate FROM service_kits WHERE id = %s",
-                [service_kit_id],
-            )
-            if not rows:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Service kit {service_kit_id} not found",
-                )
-            prior = rows[0].get("production_rate")
-            await execute(
-                "UPDATE service_kits SET production_rate = %s WHERE id = %s",
-                [rate, service_kit_id],
-            )
-            await _audit(
-                scope_type="branch",
-                scope_id=scope_id,
-                setting_key=f"production_rate.{service_kit_id}",
-                from_value=prior,
-                to_value=rate,
-                actor=actor,
-            )
-            changed += 1
+        # ── production rates → removed (Handoff 54 §4) ───────────────────────
+        # Per-branch kit rates are now written via the dedicated endpoint:
+        # PATCH /api/settings/branch/{aspire_branch_id}/kit-rates/{kit_id}
+        # That path appends to service_kit_rates (branch-scoped, append-only)
+        # instead of mutating service_kits.production_rate (a global table).
 
         # ── material factors → material_calcs.factors ────────────────────────
         # FACTOR columns only — never unit_cost/unit_sell. A branch override is
@@ -1532,18 +1511,39 @@ def register(app, require_auth) -> None:
                     "source": "inherited",
                 })
 
+        # Production rates: ALL active maintenance kits (including those with no
+        # baseline production_rate). For each kit, resolve_kit_rate merges
+        # service_kit_rates (branch then company-wide) with the service_kits
+        # baseline. A branch-specific row → source='override'; everything else
+        # (company-wide override or baseline only) → source='inherited'.
         catalog_rows = await query(
-            "SELECT id, description, production_rate FROM service_kits WHERE active = 1 AND production_rate IS NOT NULL",
+            "SELECT id, description FROM service_kits WHERE active = 1",
         )
-        production_rates: list[dict] = [
-            {
-                "serviceKitId": r["id"],
+        # One query to get all kit ids that have a branch-specific override.
+        branch_kit_ids: set[str] = set()
+        if catalog_rows:
+            kit_ids = [r["id"] for r in catalog_rows]
+            placeholders = ", ".join(["%s"] * len(kit_ids))
+            branch_rate_rows = await query(
+                f"SELECT DISTINCT service_kit_id FROM service_kit_rates"
+                f" WHERE aspire_branch_id = %s AND service_kit_id IN ({placeholders})",
+                [aspire_branch_id, *kit_ids],
+            )
+            branch_kit_ids = {r["service_kit_id"] for r in branch_rate_rows}
+
+        production_rates: list[dict] = []
+        for r in catalog_rows:
+            kit_id = r["id"]
+            resolved = await resolve_kit_rate(kit_id, aspire_branch_id)
+            resolved_rate = resolved.get("productionRate")
+            source = "override" if kit_id in branch_kit_ids else "inherited"
+            production_rates.append({
+                "serviceKitId": kit_id,
                 "description": r.get("description"),
-                "productionRate": float(r["production_rate"]),
-                "source": "inherited",
-            }
-            for r in catalog_rows
-        ]
+                "productionRate": resolved_rate,
+                "resolvedRate": resolved_rate,
+                "source": source,
+            })
 
         return {
             "aspireBranchId": aspire_branch_id,

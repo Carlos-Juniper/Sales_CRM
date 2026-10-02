@@ -245,6 +245,7 @@ export default function EstimatingPage({
                       active
                         ? 'border-[#2E7D52] text-[#2E7D52]'
                         : 'border-transparent text-[hsl(var(--muted-fg))] hover:text-[hsl(var(--fg))] hover:border-[hsl(var(--border))]',
+                      tab.key !== 'queue' && 'max-md:hidden',
                     )}
                   >
                     <Icon className="h-3.5 w-3.5 flex-shrink-0" />

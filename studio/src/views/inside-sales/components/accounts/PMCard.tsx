@@ -63,7 +63,7 @@ export function PMCard({ company, properties, expanded, onToggle, onSelectProper
 
       {/* Expanded body */}
       {expanded && (
-        <div className="border-t border-[hsl(var(--border))] grid grid-cols-2 gap-6 px-4 pt-3 pb-4">
+        <div className="border-t border-[hsl(var(--border))] grid grid-cols-2 gap-6 px-4 pt-3 pb-4 max-md:grid-cols-1 max-md:gap-4">
           {/* Contacts column */}
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--muted-fg))] mb-2">

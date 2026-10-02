@@ -34,7 +34,7 @@ export function LeadFilters() {
   }
 
   return (
-    <div className="space-y-3 p-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+    <div className="space-y-3 p-4 border-b max-md:p-3 border-[hsl(var(--border))] bg-[hsl(var(--card))]">
       {/* Search */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[hsl(var(--muted-fg))]" />
@@ -90,7 +90,7 @@ export function LeadFilters() {
         </div>
 
         {/* Min score */}
-        <div className="space-y-1.5 min-w-[160px]">
+        <div className="space-y-1.5 min-w-[160px] max-md:min-w-0">
           <Label className="text-[10px] uppercase tracking-wide text-[hsl(var(--muted-fg))]">
             Min score: <span className="text-[hsl(var(--fg))] font-semibold">{filters.minScore}</span>
           </Label>

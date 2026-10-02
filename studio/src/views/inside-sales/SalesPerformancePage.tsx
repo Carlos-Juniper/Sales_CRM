@@ -206,13 +206,13 @@ export default function SalesPerformancePage() {
 
           {/* ── Filter bar ─────────────────────────────────────────────── */}
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="relative">
+            <div className="relative max-md:w-full">
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[hsl(var(--muted-fg))]" />
               <Input
                 placeholder="Search deals..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="pl-8 h-9 w-[200px] text-sm"
+                className="pl-8 h-9 w-[200px] max-md:w-full text-sm"
               />
             </div>
 
@@ -243,7 +243,7 @@ export default function SalesPerformancePage() {
 
             {/* Inline summary strip */}
             {!summaryLoading && summary && (
-              <p className="text-sm text-[hsl(var(--muted-fg))] ml-auto whitespace-nowrap">
+              <p className="text-sm text-[hsl(var(--muted-fg))] md:ml-auto max-md:w-full whitespace-nowrap">
                 <span className="font-semibold text-green-600">
                   {summary.won_count} won &middot; {shortCents(summary.won_total_cents)}
                 </span>

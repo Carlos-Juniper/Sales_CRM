@@ -64,7 +64,7 @@ export function LeadListView({
         <LeadFilters />
 
         {/* Sort controls */}
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 max-md:px-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] flex-shrink-0">
           <span className="text-xs text-[hsl(var(--muted-fg))] mr-1">Sort:</span>
           {SORT_OPTIONS.map(({ field, label }) => (
             <button
@@ -83,7 +83,7 @@ export function LeadListView({
           ))}
           <div className="ml-auto flex items-center gap-2 text-xs text-[hsl(var(--muted-fg))]">
             {headerExtra}
-            <span>{leads.length} shown</span>
+            <span className="max-md:hidden">{leads.length} shown</span>
             <Button variant="ghost" size="icon-sm" onClick={() => refetch()} title="Refresh">
               <RefreshCw className={cn('h-3 w-3', isLoading && 'animate-spin')} />
             </Button>

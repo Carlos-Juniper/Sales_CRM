@@ -74,7 +74,7 @@ export default function LoginPage() {
       </div>
 
       {/* ── Right: Form panel ── */}
-      <div className="flex items-center justify-center px-8 py-12">
+      <div className="flex items-center justify-center px-8 py-12 max-md:px-5 max-md:py-10">
         <div className="w-full max-w-[380px]">
 
           {/* Mobile brand — hidden on desktop */}
@@ -94,7 +94,7 @@ export default function LoginPage() {
               <span className="w-1.5 h-1.5 rounded-full bg-[#2E7D52] shadow-[0_0_0_3px_rgba(46,125,82,.18)]" aria-hidden="true" />
               Employee sign in
             </span>
-            <h2 className="text-[26px] font-bold tracking-tight text-[#0d1117] mb-2 leading-[1.12]">
+            <h2 className="text-[26px] font-bold tracking-tight text-[#0d1117] mb-2 leading-[1.12] max-md:text-[22px]">
               Welcome back.
             </h2>
             <p className="text-sm text-[#6b7280] leading-relaxed">

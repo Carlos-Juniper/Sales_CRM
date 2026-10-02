@@ -167,7 +167,7 @@ export function AddHOAPanel({ isOpen, onClose, onSave, initialValues, onUpdate }
             Location
           </p>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 max-md:grid-cols-1">
             <div className="col-span-2">
               <TextField
                 label="Street address"
@@ -236,7 +236,7 @@ export function AddHOAPanel({ isOpen, onClose, onSave, initialValues, onUpdate }
       </div>
 
       {/* Footer */}
-      <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2">
+      <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2 max-md:flex-wrap">
         <Button variant="ghost" size="sm" onClick={handleClose} type="button">
           Cancel
         </Button>

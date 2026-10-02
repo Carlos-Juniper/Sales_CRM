@@ -120,7 +120,7 @@ export function NumberField({
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
-        className="w-40 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
+        className="w-full max-w-[10rem] rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
       />
     </div>
   )

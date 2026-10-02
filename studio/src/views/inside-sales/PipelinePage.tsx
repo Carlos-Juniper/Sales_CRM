@@ -65,7 +65,7 @@ function KanbanColumn({ stage, leads, conversionRate, onCardClick, onAddLead }: 
   const totalValue = leads.reduce((s, l) => s + l.estimated_contract_value, 0)
 
   return (
-    <div className="flex flex-col min-w-[200px] lg:flex-1 lg:min-w-0">
+    <div className="flex flex-col min-w-[200px] lg:flex-1 lg:min-w-0 max-md:snap-start max-md:shrink-0">
       <div className={cn('border-t-2 rounded-t-none mb-3 pt-0', stage.borderColor)} />
       <div className="flex items-center justify-between mb-1.5 px-0.5">
         <div className="flex items-center gap-2">
@@ -117,7 +117,7 @@ function SearchBar({ value, onChange }: SearchBarProps) {
         placeholder="Search leads..."
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-48 pl-7 pr-7 py-1 text-xs bg-[hsl(var(--muted))] border border-[hsl(var(--border))] rounded-md focus:outline-none focus:ring-1 focus:ring-[#2E7D52]/50 text-[hsl(var(--fg))] placeholder:text-[hsl(var(--muted-fg))]"
+        className="w-48 pl-7 pr-7 py-1 max-md:w-36 text-xs bg-[hsl(var(--muted))] border border-[hsl(var(--border))] rounded-md focus:outline-none focus:ring-1 focus:ring-[#2E7D52]/50 text-[hsl(var(--fg))] placeholder:text-[hsl(var(--muted-fg))]"
       />
       {value && (
         <button
@@ -200,7 +200,7 @@ export default function PipelinePage() {
         actions={<SearchBar value={searchQuery} onChange={setSearchQuery} />}
       />
 
-      <div className="flex-1 overflow-auto p-5">
+      <div className="flex-1 overflow-auto p-5 max-md:p-3 max-md:snap-x max-md:snap-mandatory">
         <PageHeader
           title="Inbound Pipeline"
           description="Leads move between stages automatically as estimates progress."
@@ -218,15 +218,15 @@ export default function PipelinePage() {
         />
 
         {isLoading ? (
-          <div className="flex gap-4">
+          <div className="flex gap-4 max-md:gap-3">
             {PIPELINE_STAGES.map(stage => (
-              <div key={stage.key} className="min-w-[200px] lg:flex-1 lg:min-w-0 space-y-2">
+              <div key={stage.key} className="min-w-[200px] lg:flex-1 lg:min-w-0 space-y-2 max-md:snap-start max-md:shrink-0">
                 {Array.from({ length: 3 }).map((_, i) => <KanbanCardSkeleton key={i} />)}
               </div>
             ))}
           </div>
         ) : (
-          <div className="flex gap-4 pb-4 min-w-max lg:w-full lg:min-w-0">
+          <div className="flex gap-4 pb-4 min-w-max lg:w-full lg:min-w-0 max-md:gap-3">
             {PIPELINE_STAGES.map(stage => (
               <KanbanColumn
                 key={stage.key}
@@ -238,6 +238,7 @@ export default function PipelinePage() {
               />
             ))}
           </div>
+
         )}
       </div>
 

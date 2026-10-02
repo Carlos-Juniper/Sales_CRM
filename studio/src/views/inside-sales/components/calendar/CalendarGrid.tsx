@@ -92,6 +92,18 @@ export function CalendarGrid({ events, view, onDatesSet, onSlotSelect, onEventCl
       initialView={isMobile ? 'timeGridDay' : 'timeGridWeek'}
       views={{
         threeDay: { type: 'timeGrid', duration: { days: 3 } },
+        // On mobile, compress the day-column header to just the day number
+        timeGridDay: {
+          dayHeaderFormat: isMobile
+            ? { weekday: 'short', day: 'numeric' }
+            : { weekday: 'long', month: 'short', day: 'numeric' },
+        },
+        timeGridWeek: {
+          // On mobile 3-day shows the abbreviated weekday to save width
+          dayHeaderFormat: isMobile
+            ? { weekday: 'short', day: 'numeric' }
+            : { weekday: 'short', month: 'numeric', day: 'numeric' },
+        },
       }}
       headerToolbar={false}
       selectable
@@ -106,6 +118,8 @@ export function CalendarGrid({ events, view, onDatesSet, onSlotSelect, onEventCl
       nowIndicator
       slotMinTime="06:00"
       slotMaxTime="20:00"
+      // Use compact slot labels on mobile to save horizontal space
+      slotLabelFormat={isMobile ? { hour: 'numeric', omitZeroMinute: true } : undefined}
       height="100%"
     />
   )

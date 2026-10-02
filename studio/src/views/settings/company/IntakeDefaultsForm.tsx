@@ -104,7 +104,7 @@ function Fields({ settings }: { settings: CompanySettings }) {
             id="intake-priority"
             value={priority}
             onChange={(e) => setPriority(e.target.value)}
-            className="w-40 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
+            className="w-full max-w-[10rem] rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
           >
             {PRIORITIES.map((p) => (
               <option key={p} value={p}>

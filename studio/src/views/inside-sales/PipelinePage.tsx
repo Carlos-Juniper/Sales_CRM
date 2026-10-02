@@ -9,6 +9,9 @@ import { LeadDetailPanel } from './components/LeadDetailPanel'
 import { useLeads } from '@/hooks/useLeads'
 import { AddLeadModal } from './components/AddLeadModal'
 import { useUIStore } from '@/store/uiStore'
+import { useAuthStore } from '@/store/authStore'
+import { isTeamManager } from '@/lib/roles'
+import { TeamToggle } from '@/components/shared/TeamToggle'
 import { formatCurrency, formatRelativeTime, cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { PIPELINE_STAGES, type PipelineStage } from '@/lib/pipelineStages'
@@ -132,7 +135,13 @@ function SearchBar({ value, onChange }: SearchBarProps) {
 
 // --- Page ---
 export default function PipelinePage() {
-  const { data, isLoading } = useLeads()
+  const user = useAuthStore((s) => s.user)
+  const canSeeTeam = isTeamManager(user?.role)
+  // showAll=false → mine=true (only caller's leads). Default false so managers
+  // start on their own view; toggle ON to see the full team's pipeline.
+  const [showAll, setShowAll] = useState(false)
+
+  const { data, isLoading } = useLeads({ mine: !showAll })
   const selectedLeadId = useUIStore((s) => s.selectedLeadId)
   const selectLead = useUIStore((s) => s.selectLead)
   const [searchQuery, setSearchQuery] = useState('')
@@ -196,10 +205,15 @@ export default function PipelinePage() {
           title="Inbound Pipeline"
           description="Leads move between stages automatically as estimates progress."
           actions={
-            <Button size="sm" onClick={() => setAddLeadOpen(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              Add lead
-            </Button>
+            <div className="flex items-center gap-3">
+              {canSeeTeam && (
+                <TeamToggle showAll={showAll} onToggle={setShowAll} />
+              )}
+              <Button size="sm" onClick={() => setAddLeadOpen(true)}>
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add lead
+              </Button>
+            </div>
           }
         />
 

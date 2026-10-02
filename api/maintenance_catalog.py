@@ -150,6 +150,25 @@ async def seed_standard_maintenance_services(
         )
 
 
+# (db_column, output_key, coerce_fn) for the three pricing fields on service kits.
+_RATE_FIELDS: tuple[tuple[str, str, type], ...] = (
+    ("production_rate", "productionRate", float),
+    ("unit_cost_cents", "unitCostCents", int),
+    ("target_gm", "targetGm", float),
+)
+
+
+def _absorb_rate_row(row: dict, result: dict) -> None:
+    """Merge non-None pricing fields from a DB row into result, skipping filled keys."""
+    for col, key, coerce in _RATE_FIELDS:
+        if key not in result and row.get(col) is not None:
+            result[key] = coerce(row[col])
+
+
+def _rate_complete(result: dict) -> bool:
+    return all(k in result for k in ("productionRate", "unitCostCents", "targetGm"))
+
+
 async def resolve_kit_rate(kit_id: str, aspire_branch_id: Optional[int]) -> dict:
     """Return the effective pricing fields for a service kit at a given branch.
 
@@ -158,73 +177,44 @@ async def resolve_kit_rate(kit_id: str, aspire_branch_id: Optional[int]) -> dict
       2. Newest service_kit_rates row WHERE service_kit_id=%s AND aspire_branch_id IS NULL
       3. service_kits baseline: production_rate, unit_cost_cents, target_gm
 
-    Returns {"productionRate": ..., "unitCostCents": ..., "targetGm": ...}.
-    Fields are merged per-field across steps — a branch row may override some
-    but not all fields, so the fallback applies per-field, not per-row.
-
-    FakeDb limitation: IS NULL in WHERE is not supported alongside other
-    conditions. Steps 1 and 2 are therefore issued as two separate queries.
+    Fields are merged per-field — a branch row may override some but not all,
+    so fallback applies per-field, not per-row.  Steps 1 and 2 are separate
+    queries because FakeDb does not support IS NULL alongside other conditions.
     """
     result: dict = {}
 
     # Step 1: branch-specific rate row.
     if aspire_branch_id is not None:
-        branch_rows = await query(
+        rows = await query(
             "SELECT production_rate, unit_cost_cents, target_gm"
             " FROM service_kit_rates"
             " WHERE service_kit_id = %s AND aspire_branch_id = %s"
             " ORDER BY effective_from DESC LIMIT 1",
             [kit_id, aspire_branch_id],
         )
-        if branch_rows:
-            r = branch_rows[0]
-            if r.get("production_rate") is not None:
-                result["productionRate"] = float(r["production_rate"])
-            if r.get("unit_cost_cents") is not None:
-                result["unitCostCents"] = int(r["unit_cost_cents"])
-            if r.get("target_gm") is not None:
-                result["targetGm"] = float(r["target_gm"])
+        if rows:
+            _absorb_rate_row(rows[0], result)
 
-    # Step 2: company-wide row (aspire_branch_id IS NULL).
-    # Issued as a separate query — FakeDb does not support IS NULL in a WHERE
-    # clause that also has other conditions; real MySQL handles both forms fine.
-    needs_any = not result or any(
-        k not in result for k in ("productionRate", "unitCostCents", "targetGm")
-    )
-    if needs_any:
-        company_rows = await query(
+    # Step 2: company-wide row (aspire_branch_id IS NULL — separate query for FakeDb).
+    if not _rate_complete(result):
+        rows = await query(
             "SELECT production_rate, unit_cost_cents, target_gm"
             " FROM service_kit_rates"
             " WHERE service_kit_id = %s AND aspire_branch_id IS NULL"
             " ORDER BY effective_from DESC LIMIT 1",
             [kit_id],
         )
-        if company_rows:
-            r = company_rows[0]
-            if "productionRate" not in result and r.get("production_rate") is not None:
-                result["productionRate"] = float(r["production_rate"])
-            if "unitCostCents" not in result and r.get("unit_cost_cents") is not None:
-                result["unitCostCents"] = int(r["unit_cost_cents"])
-            if "targetGm" not in result and r.get("target_gm") is not None:
-                result["targetGm"] = float(r["target_gm"])
+        if rows:
+            _absorb_rate_row(rows[0], result)
 
     # Step 3: service_kits baseline.
-    needs_any = not result or any(
-        k not in result for k in ("productionRate", "unitCostCents", "targetGm")
-    )
-    if needs_any:
-        kit_rows = await query(
+    if not _rate_complete(result):
+        rows = await query(
             "SELECT production_rate, unit_cost_cents, target_gm"
             " FROM service_kits WHERE id = %s",
             [kit_id],
         )
-        if kit_rows:
-            r = kit_rows[0]
-            if "productionRate" not in result and r.get("production_rate") is not None:
-                result["productionRate"] = float(r["production_rate"])
-            if "unitCostCents" not in result and r.get("unit_cost_cents") is not None:
-                result["unitCostCents"] = int(r["unit_cost_cents"])
-            if "targetGm" not in result and r.get("target_gm") is not None:
-                result["targetGm"] = float(r["target_gm"])
+        if rows:
+            _absorb_rate_row(rows[0], result)
 
     return result

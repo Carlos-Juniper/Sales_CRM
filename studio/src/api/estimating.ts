@@ -237,6 +237,13 @@ export interface ListEstimatesParams {
    * Estimating Tracker to show e.g. only in_progress rows.
    */
   trackingStatus?: string
+  /**
+   * When true, limits results to estimates assigned to the caller.
+   * Estimating managers bypass this filter server-side and still see all
+   * estimates in their branch scope — the flag is meaningful for regular
+   * estimators only.
+   */
+  mine?: boolean
 }
 
 /** Runtime guard backing the compile-time omission of `estimateType`. */
@@ -264,6 +271,7 @@ export const estimatingApi = {
     if (params?.leadId) qs.set('leadId', params.leadId)
     // §8: Maintenance Tracker trackingStatus filter
     if (params?.trackingStatus) qs.set('trackingStatus', params.trackingStatus)
+    if (params?.mine) qs.set('mine', 'true')
     const q = qs.toString()
     return apiClient.get<Estimate[]>(`/estimating/estimates${q ? `?${q}` : ''}`)
   },

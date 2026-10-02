@@ -27,11 +27,9 @@ TYPES_TS = STUDIO / "types" / "index.ts"
 
 # Handoff 54 §5 roles whose studio/src change is in flight. Delete each entry
 # when the frontend PR that adds it merges (the test below enforces this).
-FRONTEND_PENDING_ROLES = frozenset({
-    "maintenance_estimating_manager",
-    "install_estimating_manager",
-    "sales_manager",
-})
+# All three manager roles landed in types/index.ts and roles.ts alongside
+# the TeamToggle toggle (see studio/src/components/shared/TeamToggle.tsx).
+FRONTEND_PENDING_ROLES: frozenset[str] = frozenset()
 
 # roles.ts constant -> the api/authz.py set it mirrors.
 MIRRORED_SETS = {

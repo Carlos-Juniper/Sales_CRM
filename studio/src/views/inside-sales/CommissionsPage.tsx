@@ -84,7 +84,7 @@ export default function CommissionsPage() {
         <div className="p-5 space-y-5">
 
           {/* Header with rep selector + period dropdown */}
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <h1 className="text-2xl font-semibold text-[hsl(var(--fg))]">
                 {canViewRepSelector && selectedRep
@@ -96,7 +96,7 @@ export default function CommissionsPage() {
               </p>
             </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
               {canViewRepSelector && reps && reps.length > 0 && (
                 <Select value={selectedUserId} onValueChange={setSelectedUserId}>
                   <SelectTrigger className="w-[200px]">

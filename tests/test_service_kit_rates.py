@@ -7,6 +7,8 @@ Covers:
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -112,32 +114,36 @@ class TestResolveKitRate:
 
     @pytest.mark.asyncio
     async def test_resolve_kit_rate_company_wide_fallback(self):
-        """No branch row -> falls back to company-wide (aspire_branch_id IS NULL) row."""
-        from api.maintenance_catalog import resolve_kit_rate
+        """No branch row -> falls back to company-wide (aspire_branch_id IS NULL) row.
 
-        table_data = {
-            "service_kit_rates": [
-                {
-                    "id": "rate-002",
-                    "service_kit_id": "kit-maint-100",
-                    "aspire_branch_id": None,
-                    "production_rate": 1.2,
-                    "unit_cost_cents": 4000,
-                    "target_gm": 0.40,
-                    "effective_from": "2026-01-01 00:00:00",
-                },
-            ],
-            "service_kits": [
-                {
-                    "id": "kit-maint-100",
-                    "production_rate": 1.0,
-                    "unit_cost_cents": 3000,
-                    "target_gm": 0.35,
-                },
-            ],
+        Uses FakeDb so the real IS NULL query shape in resolve_kit_rate Step 2
+        (WHERE service_kit_id = %s AND aspire_branch_id IS NULL) is exercised
+        against the same interpreter the rest of the suite uses.
+        """
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from conftest import FakeDb
+        from api.maintenance_catalog import resolve_kit_rate
+        from unittest.mock import AsyncMock
+
+        fake = FakeDb()
+        # Seed a company-wide rate row (aspire_branch_id=None) — no branch row.
+        fake.tables["service_kit_rates"]["rate-002"] = {
+            "id": "rate-002",
+            "service_kit_id": "kit-maint-100",
+            "aspire_branch_id": None,
+            "production_rate": 1.2,
+            "unit_cost_cents": 4000,
+            "target_gm": 0.40,
+            "effective_from": "2026-01-01 00:00:00",
         }
-        q = _fake_query(table_data)
-        with patch("api.maintenance_catalog.query", new=q):
+        fake.tables["service_kits"]["kit-maint-100"] = {
+            "id": "kit-maint-100",
+            "production_rate": 1.0,
+            "unit_cost_cents": 3000,
+            "target_gm": 0.35,
+        }
+        with patch("api.maintenance_catalog.query", new=AsyncMock(side_effect=fake.query)):
             result = await resolve_kit_rate("kit-maint-100", 99)
 
         assert result["productionRate"] == 1.2

@@ -43,6 +43,7 @@ from api.catalog_links import (prepare_component, validate_estimate_tree, valida
 from api.install_sections import plan_install_create_sections
 from api.maintenance_catalog import seed_standard_maintenance_services  # §2
 from api.maintenance_pricing import _live_branch_crew_rate, annotate_maintenance_sections, apply_maintenance_crew_prices
+import api.estimating_assign as _estimating_assign_mod  # Handoff 54 §6: assign endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -592,18 +593,27 @@ def _estimate_out(
         # NULL when aspire_branch_id is not set or matches no branches row.
         "aspireBranchId": r.get("aspire_branch_id"),
         "branchCity": r.get("branch_city"),
-        # Crew-rate snapshot (cents/hr) at submission (Slice 7/11b §2.3).
-        # NULL for in_progress / pre-migration rows; never an invented fallback.
+        # Frozen crew-rate snapshot (cents/hr) captured at submission (Slice 7);
+        # NULL for in_progress / pre-migration rows. Slice 11b: the Margin
+        # Analysis panel prices maintenance margin off THIS when present, so a
+        # later branch-rate change never moves a frozen estimate's margin. Never
+        # substitutes an invented number — null flows straight through (§2.3).
         "crewRateCentsPerHour": r.get("crew_rate_cents_per_hour"),
-        # Submitted-at rate, preserved on hand-back (§2.6). Non-null when handed
-        # back after a freeze; frontend shows "$X → $Y since last submitted".
+        # Submitted-at crew rate preserved when clearing on hand-back (§2.6).
+        # Non-null when an estimate was handed back after a freeze; null for fresh
+        # in_progress estimates and pre-migration rows. The frontend uses this to
+        # show "Crew rate changed $X → $Y since this was submitted".
         "priorCrewRateCentsPerHour": r.get("prior_crew_rate_cents_per_hour"),
         "customerType": r["customer_type"],
-        # Split-contract budgets. Null = unknown (distinct from zero).
+        # Split-contract budgets in dollars. Null is unknown (the rep did not
+        # have the number), distinct from a known zero. Single-structure
+        # contracts and pre-migration rows come back null.
         "homesBudget": _budget_out(r.get("homes_budget")),
         "commonAreaBudget": _budget_out(r.get("common_area_budget")),
         "acreage": _num(r["acreage"]),
-        # Yearly occurrence counts (migration 064). Null when omitted or pre-migration.
+        # Yearly maintenance visit counts (migration 064). Null when the rep
+        # left the field blank, on install estimates, and on rows created
+        # before the columns existed (.get keeps those rows working).
         "mowingOccurrences": _int_or_none(r.get("mowing_occurrences")),
         "pruningOccurrences": _int_or_none(r.get("pruning_occurrences")),
         "turfFertOccurrences": _int_or_none(r.get("turf_fert_occurrences")),
@@ -619,7 +629,9 @@ def _estimate_out(
         "winProbability": _num(r["win_probability"]),
         "siteWalkDate": _iso(r["site_walk_date"]),
         "dueBackDate": _iso(r["due_back_date"]),
-        # Computed: true when dueBackDate is inside the SLA window (rush).
+        # Computed, not stored. True when dueBackDate (the intake needed-back
+        # date) is inside the SLA window. The queue sorts by that date, so a
+        # rush row already surfaces ahead of a longer lead time.
         "isRush": _is_rush(r.get("due_back_date"), sla_window_days),
         "anticipatedCloseDate": _iso(r["anticipated_close_date"]),
         "serviceStartDate": _iso(r["service_start_date"]),
@@ -632,17 +644,22 @@ def _estimate_out(
         "notes": r.get("notes"),
         # Aspire integration fields (.get keeps pre-migration rows working).
         "propertyId": r.get("property_id"),
-        # Logical ref to the originating lead; drives lead→estimate write-back.
+        # Pipeline kanban redesign — logical ref to the originating lead; drives
+        # the lead→estimate status write-back. (.get keeps pre-migration rows working.)
         "leadId": r.get("lead_id"),
         "aspireOpportunityId": r.get("aspire_opportunity_id"),
         "aspireSyncStatus": r.get("aspire_sync_status"),
-        # Install RFI status (capture/display only; nothing gates on it).
+        # Install RFI status, tracked first-class. Capture and
+        # display only: nothing gates approval on it. (.get keeps pre-migration
+        # rows working.)
         "rfiStatus": r.get("rfi_status"),
-        # Takeoff metadata (turf/curb). Estimator-entered; also written by Beam
-        # after unit conversion (sq ft→acres, ft→miles).
+        # Takeoff metadata (turf/curb). Estimator-entered, and also written by
+        # Beam ingest after unit conversion — Beam returns sq ft and ft, these
+        # columns are acres and miles. (.get keeps pre-migration rows working.)
         "turfAreaAcres": _num(r.get("turf_area_acres")),
         "curbMiles": _num(r.get("curb_miles")),
-        # Non-null when Attentive re-delivered measurements after pricing.
+        # Set when Attentive redelivered measurements after this estimate was
+        # priced. Non-null means the price on screen may be stale.
         "takeoffChangedAt": _iso(r["takeoff_changed_at"]) if r.get("takeoff_changed_at") else None,
         # Maintenance tracker fields (migration 078). .get keeps pre-migration rows working.
         "trackingStatus": r.get("tracking_status"),
@@ -3096,7 +3113,13 @@ def register(app, require_auth) -> None:
         attachment_id: str,
         _user: dict = Depends(require_auth),
     ):
-        """Soft-delete an attachment and remove its GCS object (§4)."""
+        """Soft-delete an attachment and remove its GCS object (§4).
+
+        Per api/attachments.py::delete's docstring, the row is soft-deleted
+        (status='deleted') to preserve the corpus, and the stored object is
+        deleted from GCS. A GCS failure (object already gone) does not fail the
+        soft-delete — the row must still be retired.
+        """
         rows = await query(
             _ATTACHMENT_BY_ID_SQL,
             [attachment_id, estimate_id, estimate_id],
@@ -3449,45 +3472,8 @@ def register(app, require_auth) -> None:
         )
         return {"projectId": project_id, "scopeId": scope_id, "statusCode": code}
 
-    # ── Estimate assignment (Handoff 54 §6) ──────────────────────────────────
-
-    @app.post("/api/estimating/estimates/{estimate_id}/assign", status_code=204)
-    async def assign_estimate(
-        estimate_id: str, body: dict, _user: dict = Depends(require_auth)
-    ):
-        """Assign LS/IRR estimator slots. Managers only; branch-scoped."""
-        if not authz.is_estimating_manager(_user.get("role")):
-            raise HTTPException(status_code=403, detail="Only estimating managers may assign")
-        rows = await query(
-            "SELECT id, aspire_branch_id, assigned_ls_estimator, assigned_irr_estimator"
-            " FROM estimates WHERE id = %s",
-            [estimate_id],
-        )
-        if not rows:
-            raise HTTPException(status_code=404, detail="Estimate not found")
-        est = rows[0]
-        scope = await authz.resolve_branch_scope(_user)
-        if scope.kind == "branch" and est.get("aspire_branch_id") not in scope.ids:
-            raise HTTPException(status_code=403, detail="Estimate is outside your branch scope")
-        note = body.get("note")
-        slots = [
-            ("lsEstimatorId", "assigned_ls_estimator", "ls"),
-            ("irrEstimatorId", "assigned_irr_estimator", "irr"),
-        ]
-        for body_key, col, role in slots:
-            new_val = body.get(body_key)
-            if new_val is None:
-                continue
-            old_val = est.get(col)
-            if new_val == old_val:
-                continue
-            await execute(f"UPDATE estimates SET {col} = %s WHERE id = %s", [new_val, estimate_id])
-            await execute(
-                "INSERT INTO estimate_assignments"
-                " (id, estimate_id, from_user_id, to_user_id, role, assigned_by, note)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                [str(uuid.uuid4()), estimate_id, old_val, new_val, role, _user["id"], note],
-            )
+    # ── Estimate assignment — registered from estimating_assign.py (Handoff 54 §6) ──
+    _estimating_assign_mod.register(app, require_auth)
 
     @app.get("/api/estimating/service-kits")
     async def list_service_kits(

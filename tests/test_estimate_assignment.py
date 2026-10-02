@@ -12,12 +12,13 @@ Tests:
     - Returns only estimates where the caller is assigned_ls_estimator or
       assigned_irr_estimator (post-query Python filter)
 
-All DB I/O is mocked via AsyncMock side-effects; no FakeDb needed here because
-the assignment endpoint does direct SELECT + UPDATE + INSERT, not going through
-the nested _load_estimate tree.
+The assign endpoint now lives in api.estimating_assign (extracted from
+api.estimating for the 3520-line cap). DB I/O is patched on that module.
+The transaction is stubbed to a no-op context manager so tests stay sync.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 from unittest.mock import AsyncMock, call, patch
 
@@ -87,11 +88,19 @@ def _est_row(**override) -> dict:
     return row
 
 
+# ── no-op transaction stub (assign endpoint wraps writes in transaction()) ────
+
+@contextlib.asynccontextmanager
+async def _noop_tx():
+    yield None
+
+
 # ── POST assign tests ─────────────────────────────────────────────────────────
 
 class TestAssignEndpoint:
-    @patch("api.estimating.execute", new_callable=AsyncMock)
-    @patch("api.estimating.query", new_callable=AsyncMock)
+    @patch("api.estimating_assign.transaction", new=_noop_tx)
+    @patch("api.estimating_assign.execute", new_callable=AsyncMock)
+    @patch("api.estimating_assign.query", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     def test_manager_can_assign_ls_estimator(
         self, mock_authz_q, mock_query, mock_exec, as_manager
@@ -133,8 +142,9 @@ class TestAssignEndpoint:
         # from_user_id is None because no prior assignee
         assert None in audit_params
 
-    @patch("api.estimating.execute", new_callable=AsyncMock)
-    @patch("api.estimating.query", new_callable=AsyncMock)
+    @patch("api.estimating_assign.transaction", new=_noop_tx)
+    @patch("api.estimating_assign.execute", new_callable=AsyncMock)
+    @patch("api.estimating_assign.query", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     def test_assign_creates_audit_row_with_from_user(
         self, mock_authz_q, mock_query, mock_exec, as_manager
@@ -159,8 +169,9 @@ class TestAssignEndpoint:
         assert old_ls in audit_params      # from_user_id is the old estimator
         assert _LS_USER_ID in audit_params  # to_user_id is the new one
 
-    @patch("api.estimating.execute", new_callable=AsyncMock)
-    @patch("api.estimating.query", new_callable=AsyncMock)
+    @patch("api.estimating_assign.transaction", new=_noop_tx)
+    @patch("api.estimating_assign.execute", new_callable=AsyncMock)
+    @patch("api.estimating_assign.query", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     def test_non_manager_gets_403(
         self, mock_authz_q, mock_query, mock_exec, as_estimator
@@ -174,8 +185,9 @@ class TestAssignEndpoint:
         # No DB writes should have happened
         mock_exec.assert_not_called()
 
-    @patch("api.estimating.execute", new_callable=AsyncMock)
-    @patch("api.estimating.query", new_callable=AsyncMock)
+    @patch("api.estimating_assign.transaction", new=_noop_tx)
+    @patch("api.estimating_assign.execute", new_callable=AsyncMock)
+    @patch("api.estimating_assign.query", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     def test_assign_out_of_scope_branch_gets_403(
         self, mock_authz_q, mock_query, mock_exec, as_manager
@@ -192,8 +204,9 @@ class TestAssignEndpoint:
         assert resp.status_code == 403
         mock_exec.assert_not_called()
 
-    @patch("api.estimating.execute", new_callable=AsyncMock)
-    @patch("api.estimating.query", new_callable=AsyncMock)
+    @patch("api.estimating_assign.transaction", new=_noop_tx)
+    @patch("api.estimating_assign.execute", new_callable=AsyncMock)
+    @patch("api.estimating_assign.query", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     def test_assign_noop_same_estimator(
         self, mock_authz_q, mock_query, mock_exec, as_manager
@@ -212,8 +225,9 @@ class TestAssignEndpoint:
         # Neither update nor audit insert should fire
         mock_exec.assert_not_called()
 
-    @patch("api.estimating.execute", new_callable=AsyncMock)
-    @patch("api.estimating.query", new_callable=AsyncMock)
+    @patch("api.estimating_assign.transaction", new=_noop_tx)
+    @patch("api.estimating_assign.execute", new_callable=AsyncMock)
+    @patch("api.estimating_assign.query", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     def test_assign_estimate_not_found_gets_404(
         self, mock_authz_q, mock_query, mock_exec, as_manager

@@ -238,10 +238,8 @@ export interface ListEstimatesParams {
    */
   trackingStatus?: string
   /**
-   * When true, limits results to estimates assigned to the caller.
-   * Estimating managers bypass this filter server-side and still see all
-   * estimates in their branch scope — the flag is meaningful for regular
-   * estimators only.
+   * When true, limits results to estimates where the caller is assigned as
+   * LS or IRR estimator. Uses a post-query OR filter server-side.
    */
   mine?: boolean
 }

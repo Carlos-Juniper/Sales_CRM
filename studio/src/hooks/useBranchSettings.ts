@@ -108,21 +108,25 @@ export function useUpdateBranchSettings(aspireBranchId: number | undefined) {
  * time. The hook invalidates branch-settings so the GET re-resolves the
  * effective rate (and updates the source badge) after each save.
  *
- * Send `productionRate: null` to clear a branch override and revert to the
- * inherited (company-wide or baseline) rate.
+ * Note: service_kit_rates is an append-only ledger — there is no way to delete
+ * a branch override row. The form only appends new rate rows on save.
  */
 export function useUpdateKitRate(
   aspireBranchId: number | undefined,
   kitId: string,
 ) {
   const queryClient = useQueryClient()
+  const toast = useUIStore((s) => s.toast)
+  const key = [BRANCH_SETTINGS_KEY, aspireBranchId]
   return useMutation({
     mutationFn: (body: KitRatePatchBody) =>
       settingsApi.patchKitRate(aspireBranchId!, kitId, body),
+    onError: () => {
+      toast('Could not save production rate', { variant: 'error' })
+      queryClient.invalidateQueries({ queryKey: key })
+    },
     onSettled: () => {
-      queryClient.invalidateQueries({
-        queryKey: [BRANCH_SETTINGS_KEY, aspireBranchId],
-      })
+      queryClient.invalidateQueries({ queryKey: key })
     },
   })
 }

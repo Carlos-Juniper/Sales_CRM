@@ -83,18 +83,25 @@ function EditableCell({
   field,
   type = 'text',
   onSaved,
+  format,
+  parse,
 }: {
   value: string | null | undefined
   estimateId: string
   field: string
   type?: 'text' | 'date' | 'number' | 'select'
   onSaved?: () => void
+  /** Transform stored value → display string (default: identity). */
+  format?: (v: string) => string
+  /** Transform typed string → value to PATCH (default: identity, or null on empty). */
+  parse?: (s: string) => unknown
 }) {
-  const [localVal, setLocalVal] = useState(value ?? '')
+  const displayValue = format ? (value != null && value !== '' ? format(value) : '') : (value ?? '')
+  const [localVal, setLocalVal] = useState(displayValue)
   const queryClient = useQueryClient()
 
   const { mutate } = useMutation({
-    mutationFn: (next: string | null) =>
+    mutationFn: (next: unknown) =>
       estimatingApi.update(estimateId, { [field]: next ?? null }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maintenance-tracker'] })
@@ -103,9 +110,14 @@ function EditableCell({
   })
 
   const handleBlur = useCallback(() => {
-    const next = localVal === '' ? null : localVal
-    mutate(next)
-  }, [localVal, mutate])
+    if (parse) {
+      const parsed = localVal === '' ? null : parse(localVal)
+      mutate(parsed)
+    } else {
+      const next = localVal === '' ? null : localVal
+      mutate(next)
+    }
+  }, [localVal, mutate, parse])
 
   if (type === 'select') {
     return (
@@ -325,13 +337,15 @@ export function MaintenanceTracker() {
                       {estimator || '—'}
                     </td>
 
-                    {/* Close % — editable */}
+                    {/* Close % — editable; stored as 0–1 fraction, displayed as 0–100 */}
                     <td className="px-2 py-1">
                       <EditableCell
-                        value={e.winProbability != null ? String(Math.round(e.winProbability * 100)) : ''}
+                        value={e.winProbability != null ? String(e.winProbability) : ''}
                         estimateId={e.id}
                         field="winProbability"
                         type="number"
+                        format={(v) => String(Math.round(Number(v) * 100))}
+                        parse={(s) => Number(s) / 100}
                       />
                     </td>
 

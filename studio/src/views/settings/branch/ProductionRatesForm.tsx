@@ -16,9 +16,6 @@ import { NumberField } from '../company/SlaForm'
  * mutating the global `service_kits.production_rate`. After each save the
  * branch-settings cache is invalidated so the source badge reflects the new
  * override state.
- *
- * A "Reset to inherited" button (shown only when source='override') sends
- * `{ productionRate: null }` to clear the branch override row.
  */
 export function ProductionRatesForm({
   aspireBranchId,
@@ -104,20 +101,6 @@ function KitRateRow({
     )
   }
 
-  function handleReset() {
-    setRowStatus('idle')
-    mutation.mutate(
-      { productionRate: null },
-      {
-        onSuccess: () => {
-          setDraft('')
-          setRowStatus('saved')
-        },
-        onError: () => setRowStatus('error'),
-      },
-    )
-  }
-
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-2">
@@ -156,17 +139,6 @@ function KitRateRow({
           step={0.0001}
           placeholder="—"
         />
-        {rate.source === 'override' && (
-          <button
-            type="button"
-            onClick={handleReset}
-            disabled={mutation.isPending}
-            className="shrink-0 text-[10px] font-medium text-amber-700 underline underline-offset-2 hover:text-amber-900 disabled:opacity-40"
-            title="Clear branch override and revert to company-wide rate"
-          >
-            Reset to default
-          </button>
-        )}
       </div>
       {!mutation.isPending && rowStatus === 'error' && (
         <p className="text-[10px] text-red-600">Save failed — try again</p>

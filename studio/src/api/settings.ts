@@ -58,7 +58,8 @@ export interface BranchSettingsPatch {
 /**
  * Per-branch kit-rate update body for
  * PATCH /api/settings/branch/{aspireBranchId}/kit-rates/{kitId}.
- * Send null productionRate to clear the branch override (revert to inherited).
+ * The backend appends an append-only row to service_kit_rates — there is no
+ * delete/revert path; omit productionRate to leave it unchanged.
  */
 export interface KitRatePatchBody {
   productionRate?: number | null
@@ -203,7 +204,6 @@ export const settingsApi = {
    * PATCH /api/settings/branch/{aspireBranchId}/kit-rates/{kitId}
    * Returns 204 No Content (void). A no-op guard server-side skips the INSERT
    * when all submitted values already match the resolved effective rate.
-   * Send `productionRate: null` to clear a branch override and revert to inherited.
    */
   patchKitRate: (
     aspireBranchId: number,

@@ -150,9 +150,8 @@ export function EstimateQueue({
   const user = useAuthStore((s) => s.user)
 
   const canSeeTeam = isTeamManager(user?.role)
-  // showAll defaults to false → mine=true for regular estimators.
-  // Estimating managers bypass the mine filter server-side, so toggling
-  // showAll controls whether a manager sees all team work or just their own.
+  // showAll defaults to false → mine=true. Team managers toggle showAll to
+  // see all in-scope estimates vs. only their own assigned work.
   const [showAll, setShowAll] = useState(false)
 
   // Branch scope is applied server-side from the session — no branch param.

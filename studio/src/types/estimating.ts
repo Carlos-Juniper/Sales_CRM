@@ -265,6 +265,10 @@ export interface EstimateBase {
    * diff to accept — Beam never silently overwrites a priced estimate.
    */
   takeoffChangedAt?: string | null
+  /** Maintenance tracker status (§8, migration 078). Null until set. */
+  trackingStatus: string | null
+  /** Free-text manager note for the Maintenance Tracker (§8). */
+  trackerComment: string | null
   sections: EstimateSection[]
   createdAt: string
   updatedAt: string

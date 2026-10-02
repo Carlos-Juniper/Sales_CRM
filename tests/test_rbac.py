@@ -388,7 +388,9 @@ class TestLineItemEditMutations:
         }
         mock_query.side_effect = [
             [{"id": "est-1", "estimate_type": "maintenance"}],
-            [{"c": 0}],
+            [{"c": 0}],           # sort_order: count existing sections
+            [{"c": 0}],           # §2 seeder guard: section_services count (empty → seed)
+            [],                   # §2 seeder: service_categories (none → early return)
             [],  # itb_projects lookup (recompute) -- no linked project, no-op
             [section_row],
             [],

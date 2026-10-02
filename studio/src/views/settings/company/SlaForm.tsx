@@ -86,17 +86,21 @@ export function NumberField({
   label,
   value,
   onChange,
+  onBlur,
   min,
   max,
   step,
+  placeholder,
 }: {
   id: string
   label: string
   value: string
   onChange: (v: string) => void
+  onBlur?: () => void
   min?: number
   max?: number
   step?: number
+  placeholder?: string
 }) {
   return (
     <div>
@@ -113,7 +117,9 @@ export function NumberField({
         min={min}
         max={max}
         step={step}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         className="w-40 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
       />
     </div>

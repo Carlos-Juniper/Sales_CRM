@@ -1,8 +1,9 @@
 """Service catalog (Handoff 55 §1, migration 073).
 
 GET /api/estimating/service-catalog?estimateType= returns the level-1
-service_categories, their level-2 services, and each service's
-service_default_items template. Lives outside api/estimating.py, which has a
+service_categories, their level-2 services, each service's
+service_default_items template and (Handoff 54 §1) the service_kits that
+price it through service_kit_links. Lives outside api/estimating.py, which has a
 size guard (tests/test_maintenance_crew_rate.py).
 
 validate_service_category is the estimate-section check api/estimating.py runs
@@ -61,8 +62,19 @@ def _service_category_out(r: dict, services: list[dict]) -> dict:
     }
 
 
-def _catalog_service_out(r: dict, default_items: list[dict]) -> dict:
-    """One services row (migration 073) with its default items nested."""
+def _catalog_service_out(
+    r: dict, default_items: list[dict], kits: Optional[list[dict]] = None
+) -> dict:
+    """One services row (migration 073) with its default items and kits nested.
+
+    kits (Handoff 54 §1) are the service_kits rows linked through
+    service_kit_links, in link sort order. Maintenance prices a service through
+    its kits (D8); install links none (Handoff 55 D1), so install's list is
+    empty. occurrenceSource is migration 075's services.occurrence_source:
+    the migration-064 estimates count that seeds the service's occurrences.
+    ``kits`` is always a list ([] when none); ``pricingKitId`` names the
+    primary kit explicitly so clients need not rely on order.
+    """
     return {
         "id": r["id"],
         "serviceCategoryId": r["service_category_id"],
@@ -70,9 +82,43 @@ def _catalog_service_out(r: dict, default_items: list[dict]) -> dict:
         "displayName": r["display_name"],
         "sortOrder": r["sort_order"],
         "defaultOccurrences": _int_or_none(r.get("default_occurrences")),
+        "occurrenceSource": r.get("occurrence_source"),
         "aspireServiceId": _int_or_none(r.get("aspire_service_id")),
         "active": bool(r["active"]),
         "defaultItems": default_items,
+        "kits": kits if kits is not None else [],
+        # The kit a maintenance line prices from (== kits[0]); null without kits.
+        "pricingKitId": kits[0]["id"] if kits else None,
+    }
+
+
+def _linked_kit_out(r: dict) -> dict:
+    """One service_kits row as linked to a service (Handoff 54 §1).
+
+    The same keys as GET /api/estimating/service-kits (studio ServiceKit type)
+    plus the link's basis and sortOrder, and ``name``/``unit`` aliases of
+    description/uom for the maintenance line adapter. productionRate is null
+    when the Aspire baseline has no rate: the UI renders "—" and the save
+    guard rejects the line; it is never defaulted. ``isPrimary`` is set by
+    the caller on the first kit (the one a maintenance line prices from).
+    """
+    return {
+        "id": r["id"],
+        "name": r["description"],
+        "description": r["description"],
+        "unit": r["uom"],
+        "uom": r["uom"],
+        "unitCostCents": int(r["unit_cost_cents"]),
+        "unitSellCents": int(r["unit_sell_cents"]),
+        "targetGm": _num(r["target_gm"]),
+        "kitType": r["kit_type"],
+        "productionRate": _num(r.get("production_rate")),
+        "aspireBranchId": r.get("aspire_branch_id"),
+        "active": bool(r["active"]),
+        "serviceType": r["service_type"],
+        "basis": r.get("basis"),
+        "sortOrder": int(r.get("link_sort_order") or 0),
+        "isPrimary": False,
     }
 
 
@@ -141,11 +187,14 @@ def register(app, require_auth) -> None:
         estimate_type: str = Query(..., alias="estimateType"),
         _user: dict = Depends(require_auth),
     ) -> list:
-        """Active service categories -> services -> default items (Handoff 55 §1).
+        """Active service categories -> services -> default items + kits.
 
-        Three queries, no N+1: categories, their active services, and those
+        Four queries, no N+1: categories, their active services, those
         services' default items with the current material price joined for
-        cost resolution. Inactive categories and services are omitted.
+        cost resolution (Handoff 55 §1), and their linked kits (Handoff 54
+        §1). Inactive categories and services are omitted; a linked kit is
+        returned with its active flag whatever it is, so a retired kit still
+        shows on the service it prices.
         """
         authz.require_estimator(_user)
         if estimate_type not in ESTIMATE_TYPES:
@@ -180,12 +229,31 @@ def register(app, require_auth) -> None:
                      ORDER BY d.sort_order, d.id""",
                 svc_ids,
             )
+        kit_rows: list[dict] = []
+        if svc_rows:
+            kit_rows = await query(
+                f"""SELECT k.*, l.service_id, l.basis, l.sort_order AS link_sort_order
+                      FROM service_kit_links l
+                      JOIN service_kits k ON k.id = l.service_kit_id
+                     WHERE l.service_id IN ({', '.join(['%s'] * len(svc_ids))})
+                     ORDER BY l.service_id, k.active DESC, l.sort_order, k.id""",
+                svc_ids,
+            )
+        kits_by_service: dict[str, list[dict]] = {}
+        for kr in kit_rows:
+            kits_by_service.setdefault(kr["service_id"], []).append(_linked_kit_out(kr))
+        # kits[0] is the primary/pricing kit: active first, then the lowest
+        # link sort_order (the pull script gives the most-used kit 10).
+        for kits in kits_by_service.values():
+            kits[0]["isPrimary"] = True
         items_by_service: dict[str, list[dict]] = {}
         for it in item_rows:
             items_by_service.setdefault(it["service_id"], []).append(_default_item_out(it))
         services_by_cat: dict[str, list[dict]] = {}
         for sv in svc_rows:
             services_by_cat.setdefault(sv["service_category_id"], []).append(
-                _catalog_service_out(sv, items_by_service.get(sv["id"], []))
+                _catalog_service_out(
+                    sv, items_by_service.get(sv["id"], []), kits_by_service.get(sv["id"], [])
+                )
             )
         return [_service_category_out(c, services_by_cat.get(c["id"], [])) for c in cat_rows]

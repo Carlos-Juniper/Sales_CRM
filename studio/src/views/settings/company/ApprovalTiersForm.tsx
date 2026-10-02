@@ -100,8 +100,8 @@ function TierRow({ tiers }: { tiers: ApprovalTier[] }) {
   return (
     <form onSubmit={onSubmit} className="rounded-md border border-[var(--border)] p-3">
       <p className="text-sm font-medium text-[var(--fg)]">{label}</p>
-      <div className="mt-2 flex items-end gap-3">
-        <div>
+      <div className="mt-2 flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[8rem]">
           <label
             htmlFor={inputId}
             className="block text-xs font-medium text-[var(--fg)] opacity-70 mb-1"
@@ -116,7 +116,7 @@ function TierRow({ tiers }: { tiers: ApprovalTier[] }) {
             value={ceiling}
             placeholder={representative.maxValueCents === null ? 'No ceiling' : undefined}
             onChange={(e) => setCeiling(e.target.value)}
-            className="w-40 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
+            className="w-full max-w-[10rem] rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
           />
         </div>
         <SaveButton pending={update.isPending}>Save {label}</SaveButton>

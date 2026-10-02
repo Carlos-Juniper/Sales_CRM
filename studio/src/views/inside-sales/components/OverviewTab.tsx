@@ -23,7 +23,7 @@ export function OverviewTab({ lead }: OverviewTabProps) {
   }
 
   return (
-    <div className="px-6 py-5 space-y-6">
+    <div className="px-6 py-5 space-y-6 max-md:px-4 max-md:py-4">
       {/* Contact */}
       <div>
         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Contact</p>

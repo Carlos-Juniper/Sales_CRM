@@ -8,7 +8,7 @@ interface CalendarTabProps {
 
 export function CalendarTab({ lead }: CalendarTabProps) {
   return (
-    <div className="px-6 py-5 space-y-5">
+    <div className="px-6 py-5 space-y-5 max-md:px-4 max-md:py-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-700">Upcoming meetings</h3>
         <MeetingScheduler lead={lead} />

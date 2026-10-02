@@ -1,5 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { NavLink, useNavigate, useParams } from 'react-router-dom'
+import { ChevronLeft } from 'lucide-react'
 import { useRole } from '@/hooks/useRole'
 import { useBranchList } from '@/hooks/useBranchList'
 import { cn } from '@/lib/utils'
@@ -33,6 +34,11 @@ export function SettingsPage() {
   }>()
   const { canAccess, isAdmin } = useRole()
   const { data: branches } = useBranchList()
+
+  // Mobile: track whether the user has drilled into a section.
+  // On desktop both panes are always visible; on mobile we show the nav list
+  // until the user taps a section, then slide to the content pane.
+  const [mobileShowContent, setMobileShowContent] = useState(false)
 
   // Permission-filter the groups: Company is admin-only; Branch is BM/RD (admin
   // passes via super-role); Mine is any authed user.
@@ -73,6 +79,8 @@ export function SettingsPage() {
     } else {
       navigate(`/settings/${slug}`)
     }
+    // On mobile, drill into the content pane when a section is selected.
+    setMobileShowContent(true)
   }
 
   function onBranchChange(nextId: number) {
@@ -80,9 +88,15 @@ export function SettingsPage() {
   }
 
   return (
-    <div data-testid="settings-shell" className="flex h-full">
-      {/* Section nav */}
-      <nav className="w-56 flex-shrink-0 border-r border-[var(--border)] overflow-y-auto p-3 space-y-4">
+    <div data-testid="settings-shell" className="flex h-full max-md:flex-col">
+      {/* Section nav — hidden on mobile once user drills into a section */}
+      <nav
+        className={cn(
+          'w-56 flex-shrink-0 border-r border-[var(--border)] overflow-y-auto p-3 space-y-4',
+          'max-md:w-full max-md:border-r-0 max-md:border-b',
+          mobileShowContent ? 'max-md:hidden' : '',
+        )}
+      >
         {visibleGroups.map((group) => (
           <SectionGroupNav
             key={group.id}
@@ -93,8 +107,25 @@ export function SettingsPage() {
         ))}
       </nav>
 
-      {/* Section content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      {/* Section content — hidden on mobile when nav is showing */}
+      <div
+        className={cn(
+          'flex-1 overflow-y-auto p-6',
+          'max-md:p-4',
+          !mobileShowContent ? 'max-md:hidden' : '',
+        )}
+      >
+        {/* Mobile back button */}
+        <button
+          type="button"
+          onClick={() => setMobileShowContent(false)}
+          className="hidden max-md:flex items-center gap-1 mb-4 text-sm text-[var(--fg)] opacity-60 hover:opacity-100"
+          aria-label="Back to settings menu"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          Settings
+        </button>
+
         {showBranchPicker && (
           <div className="mb-4">
             <label className="block text-xs font-medium text-[var(--fg)] opacity-70 mb-1">
@@ -104,7 +135,7 @@ export function SettingsPage() {
               data-testid="settings-branch-picker"
               value={selectedBranchId ?? ''}
               onChange={(e) => onBranchChange(Number(e.target.value))}
-              className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
+              className="w-full max-w-xs rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm"
             >
               {branchList.map((b) => (
                 <option key={b.aspireBranchId} value={b.aspireBranchId}>

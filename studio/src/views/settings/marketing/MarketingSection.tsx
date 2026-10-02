@@ -118,7 +118,7 @@ function RosterRepPicker({
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value || null)}
         disabled={isLoading}
-        className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm text-[var(--fg)]"
+        className="w-full max-w-xs rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-sm text-[var(--fg)]"
       >
         <option value="">Select a sales rep</option>
         {reps.map((rep) => (

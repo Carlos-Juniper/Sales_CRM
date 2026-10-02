@@ -58,7 +58,7 @@ export function SettingsFormShell({
   children: ReactNode
 }) {
   return (
-    <div data-testid={`settings-section-${slug}`} className="max-w-xl">
+    <div data-testid={`settings-section-${slug}`} className="max-w-xl w-full">
       <h2 className="text-sm font-semibold text-[var(--fg)]">{title}</h2>
       {description && (
         <p className="mt-1 mb-4 text-xs text-[var(--fg)] opacity-60">

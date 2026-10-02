@@ -20,7 +20,8 @@ export function HOATable({ rows, companies, onSelect }: HOATableProps) {
   }
 
   return (
-    <div className="border border-[hsl(var(--border))] rounded-xl overflow-hidden bg-[hsl(var(--card))]">
+    <>
+    <div className="border border-[hsl(var(--border))] rounded-xl overflow-hidden bg-[hsl(var(--card))] max-md:hidden">
       <table className="w-full border-collapse">
         <thead>
           <tr className="bg-[hsl(var(--muted))]">
@@ -96,5 +97,35 @@ export function HOATable({ rows, companies, onSelect }: HOATableProps) {
         </tbody>
       </table>
     </div>
+
+    {/* Mobile card list */}
+    <div className="hidden max-md:block space-y-2">
+      {rows.map((property) => {
+        const company = property.management_company_id
+          ? companyMap.get(property.management_company_id) ?? null
+          : null
+        return (
+          <button
+            key={property.id}
+            type="button"
+            onClick={() => onSelect(property)}
+            className="w-full text-left border border-[hsl(var(--border))] rounded-xl bg-[hsl(var(--card))] p-3 active:bg-[hsl(var(--muted))]/50 transition-colors"
+          >
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="text-sm font-semibold text-[hsl(var(--fg))] truncate">
+                {property.property_name}
+              </span>
+              <AccountStatusBadge status={property.status} />
+            </div>
+            <div className="flex items-center gap-3 text-xs text-[hsl(var(--muted-fg))]">
+              <span>{property.city}, {property.state}</span>
+              {property.acreage != null && <span>{property.acreage} ac</span>}
+              {company && <span className="truncate">{company.company_name}</span>}
+            </div>
+          </button>
+        )
+      })}
+    </div>
+    </>
   )
 }

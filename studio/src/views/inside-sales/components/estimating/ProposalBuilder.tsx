@@ -537,7 +537,7 @@ function ProposalFormStep({
             <legend className="mb-1.5 text-[11px] font-semibold text-[hsl(var(--fg))]">
               Include phases up to
             </legend>
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-4">
               {([30, 60, 90, 120] as const).map((days) => (
                 <label key={days} className="flex cursor-pointer items-center gap-1.5 text-[12px]">
                   <input
@@ -1049,16 +1049,16 @@ export function ProposalBuilder({
   return (
     <div className="proposal-generator flex flex-col gap-4 overflow-y-auto pb-6" data-testid="proposal-generator">
       {showHeader && (
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
             <h2 className="text-base font-semibold text-[hsl(var(--fg))]">
               {isEditing ? 'Edit proposal' : 'Generate proposal'}
             </h2>
-            <p className="mt-0.5 text-xs text-[hsl(var(--muted-fg))]">
+            <p className="mt-0.5 text-xs text-[hsl(var(--muted-fg))] truncate">
               {attachedLead?.property_name ?? 'Select a lead'}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-shrink-0">
             <StepIndicator />
             {onClose && (
               <button

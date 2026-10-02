@@ -50,9 +50,9 @@ export function AccountsToolbar({
   return (
     <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] flex-shrink-0">
       {/* Tab row */}
-      <div className="px-4 pt-2.5 pb-2 flex items-center gap-3 flex-wrap">
+      <div className="px-4 pt-2.5 pb-2 flex items-center gap-3 flex-wrap max-md:flex-nowrap max-md:px-3">
         {/* Tab switcher */}
-        <div className="inline-flex bg-[hsl(var(--muted))] rounded-lg p-0.5 gap-0.5">
+        <div className="inline-flex bg-[hsl(var(--muted))] rounded-lg p-0.5 gap-0.5 flex-shrink-0">
           {TABS.map(({ value, label }) => (
             <button
               key={value}
@@ -78,25 +78,25 @@ export function AccountsToolbar({
         </div>
 
         {/* Search */}
-        <div className="ml-auto">
+        <div className="ml-auto max-md:flex-1 max-md:ml-0">
           <input
             type="text"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={tab === 'hoa' ? 'Search properties...' : 'Search companies...'}
-            className="h-8 w-52 px-2.5 text-xs border border-[hsl(var(--border))] rounded-md bg-[hsl(var(--muted))] text-[hsl(var(--fg))] placeholder:text-[hsl(var(--muted-fg))] focus:outline-none focus:ring-1 focus:ring-[#2E7D52]/50 focus:bg-[hsl(var(--card))]"
+            className="h-8 w-52 px-2.5 text-xs border border-[hsl(var(--border))] rounded-md bg-[hsl(var(--muted))] text-[hsl(var(--fg))] placeholder:text-[hsl(var(--muted-fg))] focus:outline-none focus:ring-1 focus:ring-[#2E7D52]/50 focus:bg-[hsl(var(--card))] max-md:w-full"
           />
         </div>
 
         {/* Add button */}
-        <Button size="sm" onClick={onAdd}>
-          <Plus className="h-3.5 w-3.5 mr-1" />
-          {addLabel}
+        <Button size="sm" onClick={onAdd} className="max-md:px-2.5">
+          <Plus className="h-3.5 w-3.5 mr-1 max-md:mr-0" />
+          <span className="max-md:hidden">{addLabel}</span>
         </Button>
       </div>
 
       {/* Filter row */}
-      <div className="px-4 pb-2.5 flex items-center gap-2 flex-wrap">
+      <div className="px-4 pb-2.5 flex items-center gap-2 flex-wrap max-md:px-3 max-md:overflow-x-auto max-md:flex-nowrap">
         <span className="text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--muted-fg))] mr-1">
           Filter
         </span>

@@ -12,12 +12,14 @@ interface ToastItem {
 interface UIState {
   theme: 'light' | 'dark' | 'system'
   sidebarCollapsed: boolean
+  mobileNavOpen: boolean
   selectedLeadId: string | null
   toasts: ToastItem[]
 
   setTheme: (t: 'light' | 'dark' | 'system') => void
   toggleSidebar: () => void
   setSidebarCollapsed: (v: boolean) => void
+  setMobileNavOpen: (v: boolean) => void
   selectLead: (id: string | null) => void
   addToast: (toast: Omit<ToastItem, 'id' | 'open'>) => void
   dismissToast: (id: string) => void
@@ -27,12 +29,14 @@ interface UIState {
 export const useUIStore = create<UIState>()((set, get) => ({
   theme: 'system',
   sidebarCollapsed: false,
+  mobileNavOpen: false,
   selectedLeadId: null,
   toasts: [],
 
   setTheme: (theme) => set({ theme }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+  setMobileNavOpen: (v) => set({ mobileNavOpen: v }),
   selectLead: (selectedLeadId) => set({ selectedLeadId }),
 
   addToast: (toast) => {

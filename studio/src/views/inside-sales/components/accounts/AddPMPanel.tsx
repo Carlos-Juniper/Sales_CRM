@@ -249,7 +249,7 @@ export function AddPMPanel({ isOpen, onClose, onSave, initialValues, onUpdate, o
             Company
           </p>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 max-md:grid-cols-1">
             <div className="col-span-2">
               <TextField
                 label="Company name"
@@ -285,7 +285,7 @@ export function AddPMPanel({ isOpen, onClose, onSave, initialValues, onUpdate, o
             Mailing address
           </p>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 max-md:grid-cols-1">
             <div className="col-span-2">
               <TextField
                 label="Street address"
@@ -371,7 +371,7 @@ export function AddPMPanel({ isOpen, onClose, onSave, initialValues, onUpdate, o
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-2 gap-2 max-md:grid-cols-1">
                         <div className="col-span-2">
                           <TextField
                             label="Contact name"
@@ -453,7 +453,7 @@ export function AddPMPanel({ isOpen, onClose, onSave, initialValues, onUpdate, o
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-2 max-md:grid-cols-1">
                       <div className="col-span-2">
                         <TextField
                           label="Contact name"
@@ -508,7 +508,7 @@ export function AddPMPanel({ isOpen, onClose, onSave, initialValues, onUpdate, o
       </div>
 
       {/* Footer */}
-      <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2">
+      <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2 max-md:flex-wrap">
         <Button variant="ghost" size="sm" onClick={handleClose} type="button">
           Cancel
         </Button>

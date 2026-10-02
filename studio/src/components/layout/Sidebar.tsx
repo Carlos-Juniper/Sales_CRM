@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Inbox, FileText, GitBranch,
-  ChevronLeft, ChevronRight, LogOut, Leaf, Settings,
+  ChevronLeft, LogOut, Leaf, Settings,
   Map, Calculator, Building, Calendar, Globe, DollarSign, TrendingUp,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
@@ -70,14 +70,15 @@ function NavItemComp({ item, collapsed, overdueBadge }: { item: NavItem; collaps
   )
 }
 
-export function Sidebar() {
-  const { collapsed, toggle, user, logout } = {
-    collapsed: useUIStore((s) => s.sidebarCollapsed),
-    toggle: useUIStore((s) => s.toggleSidebar),
-    user: useAuthStore((s) => s.user),
-    logout: useAuthStore((s) => s.logout),
-  }
+export function Sidebar({ inDrawer = false }: { inDrawer?: boolean }) {
+  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
+  const toggle = useUIStore((s) => s.toggleSidebar)
+  const user = useAuthStore((s) => s.user)
+  const logout = useAuthStore((s) => s.logout)
   const { role, canAccess } = useRole()
+
+  // In drawer context, always render expanded regardless of desktop collapse state
+  const collapsed = inDrawer ? false : sidebarCollapsed
 
   const visibleItems = navItems.filter((item) => {
     if (!role) return false
@@ -86,34 +87,59 @@ export function Sidebar() {
 
   const user_ = user as User | null
 
+  const logoIcon = (
+    <div className="flex-shrink-0 h-7 w-7 rounded-lg bg-[#2E7D52] flex items-center justify-center">
+      <Leaf className="h-4 w-4 text-white" />
+    </div>
+  )
+
+  const logoText = (
+    <div className="min-w-0 flex-1">
+      <p className="text-xs font-semibold text-[var(--sidebar-fg)] truncate">Sales Studio</p>
+      <p className="text-[10px] text-[var(--sidebar-fg)] opacity-50 truncate">Juniper Landscaping</p>
+    </div>
+  )
+
   return (
     <aside
       className={cn(
         'flex flex-col h-full transition-all duration-200',
-        'bg-[var(--sidebar-bg)] border-r border-[var(--sidebar-border)]',
-        collapsed ? 'w-14' : 'w-56'
+        'bg-[var(--sidebar-bg)]',
+        inDrawer ? 'w-64' : cn('border-r border-[var(--sidebar-border)]', collapsed ? 'w-14' : 'w-56'),
       )}
     >
-      {/* Logo + Collapse toggle */}
-      <div className={cn('flex items-center gap-2 px-3 py-4 border-b border-[var(--sidebar-border)] flex-shrink-0', collapsed && 'justify-center')}>
-        <div className="flex-shrink-0 h-7 w-7 rounded-lg bg-[#2E7D52] flex items-center justify-center">
-          <Leaf className="h-4 w-4 text-white" />
+      {/* Logo + collapse control — three states */}
+      {inDrawer ? (
+        // Mobile drawer: logo + text, no toggle
+        <div className="flex items-center gap-2 px-3 py-4 border-b border-[var(--sidebar-border)] flex-shrink-0">
+          {logoIcon}
+          {logoText}
         </div>
-        {!collapsed && (
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-[var(--sidebar-fg)] truncate">Sales Studio</p>
-            <p className="text-[10px] text-[var(--sidebar-fg)] opacity-50 truncate">Juniper Landscaping</p>
-          </div>
-        )}
+      ) : collapsed ? (
+        // Desktop collapsed: centered logo, whole header is the expand button, no arrow
         <button
           type="button"
           onClick={toggle}
-          className="flex-shrink-0 p-1 rounded text-[var(--sidebar-fg)] opacity-60 hover:opacity-100 hover:bg-[var(--sidebar-hover-bg)] transition-colors cursor-pointer"
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="flex items-center justify-center px-3 py-4 border-b border-[var(--sidebar-border)] flex-shrink-0 w-full hover:bg-[var(--sidebar-hover-bg)] transition-colors"
+          aria-label="Expand sidebar"
         >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          {logoIcon}
         </button>
-      </div>
+      ) : (
+        // Desktop expanded: logo + text + collapse arrow
+        <div className="flex items-center gap-2 px-3 py-4 border-b border-[var(--sidebar-border)] flex-shrink-0">
+          {logoIcon}
+          {logoText}
+          <button
+            type="button"
+            onClick={toggle}
+            className="flex-shrink-0 p-1 rounded text-[var(--sidebar-fg)] opacity-60 hover:opacity-100 hover:bg-[var(--sidebar-hover-bg)] transition-colors cursor-pointer"
+            aria-label="Collapse sidebar"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">

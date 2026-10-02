@@ -14,11 +14,10 @@
 // Visual polish deferred — this is the functional stub.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
 import { estimatingApi } from '@/api/estimating'
-import type { Estimate } from '@/types/estimating'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
@@ -145,24 +144,6 @@ function EditableCell({
       onBlur={handleBlur}
       className="w-full rounded border border-transparent bg-transparent px-1 py-[2px] text-[11px] text-[hsl(var(--fg))] hover:border-[hsl(var(--border))] focus:border-[hsl(var(--border))] focus:outline-none"
     />
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Tracking status chip (display only — row has its own EditableCell)
-// ---------------------------------------------------------------------------
-
-function StatusChip({ value }: { value: string | null }) {
-  if (!value) return <span className="text-[hsl(var(--muted-fg))]">—</span>
-  const def = TRACKING_STATUS_MAP[value]
-  if (!def) return <span className="text-[11px]">{value}</span>
-  return (
-    <span
-      className="inline-flex items-center rounded px-1.5 py-[2px] text-[10px] font-semibold"
-      style={{ backgroundColor: def.bg, color: def.text }}
-    >
-      {def.label}
-    </span>
   )
 }
 

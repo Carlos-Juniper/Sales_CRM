@@ -403,6 +403,8 @@ const ESTIMATE: Estimate = {
   aspireNumber: null,
   aspireOpportunityId: null,
   aspireSyncStatus: 'synced',
+  trackingStatus: null,
+  trackerComment: null,
   sections: [],
   notes: null,
   createdAt: '2026-08-01T10:00:00Z',

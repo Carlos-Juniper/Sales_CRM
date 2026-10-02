@@ -47,6 +47,10 @@ export type CreateEstimatePayload = DistributiveOmit<
   | 'updatedAt'
   | 'aspireOpportunityId'
   | 'aspireSyncStatus'
+  // Maintenance Tracker fields (§8). Set post-creation by a manager via PATCH,
+  // never sent at intake — the server defaults them to NULL.
+  | 'trackingStatus'
+  | 'trackerComment'
   // Server-computed from dueBackDate. Never sent by the client.
   | 'isRush'
   // Optional on create: omit stores null. A sent 0 stays 0.

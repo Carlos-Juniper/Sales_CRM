@@ -3,6 +3,7 @@ import {
   settingsApi,
   type BranchSettings,
   type BranchSettingsPatch,
+  type KitRatePatchBody,
 } from '@/api/settings'
 import { estimatingConfigApi } from '@/api/estimating'
 import type { ServiceKit, MaterialCalcRow } from '@/types/estimating'
@@ -56,10 +57,10 @@ export function useServiceKits() {
 }
 
 /**
- * Patch the selected branch. The optimistic update merges the crew rate;
- * onError rolls it back. The PATCH body returns the same payload as GET,
- * including productionRates, and onSettled invalidates this cache. A
- * production-rate write also invalidates SERVICE_KITS_KEY.
+ * Patch the selected branch (crew rate, material factors). The optimistic
+ * update merges the crew rate; onError rolls it back. onSettled invalidates
+ * this cache. Production rates are now written per-kit via useUpdateKitRate
+ * (Handoff 54 §4) — this hook no longer handles productionRates.
  */
 export function useUpdateBranchSettings(aspireBranchId: number | undefined) {
   const qc = useQueryClient()
@@ -94,10 +95,38 @@ export function useUpdateBranchSettings(aspireBranchId: number | undefined) {
     },
     onSettled: (_data, _err, body) => {
       qc.invalidateQueries({ queryKey: key })
-      if (body.productionRates !== undefined)
-        qc.invalidateQueries({ queryKey: [SERVICE_KITS_KEY] })
       if (body.materialFactors !== undefined)
         qc.invalidateQueries({ queryKey: [MATERIAL_CALCS_KEY] })
+    },
+  })
+}
+
+/**
+ * Per-kit, per-branch production rate PATCH (Handoff 54 §4).
+ *
+ * Save-on-blur: the form calls mutate({ productionRate }) for one kit at a
+ * time. The hook invalidates branch-settings so the GET re-resolves the
+ * effective rate (and updates the source badge) after each save.
+ *
+ * Note: service_kit_rates is an append-only ledger — there is no way to delete
+ * a branch override row. The form only appends new rate rows on save.
+ */
+export function useUpdateKitRate(
+  aspireBranchId: number | undefined,
+  kitId: string,
+) {
+  const queryClient = useQueryClient()
+  const toast = useUIStore((s) => s.toast)
+  const key = [BRANCH_SETTINGS_KEY, aspireBranchId]
+  return useMutation({
+    mutationFn: (body: KitRatePatchBody) =>
+      settingsApi.patchKitRate(aspireBranchId!, kitId, body),
+    onError: () => {
+      toast('Could not save production rate', { variant: 'error' })
+      queryClient.invalidateQueries({ queryKey: key })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: key })
     },
   })
 }

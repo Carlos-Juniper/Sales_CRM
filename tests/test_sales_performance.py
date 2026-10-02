@@ -130,7 +130,7 @@ def test_lost_deals_scopes_a_rep_to_their_crm_rep(as_user):
     assert resp.json() == []
     sql, params = captured[0]
     _assert_no_estimate_user_id(sql)
-    assert "AND e.crm_rep = %s" in sql
+    assert "AND e.crm_rep IN (%s)" in sql
     assert params[-1] == "rep-1"
 
 

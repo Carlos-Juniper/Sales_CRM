@@ -1,41 +1,37 @@
 import type { ManageableBranch } from '@/api/settings'
+import { CheckboxList } from '@/components/shared/CheckboxList'
+
+const branchId = (b: ManageableBranch) => b.aspireBranchId
+const branchName = (b: ManageableBranch) => b.branchName
 
 /**
- * A checkbox-list branch picker producing a replace-set of aspire_branch_ids.
- * Reused by the authorize form and each row's inline editor — the selected set
- * is the WHOLE set that gets PATCHed, matching the backend's replace-set
- * semantics (re-sending the same ids is a no-op).
+ * The branch picker for the authorize form and each row's inline editor: a
+ * CheckboxList over manageable branches producing a replace-set of
+ * aspire_branch_ids. `selected` is the WHOLE set that gets PATCHed, matching
+ * the backend's replace-set semantics, and bulk actions write explicit ids
+ * (no "all" sentinel).
  */
 export function BranchMultiSelect({
   branches,
   selected,
-  onToggle,
+  onChange,
   idPrefix,
 }: {
   branches: ManageableBranch[]
   selected: number[]
-  onToggle: (aspireBranchId: number) => void
-  /** Namespaces the testid so multiple pickers can coexist (per-row editors). */
+  onChange: (next: number[]) => void
+  /** Namespaces the testids so multiple pickers can coexist (per-row editors). */
   idPrefix: string
 }) {
-  if (branches.length === 0) {
-    return <p className="text-xs opacity-60">No branches available.</p>
-  }
   return (
-    <ul className="max-h-40 space-y-1 overflow-y-auto">
-      {branches.map((b) => (
-        <li key={b.aspireBranchId}>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              data-testid={`${idPrefix}-${b.aspireBranchId}`}
-              checked={selected.includes(b.aspireBranchId)}
-              onChange={() => onToggle(b.aspireBranchId)}
-            />
-            {b.branchName}
-          </label>
-        </li>
-      ))}
-    </ul>
+    <CheckboxList
+      items={branches}
+      selected={selected}
+      onChange={onChange}
+      getId={branchId}
+      getLabel={branchName}
+      noun="branches"
+      idPrefix={idPrefix}
+    />
   )
 }

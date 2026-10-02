@@ -1,19 +1,21 @@
 import { useState } from 'react'
+import { Check, Loader2, X } from 'lucide-react'
 import {
   useBranchSettings,
-  useUpdateBranchSettings,
+  useUpdateKitRate,
 } from '@/hooks/useBranchSettings'
 import type { BranchProductionRate } from '@/api/settings'
-import { FormStatus, SettingsFormShell } from '../company/formStatus'
-import { NumberField, SaveButton } from '../company/SlaForm'
+import { SettingsFormShell } from '../company/formStatus'
+import { NumberField } from '../company/SlaForm'
 
 /**
- * Branch production rates: `service_kits.production_rate` per maintenance kit
- * (units per labor hour). Read from the enriched branch GET (commits 32c58fe /
- * 2750a9d) which returns `productionRates` with a `source` field per row.
- * `source` is currently always 'inherited' (no per-branch rate column yet —
- * backend follow-up #16), but we render the badge from the field regardless.
- * Saving PATCHes the changed rates to /branch/{id}, keyed by service kit id.
+ * Branch production rates — per-kit, per-branch, save-on-blur (Handoff 54 §4).
+ *
+ * Each kit row saves independently when the user tabs/clicks away. The backend
+ * PATCH appends to `service_kit_rates` (branch-scoped, append-only) rather than
+ * mutating the global `service_kits.production_rate`. After each save the
+ * branch-settings cache is invalidated so the source badge reflects the new
+ * override state.
  */
 export function ProductionRatesForm({
   aspireBranchId,
@@ -51,76 +53,97 @@ export function ProductionRatesForm({
   }
 
   return (
-    <ProductionFields aspireBranchId={aspireBranchId} rates={productionRates} />
-  )
-}
-
-function ProductionFields({
-  aspireBranchId,
-  rates,
-}: {
-  aspireBranchId: number
-  rates: BranchProductionRate[]
-}) {
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      rates.map((r) => [
-        r.serviceKitId,
-        r.productionRate == null ? '' : String(r.productionRate),
-      ]),
-    ),
-  )
-  const update = useUpdateBranchSettings(aspireBranchId)
-
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const changed: Record<string, number> = {}
-    for (const rate of rates) {
-      const raw = values[rate.serviceKitId]
-      if (raw == null || raw.trim() === '') continue
-      const next = Number(raw)
-      if (next === rate.productionRate) continue
-      changed[rate.serviceKitId] = next
-    }
-    if (Object.keys(changed).length === 0) return
-    update.mutate({ productionRates: changed })
-  }
-
-  return (
     <SettingsFormShell
       slug="production-rates"
       title="Production rates"
-      description="Units of work per labor hour for each maintenance kit."
+      description="Units of work per labor hour for each maintenance kit. Changes save automatically on blur."
     >
-      <form onSubmit={onSubmit} className="space-y-3">
-        {rates.map((rate) => (
-          <div key={rate.serviceKitId} className="space-y-1">
-            {/* Source badge driven by the field value — never hardcoded. */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium opacity-80">
-                {rate.description}
-              </span>
-              <RateSourceBadge
-                serviceKitId={rate.serviceKitId}
-                source={rate.source}
-              />
-            </div>
-            <NumberField
-              id={`rate-${rate.serviceKitId}`}
-              label={rate.description}
-              value={values[rate.serviceKitId]}
-              onChange={(v) =>
-                setValues((s) => ({ ...s, [rate.serviceKitId]: v }))
-              }
-              min={0}
-              step={0.0001}
-            />
-          </div>
+      <div className="space-y-3">
+        {productionRates.map((rate) => (
+          <KitRateRow
+            key={rate.serviceKitId}
+            aspireBranchId={aspireBranchId}
+            rate={rate}
+          />
         ))}
-        <SaveButton pending={update.isPending} />
-        <FormStatus isSuccess={update.isSuccess} isError={update.isError} />
-      </form>
+      </div>
     </SettingsFormShell>
+  )
+}
+
+/** Per-kit save-on-blur row with inline save/error feedback. */
+function KitRateRow({
+  aspireBranchId,
+  rate,
+}: {
+  aspireBranchId: number
+  rate: BranchProductionRate
+}) {
+  const [draft, setDraft] = useState(
+    rate.resolvedRate == null ? '' : String(rate.resolvedRate),
+  )
+  const [rowStatus, setRowStatus] = useState<'idle' | 'saved' | 'error'>('idle')
+  const mutation = useUpdateKitRate(aspireBranchId, rate.serviceKitId)
+
+  function handleBlur() {
+    const trimmed = draft.trim()
+    const next = trimmed === '' ? null : Number(trimmed)
+    if (next !== null && (!Number.isFinite(next) || next < 0)) return
+    // Skip if unchanged.
+    if (next === rate.resolvedRate) return
+    setRowStatus('idle')
+    mutation.mutate(
+      { productionRate: next ?? undefined },
+      {
+        onSuccess: () => setRowStatus('saved'),
+        onError: () => setRowStatus('error'),
+      },
+    )
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium opacity-80">{rate.description}</span>
+        <RateSourceBadge serviceKitId={rate.serviceKitId} source={rate.source} />
+        {mutation.isPending && (
+          <Loader2
+            className="h-3 w-3 animate-spin text-[var(--fg)] opacity-40"
+            aria-label="Saving…"
+          />
+        )}
+        {!mutation.isPending && rowStatus === 'saved' && (
+          <Check
+            className="h-3 w-3 text-green-600"
+            aria-label="Saved"
+          />
+        )}
+        {!mutation.isPending && rowStatus === 'error' && (
+          <X
+            className="h-3 w-3 text-red-600"
+            aria-label="Save failed"
+          />
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <NumberField
+          id={`rate-${rate.serviceKitId}`}
+          label={rate.description}
+          value={draft}
+          onChange={(v) => {
+            setDraft(v)
+            setRowStatus('idle')
+          }}
+          onBlur={handleBlur}
+          min={0}
+          step={0.0001}
+          placeholder="—"
+        />
+      </div>
+      {!mutation.isPending && rowStatus === 'error' && (
+        <p className="text-[10px] text-red-600">Save failed — try again</p>
+      )}
+    </div>
   )
 }
 

@@ -56,6 +56,7 @@ const ENRICHED_BRANCH = {
       serviceKitId: 'ci-mow',
       description: 'Weekly Mow',
       productionRate: 12000,
+      resolvedRate: 12000,
       source: 'inherited',
     },
   ],
@@ -219,8 +220,9 @@ describe('MaterialFactorsForm', () => {
 
 describe('ProductionRatesForm', () => {
   it('renders a production-rate field per maintenance kit', async () => {
-    // ProductionRatesForm reads production rates from the enriched branch GET
-    // (commits 32c58fe / 2750a9d). It does not call a separate kit-list endpoint.
+    // ProductionRatesForm reads production rates from the enriched branch GET.
+    // It does not call a separate kit-list endpoint. The input value comes from
+    // resolvedRate (Handoff 54 §4 shape).
     mockEnrichedBranch()
     renderComp(<ProductionRatesForm aspireBranchId={BRANCH_ID} />)
     const rate = (await screen.findByLabelText(
@@ -229,26 +231,25 @@ describe('ProductionRatesForm', () => {
     expect(rate.value).toBe('12000')
   })
 
-  it('PATCHes the changed production_rate keyed on service kit id', async () => {
+  it('PATCHes the per-kit rate endpoint on blur (not the batch settings endpoint)', async () => {
+    // Handoff 54 §4: save-on-blur goes to /kit-rates/{kitId}, NOT /branch/{id}.
     mockEnrichedBranch()
     let body: Record<string, unknown> | null = null
     server.use(
-      http.patch(`*/api/settings/branch/${BRANCH_ID}`, async ({ request }) => {
-        body = (await request.json()) as Record<string, unknown>
-        return HttpResponse.json({
-          aspireBranchId: BRANCH_ID,
-          crewRateCentsPerHour: null,
-        })
-      }),
+      http.patch(
+        `*/api/settings/branch/${BRANCH_ID}/kit-rates/ci-mow`,
+        async ({ request }) => {
+          body = (await request.json()) as Record<string, unknown>
+          return new HttpResponse(null, { status: 204 })
+        },
+      ),
     )
     renderComp(<ProductionRatesForm aspireBranchId={BRANCH_ID} />)
-    const rate = (await screen.findByLabelText(
-      /weekly mow/i,
-    )) as HTMLInputElement
+    const rate = (await screen.findByLabelText(/weekly mow/i)) as HTMLInputElement
     fireEvent.change(rate, { target: { value: '13000' } })
-    fireEvent.click(screen.getByRole('button', { name: /save/i }))
+    fireEvent.blur(rate)
     await waitFor(() => expect(body).not.toBeNull())
-    expect(body).toEqual({ production_rates: { 'ci-mow': 13000 } })
+    expect(body).toEqual({ productionRate: 13000 })
   })
 })
 
@@ -302,21 +303,26 @@ describe('ProductionRatesForm — source badges', () => {
     expect(badge).toHaveTextContent(/inherited/i)
   })
 
-  it('still PATCHes correctly from the enriched branch response', async () => {
+  it('PATCHes per-kit endpoint on blur from the enriched branch response', async () => {
+    // Source badge is 'inherited' — no "Reset to default" button shown.
+    // Save-on-blur goes to /kit-rates/{kitId}.
     mockEnrichedBranch()
     let body: Record<string, unknown> | null = null
     server.use(
-      http.patch(`*/api/settings/branch/${BRANCH_ID}`, async ({ request }) => {
-        body = (await request.json()) as Record<string, unknown>
-        return HttpResponse.json({ aspireBranchId: BRANCH_ID, crewRateCentsPerHour: null })
-      }),
+      http.patch(
+        `*/api/settings/branch/${BRANCH_ID}/kit-rates/ci-mow`,
+        async ({ request }) => {
+          body = (await request.json()) as Record<string, unknown>
+          return new HttpResponse(null, { status: 204 })
+        },
+      ),
     )
     renderComp(<ProductionRatesForm aspireBranchId={BRANCH_ID} />)
     const rate = (await screen.findByLabelText(/weekly mow/i)) as HTMLInputElement
     fireEvent.change(rate, { target: { value: '13000' } })
-    fireEvent.click(screen.getByRole('button', { name: /save/i }))
+    fireEvent.blur(rate)
     await waitFor(() => expect(body).not.toBeNull())
-    expect(body).toEqual({ production_rates: { 'ci-mow': 13000 } })
+    expect(body).toEqual({ productionRate: 13000 })
   })
 })
 

@@ -57,14 +57,25 @@ def _coerce_row(row: dict) -> dict:
     return out
 
 
-def _can_view_all(user: dict) -> bool:
-    """True if the authenticated user may view any rep's commissions."""
+def _is_rep_viewer(user: dict) -> bool:
+    """True for REP_VIEWER_ROLES: may pick among reps (which reps: visible_rep_ids)."""
     return authz.normalize_role(user.get("role")) in authz.REP_VIEWER_ROLES
 
 
-def _require_own_or_viewer(user: dict, target_user_id: str) -> None:
-    if not _can_view_all(user) and target_user_id != user["id"]:
-        raise HTTPException(status_code=403, detail="You can only view your own commissions")
+async def _require_visible_rep(user: dict, target_user_id: str) -> None:
+    """403 unless target_user_id is in the caller's visible_rep_ids (Handoff 54 §9).
+
+    CROSS_BRANCH_ROLES see every rep; other REP_VIEWER_ROLES the reps sharing
+    one of their user_branches rows; everyone else only themselves.
+    """
+    if target_user_id == user.get("id"):
+        return
+    visible = await authz.visible_rep_ids(user, query)
+    if visible is None or target_user_id in visible:
+        return
+    if _is_rep_viewer(user):
+        raise HTTPException(status_code=403, detail="That rep is outside your branches")
+    raise HTTPException(status_code=403, detail="You can only view your own commissions")
 
 
 def _require_mark_paid(user: dict) -> None:
@@ -121,7 +132,7 @@ def register(app, require_auth) -> None:
         assignment, so a legacy commission_rates row stays visible.
         """
         target_user_id = user_id or user["id"]
-        _require_own_or_viewer(user, target_user_id)
+        await _require_visible_rep(user, target_user_id)
 
         now = datetime.now(tz=timezone.utc)
         if not start_date:
@@ -189,7 +200,7 @@ def register(app, require_auth) -> None:
         has no assignment.
         """
         target_user_id = user_id or user["id"]
-        _require_own_or_viewer(user, target_user_id)
+        await _require_visible_rep(user, target_user_id)
 
         conditions: list[str] = ["c.user_id = %s"]
         params: list[Any] = [target_user_id]
@@ -307,7 +318,7 @@ def register(app, require_auth) -> None:
         last.
         """
         target_user_id = user_id or user["id"]
-        _require_own_or_viewer(user, target_user_id)
+        await _require_visible_rep(user, target_user_id)
         today = et_today()
         # Both bounds and no year: the client's range is the whole filter.
         range_only = year is None and bool(start_date) and bool(end_date)
@@ -410,8 +421,11 @@ def register(app, require_auth) -> None:
     async def get_commission_reps(
         user: dict = Depends(require_auth),
     ) -> list:
-        if not _can_view_all(user):
+        if not _is_rep_viewer(user):
             raise HTTPException(status_code=403, detail="Only admin, VP, or CEO can view all reps")
+        # Handoff 54 §9: branch-scoped viewers list only their branches' reps.
+        visible = await authz.visible_rep_ids(user, query)
+        scope_clause, scope_params = authz.rep_id_clause("u2.id", visible)
 
         # Include legacy role aliases (outside_sales → sales) and the split
         # field-sales roles so a reassigned rep still appears.
@@ -448,10 +462,11 @@ def register(app, require_auth) -> None:
                 FROM users u2
                 JOIN commissions c ON u2.id = c.user_id
                 WHERE u2.role IN ({role_placeholders})
+                  {scope_clause}
             ) u
             LEFT JOIN v_current_commission_plans p ON p.user_id = u.id
             ORDER BY u.name
             """,
-            list(authz.SALES_REP_DB_ROLES),
+            [*authz.SALES_REP_DB_ROLES, *scope_params],
         )
         return [_coerce_row(row) for row in rows]

@@ -49,6 +49,8 @@ import { acresFromSqft } from '@/lib/estimating/calc'
 import { SLA_CONFIG, slaCountdownLabel, slaDaysLeft, slaStateFor, type SlaState } from '@/lib/estimating/sla'
 import { useAuthStore } from '@/store/authStore'
 import { canStartIntake } from '@/lib/intakeAccess'
+import { isTeamManager } from '@/lib/roles'
+import { TeamToggle } from '@/components/shared/TeamToggle'
 import { useUsers } from '@/hooks/useUsers'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { formatOptionalBudget } from '@/lib/estimating/contractBudgets'
@@ -147,8 +149,13 @@ export function EstimateQueue({
   const { findUser } = useUsers()
   const user = useAuthStore((s) => s.user)
 
+  const canSeeTeam = isTeamManager(user?.role)
+  // showAll defaults to false → mine=true. Team managers toggle showAll to
+  // see all in-scope estimates vs. only their own assigned work.
+  const [showAll, setShowAll] = useState(false)
+
   // Branch scope is applied server-side from the session — no branch param.
-  const { data: estimatesData, isError, refetch } = useEstimates()
+  const { data: estimatesData, isError, refetch } = useEstimates({ mine: !showAll })
   const estimates = estimatesData ?? (isError ? [] : null)
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortKey, setSortKey] = useState<SortKey>('priority')
@@ -227,6 +234,9 @@ export function EstimateQueue({
 
       {/* Filter / sort bar + intake CTAs */}
       <div className="flex flex-wrap items-center gap-2">
+        {canSeeTeam && (
+          <TeamToggle showAll={showAll} onToggle={setShowAll} />
+        )}
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-40 h-8 text-xs" aria-label="Status filter">
             <SelectValue />

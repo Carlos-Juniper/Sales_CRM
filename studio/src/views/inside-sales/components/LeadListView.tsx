@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { ArrowUp, ArrowDown, RefreshCw, Plus } from 'lucide-react'
 import { TopNav } from '@/components/layout/TopNav'
 import { LeadCard } from '@/components/shared/LeadCard'
@@ -33,6 +33,8 @@ interface LeadListViewProps {
   showAddLead?: boolean
   emptyTitle?: string
   emptyDescription?: string
+  /** Optional element rendered in the sort/action bar (e.g. the manager TeamToggle). */
+  headerExtra?: React.ReactNode
 }
 
 export function LeadListView({
@@ -41,6 +43,7 @@ export function LeadListView({
   showAddLead = false,
   emptyTitle = 'No leads match your filters',
   emptyDescription = 'Try adjusting or clearing the filters above.',
+  headerExtra,
 }: LeadListViewProps) {
   const { data, isLoading, isError, refetch } = useLeads(scope)
   const { sortBy, sortDir, setSort, page, setPage } = useLeadsStore()
@@ -79,6 +82,7 @@ export function LeadListView({
             </button>
           ))}
           <div className="ml-auto flex items-center gap-2 text-xs text-[hsl(var(--muted-fg))]">
+            {headerExtra}
             <span>{leads.length} shown</span>
             <Button variant="ghost" size="icon-sm" onClick={() => refetch()} title="Refresh">
               <RefreshCw className={cn('h-3 w-3', isLoading && 'animate-spin')} />

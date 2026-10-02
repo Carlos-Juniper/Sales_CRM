@@ -38,7 +38,7 @@ export function TopNav({ title, subtitle, actions }: TopNavProps) {
 
       <div className="flex-1 min-w-0">
         <h1 className="text-sm font-semibold text-[hsl(var(--fg))] truncate">{title}</h1>
-        {subtitle && <p className="text-xs text-[hsl(var(--muted-fg))] truncate">{subtitle}</p>}
+        {subtitle && <p className="text-xs text-[hsl(var(--muted-fg))] truncate max-md:hidden">{subtitle}</p>}
       </div>
 
       {actions && <div className="flex-shrink-0">{actions}</div>}

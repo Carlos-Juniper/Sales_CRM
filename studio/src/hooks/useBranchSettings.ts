@@ -3,6 +3,7 @@ import {
   settingsApi,
   type BranchSettings,
   type BranchSettingsPatch,
+  type KitRatePatchBody,
 } from '@/api/settings'
 import { estimatingConfigApi } from '@/api/estimating'
 import type { ServiceKit, MaterialCalcRow } from '@/types/estimating'
@@ -56,10 +57,10 @@ export function useServiceKits() {
 }
 
 /**
- * Patch the selected branch. The optimistic update merges the crew rate;
- * onError rolls it back. The PATCH body returns the same payload as GET,
- * including productionRates, and onSettled invalidates this cache. A
- * production-rate write also invalidates SERVICE_KITS_KEY.
+ * Patch the selected branch (crew rate, material factors). The optimistic
+ * update merges the crew rate; onError rolls it back. onSettled invalidates
+ * this cache. Production rates are now written per-kit via useUpdateKitRate
+ * (Handoff 54 §4) — this hook no longer handles productionRates.
  */
 export function useUpdateBranchSettings(aspireBranchId: number | undefined) {
   const qc = useQueryClient()
@@ -94,10 +95,34 @@ export function useUpdateBranchSettings(aspireBranchId: number | undefined) {
     },
     onSettled: (_data, _err, body) => {
       qc.invalidateQueries({ queryKey: key })
-      if (body.productionRates !== undefined)
-        qc.invalidateQueries({ queryKey: [SERVICE_KITS_KEY] })
       if (body.materialFactors !== undefined)
         qc.invalidateQueries({ queryKey: [MATERIAL_CALCS_KEY] })
+    },
+  })
+}
+
+/**
+ * Per-kit, per-branch production rate PATCH (Handoff 54 §4).
+ *
+ * Save-on-blur: the form calls mutate({ productionRate }) for one kit at a
+ * time. The hook invalidates branch-settings so the GET re-resolves the
+ * effective rate (and updates the source badge) after each save.
+ *
+ * Send `productionRate: null` to clear a branch override and revert to the
+ * inherited (company-wide or baseline) rate.
+ */
+export function useUpdateKitRate(
+  aspireBranchId: number | undefined,
+  kitId: string,
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: KitRatePatchBody) =>
+      settingsApi.patchKitRate(aspireBranchId!, kitId, body),
+    onSettled: () => {
+      queryClient.invalidateQueries({
+        queryKey: [BRANCH_SETTINGS_KEY, aspireBranchId],
+      })
     },
   })
 }

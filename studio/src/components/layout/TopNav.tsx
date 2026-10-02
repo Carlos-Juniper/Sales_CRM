@@ -1,5 +1,5 @@
 import type React from 'react'
-import { Bell, Moon, Sun, Monitor } from 'lucide-react'
+import { Bell, Moon, Sun, Monitor, Menu } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useInsideSalesDashboard } from '@/hooks/useBids'
 import { Button } from '@/components/ui/button'
@@ -7,6 +7,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useUIStore } from '@/store/uiStore'
 
 interface TopNavProps {
   title: string
@@ -17,12 +18,24 @@ interface TopNavProps {
 export function TopNav({ title, subtitle, actions }: TopNavProps) {
   const { theme, setTheme } = useTheme()
   const { data: summary } = useInsideSalesDashboard()
+  const setMobileNavOpen = useUIStore((s) => s.setMobileNavOpen)
   const overdueCount = summary?.overdue_follow_ups ?? 0
 
   const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor
 
   return (
     <header className="h-12 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] flex items-center px-4 gap-3 flex-shrink-0">
+      {/* Hamburger — mobile only */}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="md:hidden -ml-1 flex-shrink-0"
+        onClick={() => setMobileNavOpen(true)}
+        aria-label="Open navigation"
+      >
+        <Menu className="h-4 w-4" />
+      </Button>
+
       <div className="flex-1 min-w-0">
         <h1 className="text-sm font-semibold text-[hsl(var(--fg))] truncate">{title}</h1>
         {subtitle && <p className="text-xs text-[hsl(var(--muted-fg))] truncate">{subtitle}</p>}

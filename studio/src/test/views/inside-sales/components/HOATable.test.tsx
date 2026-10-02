@@ -1,9 +1,20 @@
 import { describe, it, expect, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@/test/utils'
 import { HOATable } from '@/views/inside-sales/components/accounts/HOATable'
 import type { HOAProperty, ManagementCompany } from '@/types/accounts'
+
+// HOATable renders two responsive variants simultaneously: a desktop <table>
+// (hidden under md) and a mobile card list (hidden at md and up). jsdom has no
+// viewport, so both are in the DOM at once. Scope assertions to the desktop
+// table so queries stay unambiguous while still asserting real rendered content.
+function renderDesktop(ui: ReactElement) {
+  const result = render(ui)
+  const table = result.container.querySelector('table')
+  return { ...result, table }
+}
 
 // ── Fixtures ──────────────────────────────────────────────────────
 
@@ -71,30 +82,32 @@ describe('HOATable — row rendering', () => {
       makeProperty({ id: 'h1', property_name: 'Pelican Bay', city: 'Naples' }),
       makeProperty({ id: 'h2', property_name: "Fiddler's Creek", city: 'Fort Myers' }),
     ]
-    render(<HOATable rows={props} companies={[sampleCompany]} onSelect={vi.fn()} />)
+    const { table } = renderDesktop(<HOATable rows={props} companies={[sampleCompany]} onSelect={vi.fn()} />)
+    const grid = within(table!)
 
-    expect(screen.getByText('Pelican Bay')).toBeInTheDocument()
-    expect(screen.getByText("Fiddler's Creek")).toBeInTheDocument()
-    expect(screen.getAllByText(/Naples/)).toHaveLength(2) // city column and association name may both include Naples
+    expect(grid.getByText('Pelican Bay')).toBeInTheDocument()
+    expect(grid.getByText("Fiddler's Creek")).toBeInTheDocument()
+    // Each row shows the city in both the property cell and the location cell.
+    expect(grid.getAllByText(/Naples/)).toHaveLength(2)
   })
 
   it('renders acreage and units for a property', () => {
-    render(
+    const { table } = renderDesktop(
       <HOATable rows={[makeProperty({ acreage: 570, units: 6800 })]} companies={[sampleCompany]} onSelect={vi.fn()} />,
     )
 
-    expect(screen.getByText(/570/)).toBeInTheDocument()
+    expect(within(table!).getByText(/570/)).toBeInTheDocument()
   })
 
   it('shows management company name when management_company_id is linked', () => {
-    render(
+    const { table } = renderDesktop(
       <HOATable
         rows={[makeProperty({ management_company_id: 'pm1' })]}
         companies={[sampleCompany]}
         onSelect={vi.fn()}
       />,
     )
-    expect(screen.getByText('Alliant Property Management')).toBeInTheDocument()
+    expect(within(table!).getByText('Alliant Property Management')).toBeInTheDocument()
   })
 
   it('shows "Self-managed" when management_company_id is null', () => {
@@ -113,10 +126,11 @@ describe('HOATable — row rendering', () => {
       makeProperty({ id: 'h1', status: 'Active' }),
       makeProperty({ id: 'h2', status: 'Bidding' }),
     ]
-    render(<HOATable rows={rows} companies={[sampleCompany]} onSelect={vi.fn()} />)
+    const { table } = renderDesktop(<HOATable rows={rows} companies={[sampleCompany]} onSelect={vi.fn()} />)
+    const grid = within(table!)
 
-    expect(screen.getByText('Active')).toBeInTheDocument()
-    expect(screen.getByText('Bidding')).toBeInTheDocument()
+    expect(grid.getByText('Active')).toBeInTheDocument()
+    expect(grid.getByText('Bidding')).toBeInTheDocument()
   })
 })
 
@@ -126,9 +140,9 @@ describe('HOATable — interaction', () => {
     const property = makeProperty()
     const user = userEvent.setup()
 
-    render(<HOATable rows={[property]} companies={[sampleCompany]} onSelect={onSelect} />)
+    const { table } = renderDesktop(<HOATable rows={[property]} companies={[sampleCompany]} onSelect={onSelect} />)
 
-    await user.click(screen.getByText('Pelican Bay'))
+    await user.click(within(table!).getByText('Pelican Bay'))
 
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(onSelect).toHaveBeenCalledWith(property)
@@ -140,9 +154,9 @@ describe('HOATable — interaction', () => {
     const p2 = makeProperty({ id: 'h2', property_name: "Fiddler's Creek" })
     const user = userEvent.setup()
 
-    render(<HOATable rows={[p1, p2]} companies={[sampleCompany]} onSelect={onSelect} />)
+    const { table } = renderDesktop(<HOATable rows={[p1, p2]} companies={[sampleCompany]} onSelect={onSelect} />)
 
-    await user.click(screen.getByText("Fiddler's Creek"))
+    await user.click(within(table!).getByText("Fiddler's Creek"))
 
     expect(onSelect).toHaveBeenCalledWith(p2)
   })

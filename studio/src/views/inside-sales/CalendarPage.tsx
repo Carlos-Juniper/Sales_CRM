@@ -130,10 +130,13 @@ export default function CalendarPage() {
           <Tabs value={view} onValueChange={handleViewChange}>
             <TabsList>
               {(Object.entries(VIEW_LABELS) as [CalendarView, string][]).map(([v, label]) => (
-                <TabsTrigger key={v} value={v} className="max-md:px-2 max-md:text-xs">
-                  {/* On mobile show abbreviated labels to prevent overflow */}
-                  <span className="md:hidden">{MOBILE_VIEW_LABELS[v as CalendarView]}</span>
-                  <span className="max-md:hidden">{label}</span>
+                <TabsTrigger key={v} value={v} className="max-md:px-2 max-md:text-xs" aria-label={label}>
+                  {/* Both labels are purely visual (abbreviated on mobile), so hide
+                      them from the accessibility tree. The aria-label above gives
+                      each tab a single, stable accessible name at every breakpoint
+                      instead of the doubled "WkWeek"/"DayDay" the two spans produce. */}
+                  <span className="md:hidden" aria-hidden="true">{MOBILE_VIEW_LABELS[v as CalendarView]}</span>
+                  <span className="max-md:hidden" aria-hidden="true">{label}</span>
                 </TabsTrigger>
               ))}
             </TabsList>

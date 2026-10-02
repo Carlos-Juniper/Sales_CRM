@@ -52,11 +52,18 @@ export function AccountsToolbar({
       {/* Tab row */}
       <div className="px-4 pt-2.5 pb-2 flex items-center gap-3 flex-wrap max-md:flex-nowrap max-md:px-3">
         {/* Tab switcher */}
-        <div className="inline-flex bg-[hsl(var(--muted))] rounded-lg p-0.5 gap-0.5 flex-shrink-0">
+        <div
+          role="tablist"
+          aria-label="Account type"
+          className="inline-flex bg-[hsl(var(--muted))] rounded-lg p-0.5 gap-0.5 flex-shrink-0"
+        >
           {TABS.map(({ value, label }) => (
             <button
               key={value}
               type="button"
+              role="tab"
+              aria-selected={tab === value}
+              aria-label={label}
               onClick={() => {
                 onTabChange(value)
                 onSearchChange('')

@@ -128,16 +128,18 @@ export function HOADetailPanel({ property, company, isOpen, onClose, onCreateBid
 
       {/* Footer — engagement actions (promoting creates the
           canonical property; the estimate intake is pre-filled from it) */}
-      <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2 max-md:flex-wrap max-md:gap-1.5">
-        <Button size="sm" variant="outline" onClick={() => onCreateLead(property)}>
-          <UserPlus className="h-3.5 w-3.5 mr-1" />
-          Create lead
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => onRequestEstimate(property)}>
-          <Calculator className="h-3.5 w-3.5 mr-1" />
-          Request estimate
-        </Button>
-        <Button size="sm" onClick={() => onCreateBid(property)} className="ml-auto">
+      <div className="border-t border-[hsl(var(--border))] px-5 py-3 flex items-center gap-2 max-md:flex-col max-md:gap-2">
+        <div className="flex items-center gap-2 max-md:w-full">
+          <Button size="sm" variant="outline" onClick={() => onCreateLead(property)} className="max-md:flex-1">
+            <UserPlus className="h-3.5 w-3.5 mr-1" />
+            Create lead
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => onRequestEstimate(property)} className="max-md:flex-1">
+            <Calculator className="h-3.5 w-3.5 mr-1" />
+            Request estimate
+          </Button>
+        </div>
+        <Button size="sm" onClick={() => onCreateBid(property)} className="ml-auto max-md:ml-0 max-md:w-full">
           Create bid
           <ArrowRight className="h-3.5 w-3.5 ml-1" />
         </Button>

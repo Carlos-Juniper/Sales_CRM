@@ -24,6 +24,7 @@ import { MaintenanceIntakeModal } from './components/estimating/MaintenanceIntak
 import { crmLeadFromLead } from '@/lib/estimating/crmLead'
 import { InstallIntakeModal } from './components/estimating/InstallIntakeModal'
 import { ItbTracker } from './components/estimating/ItbTracker'
+import { MaintenanceTracker } from './MaintenanceTracker'
 // config-table read APIs (itb_scopes et al.), literals as fallback
 import { useEstimatingConfig } from '@/hooks/useEstimatingConfig'
 // ITB projects + scope statuses from the API (auto-generated per estimate)
@@ -206,6 +207,9 @@ export default function EstimatingPage({
         // without migration); projects + scope statuses from the ITB
         // endpoints (auto-generated, all active estimates).
         return <ItbTracker projects={itbProjects} scopes={itbScopes} statuses={itbStatuses} />
+      case 'tracker-maintenance':
+        // §8: Maintenance Estimating Tracker — per-estimate progress board.
+        return <MaintenanceTracker />
       default:
         return <TabPlaceholder tab={tab} />
     }
@@ -241,6 +245,7 @@ export default function EstimatingPage({
                       active
                         ? 'border-[#2E7D52] text-[#2E7D52]'
                         : 'border-transparent text-[hsl(var(--muted-fg))] hover:text-[hsl(var(--fg))] hover:border-[hsl(var(--border))]',
+                      tab.key !== 'queue' && 'max-md:hidden',
                     )}
                   >
                     <Icon className="h-3.5 w-3.5 flex-shrink-0" />

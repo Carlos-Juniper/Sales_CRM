@@ -9,7 +9,7 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, description, actions, className }: PageHeaderProps) {
   return (
-    <div className={cn('flex items-start justify-between gap-4 mb-5', className)}>
+    <div className={cn('flex items-start justify-between gap-4 mb-5 max-md:flex-col max-md:gap-2', className)}>
       <div>
         <h1 className="text-lg font-semibold text-[hsl(var(--fg))]">{title}</h1>
         {description && <p className="text-sm text-[hsl(var(--muted-fg))] mt-0.5">{description}</p>}

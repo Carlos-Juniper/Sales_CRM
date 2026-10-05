@@ -142,6 +142,15 @@ vi.mock('@/hooks/useManagementCompanies', () => ({
 
 // ── Tests ─────────────────────────────────────────────────────────
 
+// HOATable renders both a desktop <table> and a mobile card list at once
+// (CSS toggles visibility; jsdom has no viewport so both are present). Scope
+// property lookups to the desktop table so queries stay unambiguous.
+function hoaTable() {
+  const table = document.querySelector('table')
+  if (!table) throw new Error('HOA desktop table not rendered')
+  return within(table)
+}
+
 const canonicalProperty = {
   id: 'prop-1',
   name: 'Pelican Bay',
@@ -188,8 +197,8 @@ beforeEach(() => {
 describe('AccountsPage — default HOA tab', () => {
   it('renders HOA tab as active by default and shows property rows', () => {
     render(<AccountsPage />)
-    expect(screen.getByText('Pelican Bay')).toBeInTheDocument()
-    expect(screen.getByText("Fiddler's Creek")).toBeInTheDocument()
+    expect(hoaTable().getByText('Pelican Bay')).toBeInTheDocument()
+    expect(hoaTable().getByText("Fiddler's Creek")).toBeInTheDocument()
   })
 
   it('renders expected HOA table column headers', () => {
@@ -205,7 +214,7 @@ describe('AccountsPage — tab switching', () => {
     const user = userEvent.setup()
     render(<AccountsPage />)
 
-    const pmTab = screen.getByRole('button', { name: /property management/i })
+    const pmTab = screen.getByRole('tab', { name: /property management/i })
     await user.click(pmTab)
 
     expect(await screen.findByText('Alliant Property Management')).toBeInTheDocument()
@@ -215,12 +224,12 @@ describe('AccountsPage — tab switching', () => {
     const user = userEvent.setup()
     render(<AccountsPage />)
 
-    await user.click(screen.getByRole('button', { name: /property management/i }))
+    await user.click(screen.getByRole('tab', { name: /property management/i }))
     await screen.findByText('Alliant Property Management')
 
-    await user.click(screen.getByRole('button', { name: /hoa/i }))
+    await user.click(screen.getByRole('tab', { name: /hoa/i }))
 
-    expect(await screen.findByText('Pelican Bay')).toBeInTheDocument()
+    await waitFor(() => expect(hoaTable().getByText('Pelican Bay')).toBeInTheDocument())
   })
 })
 
@@ -232,9 +241,9 @@ describe('AccountsPage — search filtering', () => {
     const searchInput = screen.getByPlaceholderText(/search properties/i)
     await user.type(searchInput, 'Pelican')
 
-    expect(screen.getByText('Pelican Bay')).toBeInTheDocument()
+    expect(hoaTable().getByText('Pelican Bay')).toBeInTheDocument()
     await waitFor(() => {
-      expect(screen.queryByText("Fiddler's Creek")).not.toBeInTheDocument()
+      expect(hoaTable().queryByText("Fiddler's Creek")).not.toBeInTheDocument()
     })
   })
 
@@ -242,7 +251,7 @@ describe('AccountsPage — search filtering', () => {
     const user = userEvent.setup()
     render(<AccountsPage />)
 
-    await user.click(screen.getByRole('button', { name: /property management/i }))
+    await user.click(screen.getByRole('tab', { name: /property management/i }))
     await screen.findByText('Alliant Property Management')
 
     const searchInput = screen.getByPlaceholderText(/search companies/i)
@@ -269,7 +278,7 @@ describe('AccountsPage — search filtering', () => {
     const user = userEvent.setup()
     render(<AccountsPage />)
 
-    await user.click(screen.getByRole('button', { name: /property management/i }))
+    await user.click(screen.getByRole('tab', { name: /property management/i }))
     await screen.findByText('Alliant Property Management')
 
     const searchInput = screen.getByPlaceholderText(/search companies/i)
@@ -296,7 +305,7 @@ describe('AccountsPage — Add panels', () => {
     const user = userEvent.setup()
     render(<AccountsPage />)
 
-    await user.click(screen.getByRole('button', { name: /property management/i }))
+    await user.click(screen.getByRole('tab', { name: /property management/i }))
     await screen.findByText('Alliant Property Management')
 
     const addBtn = screen.getByRole('button', { name: /add company/i })
@@ -311,7 +320,7 @@ describe('AccountsPage — Add panels', () => {
 
     expect(screen.getByRole('button', { name: /add property/i })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /property management/i }))
+    await user.click(screen.getByRole('tab', { name: /property management/i }))
 
     expect(await screen.findByRole('button', { name: /add company/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /add property/i })).not.toBeInTheDocument()
@@ -327,7 +336,7 @@ describe('AccountsPage — filter badge and clear', () => {
     const statusFilter = screen.getByRole('button', { name: /status/i })
     await user.click(statusFilter)
 
-    const activeOption = await screen.findByRole('button', { name: /active/i })
+    const activeOption = await screen.findByRole('button', { name: 'Active' })
     await user.click(activeOption)
 
     // Badge count of 1 should appear on the Status filter button
@@ -340,7 +349,7 @@ describe('AccountsPage — filter badge and clear', () => {
 
     const statusFilter = screen.getByRole('button', { name: /status/i })
     await user.click(statusFilter)
-    const activeOption = await screen.findByRole('button', { name: /active/i })
+    const activeOption = await screen.findByRole('button', { name: 'Active' })
     await user.click(activeOption)
 
     // Close dropdown by clicking elsewhere
@@ -358,7 +367,7 @@ describe('AccountsPage — filter badge and clear', () => {
 // ── Property engagement: Create lead & Request estimate ─────────
 
 async function openDetailPanel(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByText('Pelican Bay'))
+  await user.click(hoaTable().getByText('Pelican Bay'))
   return screen.findByRole('button', { name: /request estimate/i })
 }
 

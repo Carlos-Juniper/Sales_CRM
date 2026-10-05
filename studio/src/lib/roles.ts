@@ -82,13 +82,15 @@ export const ADMIN_EQUIVALENT_ROLES: readonly UserRole[] = [
 ]
 
 /**
- * Python ESTIMATOR_ROLES: the two estimating disciplines plus admin-equivalent
- * roles. Not the line-item edit set — managers edit lines via
- * LINE_ITEM_EDIT_ROLES.
+ * Python ESTIMATOR_ROLES: the two estimating disciplines, the two estimating
+ * managers, plus admin-equivalent roles. Not the line-item edit set — managers
+ * edit lines via LINE_ITEM_EDIT_ROLES.
  */
 export const ESTIMATOR_ROLES: readonly UserRole[] = [
   'maintenance_estimating',
   'install_estimating',
+  'maintenance_estimating_manager',
+  'install_estimating_manager',
   ...ADMIN_EQUIVALENT_ROLES,
 ]
 
@@ -129,15 +131,18 @@ export const CROSS_BRANCH_ROLES: readonly UserRole[] = [
 ]
 
 /** Roles that may view sales performance / commission data for any rep.
- *  Broader than CROSS_BRANCH_ROLES — adds manager and regional_director so
- *  branch-level leaders can pick a rep without gaining full cross-branch write
- *  privileges. Mirrors api/authz.py REP_VIEWER_ROLES. */
+ *  Broader than CROSS_BRANCH_ROLES — adds manager and regional_director, plus
+ *  the Handoff 54 §5 manager roles so branch supervisors can pick a rep without
+ *  gaining full cross-branch write privileges. Mirrors api/authz.py REP_VIEWER_ROLES. */
 export const REP_SELECTOR_ROLES: readonly UserRole[] = [
   ...ADMIN_EQUIVALENT_ROLES,
   'vice_president',
   'ceo',
   'manager',
   'regional_director',
+  'sales_manager',
+  'maintenance_estimating_manager',
+  'install_estimating_manager',
 ]
 
 /**
@@ -206,8 +211,35 @@ export const ESTIMATING_NAV_ROLES: readonly UserRole[] = [
   'procurement',
   'maintenance_estimating',
   'install_estimating',
+  'maintenance_estimating_manager',
+  'install_estimating_manager',
   ...FULL_ACCESS_ROLES,
 ]
+
+/** The two estimating discipline managers (Handoff 54 §5). */
+export const ESTIMATING_MANAGER_ROLES: readonly UserRole[] = [
+  'maintenance_estimating_manager',
+  'install_estimating_manager',
+]
+
+/** Branch-level sales supervisor role. */
+export const SALES_MANAGER_ROLES: readonly UserRole[] = ['sales_manager']
+
+/**
+ * Roles that see the "All team" visibility toggle in queue/pipeline/feed views.
+ * These roles have supervisor-level visibility into their team's data.
+ * Mirrors api/authz.py ESTIMATING_MANAGER_ROLES + sales_manager + FULL_ACCESS_ROLES.
+ */
+export const TEAM_TOGGLE_ROLES: readonly UserRole[] = [
+  ...ESTIMATING_MANAGER_ROLES,
+  ...SALES_MANAGER_ROLES,
+  ...FULL_ACCESS_ROLES,
+]
+
+/** True when the user's role grants access to the "All team" toggle. */
+export function isTeamManager(role: string | null | undefined): boolean {
+  return !!role && hasRole(TEAM_TOGGLE_ROLES, normalizeRole(role))
+}
 
 /** Aspire ContactID is required for the same roles that stamp SalesRepID. */
 export function requiresAspireSalesRep(role: string): boolean {

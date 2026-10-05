@@ -77,3 +77,8 @@ studio/public/proposal/portfolio/
 # ── Raw Aspire API responses (customer data): local only, never in git ─────
 # The seed reads only scripts/data/aspire_install_service_catalog.json.
 scripts/data/aspire_raw/
+
+# ── Aspire pull review folders (Handoff 54 §1): company/customer data, local
+# only, never in git. This repo is mirrored publicly. The pull script refuses
+# to write anywhere in the repo that is not ignored.
+scripts/data/aspire_review/

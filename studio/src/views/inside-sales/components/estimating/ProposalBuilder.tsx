@@ -32,6 +32,7 @@ import './proposal-generator.css'
 import { useAuthStore } from '@/store/authStore'
 import { teamMemberTitleLabel } from '@/lib/proposal/titleLabels'
 import { regionsFromCoverage } from '@/lib/proposal/regionFilter'
+import { toggleId } from '@/lib/selection'
 import { AllRegionsBadge, RegionSwitcher } from '@/components/proposal/RegionSwitcher'
 import { ProposalDocumentsSection } from './ProposalDocumentsSection'
 import { ProposalAnchorFields } from './ProposalAnchorFields'
@@ -192,13 +193,6 @@ function MultiSelect<T extends { id: string }>({
   onChange: (ids: string[]) => void
   'data-testid'?: string
 }) {
-  function toggle(id: string) {
-    if (selected.includes(id)) {
-      onChange(selected.filter((s) => s !== id))
-    } else {
-      onChange([...selected, id])
-    }
-  }
   if (items.length === 0) {
     return <p className="text-[11px] text-[hsl(var(--muted-fg))]">No items available.</p>
   }
@@ -209,7 +203,7 @@ function MultiSelect<T extends { id: string }>({
           <input
             type="checkbox"
             checked={selected.includes(item.id)}
-            onChange={() => toggle(item.id)}
+            onChange={() => onChange(toggleId(selected, item.id))}
             className="h-3.5 w-3.5 accent-[#2E7D52]"
           />
           <span className="text-xs text-[hsl(var(--fg))]">{renderLabel(item)}</span>
@@ -537,7 +531,7 @@ function ProposalFormStep({
             <legend className="mb-1.5 text-[11px] font-semibold text-[hsl(var(--fg))]">
               Include phases up to
             </legend>
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-4">
               {([30, 60, 90, 120] as const).map((days) => (
                 <label key={days} className="flex cursor-pointer items-center gap-1.5 text-[12px]">
                   <input
@@ -1049,16 +1043,16 @@ export function ProposalBuilder({
   return (
     <div className="proposal-generator flex flex-col gap-4 overflow-y-auto pb-6" data-testid="proposal-generator">
       {showHeader && (
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
             <h2 className="text-base font-semibold text-[hsl(var(--fg))]">
               {isEditing ? 'Edit proposal' : 'Generate proposal'}
             </h2>
-            <p className="mt-0.5 text-xs text-[hsl(var(--muted-fg))]">
+            <p className="mt-0.5 text-xs text-[hsl(var(--muted-fg))] truncate">
               {attachedLead?.property_name ?? 'Select a lead'}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-shrink-0">
             <StepIndicator />
             {onClose && (
               <button

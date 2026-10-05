@@ -39,6 +39,7 @@ export type EstimatingTabKey =
   | 'approval' // Approval & Handoff
   | 'approvalQueue' // Approval Queue & Review Drawer
   | 'itb' // ITB Tracker
+  | 'tracker-maintenance' // Maintenance Estimating Tracker (§8)
 
 export interface EstimatingTabConfig {
   key: EstimatingTabKey
@@ -84,6 +85,10 @@ export const ESTIMATING_TABS: EstimatingTabConfig[] = [
   { key: 'approval', label: 'Approval & Handoff', shortLabel: 'Approval', icon: ShieldCheck, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
   { key: 'approvalQueue', label: 'Approval Queue', shortLabel: 'Appr. Queue', icon: ListChecks, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
   { key: 'itb', label: 'ITB Tracker', shortLabel: 'ITB', icon: Table2, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
+  // §8: Maintenance Estimating Tracker — visible to line-item editors (includes
+  // manager-tier approvers and admin). Will narrow to ESTIMATING_MANAGER_ROLES
+  // once those roles land in studio/src/types/index.ts (FRONTEND_PENDING_ROLES).
+  { key: 'tracker-maintenance', label: 'Maintenance Tracker', shortLabel: 'Maint. Tracker', icon: Table2, visibleForTypes: BOTH, visibleForRoles: ESTIMATING_ROLES },
 ]
 
 /**

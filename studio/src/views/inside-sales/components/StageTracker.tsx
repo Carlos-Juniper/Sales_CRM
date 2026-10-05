@@ -31,8 +31,9 @@ interface StageTrackerProps {
 export function StageTracker({ status, onStageChange }: StageTrackerProps) {
   const currentIdx = STAGE_SEQUENCE.findIndex(s => s.key === status)
   return (
-    <div className="px-6 pb-4">
-      <div className="flex items-stretch rounded-lg overflow-hidden border border-gray-200">
+    <div className="px-6 pb-4 max-md:px-4">
+      <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <div className="flex items-stretch min-w-max w-full">
         {STAGE_SEQUENCE.map((stage, idx) => {
           const isActive = stage.key === status
           const isPast = idx < currentIdx
@@ -43,7 +44,7 @@ export function StageTracker({ status, onStageChange }: StageTrackerProps) {
               onClick={() => { if (stage.manual) onStageChange(stage.key) }}
               disabled={!stage.manual}
               className={cn(
-                'flex-1 py-2 text-xs font-semibold text-center transition-colors border-r border-gray-200 last:border-r-0',
+                'flex-1 min-w-[72px] py-2 text-xs font-semibold text-center transition-colors border-r border-gray-200 last:border-r-0',
                 stage.manual ? 'cursor-pointer' : 'cursor-default',
                 isActive
                   ? 'bg-[#1f2937] text-white'
@@ -56,6 +57,7 @@ export function StageTracker({ status, onStageChange }: StageTrackerProps) {
             </button>
           )
         })}
+      </div>
       </div>
     </div>
   )

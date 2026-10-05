@@ -12,7 +12,7 @@ decoded JWT payload, and `resolve_branch_scope(user)` to build row-level scope.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from fastapi import HTTPException, Query
 
@@ -42,6 +42,16 @@ CANONICAL_ROLES = frozenset({
     # Deliberately NOT an estimator or approver — see ESTIMATOR_ROLES /
     # APPROVER_ROLES below, which it is absent from.
     "marketing",
+    # Handoff 54 §5: queue owners. Each estimating manager assigns and
+    # reviews work for their own discipline (ESTIMATING_MANAGER_ROLES). They
+    # are estimators for line-item edits and see sales performance for the
+    # reps in their branches; they do not approve and are not cross-branch.
+    "maintenance_estimating_manager",
+    "install_estimating_manager",
+    # Handoff 54 §5/§9 (D5): sees the sales reps who share at least one of
+    # their user_branches rows (visible_rep_ids). Not an estimator, approver,
+    # field-sales rep, or cross-branch role.
+    "sales_manager",
 })
 
 # Stored values that still authorize. They are not assignable: create/PATCH
@@ -129,9 +139,24 @@ _INTAKE_TYPE_LOCK = {
     "install_sales": "install",
 }
 
+# Handoff 54 §5: the two estimating managers. They own their discipline's
+# queue (assignment is Handoff 54 §6). Members of ESTIMATOR_ROLES (and so
+# LINE_ITEM_EDIT_ROLES) and REP_VIEWER_ROLES. Not in ESTIMATING_ONLY_ROLES,
+# APPROVER_ROLES, MANAGEMENT_ROLES or CROSS_BRANCH_ROLES: a manager sees its
+# own user_branches, nothing wider.
+ESTIMATING_MANAGER_ROLES = frozenset({
+    "maintenance_estimating_manager",
+    "install_estimating_manager",
+})
+
 # Estimator-owned scope: line items / sections / services / components / takeoff.
-# Admin-equivalent roles (admin, vp_sales) are included.
-ESTIMATOR_ROLES = frozenset({"maintenance_estimating", "install_estimating"}) | ADMIN_EQUIVALENT_ROLES
+# Admin-equivalent roles (admin, vp_sales) and the estimating managers are
+# included.
+ESTIMATOR_ROLES = (
+    frozenset({"maintenance_estimating", "install_estimating"})
+    | ESTIMATING_MANAGER_ROLES
+    | ADMIN_EQUIVALENT_ROLES
+)
 
 # Approver-owned scope: complexity/margin adjustments + approve/hand-back.
 # regional_director and vice_president stay on this ladder. vp_sales joins
@@ -157,9 +182,14 @@ CROSS_BRANCH_ROLES = frozenset({"vice_president", "ceo"}) | ADMIN_EQUIVALENT_ROL
 # Broader than CROSS_BRANCH_ROLES — adds manager and regional_director so
 # branch-level leaders can see their team's numbers without gaining full
 # cross-branch write privileges (mark-paid, etc. remain CROSS_BRANCH_ROLES).
+#
+# Handoff 54 §5 adds sales_manager and the estimating managers. Which reps a
+# viewer actually sees is visible_rep_ids (Handoff 54 §9): CROSS_BRANCH_ROLES
+# see every rep, everyone else here only the reps sharing one of their
+# user_branches rows.
 REP_VIEWER_ROLES = frozenset({
-    "vice_president", "ceo", "manager", "regional_director",
-}) | ADMIN_EQUIVALENT_ROLES
+    "vice_president", "ceo", "manager", "regional_director", "sales_manager",
+}) | ESTIMATING_MANAGER_ROLES | ADMIN_EQUIVALENT_ROLES
 
 # Estimating disciplines only. Admin-equivalent roles are estimators for
 # line-item edits but remain super-roles for every other surface — do not
@@ -230,6 +260,11 @@ def ensure_assignable_role(role: str) -> str:
 
 def is_estimator(role: Optional[str]) -> bool:
     return normalize_role(role) in ESTIMATOR_ROLES
+
+
+def is_estimating_manager(role: Optional[str]) -> bool:
+    """True for maintenance_estimating_manager and install_estimating_manager."""
+    return normalize_role(role) in ESTIMATING_MANAGER_ROLES
 
 
 def is_approver(role: Optional[str]) -> bool:
@@ -609,6 +644,65 @@ async def require_approval_authority(
                 "route to the next approval tier."
             ),
         )
+
+
+# ── Rep visibility (Handoff 54 §9, D5) ───────────────────────────────────────
+
+# Every sales rep sharing at least one user_branches row with the caller.
+_VISIBLE_REPS_SQL = """
+SELECT DISTINCT ub.user_id AS id
+  FROM user_branches ub
+  JOIN users u ON u.id = ub.user_id
+ WHERE ub.aspire_branch_id IN (
+         SELECT mine.aspire_branch_id FROM user_branches mine WHERE mine.user_id = %s
+       )
+   AND u.role IN ({roles})
+"""
+
+
+async def visible_rep_ids(
+    user: dict,
+    query_fn: Optional[Callable[..., Awaitable[list]]] = None,
+) -> Optional[frozenset[str]]:
+    """Which sales reps' performance and commissions the caller may see.
+
+    None means every rep (CROSS_BRANCH_ROLES: admin, vp_sales,
+    vice_president, ceo). Other REP_VIEWER_ROLES (manager, regional_director,
+    sales_manager, the estimating managers) get the sales reps
+    (SALES_REP_DB_ROLES) who share at least one of their user_branches rows,
+    plus themselves. A rep in two managers' branches appears for both (D5).
+    A viewer with no user_branches rows sees only themselves. Every other
+    role sees only themselves.
+
+    The caller's id is the JWT subject, never a query param (BRD I-9.5): a
+    rep id from the client may only narrow this set, never widen it.
+    query_fn is the caller module's query, so a test patch on that module
+    covers this read too.
+    """
+    role = normalize_role(user.get("role"))
+    if role in CROSS_BRANCH_ROLES:
+        return None
+    me = user.get("id")
+    own = frozenset({me}) if me else frozenset()
+    if role not in REP_VIEWER_ROLES or not me:
+        return own
+    run = query_fn if query_fn is not None else query
+    placeholders = ", ".join(["%s"] * len(SALES_REP_DB_ROLES))
+    rows = await run(
+        _VISIBLE_REPS_SQL.format(roles=placeholders),
+        [me, *SALES_REP_DB_ROLES],
+    )
+    return own | frozenset(str(r["id"]) for r in rows if r.get("id"))
+
+
+def rep_id_clause(column: str, rep_ids) -> tuple[str, list]:
+    """`AND column IN (...)` for an explicit rep-id set; ("", []) for None (all)."""
+    if rep_ids is None:
+        return "", []
+    ids = sorted(rep_ids)
+    if not ids:
+        return "AND 1 = 0", []
+    return f"AND {column} IN ({', '.join(['%s'] * len(ids))})", ids
 
 
 # ── Branch scoping (derived from the JWT, never the client) ─────────────────

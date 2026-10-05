@@ -20,6 +20,9 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   vice_president: 'Vice President',
   ceo: 'CEO',
   marketing: 'Marketing',
+  sales_manager: 'Sales Manager',
+  maintenance_estimating_manager: 'Maintenance Estimating Manager',
+  install_estimating_manager: 'Install Estimating Manager',
 }
 
 /** Human label for a stored role. Unknown values title-case the slug. */

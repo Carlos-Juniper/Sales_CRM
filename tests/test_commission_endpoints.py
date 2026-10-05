@@ -217,8 +217,13 @@ class TestCommissionEndpoints:
                 assert installment["payout_period"]
                 assert installment["payout_period_label"] == installment["payout_period"]
 
+        # Handoff 54 §9: a regional director reads a rep who shares one of
+        # their branches (visible_rep_ids); rep-9 is in rd-1's branch here.
+        async def rd_query(sql, params=None):
+            return [{"id": "rep-9"}] if "user_branches" in sql else []
+
         as_role("regional_director", user_id="rd-1")
-        with patch("api.commissions.query", new_callable=AsyncMock, return_value=[]):
+        with patch("api.commissions.query", new=AsyncMock(side_effect=rd_query)):
             allowed = client.get("/api/commissions/payout-schedule?user_id=rep-9&year=2026")
         assert allowed.status_code == 200
         assert allowed.json()["user_id"] == "rep-9"

@@ -1254,6 +1254,65 @@ def detect_062(conn) -> bool:
     )
 
 
+MAINTENANCE_CATEGORY_IDS_075 = (
+    "maint-cat-turf", "maint-cat-bed_maint", "maint-cat-irrigation",
+    "maint-cat-fertilizer", "maint-cat-pest_control", "maint-cat-optional",
+)
+
+
+def detect_076(conn) -> bool:
+    """076 applied ↔ service_kit_rates table exists.
+
+    076 creates two append-only rate-history tables (service_kit_rates and
+    branch_crew_rate_history). Keyed on service_kit_rates — the first CREATE
+    in the file — which is the primary new artifact. CREATE TABLE IF NOT EXISTS
+    makes a re-run of the file harmless; the table's presence is an unambiguous
+    "already ran" signal.
+    """
+    return table_exists(conn, "service_kit_rates")
+
+
+def detect_077(conn) -> bool:
+    """077 applied ↔ estimate_assignments table exists.
+
+    077 creates the append-only estimate_assignments audit table. Keyed on
+    the table's presence — CREATE TABLE IF NOT EXISTS makes re-runs harmless;
+    the table existing is an unambiguous "already ran" signal.
+    """
+    return table_exists(conn, "estimate_assignments")
+
+
+def detect_078(conn) -> bool:
+    """078 applied ↔ tracking_status column exists on estimates.
+
+    078 adds tracking_status (ENUM, NULL) and tracker_comment (TEXT, NULL).
+    tracking_status is the sentinel — it is the first column added and its
+    presence means both were applied (the file is idempotent per column).
+    """
+    return column_exists(conn, "estimates", "tracking_status")
+
+
+def detect_075(conn) -> bool:
+    """075 applied ↔ services.occurrence_source (the file's last statement),
+    service_kit_links.sort_order and all six maintenance service_categories
+    rows exist. Keyed on the migration's own effects; a partial apply stays
+    False and the guarded file runs again.
+    """
+    if not (
+        column_exists(conn, "services", "occurrence_source")
+        and column_exists(conn, "service_kit_links", "sort_order")
+    ):
+        return False
+    placeholders = ", ".join(["%s"] * len(MAINTENANCE_CATEGORY_IDS_075))
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM service_categories "
+        f"WHERE estimate_type = 'maintenance' AND id IN ({placeholders})",
+        MAINTENANCE_CATEGORY_IDS_075,
+    )
+    return bool(row) and int(row["cnt"]) == len(MAINTENANCE_CATEGORY_IDS_075)
+
+
 # ── Detection dispatch table ──────────────────────────────────────────────────
 
 _DETECT: dict = {
@@ -1300,10 +1359,14 @@ _DETECT: dict = {
     "072_materials_item_status":                  detect_072,
     "073_service_catalog":                        detect_073,
     "074_component_material_link":                detect_074,
+    "075_maintenance_service_catalog":            detect_075,
+    "076_service_kit_rates":                      detect_076,
+    "077_estimate_assignment_audit":              detect_077,
+    "078_estimate_tracking_status":               detect_078,
     "044_contract_generator":                     detect_044,
+    "046_section_services_billing_type":          detect_046,
     "054_commissions_schema":                     detect_054,
     "055_commission_rates_unique_constraint":      detect_055,
-    "046_section_services_billing_type":          detect_046,
     "063_estimate_optional_contract_budgets":     detect_063,
     "062_rep_owned_proposal_roster":              detect_062,
 }

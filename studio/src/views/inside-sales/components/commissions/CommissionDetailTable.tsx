@@ -163,14 +163,14 @@ export function CommissionDetailTable({
   return (
     <div>
       {/* Filters */}
-      <div className="flex gap-3 px-4 py-3 border-b bg-[hsl(var(--muted))]">
+      <div className="flex flex-wrap gap-3 px-4 py-3 border-b bg-[hsl(var(--muted))]">
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[hsl(var(--muted-fg))]" />
           <Input
             placeholder="Search by property..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 h-9 w-[220px] text-sm"
+            className="pl-8 h-9 w-[220px] max-md:w-full text-sm"
           />
         </div>
 
@@ -217,7 +217,7 @@ export function CommissionDetailTable({
           <thead>
             <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]">
               <th
-                className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none whitespace-nowrap"
+                className="max-md:hidden text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none whitespace-nowrap"
                 onClick={() => handleSort('created_at')}
               >
                 Date <SortIcon field="created_at" sortField={sortField} sortDirection={sortDirection} />
@@ -228,9 +228,9 @@ export function CommissionDetailTable({
               >
                 Property <SortIcon field="property_name" sortField={sortField} sortDirection={sortDirection} />
               </th>
-              <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] whitespace-nowrap">Contract #</th>
-              <th className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] whitespace-nowrap">Contract Value</th>
-              <th className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Rate</th>
+              <th className="max-md:hidden text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] whitespace-nowrap">Contract #</th>
+              <th className="max-md:hidden text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] whitespace-nowrap">Contract Value</th>
+              <th className="max-md:hidden text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Rate</th>
               <th
                 className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))] cursor-pointer select-none"
                 onClick={() => handleSort('commission_amount_cents')}
@@ -239,10 +239,10 @@ export function CommissionDetailTable({
               </th>
               <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Status</th>
               {isAdmin && (
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Rep</th>
+                <th className="max-md:hidden text-left px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Rep</th>
               )}
               {isAdmin && (
-                <th className="text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Actions</th>
+                <th className="max-md:hidden text-right px-4 py-2.5 text-xs font-medium text-[hsl(var(--muted-fg))]">Actions</th>
               )}
             </tr>
           </thead>
@@ -268,7 +268,7 @@ export function CommissionDetailTable({
                   <tr
                     className="border-b border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))] transition-colors"
                   >
-                    <td className="px-4 py-3 text-xs whitespace-nowrap">
+                    <td className="max-md:hidden px-4 py-3 text-xs whitespace-nowrap">
                       {new Date(commission.created_at).toLocaleDateString('en-US', {
                         month: 'short',
                         day: 'numeric',
@@ -292,15 +292,15 @@ export function CommissionDetailTable({
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs">{formatContractNumber(commission.aspire_number, commission.estimate_number)}</td>
-                    <td className="px-4 py-3 text-right font-mono text-xs">{formatCents(commission.contract_value_cents)}</td>
-                    <td className="px-4 py-3 text-right font-mono text-xs">{formatRate(commission.commission_rate)}</td>
+                    <td className="max-md:hidden px-4 py-3 font-mono text-xs">{formatContractNumber(commission.aspire_number, commission.estimate_number)}</td>
+                    <td className="max-md:hidden px-4 py-3 text-right font-mono text-xs">{formatCents(commission.contract_value_cents)}</td>
+                    <td className="max-md:hidden px-4 py-3 text-right font-mono text-xs">{formatRate(commission.commission_rate)}</td>
                     <td className="px-4 py-3 text-right font-mono text-xs font-semibold">{formatCents(commission.commission_amount_cents)}</td>
                     <td className="px-4 py-3">
                       <Badge variant={badge.variant}>{badge.label}</Badge>
                     </td>
                     {isAdmin && (
-                      <td className="px-4 py-3">
+                      <td className="max-md:hidden px-4 py-3">
                         {commission.rep_name && (
                           <span className="inline-flex items-center rounded-full bg-[hsl(var(--muted))] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--fg))]">
                             {commission.rep_name}
@@ -309,7 +309,7 @@ export function CommissionDetailTable({
                       </td>
                     )}
                     {isAdmin && (
-                      <td className="px-4 py-3 text-right">
+                      <td className="max-md:hidden px-4 py-3 text-right">
                         {commission.payable && commission.status !== 'paid' && (
                           <Button
                             size="sm"

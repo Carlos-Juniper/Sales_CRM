@@ -47,6 +47,10 @@ export type CreateEstimatePayload = DistributiveOmit<
   | 'updatedAt'
   | 'aspireOpportunityId'
   | 'aspireSyncStatus'
+  // Maintenance Tracker fields (§8). Set post-creation by a manager via PATCH,
+  // never sent at intake — the server defaults them to NULL.
+  | 'trackingStatus'
+  | 'trackerComment'
   // Server-computed from dueBackDate. Never sent by the client.
   | 'isRush'
   // Optional on create: omit stores null. A sent 0 stays 0.
@@ -232,6 +236,16 @@ export interface ListEstimatesParams {
    * only the approved estimate for a given lead.
    */
   leadId?: string
+  /**
+   * Filter by tracker status (§8, migration 078). Used by the Maintenance
+   * Estimating Tracker to show e.g. only in_progress rows.
+   */
+  trackingStatus?: string
+  /**
+   * When true, limits results to estimates where the caller is assigned as
+   * LS or IRR estimator. Uses a post-query OR filter server-side.
+   */
+  mine?: boolean
 }
 
 /** Runtime guard backing the compile-time omission of `estimateType`. */
@@ -257,6 +271,9 @@ export const estimatingApi = {
     if (params?.branch) qs.set('branch', params.branch)
     // Handoff 37 §7: backend added leadId filter in Slice 4 (api/estimating.py list_estimates)
     if (params?.leadId) qs.set('leadId', params.leadId)
+    // §8: Maintenance Tracker trackingStatus filter
+    if (params?.trackingStatus) qs.set('trackingStatus', params.trackingStatus)
+    if (params?.mine) qs.set('mine', 'true')
     const q = qs.toString()
     return apiClient.get<Estimate[]>(`/estimating/estimates${q ? `?${q}` : ''}`)
   },

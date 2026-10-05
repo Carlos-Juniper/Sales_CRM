@@ -410,3 +410,92 @@ describe('UsersSection — edit + deactivate', () => {
     expect((patchBody!.branches as number[]).length).toBe(2)
   })
 })
+
+// ── H54 §7: bulk branch selection round-trips through both forms ─────────────
+
+describe('UsersSection — bulk branch selection (H54 §7)', () => {
+  // 20 branches: 10 "Gulf …" and 10 "Bay …", so a filter splits them in half.
+  const MANY = Array.from({ length: 20 }, (_, i) => ({
+    aspireBranchId: 500 + i,
+    branchName: `${i < 10 ? 'Gulf' : 'Bay'} ${i}`,
+    city: null,
+  }))
+  const ALL_IDS = MANY.map((b) => b.aspireBranchId)
+  const GULF_IDS = ALL_IDS.slice(0, 10)
+  // The backend treats branches as a replace-set: compare sorted, not by order.
+  const asSet = (ids: unknown) => [...(ids as number[])].sort((a, b) => a - b)
+
+  it('authorizes with only the filtered branches after Select all', async () => {
+    mockBranches(MANY)
+    let body: Record<string, unknown> | null = null
+    server.use(
+      http.post('*/api/settings/users', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ id: 'u-new', active: 1 }, { status: 201 })
+      }),
+    )
+    renderSection()
+    await screen.findByText('Carla Reyes')
+
+    fireEvent.change(screen.getByTestId('directory-search'), {
+      target: { value: 'nina' },
+    })
+    fireEvent.click(await screen.findByText('nina.park@juniper.com'))
+    fireEvent.change(await screen.findByTestId('authorize-branch-search'), {
+      target: { value: 'gulf' },
+    })
+    fireEvent.click(screen.getByTestId('authorize-branch-select-all'))
+    expect(screen.getByTestId('authorize-branch-count')).toHaveTextContent(
+      '10 of 20 selected',
+    )
+    fireEvent.click(screen.getByRole('button', { name: /authorize user/i }))
+
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(asSet(body!.branches)).toEqual(asSet(GULF_IDS))
+  })
+
+  it('assigns 20 branches in one gesture as 20 explicit ids', async () => {
+    mockBranches(MANY)
+    let patchBody: Record<string, unknown> | null = null
+    server.use(
+      http.patch('*/api/settings/users/:id', async ({ request }) => {
+        patchBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(USERS[0])
+      }),
+    )
+    renderSection()
+    await screen.findByText('Carla Reyes')
+
+    fireEvent.click(screen.getByRole('button', { name: /edit carla reyes/i }))
+    fireEvent.click(await screen.findByTestId('edit-branch-u-carla-select-all'))
+    fireEvent.click(screen.getByRole('button', { name: /save carla reyes/i }))
+
+    await waitFor(() => expect(patchBody).not.toBeNull())
+    // Carla's stored 101 is outside the manageable list; replace-set keeps it.
+    expect(asSet(patchBody!.branches)).toEqual(asSet([101, ...ALL_IDS]))
+  })
+
+  it('clears only the filtered branches and PATCHes the remaining set', async () => {
+    mockBranches(MANY)
+    mockUsers([{ ...USERS[0], branches: ALL_IDS }])
+    let patchBody: Record<string, unknown> | null = null
+    server.use(
+      http.patch('*/api/settings/users/:id', async ({ request }) => {
+        patchBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(USERS[0])
+      }),
+    )
+    renderSection()
+    await screen.findByText('Carla Reyes')
+
+    fireEvent.click(screen.getByRole('button', { name: /edit carla reyes/i }))
+    fireEvent.change(await screen.findByTestId('edit-branch-u-carla-search'), {
+      target: { value: 'bay' },
+    })
+    fireEvent.click(screen.getByTestId('edit-branch-u-carla-clear-all'))
+    fireEvent.click(screen.getByRole('button', { name: /save carla reyes/i }))
+
+    await waitFor(() => expect(patchBody).not.toBeNull())
+    expect(asSet(patchBody!.branches)).toEqual(asSet(GULF_IDS))
+  })
+})

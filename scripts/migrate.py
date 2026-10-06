@@ -1320,6 +1320,24 @@ def detect_081(conn) -> bool:
     return column_exists(conn, "service_kit_links", "is_primary")
 
 
+def detect_082(conn) -> bool:
+    """082 applied ↔ Base Maintenance (maint-svc-50111) is inactive.
+
+    082 is data-only DML (H59 catalog curation). Keyed on the unambiguous
+    Turf Base Maintenance deactivate. Re-running is harmless. If that service
+    row was never seeded, COUNT is 0 and detect stays False — migrate will
+    apply the file (no-op UPDATEs) and record tracking.
+    """
+    if not table_exists(conn, "services"):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT COUNT(*) AS cnt FROM services "
+        "WHERE id = 'maint-svc-50111' AND active = 0",
+    )
+    return bool(row) and int(row["cnt"]) >= 1
+
+
 def detect_075(conn) -> bool:
     """075 applied ↔ services.occurrence_source (the file's last statement),
     service_kit_links.sort_order and all six maintenance service_categories
@@ -1394,6 +1412,7 @@ _DETECT: dict = {
     "079_service_kits_markup_columns":            detect_079,
     "080_section_services_sqft_override":         detect_080,
     "081_service_kit_links_markup_columns":       detect_081,
+    "082_maintenance_catalog_curation":           detect_082,
     "044_contract_generator":                     detect_044,
     "046_section_services_billing_type":          detect_046,
     "054_commissions_schema":                     detect_054,

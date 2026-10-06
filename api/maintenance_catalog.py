@@ -44,6 +44,105 @@ OCCURRENCE_SOURCES = frozenset({
 # a TakeoffItem the service is priced through (takeoff quantity / rate).
 KIT_LINK_BASIS_TAKEOFF = "takeoff"
 
+# ── H59 catalog curation ─────────────────────────────────────────────────────
+# Peak + Off-peak stay active in the catalog (Carlos approved). Auto-seed only
+# Off-peak by default (H58 §6); Peak is available via add-service / peak toggle.
+PEAK_MOWING_SERVICE_ID = "maint-svc-50390"
+OFF_PEAK_MOWING_SERVICE_ID = "maint-svc-50391"
+MOWING_SERVICE_IDS = frozenset({PEAK_MOWING_SERVICE_ID, OFF_PEAK_MOWING_SERVICE_ID})
+DEFAULT_MOWING_SERVICE_ID = OFF_PEAK_MOWING_SERVICE_ID
+
+# Standard services auto-seeded into a new maintenance section (H58 ~1–3 Turf).
+MAINTENANCE_STANDARD_SEED_ALLOWLIST: frozenset[str] = frozenset({
+    OFF_PEAK_MOWING_SERVICE_ID,  # Turf — Off-peak only at seed time
+    "maint-svc-18906",           # Bed Maint — Pruning (Peak)
+    "maint-svc-18900",           # Irrigation Wet Checks
+    "maint-svc-fert-shrub-q1",
+    "maint-svc-fert-shrub-q2",
+    "maint-svc-fert-shrub-q3",
+    "maint-svc-fert-shrub-q4",
+    "maint-svc-fert-turf-q1",
+    "maint-svc-fert-turf-q2",
+    "maint-svc-fert-turf-q3",
+    "maint-svc-fert-turf-q4",
+    "maint-svc-18904",           # Pest — Insect and Disease Control
+})
+
+# Active catalog ids after migration 082 (standard + optional takeoffs).
+# Used by the Aspire pull so a re-pull does not re-propose deactivated rows.
+# Explicit deactivate list (migration 082 + Aspire pull filter). Anything
+# else from a sample pull may still be proposed; curated active documents
+# the intended post-curation catalog and is what migration 082 re-activates.
+MAINTENANCE_DEACTIVATED_IDS: frozenset[str] = frozenset({
+    # Turf Base + Jan–Dec months (no kits)
+    "maint-svc-50111",
+    "maint-svc-50150", "maint-svc-50151", "maint-svc-50152", "maint-svc-50153",
+    "maint-svc-50154", "maint-svc-50155", "maint-svc-50156", "maint-svc-50157",
+    "maint-svc-50158", "maint-svc-50159", "maint-svc-50160", "maint-svc-50161",
+    # Turf bid / add'l / summer
+    "maint-svc-46821", "maint-svc-46814", "maint-svc-46817", "maint-svc-46837",
+    "maint-svc-50241",
+    # Bed Maint no-kit add'l
+    "maint-svc-23819",
+    # Fertilizer non-quarter Aspire samples
+    "maint-svc-23814", "maint-svc-18893", "maint-svc-30964", "maint-svc-23807",
+    "maint-svc-50243",
+    # Pest no-kit extras
+    "maint-svc-50213", "maint-svc-50148", "maint-svc-50199", "maint-svc-50137",
+    # Optional junk / no-kit schedule
+    "maint-svc-23823", "maint-svc-50168", "maint-svc-50167", "maint-svc-18892",
+    "maint-svc-18907", "maint-svc-50270", "maint-svc-50269", "maint-svc-50200",
+    "maint-svc-50273", "maint-svc-50400",
+})
+
+MAINTENANCE_CURATED_ACTIVE_IDS: frozenset[str] = frozenset({
+    # Turf
+    PEAK_MOWING_SERVICE_ID,
+    OFF_PEAK_MOWING_SERVICE_ID,
+    # Bed Maint
+    "maint-svc-18906",
+    "maint-svc-50392",  # Pruning OFF Peak — catalog only
+    # Irrigation
+    "maint-svc-18900",
+    # Fertilizer quarters
+    "maint-svc-fert-shrub-q1",
+    "maint-svc-fert-shrub-q2",
+    "maint-svc-fert-shrub-q3",
+    "maint-svc-fert-shrub-q4",
+    "maint-svc-fert-turf-q1",
+    "maint-svc-fert-turf-q2",
+    "maint-svc-fert-turf-q3",
+    "maint-svc-fert-turf-q4",
+    # Pest
+    "maint-svc-18904",
+    # Optional (kit-backed takeoffs)
+    "maint-svc-18902",  # Mulch
+    "maint-svc-19486",  # Annual Flower Installation
+    "maint-svc-46819",  # Additional Irrigation Wet Check #1
+    "maint-svc-21186",  # Additional Pruning #5
+    "maint-svc-50244",  # Fertilize Shrubs Raleigh
+    "maint-svc-50393",  # Palm Pruning
+    "maint-svc-50242",  # Winter Maintenance
+})
+
+
+def select_mowing_service(services: list[dict]) -> list[dict]:
+    """Keep exactly one Turf mowing service for auto-seed (default OFF-PEAK).
+
+    Peak and Off-peak both remain active in the catalog; never seed both.
+    TODO(carlos): real peak/off-peak selection criteria.
+    """
+    mowing = [s for s in services if s.get("id") in MOWING_SERVICE_IDS]
+    others = [s for s in services if s.get("id") not in MOWING_SERVICE_IDS]
+    if not mowing:
+        return services
+    preferred = next(
+        (s for s in mowing if s.get("id") == DEFAULT_MOWING_SERVICE_ID),
+        mowing[0],
+    )
+    return others + [preferred]
+
+
 
 def service_id_for_aspire(aspire_service_id: int) -> str:
     """Deterministic services.id for an Aspire Service (maint-svc-<ServiceID>)."""
@@ -71,10 +170,12 @@ async def seed_standard_maintenance_services(
     callers pass the already-imported (and test-patched) db functions, avoiding
     a circular import.
 
-    Business rules (Handoff 59 Track B):
+    Business rules (Handoff 59 Track B + catalog curation):
     - Only runs for estimate_type = 'maintenance'.
     - Skip if section already has services (guard against re-saves / duplication).
-    - Seed only services in non-optional maintenance categories (is_optional = 0).
+    - Seed only allowlisted standard services (MAINTENANCE_STANDARD_SEED_ALLOWLIST);
+      Turf seeds Off-peak mowing only via select_mowing_service (Peak stays catalog-only).
+    - Skip services with no kit links (no empty schedule-style rows).
     - qty = estimate's occurrence column named by occurrence_source, or
       default_occurrences when occurrence_source is NULL. NULL count → 0.
     - label = kit name (method-level label, not service-level display_name).
@@ -86,6 +187,8 @@ async def seed_standard_maintenance_services(
     - After each section_services row, insert section_service_components:
         * Always one kind='labor' row.
         * One kind='material' row only if the kit's material_unit_cost_cents is non-null.
+    - After inserts, reprice seeded rows (unit_sell_cents + hours) from the live
+      branch crew rate and kit production_rate so sells/hours are not left NULL.
     - discipline = NULL (maintenance lines carry no discipline).
     """
     if estimate_type != "maintenance":
@@ -121,16 +224,40 @@ async def seed_standard_maintenance_services(
     if not svc_rows:
         return
 
-    # Step 3: read occurrence counts from the estimate (all 6 columns at once).
+    # H59 curation: only auto-seed the allowlisted standard set, then pick one
+    # mowing service (Off-peak default) so Peak/Off-peak both stay catalog-active
+    # without double-seeding Turf.
+    svc_rows = [s for s in svc_rows if s.get("id") in MAINTENANCE_STANDARD_SEED_ALLOWLIST]
+    svc_rows = select_mowing_service(svc_rows)
+    if not svc_rows:
+        return
+
+    # Step 3: read occurrence counts + branch from the estimate.
     occ_rows = await query_fn(
         "SELECT mowing_occurrences, pruning_occurrences, turf_fert_occurrences,"
-        " shrub_fert_occurrences, ipm_occurrences, irrigation_occurrences"
+        " shrub_fert_occurrences, ipm_occurrences, irrigation_occurrences,"
+        " aspire_branch_id"
         " FROM estimates WHERE id = %s",
         [estimate_id],
     )
     occ = occ_rows[0] if occ_rows else {}
+    aspire_branch_id = occ.get("aspire_branch_id")
+
+    # Section square footage — used when a mowing primary inherits (sqft NULL).
+    section_rows = await query_fn(
+        "SELECT square_feet FROM estimate_sections WHERE id = %s",
+        [section_id],
+    )
+    section_sqft = None
+    if section_rows:
+        raw_sqft = section_rows[0].get("square_feet")
+        try:
+            section_sqft = float(raw_sqft) if raw_sqft is not None else None
+        except (TypeError, ValueError):
+            section_sqft = None
 
     # Step 4: for each service, insert one section_services row per linked kit method.
+    seeded_ids: list[str] = []
     row_sort_idx = 0
     for svc in svc_rows:
         # Determine if this service is in the turf (mowing) category.
@@ -154,27 +281,17 @@ async def seed_standard_maintenance_services(
         )
 
         if not link_rows:
-            # Service has no linked kits — insert a single row with no kit.
-            svc_id = str(uuid.uuid4())
-            label = svc.get("display_name") or svc.get("name", "")
-            await execute_fn(
-                """INSERT INTO section_services
-                     (id, section_id, service_kit_id, service_id, discipline, billing_type, label, qty, uom,
-                      complexity_pct, unit_sell_cents, embedded_cost_cents, target_gm, hours, square_feet, sort_order)
-                   VALUES (%s, %s, %s, %s, NULL, NULL, %s, %s, %s, 0, NULL, NULL, NULL, NULL, %s, %s)""",
-                [svc_id, section_id, None, svc["id"], label, qty, "/yr", 0, row_sort_idx],
-            )
-            await _seed_labor_component(svc_id, execute_fn)
-            row_sort_idx += 1
+            # No kits — skip. Schedule-style / month rows must not seed empty lines.
             continue
 
         for link in link_rows:
             kit_id = link["service_kit_id"]
             is_primary = bool(link.get("is_primary"))
 
-            # Fetch kit details for label, uom, and material fields.
+            # Fetch kit details for label, uom, material fields, and pricing.
             kit_detail_rows = await query_fn(
-                "SELECT id, description, uom, material_unit_cost_cents"
+                "SELECT id, description, uom, material_unit_cost_cents,"
+                " production_rate, unit_sell_cents, target_gm"
                 " FROM service_kits WHERE id = %s",
                 [kit_id],
             )
@@ -207,7 +324,100 @@ async def seed_standard_maintenance_services(
             if material_cost is not None:
                 await _seed_material_component(svc_id, execute_fn)
 
+            seeded_ids.append(svc_id)
             row_sort_idx += 1
+
+    if seeded_ids:
+        await _reprice_seeded_rows(
+            seeded_ids=seeded_ids,
+            aspire_branch_id=aspire_branch_id,
+            section_sqft=section_sqft,
+            query_fn=query_fn,
+            execute_fn=execute_fn,
+        )
+
+
+async def _reprice_seeded_rows(
+    *,
+    seeded_ids: list[str],
+    aspire_branch_id: Optional[int],
+    section_sqft: Optional[float],
+    query_fn: Callable[..., Awaitable[list]],
+    execute_fn: Callable[..., Awaitable[None]],
+) -> None:
+    """Fill unit_sell_cents + hours on freshly seeded method rows.
+
+    Empty create payloads are priced before seed (no lines), then seed inserts
+    with NULL sell/hours. This pass stamps crew-rate-derived sells and
+    occurrence hours so the editor is not left blank.
+    """
+    from api.maintenance_pricing import (
+        _kit_derives_sell,
+        _number,
+        sell_rate_cents_per_1000_sf,
+    )
+
+    crew_rate: Optional[int] = None
+    if aspire_branch_id is not None and not isinstance(aspire_branch_id, bool):
+        rate_rows = await query_fn(
+            "SELECT crew_rate_cents_per_hour FROM branch_settings WHERE aspire_branch_id = %s",
+            [aspire_branch_id],
+        )
+        if rate_rows:
+            raw = _number(rate_rows[0].get("crew_rate_cents_per_hour"))
+            crew_rate = int(raw) if raw is not None else None
+
+    for sid in seeded_ids:
+        rows = await query_fn(
+            "SELECT id, service_kit_id, square_feet FROM section_services WHERE id = %s",
+            [sid],
+        )
+        if not rows:
+            continue
+        row = rows[0]
+        kit_id = row.get("service_kit_id")
+        if not kit_id:
+            continue
+        kit_rows = await query_fn(
+            "SELECT id, production_rate, unit_sell_cents, target_gm FROM service_kits WHERE id = %s",
+            [kit_id],
+        )
+        if not kit_rows:
+            continue
+        kit = kit_rows[0]
+        production = _number(kit.get("production_rate"))
+
+        # Hours: line area (override or section inherit) ÷ production rate.
+        line_sqft = row.get("square_feet")
+        if line_sqft is None:
+            area = section_sqft
+        else:
+            try:
+                area = float(line_sqft)
+            except (TypeError, ValueError):
+                area = None
+        hours: Optional[float] = None
+        if production is not None and production > 0:
+            if area is None:
+                hours = None
+            else:
+                hours = float(area) / production
+
+        unit_sell: Optional[int] = None
+        if _kit_derives_sell(kit) and crew_rate is not None and production is not None and production > 0:
+            target_gm = _number(kit.get("target_gm")) or 0.0
+            unit_sell = sell_rate_cents_per_1000_sf(production, target_gm, crew_rate)
+        else:
+            catalog_sell = _number(kit.get("unit_sell_cents"))
+            if catalog_sell is not None and catalog_sell > 0:
+                unit_sell = int(catalog_sell)
+
+        if unit_sell is None and hours is None:
+            continue
+        await execute_fn(
+            "UPDATE section_services SET unit_sell_cents = %s, hours = %s WHERE id = %s",
+            [unit_sell, hours, sid],
+        )
 
 
 async def _seed_labor_component(

@@ -47,7 +47,7 @@ _INSTALL_ESTIMATOR = {
 # ---------------------------------------------------------------------------
 
 def seed_maint_catalog(fake) -> None:
-    """Seed 5 standard categories + 1 optional, 2 services per standard cat,
+    """Seed 5 standard categories + 1 optional using H59 curated service ids,
     plus kits + kit_links so the seeder can resolve primary kits."""
     # service_categories
     for code, (cat_id, name, is_opt) in {
@@ -68,123 +68,62 @@ def seed_maint_catalog(fake) -> None:
             "active": 1,
         }
 
-    # Services: 2 per standard category (10 total), 1 in optional (not seeded)
-    # turf services
-    fake.tables["services"]["maint-svc-1"] = {
-        "id": "maint-svc-1",
-        "name": "Mowing",
-        "display_name": "Lawn Mowing",
-        "service_category_id": "maint-cat-turf",
-        "occurrence_source": "mowing_occurrences",
-        "default_occurrences": 26,
-        "active": 1,
-        "sort_order": 10,
-    }
-    fake.tables["services"]["maint-svc-2"] = {
-        "id": "maint-svc-2",
-        "name": "Edging",
-        "display_name": None,
-        "service_category_id": "maint-cat-turf",
-        "occurrence_source": None,
-        "default_occurrences": 26,
-        "active": 1,
-        "sort_order": 20,
-    }
-    # bed_maint services
-    fake.tables["services"]["maint-svc-3"] = {
-        "id": "maint-svc-3",
-        "name": "Bed Weeding",
-        "display_name": "Bed Weeding & Detail",
-        "service_category_id": "maint-cat-bed_maint",
-        "occurrence_source": "pruning_occurrences",
-        "default_occurrences": 12,
-        "active": 1,
-        "sort_order": 10,
-    }
-    fake.tables["services"]["maint-svc-4"] = {
-        "id": "maint-svc-4",
-        "name": "Mulching",
-        "display_name": None,
-        "service_category_id": "maint-cat-bed_maint",
-        "occurrence_source": None,
-        "default_occurrences": 2,
-        "active": 1,
-        "sort_order": 20,
-    }
-    # irrigation
-    fake.tables["services"]["maint-svc-5"] = {
-        "id": "maint-svc-5",
-        "name": "Irrigation Check",
-        "display_name": None,
-        "service_category_id": "maint-cat-irrigation",
-        "occurrence_source": "irrigation_occurrences",
-        "default_occurrences": 4,
-        "active": 1,
-        "sort_order": 10,
-    }
-    # fertilizer
-    fake.tables["services"]["maint-svc-6"] = {
-        "id": "maint-svc-6",
-        "name": "Turf Fertilization",
-        "display_name": None,
-        "service_category_id": "maint-cat-fertilizer",
-        "occurrence_source": "turf_fert_occurrences",
-        "default_occurrences": 6,
-        "active": 1,
-        "sort_order": 10,
-    }
-    # pest_control
-    fake.tables["services"]["maint-svc-7"] = {
-        "id": "maint-svc-7",
-        "name": "IPM",
-        "display_name": "IPM Applications",
-        "service_category_id": "maint-cat-pest_control",
-        "occurrence_source": "ipm_occurrences",
-        "default_occurrences": 12,
-        "active": 1,
-        "sort_order": 10,
-    }
-    # optional service — must NOT be seeded
-    fake.tables["services"]["maint-svc-opt"] = {
-        "id": "maint-svc-opt",
-        "name": "Holiday Lighting",
-        "display_name": None,
-        "service_category_id": "maint-cat-optional",
-        "occurrence_source": None,
-        "default_occurrences": 1,
-        "active": 1,
-        "sort_order": 10,
-    }
-
-    # service_kits (referenced by kit links)
-    for kit_id in ("kit-maint-1", "kit-maint-2", "kit-maint-3"):
-        fake.tables["service_kits"][kit_id] = {
-            "id": kit_id, "name": kit_id,
-            "production_rate": 4000, "crew_size": 2,
+    # Curated active services (allowlist + Peak for catalog). Deactivated Base
+    # stays in the table at active=0 so catalog tests can assert exclusion.
+    services = [
+        ("maint-svc-50390", "maint-cat-turf", "MC: PEAK Mowing", "PEAK Mowing",
+         "mowing_occurrences", 31, 10, 1),
+        ("maint-svc-50391", "maint-cat-turf", "MC: OFF-PEAK Mowing", "OFF-PEAK Mowing",
+         "mowing_occurrences", 11, 20, 1),
+        ("maint-svc-50111", "maint-cat-turf", "MC: Base Maintenance", "Base Maintenance",
+         "mowing_occurrences", 12, 5, 0),  # deactivated — must not seed / appear
+        ("maint-svc-18906", "maint-cat-bed_maint", "MC: Pruning- Peak", "Pruning",
+         "pruning_occurrences", 12, 10, 1),
+        ("maint-svc-18900", "maint-cat-irrigation", "MC: Irrigation Wet Checks", "Irrigation Wet Checks",
+         "irrigation_occurrences", 12, 10, 1),
+        ("maint-svc-fert-turf-q1", "maint-cat-fertilizer", "Fertilizer Turf - Quarter 1", "Fertilizer Turf Q1",
+         "turf_fert_occurrences", 1, 10, 1),
+        ("maint-svc-18904", "maint-cat-pest_control", "MC: Insect and Disease Control", "Insect and Disease Control",
+         "ipm_occurrences", 12, 10, 1),
+        ("maint-svc-18902", "maint-cat-optional", "MC: Mulch", "Mulch",
+         None, 1, 10, 1),  # optional — must NOT auto-seed
+    ]
+    for sid, cat, name, display, occ_src, default_occ, sort, active in services:
+        fake.tables["services"][sid] = {
+            "id": sid, "name": name, "display_name": display,
+            "service_category_id": cat, "occurrence_source": occ_src,
+            "default_occurrences": default_occ, "active": active, "sort_order": sort,
         }
 
-    # service_kit_links: maint-svc-1 and maint-svc-3 have kits; rest have none
-    fake.tables["service_kit_links"]["skl-1"] = {
-        "id": "skl-1",
-        "service_id": "maint-svc-1",
-        "service_kit_id": "kit-maint-1",
-        "is_primary": 1,
-        "sort_order": 10,
-    }
-    fake.tables["service_kit_links"]["skl-2"] = {
-        "id": "skl-2",
-        "service_id": "maint-svc-3",
-        "service_kit_id": "kit-maint-2",
-        "is_primary": 1,
-        "sort_order": 10,
-    }
-    fake.tables["service_kit_links"]["skl-3"] = {
-        "id": "skl-3",
-        "service_id": "maint-svc-1",
-        "service_kit_id": "kit-maint-3",
-        "is_primary": 0,  # non-primary — must not be used
-        "sort_order": 20,
-    }
+    # Kits with production rates so reprice can stamp sell/hours
+    for kit_id, desc, rate, primary in (
+        ("kit-maint-1", "Standard Production Mowing", 4000, 1),
+        ("kit-maint-2", "Prune Medium", 3200, 1),
+        ("kit-maint-3", "Push Mower", 1200, 0),
+        ("kit-maint-irr", "Wet Check", 1, 1),
+        ("kit-maint-fert", "Turf Fertilizer", 60000, 1),
+        ("kit-maint-pest", "Insecticide", 36000, 1),
+    ):
+        fake.tables["service_kits"][kit_id] = {
+            "id": kit_id, "description": desc, "name": kit_id, "uom": "SF",
+            "production_rate": rate, "unit_sell_cents": None, "target_gm": 0.5,
+            "crew_size": 2, "material_unit_cost_cents": None,
+        }
+
+    links = [
+        ("skl-1", "maint-svc-50391", "kit-maint-1", 1, 10),
+        ("skl-2", "maint-svc-18906", "kit-maint-2", 1, 10),
+        ("skl-3", "maint-svc-50391", "kit-maint-3", 0, 20),
+        ("skl-4", "maint-svc-18900", "kit-maint-irr", 1, 10),
+        ("skl-5", "maint-svc-fert-turf-q1", "kit-maint-fert", 1, 10),
+        ("skl-6", "maint-svc-18904", "kit-maint-pest", 1, 10),
+        ("skl-7", "maint-svc-50390", "kit-maint-1", 1, 10),  # Peak shares kit shape
+    ]
+    for lid, sid, kid, primary, sort in links:
+        fake.tables["service_kit_links"][lid] = {
+            "id": lid, "service_id": sid, "service_kit_id": kid,
+            "is_primary": primary, "sort_order": sort,
+        }
 
 
 def seed_branch_settings(fake) -> None:
@@ -246,7 +185,7 @@ def inst(db):
 
 def test_new_maintenance_section_gets_standard_services_seeded(maint):
     """A maintenance estimate section with no services gets one row per linked
-    kit method for each standard maintenance service (H59: baked-in methods)."""
+    kit method for each allowlisted standard service (H59 curation)."""
     res = client.post("/api/estimating/estimates", json=_maint_payload())
     assert res.status_code == 201, res.text
     body = res.json()
@@ -255,30 +194,27 @@ def test_new_maintenance_section_gets_standard_services_seeded(maint):
     section = sections[0]
     services = section["services"]
 
-    # H59: one row per kit method.
-    # maint-svc-1 (Mowing) has 2 kits → 2 rows
-    # maint-svc-3 (Bed Weeding) has 1 kit → 1 row
-    # maint-svc-2 (Edging), maint-svc-4 (Mulching), maint-svc-5, maint-svc-6, maint-svc-7 have no kits → 1 row each
-    # Total: 2 + 1 + 5 = 8 rows
-    assert len(services) == 8, f"Expected 8 seeded method rows, got {len(services)}: {[s['label'] for s in services]}"
+    # Off-peak mowing (2 kits) + pruning + irrigation + fert Q1 + pest = 6 rows
+    assert len(services) == 6, (
+        f"Expected 6 seeded method rows, got {len(services)}: {[s['label'] for s in services]}"
+    )
 
-    # Optional service must NOT appear
+    svc_ids = {s.get("serviceId") for s in services}
+    assert "maint-svc-50391" in svc_ids          # Off-peak
+    assert "maint-svc-50390" not in svc_ids      # Peak not auto-seeded
+    assert "maint-svc-50111" not in svc_ids      # Base deactivated / not allowlisted
+    assert "maint-svc-18902" not in svc_ids      # Optional Mulch not auto-seeded
+
     labels = [s["label"] for s in services]
-    assert "Holiday Lighting" not in labels
+    assert "Mulch" not in labels
 
-    # Services without kits use display_name or name as label
-    assert "Edging" in labels        # maint-svc-2 has no display_name, use name
-    assert "IPM Applications" in labels  # maint-svc-7 has display_name
-
-    # Mowing primary kit row (kit-maint-1)
     mowing_primary = next((s for s in services if s["serviceKitId"] == "kit-maint-1"), None)
-    assert mowing_primary is not None, "Expected a row with serviceKitId=kit-maint-1"
+    assert mowing_primary is not None, "Expected Off-peak primary kit row"
+    assert mowing_primary.get("unitSellCents") is not None  # reprice after seed
 
-    # Edging has no kit
-    edging = next(s for s in services if s["label"] == "Edging")
-    assert edging["serviceKitId"] is None
+    # Crew rate snapshotted onto the estimate at create
+    assert body.get("crewRateCentsPerHour") == 18_000
 
-    # discipline is NULL for maintenance lines
     for svc in services:
         assert svc.get("discipline") is None
 
@@ -287,48 +223,42 @@ def test_seeding_respects_occurrence_source(maint):
     """occurrence_source field maps to the correct estimate column for qty.
 
     H59: all method rows for a service share the same qty (the occurrence count
-    is per-service, not per-kit). Labels for kit-backed services are kit names;
-    labels for kit-free services are display_name or name.
+    is per-service, not per-kit). Labels for kit-backed services are kit names.
     """
     payload = _maint_payload(
         mowingOccurrences=52,
         pruningOccurrences=8,
         irrigationOccurrences=6,
-        # turf_fert/shrub_fert/ipm not sent — should resolve to 0
+        # turf fert / ipm not sent — should resolve to 0
     )
-    # Drop occurrence fields that are not set to simulate them being absent
-    payload.pop("turf_fert_occurrences", None)
-    payload.pop("shrub_fert_occurrences", None)
-    payload.pop("ipm_occurrences", None)
+    payload.pop("turfFertOccurrences", None)
+    payload.pop("ipmOccurrences", None)
 
     res = client.post("/api/estimating/estimates", json=payload)
     assert res.status_code == 201, res.text
     sections = res.json()["sections"]
     services = sections[0]["services"]
 
-    # Mowing rows are keyed by serviceKitId (labels are kit names in H59).
-    # Both mowing method rows carry the same qty from mowing_occurrences.
-    mowing_rows = [s for s in services if s.get("serviceId") == "maint-svc-1"]
-    assert len(mowing_rows) == 2, f"Expected 2 mowing method rows, got {len(mowing_rows)}"
+    mowing_rows = [s for s in services if s.get("serviceId") == "maint-svc-50391"]
+    assert len(mowing_rows) == 2, f"Expected 2 Off-peak method rows, got {len(mowing_rows)}"
     for row in mowing_rows:
         assert row["qty"] == 52, f"Mowing row qty should be 52, got {row['qty']}"
 
-    # Bed weeding has 1 kit row (kit-maint-2) → occurrence from pruning_occurrences = 8
-    bw_rows = [s for s in services if s.get("serviceId") == "maint-svc-3"]
-    assert len(bw_rows) == 1
-    assert bw_rows[0]["qty"] == 8
+    prune_rows = [s for s in services if s.get("serviceId") == "maint-svc-18906"]
+    assert len(prune_rows) == 1
+    assert prune_rows[0]["qty"] == 8
 
-    # Services with no kits use their display_name / name as label.
-    by_label = {s["label"]: s for s in services}
+    irr_rows = [s for s in services if s.get("serviceId") == "maint-svc-18900"]
+    assert len(irr_rows) == 1
+    assert irr_rows[0]["qty"] == 6
 
-    # occurrence_source = None -> default_occurrences = 26
-    assert by_label["Edging"]["qty"] == 26
+    fert_rows = [s for s in services if s.get("serviceId") == "maint-svc-fert-turf-q1"]
+    assert len(fert_rows) == 1
+    assert fert_rows[0]["qty"] == 0  # turfFertOccurrences absent → 0
 
-    # occurrence_source = "turf_fert_occurrences" -> not in payload -> 0
-    assert by_label["Turf Fertilization"]["qty"] == 0
-
-    # occurrence_source = "irrigation_occurrences" -> 6
-    assert by_label["Irrigation Check"]["qty"] == 6
+    pest_rows = [s for s in services if s.get("serviceId") == "maint-svc-18904"]
+    assert len(pest_rows) == 1
+    assert pest_rows[0]["qty"] == 0  # ipmOccurrences absent → 0
 
 
 def test_new_install_section_not_seeded(inst):
@@ -396,9 +326,9 @@ def _build_baked_fake():
 
     # Categories
     for code, (cat_id, name, is_opt) in {
-        "turf":         ("baked-cat-turf", "Turf", False),
-        "bed_maint":    ("baked-cat-bed_maint", "Bed Maint", False),
-        "fertilizer":   ("baked-cat-fertilizer", "Fertilizer", False),
+        "turf":         ("maint-cat-turf", "Turf", False),
+        "bed_maint":    ("maint-cat-bed_maint", "Bed Maint", False),
+        "fertilizer":   ("maint-cat-fertilizer", "Fertilizer", False),
     }.items():
         fake.tables["service_categories"][cat_id] = {
             "id": cat_id, "code": code, "name": name,
@@ -407,25 +337,25 @@ def _build_baked_fake():
         }
 
     # Mowing service (turf)
-    fake.tables["services"]["baked-svc-mow"] = {
-        "id": "baked-svc-mow", "name": "Mowing", "display_name": "Lawn Mowing",
-        "service_category_id": "baked-cat-turf",
+    fake.tables["services"]["maint-svc-50391"] = {
+        "id": "maint-svc-50391", "name": "Mowing", "display_name": "Lawn Mowing",
+        "service_category_id": "maint-cat-turf",
         "occurrence_source": "mowing_occurrences", "default_occurrences": 26,
         "active": 1, "sort_order": 10,
     }
 
     # Pruning service (bed_maint) — primary starts at 0, not NULL
-    fake.tables["services"]["baked-svc-prune"] = {
-        "id": "baked-svc-prune", "name": "Pruning", "display_name": "Prune Medium",
-        "service_category_id": "baked-cat-bed_maint",
+    fake.tables["services"]["maint-svc-18906"] = {
+        "id": "maint-svc-18906", "name": "Pruning", "display_name": "Prune Medium",
+        "service_category_id": "maint-cat-bed_maint",
         "occurrence_source": "pruning_occurrences", "default_occurrences": 12,
         "active": 1, "sort_order": 10,
     }
 
     # Fertilizer service — kit has material_unit_cost_cents=3200
-    fake.tables["services"]["baked-svc-fert"] = {
-        "id": "baked-svc-fert", "name": "Turf Fertilization", "display_name": None,
-        "service_category_id": "baked-cat-fertilizer",
+    fake.tables["services"]["maint-svc-fert-turf-q1"] = {
+        "id": "maint-svc-fert-turf-q1", "name": "Turf Fertilization", "display_name": None,
+        "service_category_id": "maint-cat-fertilizer",
         "occurrence_source": "turf_fert_occurrences", "default_occurrences": 6,
         "active": 1, "sort_order": 10,
     }
@@ -464,27 +394,27 @@ def _build_baked_fake():
 
     # service_kit_links — Mowing has 3 kits; Pruning and Fert each have 1
     fake.tables["service_kit_links"]["baked-skl-std48"] = {
-        "id": "baked-skl-std48", "service_id": "baked-svc-mow",
+        "id": "baked-skl-std48", "service_id": "maint-svc-50391",
         "service_kit_id": "baked-kit-std48", "is_primary": 1, "sort_order": 10,
         "basis": "takeoff",
     }
     fake.tables["service_kit_links"]["baked-skl-push21"] = {
-        "id": "baked-skl-push21", "service_id": "baked-svc-mow",
+        "id": "baked-skl-push21", "service_id": "maint-svc-50391",
         "service_kit_id": "baked-kit-push21", "is_primary": 0, "sort_order": 20,
         "basis": "takeoff",
     }
     fake.tables["service_kit_links"]["baked-skl-road"] = {
-        "id": "baked-skl-road", "service_id": "baked-svc-mow",
+        "id": "baked-skl-road", "service_id": "maint-svc-50391",
         "service_kit_id": "baked-kit-road", "is_primary": 0, "sort_order": 30,
         "basis": "takeoff",
     }
     fake.tables["service_kit_links"]["baked-skl-prune"] = {
-        "id": "baked-skl-prune", "service_id": "baked-svc-prune",
+        "id": "baked-skl-prune", "service_id": "maint-svc-18906",
         "service_kit_id": "baked-kit-prune", "is_primary": 1, "sort_order": 10,
         "basis": "takeoff",
     }
     fake.tables["service_kit_links"]["baked-skl-fert"] = {
-        "id": "baked-skl-fert", "service_id": "baked-svc-fert",
+        "id": "baked-skl-fert", "service_id": "maint-svc-fert-turf-q1",
         "service_kit_id": "baked-kit-fert", "is_primary": 1, "sort_order": 10,
         "basis": "takeoff",
     }
@@ -529,7 +459,7 @@ class TestBakedInMethods:
         seeded_services = [
             r for r in fake.tables["section_services"].values()
             if r["section_id"] == section_id
-            and r.get("service_id") == "baked-svc-mow"
+            and r.get("service_id") == "maint-svc-50391"
         ]
         assert len(seeded_services) == 3, (
             f"Expected 3 method rows for Mowing, got {len(seeded_services)}"
@@ -546,7 +476,7 @@ class TestBakedInMethods:
         mow_rows = [
             r for r in fake.tables["section_services"].values()
             if r["section_id"] == section_id
-            and r.get("service_id") == "baked-svc-mow"
+            and r.get("service_id") == "maint-svc-50391"
         ]
         primary_row = next(r for r in mow_rows if r.get("service_kit_id") == "baked-kit-std48")
         non_primary_rows = [r for r in mow_rows if r.get("service_kit_id") != "baked-kit-std48"]
@@ -569,7 +499,7 @@ class TestBakedInMethods:
         prune_rows = [
             r for r in fake.tables["section_services"].values()
             if r["section_id"] == section_id
-            and r.get("service_id") == "baked-svc-prune"
+            and r.get("service_id") == "maint-svc-18906"
         ]
         assert len(prune_rows) >= 1, "Expected at least one pruning row"
         primary_prune = next(
@@ -613,7 +543,7 @@ class TestBakedInMethods:
         fert_rows = [
             r for r in fake.tables["section_services"].values()
             if r["section_id"] == section_id
-            and r.get("service_id") == "baked-svc-fert"
+            and r.get("service_id") == "maint-svc-fert-turf-q1"
         ]
         assert len(fert_rows) == 1, f"Expected 1 fert row, got {len(fert_rows)}"
         fert_svc_id = fert_rows[0]["id"]
@@ -629,7 +559,7 @@ class TestBakedInMethods:
         mow_rows = [
             r for r in fake.tables["section_services"].values()
             if r["section_id"] == section_id
-            and r.get("service_id") == "baked-svc-mow"
+            and r.get("service_id") == "maint-svc-50391"
         ]
         for mow_row in mow_rows:
             mow_comps = [
@@ -675,20 +605,229 @@ class TestBakedInMethods:
                 section = body["sections"][0]
                 services = section["services"]
 
-                # 2. Manually set unit_sell_cents on the first two rows so we
-                #    have known values to assert the sum against.
+                assert len(services) >= 2, f"Expected seeded method rows, got {len(services)}"
+
+                # 2. Overwrite unit_sell_cents on the first two rows with known values.
                 svc_ids = [s["id"] for s in services[:2]]
                 fake.tables["section_services"][svc_ids[0]]["unit_sell_cents"] = 12000
                 fake.tables["section_services"][svc_ids[1]]["unit_sell_cents"] = 3000
 
-                # 3. GET the estimate and verify both rows come back with their prices.
+                # 3. GET the estimate and verify those two rows keep the overwritten prices.
                 res2 = client.get(f"/api/estimating/estimates/{est_id}")
                 assert res2.status_code == 200, res2.text
                 body2 = res2.json()
                 svcs2 = body2["sections"][0]["services"]
-                priced = [s for s in svcs2 if s.get("unitSellCents") is not None]
-                assert len(priced) == 2, f"Expected 2 priced rows, got {len(priced)}"
-                total = sum(s["unitSellCents"] for s in priced)
-                assert total == 15000, f"Expected 12000+3000=15000, got {total}"
+                by_id = {s["id"]: s for s in svcs2}
+                assert by_id[svc_ids[0]]["unitSellCents"] == 12000
+                assert by_id[svc_ids[1]]["unitSellCents"] == 3000
+                assert by_id[svc_ids[0]]["unitSellCents"] + by_id[svc_ids[1]]["unitSellCents"] == 15000
             finally:
                 app.dependency_overrides.clear()
+
+
+# ── H59 catalog curation: allowlist, deactivate, reprice, mowing select ────────
+
+
+class TestCatalogCurationAllowlist:
+    def test_allowlist_is_subset_of_curated_active(self):
+        from api.maintenance_catalog import (
+            MAINTENANCE_CURATED_ACTIVE_IDS,
+            MAINTENANCE_STANDARD_SEED_ALLOWLIST,
+            DEFAULT_MOWING_SERVICE_ID,
+            PEAK_MOWING_SERVICE_ID,
+            OFF_PEAK_MOWING_SERVICE_ID,
+        )
+        assert MAINTENANCE_STANDARD_SEED_ALLOWLIST <= MAINTENANCE_CURATED_ACTIVE_IDS
+        assert DEFAULT_MOWING_SERVICE_ID == OFF_PEAK_MOWING_SERVICE_ID
+        assert PEAK_MOWING_SERVICE_ID in MAINTENANCE_CURATED_ACTIVE_IDS
+        assert PEAK_MOWING_SERVICE_ID not in MAINTENANCE_STANDARD_SEED_ALLOWLIST
+        assert OFF_PEAK_MOWING_SERVICE_ID in MAINTENANCE_STANDARD_SEED_ALLOWLIST
+        # H58 shape: Off-peak + pruning + irrigation + 8 fert + pest = 12
+        assert len(MAINTENANCE_STANDARD_SEED_ALLOWLIST) == 12
+
+    def test_select_mowing_keeps_off_peak_only(self):
+        from api.maintenance_catalog import select_mowing_service
+        services = [
+            {"id": "maint-svc-50390", "name": "PEAK"},
+            {"id": "maint-svc-50391", "name": "OFF-PEAK"},
+            {"id": "maint-svc-18906", "name": "Pruning"},
+        ]
+        out = select_mowing_service(services)
+        ids = [s["id"] for s in out]
+        assert "maint-svc-50391" in ids
+        assert "maint-svc-50390" not in ids
+        assert "maint-svc-18906" in ids
+
+
+def _build_curation_fake():
+    """FakeDb with Peak+Off-peak+Base turf services; only Off-peak allowlisted."""
+    from tests.conftest import FakeDb
+    from api.maintenance_catalog import (
+        OFF_PEAK_MOWING_SERVICE_ID,
+        PEAK_MOWING_SERVICE_ID,
+    )
+    fake = FakeDb()
+    fake.tables["service_categories"]["maint-cat-turf"] = {
+        "id": "maint-cat-turf", "code": "turf", "name": "Turf",
+        "estimate_type": "maintenance", "sort_order": 10,
+        "is_optional": 0, "active": 1,
+    }
+    fake.tables["service_categories"]["maint-cat-bed_maint"] = {
+        "id": "maint-cat-bed_maint", "code": "bed_maint", "name": "Bed Maint",
+        "estimate_type": "maintenance", "sort_order": 20,
+        "is_optional": 0, "active": 1,
+    }
+    # Active Peak + Off-peak + deactivated-style Base (active=0)
+    fake.tables["services"][PEAK_MOWING_SERVICE_ID] = {
+        "id": PEAK_MOWING_SERVICE_ID, "name": "MC: PEAK Mowing",
+        "display_name": "PEAK Mowing",
+        "service_category_id": "maint-cat-turf",
+        "occurrence_source": "mowing_occurrences", "default_occurrences": 31,
+        "active": 1, "sort_order": 10,
+    }
+    fake.tables["services"][OFF_PEAK_MOWING_SERVICE_ID] = {
+        "id": OFF_PEAK_MOWING_SERVICE_ID, "name": "MC: OFF-PEAK Mowing",
+        "display_name": "OFF-PEAK Mowing",
+        "service_category_id": "maint-cat-turf",
+        "occurrence_source": "mowing_occurrences", "default_occurrences": 11,
+        "active": 1, "sort_order": 20,
+    }
+    fake.tables["services"]["maint-svc-50111"] = {
+        "id": "maint-svc-50111", "name": "MC: Base Maintenance",
+        "display_name": "Base Maintenance",
+        "service_category_id": "maint-cat-turf",
+        "occurrence_source": "mowing_occurrences", "default_occurrences": 12,
+        "active": 0, "sort_order": 5,
+    }
+    fake.tables["services"]["maint-svc-18906"] = {
+        "id": "maint-svc-18906", "name": "MC: Pruning- Peak",
+        "display_name": "Pruning",
+        "service_category_id": "maint-cat-bed_maint",
+        "occurrence_source": "pruning_occurrences", "default_occurrences": 12,
+        "active": 1, "sort_order": 10,
+    }
+    # Kits for Off-peak (2 methods) + Peak (1) + Pruning (1)
+    for kid, desc, rate, primary in [
+        ("kit-off-std", "Standard Production Mowing", 35000, 1),
+        ("kit-off-push", "Push Mower Low Production", 8000, 0),
+        ("kit-peak-std", "Standard Production Mowing Peak", 35000, 1),
+        ("kit-prune", "Prune Medium", 3200, 1),
+    ]:
+        fake.tables["service_kits"][kid] = {
+            "id": kid, "description": desc, "uom": "SF",
+            "production_rate": rate, "unit_sell_cents": None, "target_gm": 0.5,
+            "material_unit_cost_cents": None,
+        }
+    fake.tables["service_kit_links"]["l1"] = {
+        "id": "l1", "service_id": OFF_PEAK_MOWING_SERVICE_ID,
+        "service_kit_id": "kit-off-std", "is_primary": 1, "sort_order": 10,
+    }
+    fake.tables["service_kit_links"]["l2"] = {
+        "id": "l2", "service_id": OFF_PEAK_MOWING_SERVICE_ID,
+        "service_kit_id": "kit-off-push", "is_primary": 0, "sort_order": 20,
+    }
+    fake.tables["service_kit_links"]["l3"] = {
+        "id": "l3", "service_id": PEAK_MOWING_SERVICE_ID,
+        "service_kit_id": "kit-peak-std", "is_primary": 1, "sort_order": 10,
+    }
+    fake.tables["service_kit_links"]["l4"] = {
+        "id": "l4", "service_id": "maint-svc-18906",
+        "service_kit_id": "kit-prune", "is_primary": 1, "sort_order": 10,
+    }
+    fake.tables["estimates"]["cur-est-1"] = {
+        "id": "cur-est-1", "estimate_type": "maintenance",
+        "aspire_branch_id": 42,
+        "mowing_occurrences": 42, "pruning_occurrences": 12,
+        "turf_fert_occurrences": 4, "shrub_fert_occurrences": 4,
+        "ipm_occurrences": 6, "irrigation_occurrences": 12,
+    }
+    fake.tables["estimate_sections"]["cur-sec-1"] = {
+        "id": "cur-sec-1", "estimate_id": "cur-est-1",
+        "name": "Common Area", "square_feet": 70000, "sort_order": 0,
+    }
+    fake.tables["branch_settings"]["bs-42"] = {
+        "id": "bs-42", "aspire_branch_id": 42,
+        "crew_rate_cents_per_hour": 2319,
+    }
+    return fake
+
+
+class TestCatalogCurationSeeder:
+    def test_deactivated_base_not_seeded(self):
+        import asyncio
+        from api.maintenance_catalog import seed_standard_maintenance_services
+        fake = _build_curation_fake()
+        asyncio.run(seed_standard_maintenance_services(
+            "cur-est-1", "maintenance", "cur-sec-1", fake.query, fake.execute,
+        ))
+        seeded_svc_ids = {
+            r.get("service_id") for r in fake.tables["section_services"].values()
+            if r["section_id"] == "cur-sec-1"
+        }
+        assert "maint-svc-50111" not in seeded_svc_ids
+        assert "maint-svc-50390" not in seeded_svc_ids  # Peak not auto-seeded
+        assert "maint-svc-50391" in seeded_svc_ids      # Off-peak seeded
+        assert "maint-svc-18906" in seeded_svc_ids
+
+    def test_off_peak_bakes_all_methods(self):
+        import asyncio
+        from api.maintenance_catalog import seed_standard_maintenance_services
+        fake = _build_curation_fake()
+        asyncio.run(seed_standard_maintenance_services(
+            "cur-est-1", "maintenance", "cur-sec-1", fake.query, fake.execute,
+        ))
+        off_peak_rows = [
+            r for r in fake.tables["section_services"].values()
+            if r.get("service_id") == "maint-svc-50391"
+        ]
+        assert len(off_peak_rows) == 2
+        kits = {r["service_kit_id"] for r in off_peak_rows}
+        assert kits == {"kit-off-std", "kit-off-push"}
+
+    def test_reprice_after_seed_sets_sell_and_hours(self):
+        import asyncio
+        from api.maintenance_catalog import seed_standard_maintenance_services
+        from api.maintenance_pricing import sell_rate_cents_per_1000_sf
+        fake = _build_curation_fake()
+        asyncio.run(seed_standard_maintenance_services(
+            "cur-est-1", "maintenance", "cur-sec-1", fake.query, fake.execute,
+        ))
+        primary = next(
+            r for r in fake.tables["section_services"].values()
+            if r.get("service_kit_id") == "kit-off-std"
+        )
+        expected_sell = sell_rate_cents_per_1000_sf(35000, 0.5, 2319)
+        assert primary["unit_sell_cents"] == expected_sell
+        # Primary inherits section 70000 SF → hours = 70000/35000 = 2.0
+        assert primary["hours"] == pytest.approx(2.0)
+        non_primary = next(
+            r for r in fake.tables["section_services"].values()
+            if r.get("service_kit_id") == "kit-off-push"
+        )
+        assert non_primary["hours"] == pytest.approx(0.0)
+        assert non_primary["unit_sell_cents"] == sell_rate_cents_per_1000_sf(8000, 0.5, 2319)
+
+
+class TestMigration082Registration:
+    def test_082_registered_after_081(self):
+        import scripts.migrate as M
+        ids = [mid for mid, _ in M.migration_files()]
+        assert "082_maintenance_catalog_curation" in ids
+        assert ids.index("082_maintenance_catalog_curation") == ids.index(
+            "081_service_kit_links_markup_columns"
+        ) + 1
+        assert M._DETECT["082_maintenance_catalog_curation"] is M.detect_082
+
+    def test_082_file_deactivates_base_and_months(self):
+        from pathlib import Path
+        text = (Path(__file__).resolve().parents[1]
+                / "sql" / "migrations" / "082_maintenance_catalog_curation.sql"
+                ).read_text(encoding="utf-8")
+        assert "maint-svc-50111" in text
+        for month_id in (
+            "50150", "50151", "50152", "50153", "50154", "50155",
+            "50156", "50157", "50158", "50159", "50160", "50161",
+        ):
+            assert f"maint-svc-{month_id}" in text
+        assert "maint-svc-50390" in text and "active = 1" in text
+        assert "maint-svc-50391" in text

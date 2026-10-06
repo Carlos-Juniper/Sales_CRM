@@ -87,6 +87,8 @@ from api.aspire_config import ASPIRE_DIVISION_MAP, ASPIRE_OPPORTUNITY_STATUS_WON
 from api.maintenance_catalog import (  # noqa: E402
     KIT_LINK_BASIS_TAKEOFF,
     MAINTENANCE_CATEGORIES,
+    MAINTENANCE_DEACTIVATED_IDS,
+    MAINTENANCE_STANDARD_SEED_ALLOWLIST,
     OCCURRENCE_SOURCES,
     kit_id_for_takeoff_item,
     service_id_for_aspire,
@@ -676,6 +678,25 @@ def derive(raw: RawPull, kits: dict[str, dict], min_opportunities: int = 1) -> P
                         "Aspire id; kits copied from the same-kind quarters",
             })
             notes.append(f"{label} is not an Aspire service; proposed without aspire_service_id.")
+
+    # H59 curation: drop the explicit deactivate list (Base+months, bid items,
+    # non-quarter fertilizer samples, no-kit optional junk). Other sampled
+    # services still propose; migration 082 + seed allowlist gate what is
+    # active / auto-seeded in the app.
+    dropped = [s for s in services if s["id"] in MAINTENANCE_DEACTIVATED_IDS]
+    if dropped:
+        for s in dropped:
+            unassigned.append({
+                "aspire_service_id": s.get("aspire_service_id"),
+                "name": s.get("name"),
+                "service_type": s.get("service_type"),
+                "reason": "H59 curation: in MAINTENANCE_DEACTIVATED_IDS",
+            })
+        services = [s for s in services if s["id"] not in MAINTENANCE_DEACTIVATED_IDS]
+        notes.append(
+            f"H59 curation dropped {len(dropped)} deactivated services; "
+            f"{len(MAINTENANCE_STANDARD_SEED_ALLOWLIST)} remain on the auto-seed allowlist."
+        )
 
     # Order within category: sample frequency, then Aspire SortOrder, then name.
     by_cat: dict[str, list[dict]] = defaultdict(list)

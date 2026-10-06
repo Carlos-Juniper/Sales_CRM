@@ -1926,13 +1926,16 @@ def register(app, require_auth) -> None:
         # America/New_York, not UTC.
         _require_due_back_not_past(body.get("dueBackDate"))
         # Guard runs BEFORE any INSERT so a reject persists nothing.
+        crew_rate_snapshot = None
         if est_type == "maintenance":
-            # Read the branch crew rate only when there are lines to price.
-            # An empty create has nothing to price and issues no extra query.
+            # Snapshot the live branch crew rate onto the estimate at create
+            # (H59). Also price any client-supplied lines; empty creates still
+            # snapshot so seeded rows reprice against the same rate.
             create_lines = annotate_maintenance_sections(body.get("sections"))
+            crew_rate_snapshot = await _live_branch_crew_rate(aspire_branch_id)
             await _require_resolvable_maintenance_lines(
                 create_lines,
-                await _live_branch_crew_rate(aspire_branch_id) if create_lines else None,
+                crew_rate_snapshot if create_lines else None,
             )
         # Budgets are optional. Resolve before the INSERT so a 400 persists
         # nothing, and so a blank string is NULL rather than 0. These dollars
@@ -1961,8 +1964,8 @@ def register(app, require_auth) -> None:
                       notify_bm_rd_on_return, notes, property_id, lead_id, rfi_status,
                       mowing_occurrences, pruning_occurrences, turf_fert_occurrences,
                       shrub_fert_occurrences, ipm_occurrences, irrigation_occurrences,
-                      homes_budget, common_area_budget)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                      homes_budget, common_area_budget, crew_rate_cents_per_hour)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 [
                     estimate_id,
                     est_type,
@@ -1997,6 +2000,7 @@ def register(app, require_auth) -> None:
                     # NULL when the rep left the budget blank. 0 only when they sent 0.
                     homes_budget,
                     common_area_budget,
+                    crew_rate_snapshot,  # H59: freeze branch crew rate at create
                 ],
             )
             for si, section in enumerate(body.get("sections") or []):

@@ -161,8 +161,8 @@ async def seed_standard_maintenance_services(
                 """INSERT INTO section_services
                      (id, section_id, service_kit_id, service_id, discipline, billing_type, label, qty, uom,
                       complexity_pct, unit_sell_cents, embedded_cost_cents, target_gm, hours, square_feet, sort_order)
-                   VALUES (%s, %s, %s, %s, NULL, NULL, %s, %s, NULL, NULL, NULL, NULL, NULL, NULL, %s, %s)""",
-                [svc_id, section_id, None, svc["id"], label, qty, 0, row_sort_idx],
+                   VALUES (%s, %s, %s, %s, NULL, NULL, %s, %s, %s, 0, NULL, NULL, NULL, NULL, %s, %s)""",
+                [svc_id, section_id, None, svc["id"], label, qty, "/yr", 0, row_sort_idx],
             )
             await _seed_labor_component(svc_id, execute_fn)
             row_sort_idx += 1
@@ -172,16 +172,17 @@ async def seed_standard_maintenance_services(
             kit_id = link["service_kit_id"]
             is_primary = bool(link.get("is_primary"))
 
-            # Fetch kit details for label and material fields.
+            # Fetch kit details for label, uom, and material fields.
             kit_detail_rows = await query_fn(
-                "SELECT id, name, material_unit_cost_cents"
+                "SELECT id, description, uom, material_unit_cost_cents"
                 " FROM service_kits WHERE id = %s",
                 [kit_id],
             )
             kit_detail = kit_detail_rows[0] if kit_detail_rows else {}
 
-            # Label at method level: kit name.
-            label = kit_detail.get("name") or svc.get("display_name") or svc.get("name", "")
+            # Label at method level: kit description.
+            label = kit_detail.get("description") or svc.get("display_name") or svc.get("name", "")
+            kit_uom = kit_detail.get("uom") or "/yr"
 
             # square_feet rule:
             #   NULL  — turf (mowing) primary kit only; inherits section.square_feet.
@@ -196,8 +197,8 @@ async def seed_standard_maintenance_services(
                 """INSERT INTO section_services
                      (id, section_id, service_kit_id, service_id, discipline, billing_type, label, qty, uom,
                       complexity_pct, unit_sell_cents, embedded_cost_cents, target_gm, hours, square_feet, sort_order)
-                   VALUES (%s, %s, %s, %s, NULL, NULL, %s, %s, NULL, NULL, NULL, NULL, NULL, NULL, %s, %s)""",
-                [svc_id, section_id, kit_id, svc["id"], label, qty, sqft, row_sort_idx],
+                   VALUES (%s, %s, %s, %s, NULL, NULL, %s, %s, %s, 0, NULL, NULL, NULL, NULL, %s, %s)""",
+                [svc_id, section_id, kit_id, svc["id"], label, qty, kit_uom, sqft, row_sort_idx],
             )
 
             # Components: always labor; material only when kit has a material cost.

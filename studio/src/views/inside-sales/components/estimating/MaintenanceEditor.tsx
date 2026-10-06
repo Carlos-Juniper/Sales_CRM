@@ -245,7 +245,7 @@ export function MaintenanceEditor({ estimate }: MaintenanceEditorProps) {
   function handleAddSection() {
     setDraft((d) => ({
       ...d,
-      sections: [...d.sections, buildDefaultSection(d.id, d.sections.length, maintCatalog)],
+      sections: [...d.sections, buildDefaultSection(d.id, d.sections.length)],
     }))
     toast.show('Section added')
   }

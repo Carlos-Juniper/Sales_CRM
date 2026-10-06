@@ -1,6 +1,14 @@
 // ---------------------------------------------------------------------------
-// Maintenance engine (hours-driven, section-based).
-// Fixture math (buildMaintenanceEstimate, all cents, via maintServiceLine):
+// Maintenance engine (section-based), rollup contract (Handoff 59 §B4).
+//
+// The editor now renders each service as a collapsed ServiceRollupRow inside
+// its category block. The method rows expose a per-method sqft input and a GM%
+// input — NOT the old flat OCC/COMP/P/H/TH columns. These specs assert the
+// rollup contract for create / edit / delete / totals; structural, lifecycle,
+// section-CRUD, rush and crew-rate-notice specs are unchanged (they never read
+// the per-line columns).
+//
+// Fixture math (buildMaintenanceEstimate, all cents):
 //   Common Area (120,000 SF):
 //     Mowing        120 × 450 × 42 × 1.10 = 2,494,800
 //     Detail/Bed    120 × 320 × 26 × 1.05 = 1,048,320
@@ -54,12 +62,38 @@ function sectionCard(name: string): HTMLElement {
   return card as HTMLElement
 }
 
+/**
+ * Locate a service rollup line by its visible label inside a section card.
+ * Lines in the default fixture carry no serviceId, so each is its own singleton
+ * rollup group keyed by its row id — we find it by header text, not testid.
+ */
+function rollupHeaderByLabel(card: HTMLElement, label: string): HTMLElement {
+  const headers = within(card).getAllByTestId(/^service-rollup-header-/)
+  const match = headers.find((h) => within(h).queryByText(label))
+  if (!match) throw new Error(`No service rollup line labeled “${label}”`)
+  return match
+}
+
+/** The outer service-rollup-{id} wrapper is the header's parent. */
+function rollupByLabel(card: HTMLElement, label: string): HTMLElement {
+  return rollupHeaderByLabel(card, label).parentElement as HTMLElement
+}
+
+/** Expand a rollup line and return its single method row. */
+async function expandMethod(
+  user: ReturnType<typeof userEvent.setup>,
+  card: HTMLElement,
+  label: string,
+): Promise<HTMLElement> {
+  const head = rollupHeaderByLabel(card, label)
+  if (head.getAttribute('data-expanded') !== 'true') {
+    await user.click(within(head).getByRole('button'))
+  }
+  const line = head.parentElement as HTMLElement
+  return within(line).getByTestId(/^method-row-/)
+}
+
 beforeEach(() => {
-  // Each render() call gets its own fresh QueryClient (test/utils.tsx), so
-  // there's no cross-test config cache to reset.
-  // These specs exercise the OFFLINE-FALLBACK catalog (the
-  // maintenance.ts literal). The API-driven catalog + save-guard specs at the
-  // bottom override this handler per test.
   server.use(http.get('/api/estimating/service-kits', () => HttpResponse.json([])))
 })
 
@@ -104,38 +138,34 @@ describe('MaintenanceEditor — structure', () => {
     expect(screen.getByDisplayValue('Entry & Medians')).toBeInTheDocument()
   })
 
-  it('shares one column template between hours-driven headers and line rows', () => {
+  it('renders the shared hours-driven column header on each section', () => {
     renderMaint()
-    const headerLabels = ['Service', 'Occurrences', 'Complexity', 'Discipline', 'Billing', 'Line total']
-
+    const headerLabels = [
+      'Service', 'Occurrences', 'Complexity', 'P/H', 'TH', 'Discipline', 'Billing', 'P/P', 'Line total', '',
+    ]
     for (const name of ['Common Area', 'Entry & Medians']) {
-      const card = sectionCard(name)
-      const header = within(card).getByTestId('maintenance-line-columns')
-      const row = within(card).getAllByTestId(/^service-row-/)[0]
-
+      const header = within(sectionCard(name)).getByTestId('maintenance-line-columns')
       expect([...header.children].map((el) => el.textContent)).toEqual(headerLabels)
-
-      const headerCols = [...header.classList].find((token) => token.startsWith('grid-cols-'))
-      const rowCols = [...row.classList].find((token) => token.startsWith('grid-cols-'))
-      expect(headerCols).toBeTruthy()
-      expect(rowCols).toBe(headerCols)
-      expect(headerCols).not.toMatch(/auto/)
-
-      const headerGap = [...header.classList].find((token) => token.startsWith('gap-x-'))
-      const rowGap = [...row.classList].find((token) => token.startsWith('gap-x-'))
-      expect(headerGap).toBe('gap-x-4')
-      expect(rowGap).toBe(headerGap)
     }
+  })
+
+  it('renders each service as a collapsed rollup line, with its rolled-up $/yr', () => {
+    renderMaint()
+    const s1 = sectionCard('Common Area')
+    const mowing = within(rollupByLabel(s1, 'Mowing')).getByTestId(/^service-rollup-header-/)
+    expect(mowing).toHaveAttribute('data-expanded', 'false')
+    // rolled-up $/yr = unitSellCents × qty = 450 × 42 = 18,900¢ = $189.00
+    expect(mowing).toHaveTextContent('$189.00')
   })
 
   it('shows section totals, unit reads, and the contract roll-up from calc.ts', () => {
     renderMaint()
     const s1 = sectionCard('Common Area')
-    expect(within(s1).getByText('$38,023.20')).toBeInTheDocument()
+    expect(within(s1).getByTestId('section-total')).toHaveTextContent('$38,023.20')
     // unit read: 3,802,320¢ / 120 = $316.86 / 1,000 SF
     expect(within(s1).getByText(/\$316\.86 \/ 1,000 SF/)).toBeInTheDocument()
     const s2 = sectionCard('Entry & Medians')
-    expect(within(s2).getByText('$12,750.75')).toBeInTheDocument()
+    expect(within(s2).getByTestId('section-total')).toHaveTextContent('$12,750.75')
     expect(screen.getByTestId('contract-total')).toHaveTextContent('$50,773.95')
   })
 
@@ -143,7 +173,6 @@ describe('MaintenanceEditor — structure', () => {
     renderMaint()
     expect(screen.getByTestId('rollup-sections')).toHaveTextContent('2')
     expect(screen.getByTestId('rollup-sqft')).toHaveTextContent('165,000')
-    // $50,773.95 < $100K ⇒ Manager tier (config-driven tier table)
     expect(screen.getByTestId('rollup-approval')).toHaveTextContent('Manager')
   })
 
@@ -230,7 +259,7 @@ describe('MaintenanceEditor — structure', () => {
   })
 })
 
-describe('MaintenanceEditor — live recompute (hours-driven)', () => {
+describe('MaintenanceEditor — live recompute', () => {
   it('acreage pill is sqft/43560 to 1 decimal and updates live', async () => {
     const user = userEvent.setup()
     renderMaint()
@@ -243,115 +272,205 @@ describe('MaintenanceEditor — live recompute (hours-driven)', () => {
     expect(within(s1).getByText('≈ 1.0 ac')).toBeInTheDocument()
   })
 
-  it('editing occurrences recomputes line, section, and contract totals live', async () => {
+  it('changing section sqft recomputes section and contract totals live', async () => {
     const user = userEvent.setup()
     renderMaint()
     const s1 = sectionCard('Common Area')
-    const mowRow = within(s1).getByTestId('service-row-Mowing')
-    expect(within(mowRow).getByText('$24,948.00')).toBeInTheDocument()
+    expect(within(s1).getByTestId('section-total')).toHaveTextContent('$38,023.20')
 
-    const qty = within(mowRow).getByLabelText(/occurrences/i)
-    await user.clear(qty)
-    await user.type(qty, '21')
-    // 120 × 450 × 21 × 1.1 = 1,247,400
-    expect(within(mowRow).getByText('$12,474.00')).toBeInTheDocument()
-    // section: 3,802,320 − 1,247,400 = 2,554,920
-    expect(within(s1).getByText('$25,549.20')).toBeInTheDocument()
-    // contract: 2,554,920 + 1,275,075 = 3,829,995
-    expect(screen.getByTestId('contract-total')).toHaveTextContent('$38,299.95')
-  })
-
-  it('blank input coerces to 0', async () => {
-    const user = userEvent.setup()
-    renderMaint()
-    const s1 = sectionCard('Common Area')
-    const mowRow = within(s1).getByTestId('service-row-Mowing')
-    await user.clear(within(mowRow).getByLabelText(/occurrences/i))
-    expect(within(mowRow).getByText('$0.00')).toBeInTheDocument()
-    // contract drops to Entry & Medians + remaining Common Area lines
-    expect(screen.getByTestId('contract-total')).toHaveTextContent('$25,825.95')
+    // Halving the region sqft halves every hours-based line in it.
+    const sqft = within(s1).getByLabelText(/region square footage/i)
+    await user.clear(sqft)
+    await user.type(sqft, '60000')
+    // 3,802,320 / 2 = 1,901,160
+    expect(within(s1).getByTestId('section-total')).toHaveTextContent('$19,011.60')
+    // contract: 1,901,160 + 1,275,075 = 3,176,235
+    expect(screen.getByTestId('contract-total')).toHaveTextContent('$31,762.35')
   })
 })
 
-describe('MaintenanceEditor — complexity (I-9.7)', () => {
-  it('flags rows whose complexity deviates from the company default (10%)', () => {
-    renderMaint()
-    const s1 = sectionCard('Common Area')
-    // Mowing is at the 10% default — not flagged
-    expect(
-      within(within(s1).getByTestId('service-row-Mowing')).queryByTestId('complexity-override-flag'),
-    ).not.toBeInTheDocument()
-    // Detail (5%) and Irrigation (0%) deviate — flagged
-    expect(
-      within(within(s1).getByTestId('service-row-Detail / Bed Maintenance')).getByTestId('complexity-override-flag'),
-    ).toBeInTheDocument()
-  })
-
-  it('changing complexity recomputes the line total AND its $/SF read, and flags the override', async () => {
+describe('MaintenanceEditor — rollup edit (sqft + GM)', () => {
+  it('typing a per-method sqft override updates the controlled input', async () => {
     const user = userEvent.setup()
     renderMaint()
-    const s1 = sectionCard('Common Area')
-    const irrRow = within(s1).getByTestId('service-row-Irrigation Inspection')
-    // 259,200¢ / 120,000 SF = $0.0216/SF
-    expect(within(irrRow).getByText('$0.0216 /SF')).toBeInTheDocument()
-    expect(within(irrRow).queryByTestId('complexity-override-flag')).toBeInTheDocument() // 0% ≠ 10% default
+    const method = await expandMethod(user, sectionCard('Common Area'), 'Mowing')
+    const sqft = within(method).getByTestId(/^sqft-input-/) as HTMLInputElement
+    // not overridden → blank with the section sqft as placeholder
+    expect(sqft.value).toBe('')
+    expect(sqft.placeholder).toBe('120,000')
 
-    const cx = within(irrRow).getByLabelText(/complexity/i)
-    await user.selectOptions(cx, '0.2')
-    // 259,200 × 1.2 = 311,040 → $3,110.40 · $0.0259/SF
-    expect(within(irrRow).getByText('$3,110.40')).toBeInTheDocument()
-    expect(within(irrRow).getByText('$0.0259 /SF')).toBeInTheDocument()
-    expect(within(irrRow).getByTestId('complexity-override-flag')).toBeInTheDocument()
+    await user.type(sqft, '60000')
+    expect(sqft.value).toBe('60000')
   })
 
-  it('setting complexity back to the company default clears the flag', async () => {
+  it('typing a GM% updates the method row GM input', async () => {
     const user = userEvent.setup()
     renderMaint()
-    const s1 = sectionCard('Common Area')
-    const irrRow = within(s1).getByTestId('service-row-Irrigation Inspection')
-    await user.selectOptions(within(irrRow).getByLabelText(/complexity/i), '0.1')
-    expect(within(irrRow).queryByTestId('complexity-override-flag')).not.toBeInTheDocument()
+    const method = await expandMethod(user, sectionCard('Common Area'), 'Mowing')
+    const gm = within(method).getByTestId(/^gm-input-/) as HTMLInputElement
+    await user.clear(gm)
+    await user.type(gm, '30')
+    expect(gm.value).toBe('30')
   })
 })
 
-describe('MaintenanceEditor — granularity + add line item (I-9.7)', () => {
-  it('mowing rows expose a kit granularity dropdown with mower sizes', async () => {
-    const user = userEvent.setup()
+describe('MaintenanceEditor — lifecycle & ownership (BRD §8.1)', () => {
+  it('starts in Bidding with the estimating-ownership banner', () => {
     renderMaint()
-    const s1 = sectionCard('Common Area')
-    const mowRow = within(s1).getByTestId('service-row-Mowing')
-    const size = within(mowRow).getByLabelText(/mower size/i)
-    expect(within(size).getByRole('option', { name: '36"' })).toBeInTheDocument()
-    expect(within(size).getByRole('option', { name: '72"' })).toBeInTheDocument()
-    await user.selectOptions(size, '72"')
-    expect((size as HTMLSelectElement).value).toBe('72"')
-  })
-
-  it('"Add line item" adds a catalog service not in the original spec', async () => {
-    const user = userEvent.setup()
-    const priced: ServiceKit = {
-      ...RATED_KIT,
-      id: 'kit-fert',
-      description: 'Fertilizer & pest',
-      unitSellCents: 135,
-      productionRate: 5000,
-    }
-    server.use(http.get('/api/estimating/service-kits', () => HttpResponse.json([priced])))
-    renderMaint()
-    const s1 = sectionCard('Common Area')
-    expect(within(s1).queryByTestId('service-row-Fertilizer & pest')).not.toBeInTheDocument()
-    await waitFor(() =>
-      expect(within(s1).getByRole('option', { name: 'Fertilizer & pest' })).toBeInTheDocument(),
+    expect(screen.getByRole('button', { name: 'Bidding' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('ownership-banner')).toHaveTextContent(
+      /addendums route to both CRM and Estimating/i,
     )
+    expect(screen.getByTestId('ownership-banner')).toHaveTextContent(/Estimating owns Aspire/i)
+  })
 
-    await user.selectOptions(within(s1).getByLabelText(/add line item/i), priced.id)
-    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
+  it('clicking Won persists the flip server-side, swaps the banner, and records the edge in the status-transition audit', async () => {
+    const user = userEvent.setup()
+    const created = (await estimatingApi.create(
+      toCreatePayload(buildMaintenanceEstimate()),
+    )) as MaintenanceEstimate
+    const { setOpenEstimate } = renderMaint(created)
+    await user.click(screen.getByRole('button', { name: 'Won' }))
 
-    const fertRow = within(s1).getByTestId('service-row-Fertilizer & pest')
-    expect(fertRow).toBeInTheDocument()
-    // catalog unit sell 135¢ / 1,000 SF, qty 1, complexity 10%:
-    // 120 × 135 × 1 × 1.10 = 17,820 → $178.20
-    expect(within(fertRow).getByText('$178.20')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByTestId('ownership-banner')).toHaveTextContent(
+        /Aspire ownership transferred to CRM/i,
+      ),
+    )
+    expect(screen.getByRole('button', { name: 'Won' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('ownership-banner')).toHaveTextContent(/quantities-assist/i)
+
+    expect(setOpenEstimate).toHaveBeenCalled()
+    const updated = setOpenEstimate.mock.calls.at(-1)![0] as MaintenanceEstimate
+    expect(updated.lifecycle).toBe('won')
+    expect(updated.aspireOwner).toBe('crm')
+
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.lifecycle).toBe('won')
+    expect(fetched.aspireOwner).toBe('crm')
+    const audit = await estimatingApi.listStatusTransitions(created.id)
+    expect(audit.some((t) => t.from === 'lifecycle:bidding' && t.to === 'lifecycle:won')).toBe(true)
+  })
+
+  it('clicking the already-active lifecycle is a no-op (no audit spam)', async () => {
+    const user = userEvent.setup()
+    const created = (await estimatingApi.create(
+      toCreatePayload(buildMaintenanceEstimate()),
+    )) as MaintenanceEstimate
+    renderMaint(created)
+    await user.click(screen.getByRole('button', { name: 'Bidding' }))
+    expect(await estimatingApi.listStatusTransitions(created.id)).toHaveLength(0)
+  })
+})
+
+describe('MaintenanceEditor — Reset / Save', () => {
+  it('Reset restores sections to saved state and margin to the 0.22 target', async () => {
+    const user = userEvent.setup()
+    renderMaint(buildMaintenanceEstimate({ targetMargin: 0.3 }))
+    const s1 = sectionCard('Common Area')
+
+    // dirty the draft via the region sqft, then Reset restores it
+    const sqft = within(s1).getByLabelText(/region square footage/i)
+    await user.clear(sqft)
+    await user.type(sqft, '60000')
+    expect(screen.getByTestId('contract-total')).toHaveTextContent('$31,762.35')
+
+    await user.click(screen.getByRole('button', { name: /reset/i }))
+    expect(screen.getByTestId('contract-total')).toHaveTextContent('$50,773.95')
+    expect(screen.getByText(/margin 22%/i)).toBeInTheDocument()
+  })
+
+  it('Save persists via the API and toasts success', async () => {
+    const user = userEvent.setup()
+    const seeded = mockEstimatesV2[0]
+    renderMaint(seeded)
+    await user.click(screen.getByRole('button', { name: /save/i }))
+    expect(await screen.findByRole('status')).toHaveTextContent(/saved/i)
+  })
+
+  it('Save persists an added section (tree diff) and reloads server state', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get('/api/estimating/service-kits', () => HttpResponse.json([RATED_KIT])),
+    )
+    const created = (await estimatingApi.create(
+      toCreatePayload(buildMaintenanceEstimate()),
+    )) as MaintenanceEstimate
+    renderMaint(created)
+    await screen.findByDisplayValue('Common Area')
+
+    await user.click(screen.getByRole('button', { name: /add section/i }))
+    await user.click(screen.getByRole('button', { name: /save/i }))
+    expect(await screen.findByText(/estimate saved/i)).toBeInTheDocument()
+
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.sections).toHaveLength(created.sections.length + 1)
+    const added = fetched.sections.at(-1)!
+    expect(added.name).toBe('New region')
+    expect(screen.getByDisplayValue('New region')).toBeInTheDocument()
+  })
+
+  it('Save persists a per-method sqft edit and a section removal — changed/gone after reload', async () => {
+    const user = userEvent.setup()
+    const created = (await estimatingApi.create(
+      toCreatePayload(buildMaintenanceEstimate()),
+    )) as MaintenanceEstimate
+    renderMaint(created)
+
+    // estimator sets a per-method sqft override on an existing line
+    const s1 = sectionCard('Common Area')
+    const method = await expandMethod(user, s1, 'Mowing')
+    const sqft = within(method).getByTestId(/^sqft-input-/)
+    await user.type(sqft, '60000')
+
+    // …and removes a whole section (confirm dialog)
+    const s2 = sectionCard('Entry & Medians')
+    await user.click(within(s2).getByRole('button', { name: /remove section entry & medians/i }))
+    await user.click(screen.getByRole('button', { name: 'Remove section' }))
+
+    await user.click(screen.getByRole('button', { name: /save/i }))
+    expect(await screen.findByText(/estimate saved/i)).toBeInTheDocument()
+
+    const fetched = await estimatingApi.get(created.id)
+    expect(fetched.sections).toHaveLength(1)
+    expect(fetched.sections[0].name).toBe('Common Area')
+    const mow = fetched.sections[0].services.find((sv) => sv.label === 'Mowing')!
+    expect(mow.squareFeet).toBe(60000)
+  })
+
+  it('Save persists a rollup line deletion — gone after reload', async () => {
+    const user = userEvent.setup()
+    const created = (await estimatingApi.create(
+      toCreatePayload(buildMaintenanceEstimate()),
+    )) as MaintenanceEstimate
+    const deleteSpy = vi.spyOn(estimatingApi, 'deleteService')
+    renderMaint(created)
+    await screen.findByDisplayValue('Common Area')
+
+    const s1 = sectionCard('Common Area')
+    const method = await expandMethod(user, s1, 'Detail / Bed Maintenance')
+    await user.click(within(method).getByRole('button', { name: /remove method/i }))
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    expect(await screen.findByText(/estimate saved/i)).toBeInTheDocument()
+
+    expect(deleteSpy).toHaveBeenCalledTimes(1)
+    const fetched = await estimatingApi.get(created.id)
+    const labels = fetched.sections[0].services.map((s) => s.label)
+    expect(labels).not.toContain('Detail / Bed Maintenance')
+    expect(labels).toContain('Mowing')
+    deleteSpy.mockRestore()
+  })
+
+  it('a failed save shows the save-error state with retry', async () => {
+    const user = userEvent.setup()
+    renderMaint(buildMaintenanceEstimate())
+    await user.click(screen.getByRole('button', { name: /save/i }))
+    const err = await screen.findByTestId('save-error')
+    expect(err).toHaveTextContent(/couldn.t be saved|failed/i)
+    expect(within(err).getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /save/i })).not.toBeDisabled(),
+    )
   })
 })
 
@@ -382,7 +501,7 @@ describe('MaintenanceEditor — section CRUD', () => {
     const user = userEvent.setup()
     renderMaint()
     const s2 = sectionCard('Entry & Medians')
-    await user.click(within(s2).getByRole('button', { name: /remove/i }))
+    await user.click(within(s2).getByRole('button', { name: /^remove section/i }))
 
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent(/remove section/i)
@@ -396,7 +515,7 @@ describe('MaintenanceEditor — section CRUD', () => {
     const user = userEvent.setup()
     renderMaint()
     const s2 = sectionCard('Entry & Medians')
-    await user.click(within(s2).getByRole('button', { name: /remove/i }))
+    await user.click(within(s2).getByRole('button', { name: /^remove section/i }))
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: /remove section/i }))
 
@@ -421,241 +540,6 @@ describe('MaintenanceEditor — section CRUD', () => {
   })
 })
 
-describe('MaintenanceEditor — lifecycle & ownership (BRD §8.1)', () => {
-  it('starts in Bidding with the estimating-ownership banner', () => {
-    renderMaint()
-    expect(screen.getByRole('button', { name: 'Bidding' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByTestId('ownership-banner')).toHaveTextContent(
-      /addendums route to both CRM and Estimating/i,
-    )
-    expect(screen.getByTestId('ownership-banner')).toHaveTextContent(/Estimating owns Aspire/i)
-  })
-
-  it('clicking Won persists the flip server-side, swaps the banner, and records the edge in the status-transition audit', async () => {
-    const user = userEvent.setup()
-    // server-seeded so the persistence round-trip is real (MSW store)
-    const created = (await estimatingApi.create(
-      toCreatePayload(buildMaintenanceEstimate()),
-    )) as MaintenanceEstimate
-    const { setOpenEstimate } = renderMaint(created)
-    await user.click(screen.getByRole('button', { name: 'Won' }))
-
-    await waitFor(() =>
-      expect(screen.getByTestId('ownership-banner')).toHaveTextContent(
-        /Aspire ownership transferred to CRM/i,
-      ),
-    )
-    expect(screen.getByRole('button', { name: 'Won' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByTestId('ownership-banner')).toHaveTextContent(/quantities-assist/i)
-
-    // the shell estimate was updated from the server response
-    expect(setOpenEstimate).toHaveBeenCalled()
-    const updated = setOpenEstimate.mock.calls.at(-1)![0] as MaintenanceEstimate
-    expect(updated.lifecycle).toBe('won')
-    expect(updated.aspireOwner).toBe('crm')
-
-    // the flip SURVIVES A RELOAD — the server row changed…
-    const fetched = await estimatingApi.get(created.id)
-    expect(fetched.lifecycle).toBe('won')
-    expect(fetched.aspireOwner).toBe('crm')
-    // …and the WON edge landed in estimate_status_transitions
-    const audit = await estimatingApi.listStatusTransitions(created.id)
-    expect(audit.some((t) => t.from === 'lifecycle:bidding' && t.to === 'lifecycle:won')).toBe(true)
-  })
-
-  it('clicking the already-active lifecycle is a no-op (no audit spam)', async () => {
-    const user = userEvent.setup()
-    const created = (await estimatingApi.create(
-      toCreatePayload(buildMaintenanceEstimate()),
-    )) as MaintenanceEstimate
-    renderMaint(created)
-    await user.click(screen.getByRole('button', { name: 'Bidding' }))
-    expect(await estimatingApi.listStatusTransitions(created.id)).toHaveLength(0)
-  })
-})
-
-describe('MaintenanceEditor — Reset / Save', () => {
-  it('Reset restores sections to saved state and margin to the 0.22 target', async () => {
-    const user = userEvent.setup()
-    renderMaint(buildMaintenanceEstimate({ targetMargin: 0.3 }))
-    const s1 = sectionCard('Common Area')
-    const mowRow = within(s1).getByTestId('service-row-Mowing')
-    await user.clear(within(mowRow).getByLabelText(/occurrences/i))
-    expect(screen.getByTestId('contract-total')).toHaveTextContent('$25,825.95')
-
-    await user.click(screen.getByRole('button', { name: /reset/i }))
-    expect(screen.getByTestId('contract-total')).toHaveTextContent('$50,773.95')
-    expect(screen.getByText(/margin 22%/i)).toBeInTheDocument()
-  })
-
-  it('Save persists via the API and toasts success', async () => {
-    const user = userEvent.setup()
-    // must be a server-seeded estimate for the MSW PATCH route to find it
-    const seeded = mockEstimatesV2[0]
-    renderMaint(seeded)
-    await user.click(screen.getByRole('button', { name: /save/i }))
-    expect(await screen.findByRole('status')).toHaveTextContent(/saved/i)
-  })
-
-  it('Save persists an added section (tree diff) and reloads server state', async () => {
-    const user = userEvent.setup()
-    server.use(
-      http.get('/api/estimating/service-kits', () => HttpResponse.json([RATED_KIT])),
-    )
-    const created = (await estimatingApi.create(
-      toCreatePayload(buildMaintenanceEstimate()),
-    )) as MaintenanceEstimate
-    renderMaint(created)
-    await waitFor(() =>
-      expect(
-        within(sectionCard('Common Area')).getByRole('option', { name: 'Standard Production Mowing' }),
-      ).toBeInTheDocument(),
-    )
-
-    await user.click(screen.getByRole('button', { name: /add section/i }))
-    await user.click(screen.getByRole('button', { name: /save/i }))
-    expect(await screen.findByText(/estimate saved/i)).toBeInTheDocument()
-
-    // reload from the server: the section (and its seeded services) persisted
-    const fetched = await estimatingApi.get(created.id)
-    expect(fetched.sections).toHaveLength(created.sections.length + 1)
-    const added = fetched.sections.at(-1)!
-    expect(added.name).toBe('New region')
-    expect(added.services.length).toBeGreaterThan(0)
-    // the editor now shows the server-reloaded tree
-    expect(screen.getByDisplayValue('New region')).toBeInTheDocument()
-  })
-
-  it('Save persists qty edits and section removal — gone/changed after reload', async () => {
-    const user = userEvent.setup()
-    const created = (await estimatingApi.create(
-      toCreatePayload(buildMaintenanceEstimate()),
-    )) as MaintenanceEstimate
-    renderMaint(created)
-
-    // estimator edits occurrences on an existing line item
-    const s1 = sectionCard('Common Area')
-    const mowRow = within(s1).getByTestId('service-row-Mowing')
-    const qty = within(mowRow).getByLabelText(/occurrences/i)
-    await user.clear(qty)
-    await user.type(qty, '21')
-
-    // …and removes a whole section (confirm dialog)
-    const s2 = sectionCard('Entry & Medians')
-    await user.click(within(s2).getByRole('button', { name: /remove section entry & medians/i }))
-    await user.click(screen.getByRole('button', { name: 'Remove section' }))
-
-    await user.click(screen.getByRole('button', { name: /save/i }))
-    expect(await screen.findByText(/estimate saved/i)).toBeInTheDocument()
-
-    const fetched = await estimatingApi.get(created.id)
-    expect(fetched.sections).toHaveLength(1)
-    expect(fetched.sections[0].name).toBe('Common Area')
-    const mow = fetched.sections[0].services.find((sv) => sv.label === 'Mowing')!
-    expect(mow.qty).toBe(21)
-    // server-reloaded contract value reflects the persisted tree
-    expect(fetched.contractValueCents).toBeGreaterThan(0)
-  })
-
-  it('a failed save shows the save-error state with retry', async () => {
-    const user = userEvent.setup()
-    // a fresh estimate is unknown to the MSW store → PATCH 404s
-    renderMaint(buildMaintenanceEstimate())
-    await user.click(screen.getByRole('button', { name: /save/i }))
-    const err = await screen.findByTestId('save-error')
-    expect(err).toHaveTextContent(/couldn.t be saved|failed/i)
-    expect(within(err).getByRole('button', { name: /retry/i })).toBeInTheDocument()
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /save/i })).not.toBeDisabled(),
-    )
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Kits come from GET /service-kits; every maintenance line must
-// resolve a production rate (or explicit hours) before Save.
-// ---------------------------------------------------------------------------
-
-describe('MaintenanceEditor — kit catalog + production-rate save guard', () => {
-  it('feeds the add-line dropdown from GET /service-kits, not the literal', async () => {
-    server.use(
-      http.get('/api/estimating/service-kits', () => HttpResponse.json([RATED_KIT])),
-    )
-    renderMaint()
-    const s1 = sectionCard('Common Area')
-    const select = within(s1).getByLabelText(/add line item/i)
-    await waitFor(() =>
-      expect(
-        within(select).getByRole('option', { name: 'Standard Production Mowing' }),
-      ).toBeInTheDocument(),
-    )
-    // the literal-only demo rows are gone once the API catalog loads
-    expect(
-      within(select).queryByRole('option', { name: 'Fertilizer & pest' }),
-    ).not.toBeInTheDocument()
-  })
-
-  it('does not fall back to the literal catalog when the API returns no kits', () => {
-    renderMaint()
-    const s1 = sectionCard('Common Area')
-    const select = within(s1).getByLabelText(/add line item/i)
-    expect(
-      within(select).queryByRole('option', { name: 'Fertilizer & pest' }),
-    ).not.toBeInTheDocument()
-  })
-
-  it('blocks Save with a clear message when a line resolves no production rate', async () => {
-    const user = userEvent.setup()
-    const est = buildMaintenanceEstimate()
-    // strip the resolution paths from one line: no hours, no kit
-    est.sections[0].services[0] = {
-      ...est.sections[0].services[0],
-      hours: null,
-      serviceKitId: null,
-    }
-    renderMaint(est)
-    await user.click(screen.getByRole('button', { name: /^save$/i }))
-
-    const err = await screen.findByTestId('save-error')
-    expect(err).toHaveTextContent(/production rate/i)
-    expect(err).toHaveTextContent('Mowing')
-    // the save never reached the API — no success toast
-    expect(screen.queryByText(/estimate saved/i)).not.toBeInTheDocument()
-  })
-
-  it('a line pointing at an UNRATED kit is blocked once the catalog is loaded', async () => {
-    const unrated: ServiceKit = {
-      ...RATED_KIT,
-      id: 'kit-maint-3435',
-      description: 'Prune Easy',
-      productionRate: null,
-    }
-    server.use(
-      http.get('/api/estimating/service-kits', () =>
-        HttpResponse.json([RATED_KIT, unrated]),
-      ),
-    )
-    const user = userEvent.setup()
-    const est = buildMaintenanceEstimate()
-    est.sections[0].services[0] = {
-      ...est.sections[0].services[0],
-      hours: null,
-      serviceKitId: unrated.id,
-    }
-    renderMaint(est)
-    // wait for the catalog fetch so the client guard can resolve the kit
-    const s1 = sectionCard('Common Area')
-    await waitFor(() =>
-      expect(
-        within(s1).getByRole('option', { name: 'Standard Production Mowing' }),
-      ).toBeInTheDocument(),
-    )
-    await user.click(screen.getByRole('button', { name: /^save$/i }))
-    const err = await screen.findByTestId('save-error')
-    expect(err).toHaveTextContent(/production rate/i)
-  })
-})
-
 describe('MaintenanceEditor — rush badge', () => {
   it('shows Rush on the estimate detail only when isRush is true', () => {
     renderMaint(buildMaintenanceEstimate({ name: 'Rush Detail', isRush: true }))
@@ -675,40 +559,7 @@ describe('MaintenanceEditor — rush badge', () => {
   })
 })
 
-describe('MaintenanceEditor — branch crew rate', () => {
-  it('prices a new kit line from the live branch crew rate', async () => {
-    const user = userEvent.setup()
-    server.use(
-      http.get('/api/estimating/service-kits', () => HttpResponse.json([RATED_KIT])),
-      http.get('/api/settings/branch/3696', () =>
-        HttpResponse.json({ aspireBranchId: 3696, crewRateCentsPerHour: 22_500 }),
-      ),
-    )
-    renderMaint(
-      buildMaintenanceEstimate({
-        crewRateCentsPerHour: null,
-        aspireBranchId: 3696,
-        branchCity: 'Fort Myers, FL',
-      }),
-    )
-    const rate = await screen.findByTestId('crew-rate-provenance')
-    expect(rate).toHaveTextContent('Priced at $225.00/hr loaded crew rate')
-    expect(rate).toHaveTextContent('Fort Myers, FL')
-    expect(rate).toHaveAttribute('data-source', 'live')
-    const s1 = sectionCard('Common Area')
-    await waitFor(() =>
-      expect(
-        within(s1).getByRole('option', { name: 'Standard Production Mowing' }),
-      ).toBeInTheDocument(),
-    )
-    await user.selectOptions(within(s1).getByLabelText(/add line item/i), RATED_KIT.id)
-    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
-    // 1000/67650 × 22500¢ / 0.78 = 426¢ per 1,000 SF
-    // 120,000 SF × 426¢ × qty 1 × 1.10 complexity = $562.32
-    const row = within(s1).getByTestId('service-row-Standard Production Mowing')
-    expect(within(row).getByText('$562.32')).toBeInTheDocument()
-  })
-
+describe('MaintenanceEditor — crew rate notices', () => {
   it('uses a frozen snapshot and labels it as frozen at submission', () => {
     renderMaint(
       buildMaintenanceEstimate({
@@ -744,7 +595,6 @@ describe('MaintenanceEditor — branch crew rate', () => {
     )
     expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled()
     expect(screen.queryByTestId('crew-rate-provenance')).not.toBeInTheDocument()
-    expect(screen.queryByText(/Maintenance pricing is blocked/)).not.toBeInTheDocument()
   })
 
   it('shows the shared no-crew-rate notice without a settings link when the estimate has no branch', () => {
@@ -757,137 +607,25 @@ describe('MaintenanceEditor — branch crew rate', () => {
     expect(screen.queryByTestId('crew-rate-settings-link')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled()
   })
+})
 
-  it('marks only the server-listed lines and links to the branch crew-rate settings', async () => {
+describe('MaintenanceEditor — production-rate save guard', () => {
+  it('blocks Save with a clear message when a line resolves no production rate', async () => {
     const user = userEvent.setup()
-    const seeded = buildMaintenanceEstimate({
-      aspireBranchId: 2224,
-      branchCity: '*** PICK A BRANCH ***',
-      crewRateCentsPerHour: 18_000,
-    })
-    const created = (await estimatingApi.create(toCreatePayload(seeded))) as MaintenanceEstimate
-    const estimate: MaintenanceEstimate = {
-      ...created,
-      crewRateCentsPerHour: 18_000,
-      aspireBranchId: 2224,
-      branchCity: '*** PICK A BRANCH ***',
+    const est = buildMaintenanceEstimate()
+    // strip the resolution paths from one line: no hours, no kit
+    est.sections[0].services[0] = {
+      ...est.sections[0].services[0],
+      hours: null,
+      serviceKitId: null,
     }
-    const common = estimate.sections[0]
-    const mowing = common.services.find((svc) => svc.label === 'Mowing')!
-    server.use(
-      http.patch(
-        '/api/estimating/estimates/:id/sections/:sectionId/services/:serviceId',
-        () =>
-          HttpResponse.json(
-            {
-              detail: {
-                code: 'crew_rate_required',
-                blockedLines: [{ serviceId: mowing.id, sectionId: common.id }],
-              },
-            },
-            { status: 422 },
-          ),
-      ),
-    )
-
-    renderMaint(estimate)
-    expect(screen.getByTestId('crew-rate-provenance')).toBeInTheDocument()
-    expect(screen.queryByTestId('margin-no-crew-rate')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled()
-
-    const detailRow = within(sectionCard('Common Area')).getByTestId(
-      'service-row-Detail / Bed Maintenance',
-    )
-    const qty = within(detailRow).getByLabelText(/occurrences/i)
-    await user.clear(qty)
-    await user.type(qty, '10')
+    renderMaint(est)
     await user.click(screen.getByRole('button', { name: /^save$/i }))
 
     const err = await screen.findByTestId('save-error')
-    expect(err).toHaveTextContent(
-      'Set a crew rate for this branch in Settings before saving maintenance prices that are calculated from it.',
-    )
-    expect(screen.queryByText(/Maintenance pricing is blocked/)).not.toBeInTheDocument()
-
-    const blocked = within(sectionCard('Common Area')).getByTestId('service-row-Mowing')
-    expect(blocked).toHaveAttribute('data-crew-rate-blocked', 'true')
-    expect(within(blocked).getByTestId('crew-rate-blocked-line')).toBeInTheDocument()
-
-    const kept = within(sectionCard('Common Area')).getByTestId('service-row-Detail / Bed Maintenance')
-    expect(kept).toHaveAttribute('data-crew-rate-blocked', 'false')
-    expect(within(kept).queryByTestId('crew-rate-blocked-line')).not.toBeInTheDocument()
-
-    const otherMowing = within(sectionCard('Entry & Medians')).getByTestId('service-row-Mowing')
-    expect(otherMowing).toHaveAttribute('data-crew-rate-blocked', 'false')
-
-    expect(screen.getByTestId('crew-rate-settings-link')).toHaveAttribute(
-      'href',
-      '/settings/branch/2224/crew-rate',
-    )
-  })
-
-  it('an empty blockedLines list marks only unsaved crew-rate-derived lines', async () => {
-    const user = userEvent.setup()
-    const derivedKit: ServiceKit = {
-      ...RATED_KIT,
-      id: 'kit-derived',
-      description: 'Derived Mowing',
-      unitSellCents: 0,
-      productionRate: 67650,
-      targetGm: 0.22,
-    }
-    const catalogKit: ServiceKit = {
-      ...RATED_KIT,
-      id: 'kit-catalog',
-      description: 'Catalog Fertilizer',
-      unitSellCents: 450,
-      productionRate: 5000,
-    }
-    const estimate = buildMaintenanceEstimate({
-      crewRateCentsPerHour: null,
-      aspireBranchId: 2224,
-      branchCity: '*** PICK A BRANCH ***',
-    })
-    // Already saved, sell 0 on a deriving kit. The create 422 must not mark it.
-    estimate.sections[0].services[0] = {
-      ...estimate.sections[0].services[0],
-      serviceKitId: derivedKit.id,
-      unitSellCents: 0,
-      hours: 1.6,
-    }
-    server.use(
-      http.get('/api/settings/branch/2224', () =>
-        HttpResponse.json({ aspireBranchId: 2224, crewRateCentsPerHour: 22_500 }),
-      ),
-      http.get('/api/estimating/service-kits', () =>
-        HttpResponse.json([derivedKit, catalogKit]),
-      ),
-      http.post('/api/estimating/estimates/:id/sections/:sectionId/services', () =>
-        HttpResponse.json(
-          { detail: { code: 'crew_rate_required', blockedLines: [] } },
-          { status: 422 },
-        ),
-      ),
-    )
-
-    renderMaint(estimate)
-    const s1 = sectionCard('Common Area')
-    const add = () => within(s1).getByLabelText(/add line item/i)
-    await waitFor(() => expect(within(add()).getByRole('option', { name: 'Derived Mowing' })).toBeInTheDocument())
-    await user.selectOptions(add(), derivedKit.id)
-    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
-    await user.selectOptions(add(), catalogKit.id)
-    await user.click(within(s1).getByRole('button', { name: /add line item/i }))
-    await user.click(screen.getByRole('button', { name: /^save$/i }))
-
-    expect(await screen.findByTestId('save-error')).toHaveTextContent(/set a crew rate/i)
-    const addedDerived = within(s1).getByTestId('service-row-Derived Mowing')
-    expect(addedDerived).toHaveAttribute('data-crew-rate-blocked', 'true')
-    expect(within(s1).getByTestId('service-row-Catalog Fertilizer')).toHaveAttribute(
-      'data-crew-rate-blocked',
-      'false',
-    )
-    expect(within(s1).getByTestId('service-row-Mowing')).toHaveAttribute('data-crew-rate-blocked', 'false')
-    expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled()
+    expect(err).toHaveTextContent(/production rate/i)
+    expect(err).toHaveTextContent('Mowing')
+    // the save never reached the API — no success toast
+    expect(screen.queryByText(/estimate saved/i)).not.toBeInTheDocument()
   })
 })

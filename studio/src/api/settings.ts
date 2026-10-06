@@ -19,13 +19,18 @@ export interface ManageableBranch {
 /**
  * A branch's settings as returned by GET /api/settings/branch/{aspire_branch_id}.
  * `crewRateCentsPerHour` is null when the branch has no configured rate.
- * `productionRates` are active rated `service_kits` rows (`serviceKitId`);
- * the list is not filtered by this branch, and `source` is `inherited`.
+ * `productionRates` are ALL active `service_kits` rows (even those with no
+ * baseline production_rate). `source` is 'override' when a service_kit_rates
+ * row exists for this branch-kit pair; 'inherited' otherwise.
+ * `resolvedRate` is the merged effective production_rate (null if no rate anywhere).
  */
 export interface BranchProductionRate {
   serviceKitId: string
   description: string
+  /** Alias for resolvedRate — kept for backwards compatibility. */
   productionRate: number | null
+  /** The merged effective production_rate across branch + company + baseline. */
+  resolvedRate: number | null
   source: 'override' | 'inherited'
 }
 
@@ -45,10 +50,20 @@ export interface BranchSettings {
 export interface BranchSettingsPatch {
   /** Crew rate in cents-per-hour (dollars converted client-side). */
   crewRateCentsPerHour?: number
-  /** {serviceKitId: productionRate} — one row per changed kit. */
-  productionRates?: Record<string, number>
+  // productionRates removed (Handoff 54 §4): use settingsApi.patchKitRate().
   /** {materialKey: {factorName: value}} — FACTOR columns only, never unit_cost/sell. */
   materialFactors?: Record<string, Record<string, number | Record<string, number>>>
+}
+
+/**
+ * Per-branch kit-rate update body for
+ * PATCH /api/settings/branch/{aspireBranchId}/kit-rates/{kitId}.
+ * The backend appends an append-only row to service_kit_rates — there is no
+ * delete/revert path; omit productionRate to leave it unchanged.
+ */
+export interface KitRatePatchBody {
+  productionRate?: number | null
+  note?: string
 }
 
 /**
@@ -167,16 +182,15 @@ export const settingsApi = {
     apiClient.get<BranchSettings>(`/settings/branch/${aspireBranchId}`),
 
   /**
-   * Patch a branch's crew rate / production rates / material factors. The
-   * BranchSettingsPatch (Slice 5) model expects snake_case keys, so the camel
-   * body is mapped to the wire shape here — the UI/hooks stay camelCase.
+   * Patch a branch's crew rate / material factors. The BranchSettingsPatch
+   * model expects snake_case keys, so the camel body is mapped to the wire
+   * shape here — the UI/hooks stay camelCase.
+   * Production rates are now written per-kit via patchKitRate (Handoff 54 §4).
    */
   updateBranchSettings: (aspireBranchId: number, body: BranchSettingsPatch) => {
     const wire: Record<string, unknown> = {}
     if (body.crewRateCentsPerHour !== undefined)
       wire.crew_rate_cents_per_hour = body.crewRateCentsPerHour
-    if (body.productionRates !== undefined)
-      wire.production_rates = body.productionRates
     if (body.materialFactors !== undefined)
       wire.material_factors = body.materialFactors
     return apiClient.patch<BranchSettings>(
@@ -184,6 +198,22 @@ export const settingsApi = {
       wire,
     )
   },
+
+  /**
+   * Per-branch kit-rate PATCH (Handoff 54 §4).
+   * PATCH /api/settings/branch/{aspireBranchId}/kit-rates/{kitId}
+   * Returns 204 No Content (void). A no-op guard server-side skips the INSERT
+   * when all submitted values already match the resolved effective rate.
+   */
+  patchKitRate: (
+    aspireBranchId: number,
+    kitId: string,
+    body: KitRatePatchBody,
+  ): Promise<void> =>
+    apiClient.patch<void>(
+      `/settings/branch/${aspireBranchId}/kit-rates/${kitId}`,
+      body,
+    ),
 
   /** Read the company_settings singleton (any authed role). */
   company: () => apiClient.get<CompanySettings>('/settings/company'),

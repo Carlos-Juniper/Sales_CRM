@@ -740,32 +740,35 @@ class TestBranchSettingsEnriched:
       - crewRateCentsPerHour is unchanged.
     """
 
+    @patch("api.settings.resolve_kit_rate", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
     async def test_branch_with_override_returns_override_flag(
-        self, mock_query, mock_authz_query, as_role
+        self, mock_query, mock_authz_query, mock_resolve_kit_rate, as_role
     ):
         """A branch override row must come back flagged source='override'."""
         as_role("admin")
         mock_authz_query.return_value = []  # admin → kind='all'
 
-        # 4 sequential query calls in get_branch_settings:
+        # Query calls in get_branch_settings_payload (Handoff 54 §4 shape):
         #   (1) branch_settings, (2) material_calcs branch overrides,
-        #   (3) material_calcs company-wide, (4) service_kits
+        #   (3) material_calcs company-wide, (4) service_kits (all active),
+        #   (5) DISTINCT service_kit_id FROM service_kit_rates for this branch
+        # resolve_kit_rate is patched separately (it lives in maintenance_catalog).
         branch_row = {"crew_rate_cents_per_hour": 20000}
         override_factor_row = {
             "material_key": "mulch", "factors": '{"depth_in": 3}',
             "aspire_branch_id": 1403,
         }
-        catalog_row = {
-            "id": "ci-001", "description": "Mulch Install", "production_rate": 1200.0,
-        }
+        catalog_row = {"id": "ci-001", "description": "Mulch Install"}
         mock_query.side_effect = [
-            [branch_row],           # (1) branch_settings
-            [override_factor_row],  # (2) material_calcs branch overrides
-            [],                     # (3) material_calcs company-wide (mulch overridden, nothing extra)
-            [catalog_row],          # (4) service_kits
+            [branch_row],                               # (1) branch_settings
+            [override_factor_row],                      # (2) material_calcs branch overrides
+            [],                                         # (3) material_calcs company-wide
+            [catalog_row],                              # (4) service_kits (all active)
+            [{"service_kit_id": "ci-001"}],             # (5) branch-scoped kit ids
         ]
+        mock_resolve_kit_rate.return_value = {"productionRate": 1200.0}
         r = client.get("/api/settings/branch/1403")
         assert r.status_code == 200
         body = r.json()
@@ -781,13 +784,23 @@ class TestBranchSettingsEnriched:
         assert override_factor is not None, "mulch factor row must be present"
         assert override_factor["source"] == "override"
 
+        # Kit with a branch row must be flagged source='override'.
+        rates = body["productionRates"]
+        assert len(rates) >= 1
+        kit_rate = next((rr for rr in rates if rr["serviceKitId"] == "ci-001"), None)
+        assert kit_rate is not None
+        assert kit_rate["source"] == "override"
+        assert kit_rate["resolvedRate"] == 1200.0
+
+    @patch("api.settings.resolve_kit_rate", new_callable=AsyncMock)
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)
     async def test_branch_without_override_returns_inherited_flag(
-        self, mock_query, mock_authz_query, as_role
+        self, mock_query, mock_authz_query, mock_resolve_kit_rate, as_role
     ):
         """When a branch has no material_calcs override, the company-wide row
-        must be returned flagged source='inherited'."""
+        must be returned flagged source='inherited'. A kit with no branch-level
+        service_kit_rates row must also be flagged source='inherited'."""
         as_role("admin")
         mock_authz_query.return_value = []
 
@@ -796,15 +809,15 @@ class TestBranchSettingsEnriched:
             "material_key": "mulch", "factors": '{"depth_in": 3}',
             "aspire_branch_id": None,  # company-wide
         }
-        catalog_row = {
-            "id": "ci-001", "description": "Mulch Install", "production_rate": 900.0,
-        }
+        catalog_row = {"id": "ci-001", "description": "Mulch Install"}
         mock_query.side_effect = [
             [branch_row],           # (1) branch_settings
             [],                     # (2) material_calcs branch overrides — none
             [company_wide_row],     # (3) material_calcs company-wide row
-            [catalog_row],          # (4) service_kits
+            [catalog_row],          # (4) service_kits (all active)
+            [],                     # (5) branch-scoped kit ids — none for this branch
         ]
+        mock_resolve_kit_rate.return_value = {"productionRate": 900.0}
         r = client.get("/api/settings/branch/3696")
         assert r.status_code == 200
         body = r.json()
@@ -814,6 +827,14 @@ class TestBranchSettingsEnriched:
         company_factor = next((f for f in factors if f["materialKey"] == "mulch"), None)
         assert company_factor is not None
         assert company_factor["source"] == "inherited"
+
+        # Kit without a branch row must be flagged source='inherited'.
+        rates = body["productionRates"]
+        assert len(rates) >= 1
+        kit_rate = next((rr for rr in rates if rr["serviceKitId"] == "ci-001"), None)
+        assert kit_rate is not None
+        assert kit_rate["source"] == "inherited"
+        assert kit_rate["resolvedRate"] == 900.0
 
     @patch("api.authz.query", new_callable=AsyncMock)
     @patch("api.settings.query", new_callable=AsyncMock)

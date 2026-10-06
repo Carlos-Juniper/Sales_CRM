@@ -13,7 +13,7 @@ export function LeadMetricsGrid({ lead }: LeadMetricsGridProps) {
   return (
     <>
       {/* Metric tiles */}
-      <div className="px-6 pb-4 grid grid-cols-4 gap-3">
+      <div className="px-6 pb-4 grid grid-cols-4 gap-3 max-md:px-4 max-md:grid-cols-2 max-md:gap-2">
         <div className="border border-gray-200 rounded-lg p-3">
           <p className="text-[10px] font-semibold text-[#2E7D52] uppercase tracking-wide mb-1">
             $ Annual Value

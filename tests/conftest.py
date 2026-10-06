@@ -264,6 +264,10 @@ class FakeDb:
                     if cm:
                         rows = [r for r in rows if r.get(cm.group(1)) is not None]
                         continue
+                    cm = re.match(r"(\w+) IS NULL$", cond.strip())
+                    if cm:
+                        rows = [r for r in rows if r.get(cm.group(1)) is None]
+                        continue
                     cm = re.match(r"(\w+) IN \((.*)\)$", cond.strip())
                     if cm:
                         col = cm.group(1)

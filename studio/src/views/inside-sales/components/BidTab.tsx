@@ -74,7 +74,7 @@ export function BidTab({ lead, builderOpen, onBuilderOpenChange }: BidTabProps) 
   }
 
   return (
-    <div className="px-6 py-5 space-y-5">
+    <div className="px-6 py-5 space-y-5 max-md:px-4 max-md:py-4">
       {/* Bid section */}
       <div>
         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Bid</p>

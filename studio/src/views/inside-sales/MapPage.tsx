@@ -69,7 +69,7 @@ export default function MapPage() {
       />
 
       {/* Filter bar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--bg))] flex-shrink-0 flex-wrap">
+      <div className="flex items-center gap-2 px-4 py-2 border-b max-md:px-3 max-md:py-1.5 border-[hsl(var(--border))] bg-[hsl(var(--bg))] flex-shrink-0 flex-wrap">
         <span className="text-xs text-[hsl(var(--muted-fg))] font-medium mr-1">Filter:</span>
         {LEAD_TYPES.map((type) => {
           const active = filterTypes.has(type)
@@ -145,15 +145,15 @@ export default function MapPage() {
         </MapContainer>
 
         {/* Legend */}
-        <div className="absolute bottom-6 left-3 z-[1000] bg-white/90 backdrop-blur-sm rounded-lg shadow border border-[hsl(var(--border))] px-3 py-2 flex flex-wrap items-center gap-3">
+        <div className="absolute bottom-6 left-3 max-md:bottom-3 max-md:left-2 z-[1000] bg-white/90 backdrop-blur-sm rounded-lg shadow border border-[hsl(var(--border))] px-3 py-2 max-md:px-2 max-md:py-1.5 flex flex-wrap items-center gap-3 max-md:gap-2">
           {LEAD_TYPES.map((type) => (
             <div key={type} className="flex items-center gap-1.5">
               <div className="h-3 w-3 rounded-full border border-white/50 map-legend-dot" style={{ '--dot-color': LEAD_TYPE_COLORS[type].hex } as React.CSSProperties} />
               <span className="text-xs text-[hsl(var(--muted-fg))] font-medium">{LEAD_TYPE_LABELS[type]}</span>
             </div>
           ))}
-          <div className="w-px h-3 bg-[hsl(var(--border))]" />
-          <span className="text-[10px] text-[hsl(var(--muted-fg))]">Dot size = contract value</span>
+          <div className="w-px h-3 bg-[hsl(var(--border))] max-md:hidden" />
+          <span className="text-[10px] text-[hsl(var(--muted-fg))] max-md:hidden">Dot size = contract value</span>
         </div>
 
         {/* Stats overlay */}

@@ -197,7 +197,7 @@ export default function AccountsPage() {
         filterOptions={filterOptions}
       />
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4 max-md:p-3">
         {tab === 'hoa' ? (
           isLoading ? (
             <div className="text-sm text-[hsl(var(--muted-fg))] text-center py-10">Loading…</div>

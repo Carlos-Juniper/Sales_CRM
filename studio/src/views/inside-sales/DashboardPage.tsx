@@ -32,17 +32,17 @@ function GroupedStatCard({ label, dotColor, stats, onClick }: GroupedStatCardPro
   return (
     <Card className={cn('flex-1', onClick && 'cursor-pointer hover:shadow-md transition-shadow')} onClick={onClick}>
       <CardContent className="p-0">
-        <div className="flex items-center gap-1.5 px-4 py-3">
+        <div className="flex items-center gap-1.5 px-4 py-3 max-md:px-3 max-md:py-2">
           <span className={cn('h-2 w-2 rounded-full flex-shrink-0', dotColor)} />
           <span className="text-xs font-semibold tracking-widest text-[hsl(var(--muted-fg))] uppercase">{label}</span>
         </div>
         <div className="border-t border-[hsl(var(--border))]" />
         <div className="flex divide-x divide-[hsl(var(--border))]">
           {stats.map((stat, i) => (
-            <div key={i} className="flex-1 px-5 py-4">
+            <div key={i} className="flex-1 px-5 py-4 max-md:px-3 max-md:py-3">
               <p className="text-xs text-[hsl(var(--muted-fg))]">{stat.title}</p>
               <div className="flex items-baseline gap-1.5 mt-0.5">
-                <p className={cn('text-2xl font-bold', stat.valueColor ?? 'text-[hsl(var(--fg))]')}>
+                <p className={cn('text-2xl font-bold max-md:text-xl', stat.valueColor ?? 'text-[hsl(var(--fg))]')}>
                   {stat.value}
                 </p>
                 {stat.description && (
@@ -74,10 +74,10 @@ export default function DashboardPage() {
       <TopNav title="Analytics" />
 
       <ScrollArea className="flex-1">
-        <div className="p-5 space-y-5">
+        <div className="p-5 space-y-5 max-md:p-3 max-md:space-y-3">
 
           {/* Header */}
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start justify-between gap-4 max-md:flex-col max-md:gap-3">
             <div>
               <h1 className="text-2xl font-semibold text-[hsl(var(--fg))]">
                 {greeting}, {user?.name?.split(' ')[0]}
@@ -89,7 +89,7 @@ export default function DashboardPage() {
                 )}
               </p>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-shrink-0 max-md:self-start">
               <Button size="sm" className="gap-1.5 bg-[hsl(var(--fg))] text-[hsl(var(--bg))] hover:bg-[hsl(var(--fg))]/90">
                 <Sparkles className="h-3.5 w-3.5" />
                 AI summary
@@ -99,7 +99,7 @@ export default function DashboardPage() {
 
           {/* Grouped stat cards */}
           {summaryLoading ? (
-            <div className="flex gap-3">
+            <div className="flex gap-3 max-md:flex-col">
               {Array.from({ length: 3 }).map((_, i) => (
                 <Card key={i} className="flex-1">
                   <CardContent className="pt-4 pb-5">
@@ -109,7 +109,7 @@ export default function DashboardPage() {
               ))}
             </div>
           ) : summary ? (
-            <div className="flex gap-3">
+            <div className="flex gap-3 max-md:flex-col">
               <GroupedStatCard
                 label="Today"
                 dotColor="bg-green-500"
@@ -146,7 +146,7 @@ export default function DashboardPage() {
           ) : null}
 
           {/* Analytics grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 max-md:gap-3">
             <div className="lg:col-span-3"><PipelineAnalyticsCard /></div>
             <div className="lg:col-span-2"><TeamPerformanceCard /></div>
             <div className="lg:col-span-2"><RevenueForecastCard /></div>

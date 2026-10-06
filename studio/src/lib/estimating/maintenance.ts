@@ -49,13 +49,6 @@ export function isComplexityOverridden(complexityPct: number): boolean {
  */
 export type ServiceBasis = 'sqft'
 
-export interface ServiceGranularity {
-  /** e.g. "Mower size" — Aspire kit option group (I-9.7). */
-  label: string
-  options: string[]
-  defaultOption: string
-}
-
 export interface MaintenanceCatalogService {
   key: string
   label: string
@@ -68,11 +61,7 @@ export interface MaintenanceCatalogService {
    */
   rateCentsPer1000Sf: number
   defaultQty: number
-  granularity?: ServiceGranularity
 }
-
-/** Aspire kit mower-size options (I-9.7). */
-export const MOWER_SIZE_OPTIONS = ['36"', '52–60"', '72"']
 
 /**
  * Region-template services an estimator can add ("add line item", I-9.7).
@@ -86,7 +75,6 @@ export const MAINTENANCE_SERVICE_CATALOG: MaintenanceCatalogService[] = [
     basis: 'sqft',
     rateCentsPer1000Sf: 450,
     defaultQty: 42,
-    granularity: { label: 'Mower size', options: MOWER_SIZE_OPTIONS, defaultOption: '52–60"' },
   },
   { key: 'trim', label: 'Trimming & edging', uom: '/yr', basis: 'sqft', rateCentsPer1000Sf: 240, defaultQty: 42 },
   { key: 'detail', label: 'Bed detail', uom: '/yr', basis: 'sqft', rateCentsPer1000Sf: 210, defaultQty: 26 },
@@ -196,11 +184,6 @@ export function assertSqftBasis(row: { key: string; label: string; basis: string
   }
 }
 
-/** Granularity options for a service label, from the kit catalog config. */
-export function granularityFor(label: string): ServiceGranularity | null {
-  return MAINTENANCE_SERVICE_CATALOG.find((r) => r.label === label)?.granularity ?? null
-}
-
 // ----- Input coercion ----------------------------------------------------------
 
 /** Blank/invalid input coerces to 0; negatives are clamped to 0. */
@@ -213,7 +196,8 @@ export function coerceQty(raw: string): number {
 // ----- Section operations --------------------------------------------------------
 
 let opSeq = 0
-function newId(prefix: string): string {
+/** A client-only id for an unsaved node; the server mints the real one. */
+export function newLocalId(prefix: string): string {
   opSeq += 1
   return `${prefix}-${Date.now()}-${opSeq}`
 }
@@ -226,7 +210,7 @@ export function catalogToService(
 ): SectionService {
   assertSqftBasis(row)
   return {
-    id: newId('svc'),
+    id: newLocalId('svc'),
     sectionId,
     serviceKitId: row.key,
     label: row.label,
@@ -253,7 +237,7 @@ export function buildDefaultSection(
   sortOrder: number,
   catalog: MaintenanceCatalogService[] = [],
 ): EstimateSection {
-  const id = newId('sec')
+  const id = newLocalId('sec')
   const seedKeys = ['mow', 'trim', 'fert']
   const seedRows = catalog.filter((r) => seedKeys.includes(r.key))
   const services = (seedRows.length > 0 ? seedRows : catalog.slice(0, 3)).map((row, i) =>
@@ -270,16 +254,16 @@ export function duplicateSection(
   const idx = sections.findIndex((s) => s.id === sectionId)
   if (idx === -1) return sections
   const source = sections[idx]
-  const copyId = newId('sec')
+  const copyId = newLocalId('sec')
   const copy: EstimateSection = {
     ...source,
     id: copyId,
     name: `${source.name} (copy)`,
     services: source.services.map((svc) => ({
       ...svc,
-      id: newId('svc'),
+      id: newLocalId('svc'),
       sectionId: copyId,
-      components: svc.components.map((c) => ({ ...c, id: newId('cmp') })),
+      components: svc.components.map((c) => ({ ...c, id: newLocalId('cmp') })),
     })),
   }
   const next = [...sections]

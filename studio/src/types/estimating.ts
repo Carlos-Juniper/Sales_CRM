@@ -265,6 +265,10 @@ export interface EstimateBase {
    * diff to accept — Beam never silently overwrites a priced estimate.
    */
   takeoffChangedAt?: string | null
+  /** Maintenance tracker status (§8, migration 078). Null until set. */
+  trackingStatus: string | null
+  /** Free-text manager note for the Maintenance Tracker (§8). */
+  trackerComment: string | null
   sections: EstimateSection[]
   createdAt: string
   updatedAt: string
@@ -338,6 +342,23 @@ export interface SectionService {
   embeddedCostCents: number | null
   /** Install per-line GM% target (e.g. ~0.45 irrigation). */
   targetGm: number | null
+  /**
+   * Per-method square footage override (Handoff 59 §B4). `null` means inherit
+   * the parent section's `squareFeet`; a number overrides it for this method
+   * row only. Accepted on create/patch; snake_case `square_feet` on the wire.
+   */
+  squareFeet?: number | null
+  /**
+   * Labor markup percentage captured from the Aspire-derived pricing engine
+   * (Handoff 59 §B4). Used to derive GM display when `targetGm` is null.
+   * Absent for non-maintenance rows and legacy rows created before migration.
+   */
+  laborMarkupPct?: number
+  /**
+   * Material markup percentage from Aspire pricing (Handoff 59 §B4).
+   * Complements `laborMarkupPct` for the GM% derivation formula.
+   */
+  materialMarkupPct?: number
   /** Tracked for production planning; does NOT drive price. */
   hours: number | null
   sortOrder: number

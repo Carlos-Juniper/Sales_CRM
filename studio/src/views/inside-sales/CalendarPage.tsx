@@ -15,10 +15,10 @@ import { EventDetailPopover } from './components/calendar/EventDetailPopover'
 import type { CalendarEvent } from '@/types'
 import type { CalendarView } from './components/calendar/CalendarGrid'
 
-// Module-level: view selection survives navigation (remounts) within the session
-let persistedView: CalendarView = window.matchMedia('(max-width: 767px)').matches
-  ? 'timeGridDay'
-  : 'timeGridWeek'
+// Module-level: view selection survives navigation (remounts) within the session.
+// On mobile (< 768px) default to single-day view — the most usable on narrow screens.
+const _isMobileInit = window.matchMedia('(max-width: 767px)').matches
+let persistedView: CalendarView = _isMobileInit ? 'timeGridDay' : 'timeGridWeek'
 
 function getBrowserTimezoneLabel(): string {
   const tz = getBrowserTimezone()
@@ -40,6 +40,13 @@ function getBrowserTimezoneLabel(): string {
 const VIEW_LABELS: Record<CalendarView, string> = {
   timeGridWeek: 'Week',
   threeDay: '3-day',
+  timeGridDay: 'Day',
+}
+
+// Abbreviated labels for mobile — keep each tab narrow enough to fit the header
+const MOBILE_VIEW_LABELS: Record<CalendarView, string> = {
+  timeGridWeek: 'Wk',
+  threeDay: '3d',
   timeGridDay: 'Day',
 }
 
@@ -123,8 +130,13 @@ export default function CalendarPage() {
           <Tabs value={view} onValueChange={handleViewChange}>
             <TabsList>
               {(Object.entries(VIEW_LABELS) as [CalendarView, string][]).map(([v, label]) => (
-                <TabsTrigger key={v} value={v}>
-                  {label}
+                <TabsTrigger key={v} value={v} className="max-md:px-2 max-md:text-xs" aria-label={label}>
+                  {/* Both labels are purely visual (abbreviated on mobile), so hide
+                      them from the accessibility tree. The aria-label above gives
+                      each tab a single, stable accessible name at every breakpoint
+                      instead of the doubled "WkWeek"/"DayDay" the two spans produce. */}
+                  <span className="md:hidden" aria-hidden="true">{MOBILE_VIEW_LABELS[v as CalendarView]}</span>
+                  <span className="max-md:hidden" aria-hidden="true">{label}</span>
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -146,7 +158,7 @@ export default function CalendarPage() {
         )}
 
         {showGrid && (
-          <div className="h-full p-4">
+          <div className="h-full p-4 max-md:p-1 overflow-hidden">
             <CalendarGrid
               events={activeEvents}
               view={view}

@@ -49,6 +49,8 @@ import { acresFromSqft } from '@/lib/estimating/calc'
 import { SLA_CONFIG, slaCountdownLabel, slaDaysLeft, slaStateFor, type SlaState } from '@/lib/estimating/sla'
 import { useAuthStore } from '@/store/authStore'
 import { canStartIntake } from '@/lib/intakeAccess'
+import { isTeamManager } from '@/lib/roles'
+import { TeamToggle } from '@/components/shared/TeamToggle'
 import { useUsers } from '@/hooks/useUsers'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { formatOptionalBudget } from '@/lib/estimating/contractBudgets'
@@ -147,8 +149,13 @@ export function EstimateQueue({
   const { findUser } = useUsers()
   const user = useAuthStore((s) => s.user)
 
+  const canSeeTeam = isTeamManager(user?.role)
+  // showAll defaults to false → mine=true. Team managers toggle showAll to
+  // see all in-scope estimates vs. only their own assigned work.
+  const [showAll, setShowAll] = useState(false)
+
   // Branch scope is applied server-side from the session — no branch param.
-  const { data: estimatesData, isError, refetch } = useEstimates()
+  const { data: estimatesData, isError, refetch } = useEstimates({ mine: !showAll })
   const estimates = estimatesData ?? (isError ? [] : null)
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortKey, setSortKey] = useState<SortKey>('priority')
@@ -207,7 +214,7 @@ export function EstimateQueue({
   return (
     <div className="flex flex-col gap-4 h-full">
       {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-md:gap-2">
         <StatCard testId="stat-total-queue" label="Total Queue" value={String(stats.total)} sub="estimates pending" />
         <StatCard
           testId="stat-sla-at-risk"
@@ -226,56 +233,67 @@ export function EstimateQueue({
       </div>
 
       {/* Filter / sort bar + intake CTAs */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-40 h-8 text-xs" aria-label="Status filter">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {(Object.keys(STATUS_CONFIG) as EstimateStatus[]).map((k) => (
-              <SelectItem key={k} value={k}>
-                {STATUS_CONFIG[k].label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-center gap-2 max-md:flex-col max-md:items-stretch">
+        {/* Row 1 on mobile: team toggle + status filter + sort chips side by side */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {canSeeTeam && (
+            <TeamToggle showAll={showAll} onToggle={setShowAll} />
+          )}
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-40 h-8 text-xs" aria-label="Status filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              {(Object.keys(STATUS_CONFIG) as EstimateStatus[]).map((k) => (
+                <SelectItem key={k} value={k}>
+                  {STATUS_CONFIG[k].label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-        <div className="flex items-center gap-1 ml-auto text-xs text-[hsl(var(--muted-fg))]">
-          Sort by:
-          {(['priority', 'deadline', 'value', 'acreage'] as SortKey[]).map((k) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => toggleSort(k)}
-              className={cn(
-                'flex items-center gap-0.5 px-2 py-1 rounded capitalize hover:bg-[hsl(var(--muted))] transition-colors cursor-pointer',
-                sortKey === k && 'bg-[hsl(var(--muted))] font-medium text-[hsl(var(--fg))]',
-              )}
-            >
-              {k} <SortIcon field={k} />
-            </button>
-          ))}
+          <div className="flex items-center gap-1 text-xs text-[hsl(var(--muted-fg))] max-md:flex-wrap">
+            <span className="max-md:hidden">Sort by:</span>
+            {(['priority', 'deadline', 'value', 'acreage'] as SortKey[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => toggleSort(k)}
+                className={cn(
+                  'flex items-center gap-0.5 px-2 py-1 rounded capitalize hover:bg-[hsl(var(--muted))] transition-colors cursor-pointer',
+                  sortKey === k && 'bg-[hsl(var(--muted))] font-medium text-[hsl(var(--fg))]',
+                )}
+              >
+                {k} <SortIcon field={k} />
+              </button>
+            ))}
+          </div>
         </div>
 
-        {canStartIntake(user, 'maintenance') && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs gap-1.5"
-            onClick={handleMaintenanceIntake}
-          >
-            <Repeat className="h-3.5 w-3.5" /> Maintenance intake
-          </Button>
-        )}
-        {canStartIntake(user, 'install') && (
-          <Button
-            size="sm"
-            className="h-8 text-xs gap-1.5 bg-[#2E7D52] hover:bg-[#256844] text-white"
-            onClick={handleInstallIntake}
-          >
-            <Hammer className="h-3.5 w-3.5" /> {installCtaLabel}
-          </Button>
+        {/* Row 2 on mobile: intake CTA buttons, full-width */}
+        {(canStartIntake(user, 'maintenance') || canStartIntake(user, 'install')) && (
+          <div className="flex gap-2 ml-auto max-md:ml-0 max-md:flex-col">
+            {canStartIntake(user, 'maintenance') && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1.5 max-md:w-full max-md:justify-center"
+                onClick={handleMaintenanceIntake}
+              >
+                <Repeat className="h-3.5 w-3.5" /> Maintenance intake
+              </Button>
+            )}
+            {canStartIntake(user, 'install') && (
+              <Button
+                size="sm"
+                className="h-8 text-xs gap-1.5 bg-[#2E7D52] hover:bg-[#256844] text-white max-md:w-full max-md:justify-center"
+                onClick={handleInstallIntake}
+              >
+                <Hammer className="h-3.5 w-3.5" /> {installCtaLabel}
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
@@ -356,11 +374,11 @@ function QueueCard({
         sla === 'ok' && estimate.status === 'new_from_sales' && 'border-[#bfdcc9]',
       )}
     >
-      <CardContent className="py-3 px-4">
+      <CardContent className="py-3 px-4 max-md:px-3 max-md:py-2.5">
         <div className="flex items-start gap-3">
           <div className="flex-1 min-w-0">
             {/* Badge row */}
-            <div className="flex flex-wrap items-center gap-1.5 mb-1">
+            <div className="flex flex-wrap items-center gap-1 mb-1">
               <span className={cn('inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold', priCfg.className)}>
                 {priCfg.label}
               </span>

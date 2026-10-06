@@ -64,6 +64,10 @@ const SERVICE_FIELDS = [
   'unitSellCents',
   'embeddedCostCents',
   'targetGm',
+  // Handoff 59 §B4: per-method sqft override + markup inputs behind the GM%.
+  'squareFeet',
+  'laborMarkupPct',
+  'materialMarkupPct',
   'hours',
   'sortOrder',
 ] as const
@@ -201,6 +205,10 @@ function toServicePayload(sv: SectionService): CreateServicePayload {
     unitSellCents: sv.unitSellCents,
     embeddedCostCents: sv.embeddedCostCents,
     targetGm: sv.targetGm,
+    // Handoff 59 §B4: carry the per-method sqft override + markups on create.
+    squareFeet: sv.squareFeet ?? null,
+    laborMarkupPct: sv.laborMarkupPct,
+    materialMarkupPct: sv.materialMarkupPct,
     hours: sv.hours,
     sortOrder: sv.sortOrder,
     components: sv.components.map(toComponentPayload),

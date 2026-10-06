@@ -56,6 +56,11 @@ export type UserRole =
   // (portfolio, client references, team bios/headshots). Not an estimator or
   // approver — see api/authz.py MARKETING_ROLES.
   | 'marketing'
+  // Manager-tier roles added in Handoff 54 §5. They are supervisor roles that
+  // can see their whole team's data (see api/authz.py ESTIMATING_MANAGER_ROLES).
+  | 'sales_manager'
+  | 'maintenance_estimating_manager'
+  | 'install_estimating_manager'
 
 export const CANONICAL_ROLES: readonly UserRole[] = [
   'procurement',
@@ -72,6 +77,9 @@ export const CANONICAL_ROLES: readonly UserRole[] = [
   'vice_president',
   'ceo',
   'marketing',
+  'sales_manager',
+  'maintenance_estimating_manager',
+  'install_estimating_manager',
 ] as const
 
 /** Intake forms a session may open. Comes from the server, not from the role. */

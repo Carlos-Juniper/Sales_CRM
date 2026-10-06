@@ -203,51 +203,53 @@ function DocumentRow({
   }
 
   return (
-    <li className="flex items-start justify-between rounded-md border border-[var(--border)] px-3 py-2 text-xs">
-      <div>
-        <span className="rounded bg-[var(--sidebar-hover-bg)] px-1 py-0.5 text-[10px] text-[var(--fg)] opacity-70 mr-2">
-          {row.kind}
-        </span>
-        <span className="font-medium text-[var(--fg)]">{row.name}</span>
-        {row.issuingBody && (
-          <span className="ml-2 text-[var(--fg)] opacity-60">{row.issuingBody}</span>
-        )}
-        {row.identifier && (
-          <span className="ml-2 text-[var(--fg)] opacity-50">· {row.identifier}</span>
-        )}
-        <span className="ml-2 text-[var(--fg)] opacity-50">Exp {row.expiryDate}</span>
-        {!row.active && (
-          <span className="ml-2 rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-500">Inactive</span>
-        )}
-        {isCompanyWide && !isAdmin && (
-          <span
-            data-testid={`license-${row.id}-readonly`}
-            className="ml-2 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800"
-          >
-            Company-wide (read-only)
+    <li className="rounded-md border border-[var(--border)] px-3 py-2 text-xs">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <span className="rounded bg-[var(--sidebar-hover-bg)] px-1 py-0.5 text-[10px] text-[var(--fg)] opacity-70 mr-2">
+            {row.kind}
           </span>
-        )}
-        <DocumentScanCell row={row} canEdit={canEdit} aspireBranchId={aspireBranchId} />
-      </div>
-      {canEdit && (
-        <div className="flex gap-2 ml-3 flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="text-[var(--fg)] opacity-60 hover:opacity-100 text-[10px]"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            onClick={() => deactivate.mutate(row.id)}
-            disabled={deactivate.isPending}
-            className="text-red-600 opacity-70 hover:opacity-100 text-[10px] disabled:opacity-30"
-          >
-            Deactivate
-          </button>
+          <span className="font-medium text-[var(--fg)]">{row.name}</span>
+          {row.issuingBody && (
+            <span className="ml-2 text-[var(--fg)] opacity-60">{row.issuingBody}</span>
+          )}
+          {row.identifier && (
+            <span className="ml-2 text-[var(--fg)] opacity-50">· {row.identifier}</span>
+          )}
+          <span className="ml-2 text-[var(--fg)] opacity-50">Exp {row.expiryDate}</span>
+          {!row.active && (
+            <span className="ml-2 rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-500">Inactive</span>
+          )}
+          {isCompanyWide && !isAdmin && (
+            <span
+              data-testid={`license-${row.id}-readonly`}
+              className="ml-2 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800"
+            >
+              Company-wide (read-only)
+            </span>
+          )}
+          <DocumentScanCell row={row} canEdit={canEdit} aspireBranchId={aspireBranchId} />
         </div>
-      )}
+        {canEdit && (
+          <div className="flex gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="text-[var(--fg)] opacity-60 hover:opacity-100 text-[10px]"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => deactivate.mutate(row.id)}
+              disabled={deactivate.isPending}
+              className="text-red-600 opacity-70 hover:opacity-100 text-[10px] disabled:opacity-30"
+            >
+              Deactivate
+            </button>
+          </div>
+        )}
+      </div>
     </li>
   )
 }

@@ -554,6 +554,11 @@ def _service_out(
         "targetGm": _num(r["target_gm"]),
         "hours": _num(r["hours"]),
         "sortOrder": r["sort_order"],
+        # Per-line square footage override (migration 080 / H59 Track B).
+        # NULL = inherit estimate_sections.square_feet (mowing primary).
+        # 0 or positive = explicit override (non-primary mowing methods,
+        # and all rows for pruning / fertilizer / pest / irrigation).
+        "squareFeet": _num(r.get("square_feet")),
         # Contract generator fields, sourced from the line's catalog item.
         "serviceType": (catalog_data or {}).get("service_type"),
         "scopeText": (catalog_data or {}).get("scope_text"),
@@ -1555,8 +1560,8 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
     await execute(
         """INSERT INTO section_services
              (id, section_id, service_kit_id, service_id, discipline, billing_type, label, qty, uom,
-              complexity_pct, unit_sell_cents, embedded_cost_cents, target_gm, hours, sort_order)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+              complexity_pct, unit_sell_cents, embedded_cost_cents, target_gm, hours, square_feet, sort_order)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
             service_id,
             section_id,
@@ -1572,6 +1577,7 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
             svc.get("embeddedCostCents"),
             svc.get("targetGm"),
             svc.get("hours"),
+            svc.get("squareFeet"),
             svc.get("sortOrder", idx),
         ],
     )
@@ -2573,6 +2579,8 @@ def register(app, require_auth) -> None:
             "embeddedCostCents": "embedded_cost_cents",
             "targetGm": "target_gm",
             "hours": "hours",
+            # H59 Track B: per-line sqft override (NULL = inherit section sqft).
+            "squareFeet": "square_feet",
             "sortOrder": "sort_order",
         }
         await _apply_updates("section_services", cols, body, service_id)

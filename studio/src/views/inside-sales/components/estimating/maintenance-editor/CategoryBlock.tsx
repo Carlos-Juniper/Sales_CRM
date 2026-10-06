@@ -16,14 +16,19 @@ export function CategoryBlock({
   rollup,
   expanded,
   onToggle,
-  renderRow,
+  renderServices,
   addControl,
 }: {
   group: ServiceGroup
   rollup: CategoryRollup
   expanded: boolean
   onToggle: () => void
-  renderRow: (svc: SectionService) => ReactNode
+  /**
+   * Renders this category's service lines. Receives the whole services array so
+   * the caller can roll method rows up by service (Handoff 59 §B4) rather than
+   * rendering one flat row per `section_services` row.
+   */
+  renderServices: (services: SectionService[]) => ReactNode
   /** Rendered under the header whatever the collapse state (Optional Services' add). */
   addControl?: ReactNode
 }) {
@@ -57,7 +62,7 @@ export function CategoryBlock({
         </span>
       </div>
       {addControl && <div className="px-4 py-1.5 pl-9">{addControl}</div>}
-      {expanded && group.services.map((svc) => renderRow(svc))}
+      {expanded && renderServices(group.services)}
     </div>
   )
 }

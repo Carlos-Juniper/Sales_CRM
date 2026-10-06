@@ -2,7 +2,7 @@
 // Lines are grouped at render time; the persisted section.services[] shape is
 // unchanged.
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type {
   CatalogService,
@@ -17,11 +17,12 @@ import {
   groupSectionServices,
   type ServiceGroup,
 } from '@/lib/estimating/maintenanceCategories'
+import { groupByService } from '@/lib/estimating/maintenanceEditor'
 import { categoryRollup } from '@/lib/estimating/maintenanceHours'
 import type { CatalogStatus } from '@/lib/estimating/maintenanceCatalogAdapter'
 import { AddOptionalServiceSelect } from './AddOptionalServiceSelect'
 import { CategoryBlock } from './CategoryBlock'
-import { MaintenanceServiceRow } from './MaintenanceServiceRow'
+import { ServiceRollupRow } from './ServiceRollupRow'
 import { MAINTENANCE_LINE_GRID, MAINTENANCE_LINE_MIN_WIDTH } from './cells'
 import { useCategoryCollapse } from './useCategoryCollapse'
 
@@ -65,6 +66,21 @@ export function SectionLineTable({
   )
   const collapse = useCategoryCollapse(groups, catalogStatus !== 'loading')
 
+  // Per-service-line expand state (Handoff 59 §B4), keyed by serviceId. This is
+  // the SECOND level of the hierarchy: the category block (above) governs which
+  // service lines show; this governs which of a line's method rows show. Lines
+  // start collapsed — the estimator opens one to edit its methods.
+  const [expandedServices, setExpandedServices] = useState<Record<string, boolean>>({})
+  const toggleService = (serviceId: string) =>
+    setExpandedServices((prev) => ({ ...prev, [serviceId]: !prev[serviceId] }))
+
+  // Resolve a method id back to its row so the delete callback can keep the
+  // existing `onRemoveService(svc)` contract (it toasts with svc.label).
+  const byId = useMemo(
+    () => new Map(section.services.map((s) => [s.id, s])),
+    [section.services],
+  )
+
   const addControl = (group: ServiceGroup) =>
     group.kind !== 'optional' ? undefined : (
       <AddOptionalServiceSelect
@@ -78,17 +94,25 @@ export function SectionLineTable({
       />
     )
 
-  const renderRow = (svc: SectionService) => (
-    <MaintenanceServiceRow
-      key={svc.id}
-      section={section}
-      svc={svc}
-      serviceKits={serviceKits}
-      blocked={blockedServiceIds?.has(svc.id) ?? false}
-      onChange={(patch) => onServiceChange(svc.id, patch)}
-      onRemove={() => onRemoveService(svc)}
-    />
-  )
+  // Roll a category's method rows up into service lines (one line per serviceId)
+  // and render each as a ServiceRollupRow. Grouping is render-time only — the
+  // persisted section.services[] shape is untouched, so the Save tree diff and
+  // the category rollup totals above keep working as-is.
+  const renderServices = (services: SectionService[]) =>
+    groupByService(services).map((group) => (
+      <ServiceRollupRow
+        key={group.serviceId}
+        group={{ ...group, isExpanded: expandedServices[group.serviceId] ?? false }}
+        sectionSquareFeet={section.squareFeet}
+        onToggle={toggleService}
+        onUpdate={(methodId, patch) => onServiceChange(methodId, patch)}
+        onGmChange={(methodId, gm) => onServiceChange(methodId, { targetGm: gm })}
+        onRemove={(methodId) => {
+          const svc = byId.get(methodId)
+          if (svc) onRemoveService(svc)
+        }}
+      />
+    ))
 
   return (
     <div className="overflow-x-auto">
@@ -114,7 +138,7 @@ export function SectionLineTable({
             rollup={categoryRollup(section, group.services, serviceKits)}
             expanded={collapse.isExpanded(group.key)}
             onToggle={() => collapse.toggle(group.key)}
-            renderRow={renderRow}
+            renderServices={renderServices}
             addControl={addControl(group)}
           />
         ))}

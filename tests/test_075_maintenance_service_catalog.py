@@ -316,6 +316,9 @@ def test_generated_seed_sql_applies_twice_and_never_moves_a_set_rate(mdb):
     from test_pull_aspire_service_catalog import FakeAspire, build_data
     from scripts import pull_aspire_service_catalog as P
     M.exec_file(mdb, MIGRATION)
+    # 081 adds is_primary/labor_markup_pct/material_markup_pct to service_kit_links,
+    # which service_kit_links only exists after 075 creates it.
+    M.exec_file(mdb, REPO / "sql" / "migrations" / "081_service_kit_links_markup_columns.sql")
     before = {r["id"]: r for r in _rows(mdb, "SELECT * FROM service_kits")}
     raw = asyncio.run(P.pull(FakeAspire(build_data()), log=lambda *_: None))
     plan = P.derive(raw, P.load_baseline_kits())

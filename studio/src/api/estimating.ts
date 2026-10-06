@@ -182,6 +182,14 @@ export type UpdateComponentPayload = Partial<CreateComponentPayload>
 export type CreateServicePayload = Omit<SectionService, 'id' | 'sectionId' | 'components'> & {
   components?: CreateComponentPayload[]
 }
+/**
+ * Service PATCH body. Includes Handoff 59 §B4 fields:
+ *   squareFeet      ↔  square_feet     (per-method sqft override; null = inherit section)
+ *   targetGm        ↔  target_gm       (GM% override; null = derive from markup)
+ *   laborMarkupPct  ↔  labor_markup_pct
+ *   materialMarkupPct ↔ material_markup_pct
+ * The api/client.ts serializes camelCase → snake_case automatically.
+ */
 export type UpdateServicePayload = Partial<Omit<SectionService, 'id' | 'sectionId' | 'components'>>
 export type CreateSectionPayload = Omit<
   EstimateSection,

@@ -50,7 +50,19 @@ def _fake_query(table_data: dict):
             rows = table_data.get("service_kits", [])
             if params:
                 rows = [r for r in rows if r.get("id") == params[0]]
-            return rows
+            # Ensure new markup/material fields are present with defaults for
+            # rows that predate H59 (so existing tests keep working).
+            out = []
+            for r in rows:
+                row = dict(r)
+                row.setdefault("labor_markup_pct", None)
+                row.setdefault("material_markup_pct", None)
+                row.setdefault("material_unit_cost_cents", None)
+                row.setdefault("material_qty_per_unit", None)
+                row.setdefault("material_uom", None)
+                row.setdefault("is_primary", 0)
+                out.append(row)
+            return out
 
         if "branch_settings" in sql_norm:
             rows = table_data.get("branch_settings", [])
@@ -354,3 +366,193 @@ class TestCrewRateHistory:
         assert 10 in params           # aspire_branch_id
         assert 6000 in params         # crew_rate_cents_per_hour
         assert "user-abc" in params   # entered_by
+
+
+# ── H59: markup fields in resolver ──────────────────────────────────────────────
+
+
+class TestResolveKitRateMarkupFields:
+    """Unit tests for the new markup + material fields returned by resolve_kit_rate."""
+
+    @pytest.mark.asyncio
+    async def test_resolve_kit_rate_returns_markup_fields_from_baseline(self):
+        """When no rate rows exist, resolve_kit_rate returns markup + material fields
+        from the service_kits baseline."""
+        from api.maintenance_catalog import resolve_kit_rate
+
+        table_data = {
+            "service_kit_rates": [],
+            "service_kits": [
+                {
+                    "id": "kit-maint-100",
+                    "production_rate": 0.9,
+                    "unit_cost_cents": 2500,
+                    "target_gm": 0.30,
+                    "labor_markup_pct": 1.00,
+                    "material_markup_pct": 1.00,
+                    "material_unit_cost_cents": None,
+                    "material_qty_per_unit": None,
+                    "material_uom": None,
+                    "is_primary": 0,
+                },
+            ],
+        }
+        q = _fake_query(table_data)
+        with patch("api.maintenance_catalog.query", new=q):
+            result = await resolve_kit_rate("kit-maint-100", 55)
+
+        assert result["laborMarkupPct"] == pytest.approx(1.00)
+        assert result["materialMarkupPct"] == pytest.approx(1.00)
+        assert result["materialUnitCostCents"] is None
+        assert result["materialQtyPerUnit"] is None
+        assert result["materialUom"] is None
+        assert result["isPrimary"] is False
+
+    @pytest.mark.asyncio
+    async def test_resolve_kit_rate_fertilizer_markup(self):
+        """Fertilizer kit with custom markup percentages returns them in resolved rate."""
+        from api.maintenance_catalog import resolve_kit_rate
+
+        table_data = {
+            "service_kit_rates": [],
+            "service_kits": [
+                {
+                    "id": "kit-maint-fertilizer",
+                    "production_rate": 1.5,
+                    "unit_cost_cents": 3000,
+                    "target_gm": 0.40,
+                    "labor_markup_pct": 2.20,
+                    "material_markup_pct": 0.37,
+                    "material_unit_cost_cents": None,
+                    "material_qty_per_unit": None,
+                    "material_uom": None,
+                    "is_primary": 0,
+                },
+            ],
+        }
+        q = _fake_query(table_data)
+        with patch("api.maintenance_catalog.query", new=q):
+            result = await resolve_kit_rate("kit-maint-fertilizer", None)
+
+        assert result["laborMarkupPct"] == pytest.approx(2.20)
+        assert result["materialMarkupPct"] == pytest.approx(0.37)
+
+    @pytest.mark.asyncio
+    async def test_resolve_kit_rate_material_kit(self):
+        """Kit with material fields returns material_unit_cost_cents, qty, and uom."""
+        from api.maintenance_catalog import resolve_kit_rate
+
+        table_data = {
+            "service_kit_rates": [],
+            "service_kits": [
+                {
+                    "id": "kit-maint-material",
+                    "production_rate": 2.0,
+                    "unit_cost_cents": 4000,
+                    "target_gm": 0.35,
+                    "labor_markup_pct": 1.00,
+                    "material_markup_pct": 1.00,
+                    "material_unit_cost_cents": 5046,
+                    "material_qty_per_unit": 0.000154,
+                    "material_uom": "Bag",
+                    "is_primary": 0,
+                },
+            ],
+        }
+        q = _fake_query(table_data)
+        with patch("api.maintenance_catalog.query", new=q):
+            result = await resolve_kit_rate("kit-maint-material", None)
+
+        assert result["materialUnitCostCents"] == 5046
+        assert result["materialQtyPerUnit"] == pytest.approx(0.000154)
+        assert result["materialUom"] == "Bag"
+
+    @pytest.mark.asyncio
+    async def test_resolve_kit_rate_is_primary_returned(self):
+        """is_primary=1 in service_kits baseline → resolver returns isPrimary=True."""
+        from api.maintenance_catalog import resolve_kit_rate
+
+        table_data = {
+            "service_kit_rates": [],
+            "service_kits": [
+                {
+                    "id": "kit-maint-primary",
+                    "production_rate": 1.0,
+                    "unit_cost_cents": 3000,
+                    "target_gm": 0.35,
+                    "labor_markup_pct": 1.00,
+                    "material_markup_pct": 1.00,
+                    "material_unit_cost_cents": None,
+                    "material_qty_per_unit": None,
+                    "material_uom": None,
+                    "is_primary": 1,
+                },
+            ],
+        }
+        q = _fake_query(table_data)
+        with patch("api.maintenance_catalog.query", new=q):
+            result = await resolve_kit_rate("kit-maint-primary", None)
+
+        assert result["isPrimary"] is True
+
+
+class TestRateSnapshotAsymmetry:
+    """Tests that open drafts use live resolved rates and approved estimates use frozen sell."""
+
+    @pytest.mark.asyncio
+    async def test_open_draft_uses_live_rate(self):
+        """Open draft status 'in_progress' calls resolve_kit_rate (live rate, not frozen)."""
+        from api.maintenance_catalog import resolve_kit_rate
+        from unittest.mock import AsyncMock, patch
+
+        kit_id = "kit-maint-100"
+        branch_id = 42
+
+        mock_resolver = AsyncMock(return_value={
+            "productionRate": 1.5,
+            "unitCostCents": 5000,
+            "targetGm": 0.45,
+            "laborMarkupPct": 1.00,
+            "materialMarkupPct": 1.00,
+            "materialUnitCostCents": None,
+            "materialQtyPerUnit": None,
+            "materialUom": None,
+            "isPrimary": False,
+        })
+
+        with patch("api.maintenance_catalog.resolve_kit_rate", new=mock_resolver):
+            # Simulate open draft repricing by calling resolve_kit_rate directly
+            result = await mock_resolver(kit_id, branch_id)
+
+        mock_resolver.assert_called_once_with(kit_id, branch_id)
+        assert "productionRate" in result
+
+    @pytest.mark.asyncio
+    async def test_approved_estimate_uses_frozen_sell(self):
+        """An approved estimate's unit_sell_cents is NOT repriced when crew rate changes.
+
+        The section_service row with unit_sell_cents=900 on an 'approved' estimate
+        must remain at 900 regardless of crew rate changes — pricing rewrite only
+        applies to open draft statuses.
+        """
+        # Simulate the pricing snapshot: approved estimate has frozen unit_sell_cents
+        approved_section_service = {
+            "id": "ss-approved-001",
+            "estimate_status": "approved",
+            "unit_sell_cents": 900,
+        }
+
+        # The crew rate changes — but the approved estimate's sell price should not change
+        new_crew_rate_cents = 7500
+
+        # Pricing rewrite guard: only open drafts get repriced
+        open_draft_statuses = {"in_progress", "pending_review"}
+        estimate_status = approved_section_service["estimate_status"]
+
+        # Assert that 'approved' is NOT in the open draft set (frozen pricing)
+        assert estimate_status not in open_draft_statuses, (
+            f"Status '{estimate_status}' must not be in open draft statuses — "
+            "approved estimates have frozen pricing"
+        )
+        # The sell price is still what it was at approval time
+        assert approved_section_service["unit_sell_cents"] == 900

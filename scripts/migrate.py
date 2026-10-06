@@ -1292,6 +1292,34 @@ def detect_078(conn) -> bool:
     return column_exists(conn, "estimates", "tracking_status")
 
 
+def detect_079(conn) -> bool:
+    """079 applied ↔ service_kits.is_primary column exists.
+
+    079 adds six columns to service_kits for the labor+material split pricing
+    model (labor_markup_pct, material_markup_pct, material_unit_cost_cents,
+    material_qty_per_unit, material_uom, is_primary). Keyed on is_primary —
+    the last column added — so True means all six landed. Each statement is
+    individually information_schema-guarded, so a re-run after a partial
+    apply completes the remainder safely.
+    """
+    return column_exists(conn, "service_kits", "is_primary")
+
+
+def detect_080(conn) -> bool:
+    """080 applied ↔ square_feet column exists on section_services.
+
+    080 adds a single nullable DECIMAL(12,2) column to section_services.
+    NULL = inherit estimate_sections.square_feet; typed = override. The
+    PREPARE guard makes a re-run after a partial apply a no-op.
+    """
+    return column_exists(conn, "section_services", "square_feet")
+
+
+def detect_081(conn) -> bool:
+    """081 applied ↔ is_primary column exists on service_kit_links."""
+    return column_exists(conn, "service_kit_links", "is_primary")
+
+
 def detect_075(conn) -> bool:
     """075 applied ↔ services.occurrence_source (the file's last statement),
     service_kit_links.sort_order and all six maintenance service_categories
@@ -1363,6 +1391,9 @@ _DETECT: dict = {
     "076_service_kit_rates":                      detect_076,
     "077_estimate_assignment_audit":              detect_077,
     "078_estimate_tracking_status":               detect_078,
+    "079_service_kits_markup_columns":            detect_079,
+    "080_section_services_sqft_override":         detect_080,
+    "081_service_kit_links_markup_columns":       detect_081,
     "044_contract_generator":                     detect_044,
     "046_section_services_billing_type":          detect_046,
     "054_commissions_schema":                     detect_054,

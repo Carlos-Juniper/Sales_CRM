@@ -143,6 +143,80 @@ def norm(text: Any) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip().lower()
 
 
+# ── H59 A1: canonical *Orig field helpers ────────────────────────────────────
+
+_PROD_RATE_RE = re.compile(r"\(Production Rate\s+([\d.]+)[kK]\)", re.I)
+
+
+def parse_production_rate(name: str) -> Optional[int]:
+    """Extract integer production rate from an Aspire kit item name.
+
+    Handles ``(Production Rate 35k)``, ``(Production Rate 3.2K)``, etc.
+    Returns an integer (e.g. 35000, 3200) or None if not present.
+    """
+    m = _PROD_RATE_RE.search(name or "")
+    if not m:
+        return None
+    return round(float(m.group(1)) * 1000)
+
+
+_UOM_MAP = {
+    "sq. ft.": "SF",
+    "lf": "LF",
+    "ct": "CT",
+    "hr": "HR",
+    "dollars": "Dollars",
+}
+
+
+def map_uom(aspire_uom: str) -> str:
+    """Map an Aspire ``AllocationUnitTypeName`` to our internal UOM code."""
+    return _UOM_MAP.get((aspire_uom or "").strip().lower(), aspire_uom)
+
+
+def classify_kit_item(item: dict) -> str:
+    """Return ``'labor'``, ``'material'``, or ``'kit'`` for a kit item row."""
+    item_type = str(f(item, "ItemType") or "").strip()
+    if item_type == "Labor":
+        return "labor"
+    if item_type == "Material":
+        return "material"
+    return "kit"
+
+
+def coverage_factor(item: dict) -> Optional[float]:
+    """Material quantity per area unit.
+
+    When ``InvertFactorOrig`` is True the factor is *area per unit* (e.g. sqft
+    per bag), so we invert to get *units per sqft*.  When False it is already
+    *units per sqft*.
+    Returns ``None`` if the factor is absent or zero.
+    """
+    factor = as_float(f(item, "ItemFactorOrig"))
+    if factor is None or factor == 0:
+        return None
+    if as_bool(f(item, "InvertFactorOrig")):
+        return 1.0 / factor
+    return factor
+
+
+def extract_markups(service_rows: list[dict]) -> tuple[float, float]:
+    """Mode ``LaborMarkup`` and ``MaterialMarkup`` (÷ 100) across sample rows.
+
+    Returns ``(labor_markup_pct, material_markup_pct)`` where 1.00 = 100%.
+    Falls back to ``(1.0, 1.0)`` when the list is empty.
+    """
+    if not service_rows:
+        return (1.0, 1.0)
+    labor_vals = [as_float(f(r, "LaborMarkup")) for r in service_rows]
+    material_vals = [as_float(f(r, "MaterialMarkup")) for r in service_rows]
+    labor_vals = [v for v in labor_vals if v is not None]
+    material_vals = [v for v in material_vals if v is not None]
+    labor_mode = statistics.mode(labor_vals) if labor_vals else 100.0
+    material_mode = statistics.mode(material_vals) if material_vals else 100.0
+    return (labor_mode / 100.0, material_mode / 100.0)
+
+
 # ── Aspire transport: paged GETs only ────────────────────────────────────────
 
 def _rows(payload: Any) -> list[dict]:
@@ -762,10 +836,17 @@ def render_sql(plan: Plan) -> str:
         )
     out.append("")
     for l in plan.links:
+        is_primary_val = 1 if l.get("is_primary") else 0
+        labor_markup = sql_str(l.get("labor_markup_pct"))
+        material_markup = sql_str(l.get("material_markup_pct"))
         out.append(
-            "INSERT INTO service_kit_links (service_id, service_kit_id, basis, sort_order) VALUES "
-            f"({sql_str(l['service_id'])}, {sql_str(l['service_kit_id'])}, {sql_str(l['basis'])}, "
-            f"{l['sort_order']}) ON DUPLICATE KEY UPDATE basis = VALUES(basis), sort_order = VALUES(sort_order);"
+            "INSERT INTO service_kit_links "
+            "(service_id, service_kit_id, basis, sort_order, is_primary, labor_markup_pct, material_markup_pct) "
+            f"VALUES ({sql_str(l['service_id'])}, {sql_str(l['service_kit_id'])}, {sql_str(l['basis'])}, "
+            f"{l['sort_order']}, {is_primary_val}, {labor_markup}, {material_markup}) "
+            "ON DUPLICATE KEY UPDATE basis = VALUES(basis), sort_order = VALUES(sort_order), "
+            "is_primary = VALUES(is_primary), labor_markup_pct = VALUES(labor_markup_pct), "
+            "material_markup_pct = VALUES(material_markup_pct);"
         )
     out.append("")
     for r in plan.rates:

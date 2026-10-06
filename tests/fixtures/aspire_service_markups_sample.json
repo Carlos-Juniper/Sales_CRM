@@ -1,0 +1,56 @@
+[
+  {
+    "_note": "Mowing — opportunity 1",
+    "OpportunityServiceID": 5001,
+    "OpportunityID": 655100,
+    "ServiceID": 101,
+    "ServiceName": "MC: Mowing Service",
+    "LaborMarkup": 100.0,
+    "MaterialMarkup": 100.0
+  },
+  {
+    "_note": "Mowing — opportunity 2",
+    "OpportunityServiceID": 5011,
+    "OpportunityID": 655101,
+    "ServiceID": 101,
+    "ServiceName": "MC: Mowing Service",
+    "LaborMarkup": 100.0,
+    "MaterialMarkup": 100.0
+  },
+  {
+    "_note": "Mowing — opportunity 3",
+    "OpportunityServiceID": 5021,
+    "OpportunityID": 655102,
+    "ServiceID": 101,
+    "ServiceName": "MC: Mowing Service",
+    "LaborMarkup": 100.0,
+    "MaterialMarkup": 100.0
+  },
+  {
+    "_note": "Fertilize Turf — opportunity 1",
+    "OpportunityServiceID": 5002,
+    "OpportunityID": 655100,
+    "ServiceID": 411,
+    "ServiceName": "Fertilizer Turf - Quarter 1",
+    "LaborMarkup": 220.0,
+    "MaterialMarkup": 37.0
+  },
+  {
+    "_note": "Fertilize Turf — opportunity 2",
+    "OpportunityServiceID": 5012,
+    "OpportunityID": 655101,
+    "ServiceID": 411,
+    "ServiceName": "Fertilizer Turf - Quarter 1",
+    "LaborMarkup": 220.0,
+    "MaterialMarkup": 37.0
+  },
+  {
+    "_note": "Pruning — opportunity 1",
+    "OpportunityServiceID": 5003,
+    "OpportunityID": 655100,
+    "ServiceID": 201,
+    "ServiceName": "MC: Pruning",
+    "LaborMarkup": 100.0,
+    "MaterialMarkup": 100.0
+  }
+]

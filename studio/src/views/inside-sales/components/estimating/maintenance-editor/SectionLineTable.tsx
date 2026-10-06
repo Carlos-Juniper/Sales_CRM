@@ -44,6 +44,9 @@ export interface SectionLineTableProps {
   categories: ServiceCategory[]
   catalogStatus: CatalogStatus
   serviceKits: ServiceKit[]
+  // Crew-rate-blocked method ids. Not rendered since ServiceRollupRow replaced
+  // MaintenanceServiceRow (Handoff 59, PR #51); kept so MaintenanceEditor's call
+  // site compiles until the per-line highlight is re-wired.
   blockedServiceIds?: ReadonlySet<string>
   onServiceChange: (serviceId: string, patch: Partial<SectionService>) => void
   onRemoveService: (svc: SectionService) => void
@@ -55,7 +58,6 @@ export function SectionLineTable({
   categories,
   catalogStatus,
   serviceKits,
-  blockedServiceIds,
   onServiceChange,
   onRemoveService,
   onAddOptionalService,

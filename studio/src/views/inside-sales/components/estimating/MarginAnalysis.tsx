@@ -13,7 +13,7 @@
 //     are provisional config rows (BRD III-6 auto-calculator is future).
 // ---------------------------------------------------------------------------
 
-import type { CSSProperties } from 'react'
+import { useMemo, type CSSProperties } from 'react'
 import './MarginAnalysis.css'
 import {
   BarChart2,
@@ -41,6 +41,18 @@ import {
   perAcreCents,
   serviceGroupMargins,
 } from '@/lib/estimating/margins'
+import { useServiceCatalog } from '@/hooks/useServiceCatalog'
+import { usePriceSqftBenchmark } from '@/hooks/usePriceSqftBenchmark'
+import {
+  classificationFromCatalog,
+  formatCentsPerSqft,
+  formatPriceSqftBenchmark,
+  needsCategoryCodes,
+  readJobPricePerSqft,
+  type PriceSqftBenchmark,
+  type SqftClassification,
+} from '@/lib/estimating/pricePerSqft'
+import type { MaintenanceEstimate } from '@/types/estimating'
 import { useEstimatingShell } from './useEstimatingShell'
 import { CrewRateProvenance, NoCrewRateState } from './CrewRateNotice'
 import { cn } from '@/lib/utils'
@@ -194,6 +206,70 @@ function buildBenchCards(
   return { verdict: cards[0].status, perAcre, cards }
 }
 
+function benchmarkLabel(
+  benchmark: { isError: boolean; isPending: boolean; data: PriceSqftBenchmark | undefined },
+  jobCents: number | null,
+): string {
+  if (benchmark.isError) return 'Benchmark unavailable'
+  if (benchmark.isPending || !benchmark.data) return 'Loading benchmark…'
+  if (benchmark.data.sampleSize === 0) return 'No benchmark yet'
+  const average = benchmark.data.averageCentsPerSqft
+  if (average === null) return 'Benchmark unavailable'
+  if (jobCents === null) return `Avg ${formatCentsPerSqft(average)}`
+  return formatPriceSqftBenchmark(jobCents, average)
+}
+
+function PriceSqftReadout({
+  estimate,
+  classification,
+  catalogLoading,
+  catalogError,
+  classificationError,
+  benchmark,
+}: {
+  estimate: MaintenanceEstimate
+  classification: SqftClassification | null
+  catalogLoading: boolean
+  catalogError: boolean
+  classificationError: string | null
+  benchmark: { isError: boolean; isPending: boolean; data: PriceSqftBenchmark | undefined }
+}) {
+  const needsCatalog = needsCategoryCodes(estimate)
+  let jobText: string
+  let jobCents: number | null = null
+  if (needsCatalog && (catalogError || classificationError)) {
+    jobText = classificationError ?? 'Service catalog unavailable — cannot classify turf and bed square feet'
+  } else if (needsCatalog && (catalogLoading || classification === null)) {
+    jobText = 'Loading square footage…'
+  } else {
+    try {
+      const job = readJobPricePerSqft(estimate, classification)
+      if (job.kind === 'value') {
+        jobCents = job.cents
+        jobText = formatCentsPerSqft(job.cents)
+      } else if (job.reason === 'no-price') {
+        jobText = 'No contract total on this estimate'
+      } else {
+        jobText = 'No square footage on this estimate'
+      }
+    } catch (err) {
+      jobText = err instanceof Error ? err.message : 'Square footage could not be read'
+    }
+  }
+
+  return (
+    <p data-testid="price-sqft-row" className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
+      <span className="text-[hsl(var(--muted-fg))]">Price / sq ft</span>
+      <span data-testid="price-sqft-job" className="font-semibold text-[hsl(var(--fg))]">
+        {jobText}
+      </span>
+      <span data-testid="price-sqft-benchmark" className="text-[hsl(var(--muted-fg))]">
+        {benchmarkLabel(benchmark, jobCents)}
+      </span>
+    </p>
+  )
+}
+
 const VERDICT_SUB: Record<BenchmarkStatus, (perAcre: string, band: string) => string> = {
   ok: (v, band) => `${v}/ac sits within the typical ${band} band for comparable won bids.`,
   low: (v) => `${v}/ac is under the typical band — check for missed scope or under-pricing.`,
@@ -209,6 +285,22 @@ export function MarginAnalysis() {
   // Crew rate: frozen snapshot (review+) → live branch rate → null. NEVER an
   // invented default — a null rate refuses a maintenance margin (§2.3 / §2.6).
   const crew = useResolvedCrewRate(openEstimate)
+  // Catalog codes classify turf vs bed. A missing code fails the readout
+  // instead of treating bed area as 0. The benchmark query is every other
+  // maintenance estimate, not this estimator's own average.
+  const catalog = useServiceCatalog('maintenance')
+  const benchmark = usePriceSqftBenchmark(
+    openEstimate?.estimateType === 'maintenance' ? openEstimate.id : null,
+  )
+  const classificationState = useMemo(() => {
+    if (!catalog.data) return { classification: null as SqftClassification | null, error: null as string | null }
+    try {
+      return { classification: classificationFromCatalog(catalog.data), error: null as string | null }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Service catalog is invalid'
+      return { classification: null, error: message }
+    }
+  }, [catalog.data])
 
   if (!openEstimate) {
     return (
@@ -264,6 +356,16 @@ export function MarginAnalysis() {
             Margin analysis · {estimateAcres(estimate).toFixed(1)} ac ·{' '}
             {isMaintenance ? 'maintenance (hours-driven)' : 'install (materials-driven)'}
           </p>
+          {isMaintenance ? (
+            <PriceSqftReadout
+              estimate={estimate}
+              classification={classificationState.classification}
+              catalogLoading={catalog.isLoading}
+              catalogError={catalog.isError}
+              classificationError={classificationState.error}
+              benchmark={benchmark}
+            />
+          ) : null}
         </div>
         <span className="text-[11px] text-[hsl(var(--muted-fg))] inline-flex items-center gap-1">
           <Info className="h-3.5 w-3.5" />

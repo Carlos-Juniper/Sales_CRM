@@ -923,6 +923,12 @@ const allHandlers = [
     return HttpResponse.json(created, { status: 201 })
   }),
 
+  // GET /api/estimating/estimates/:id/price-sqft-benchmark
+  // Default is an empty cohort. Tests that need a number override this.
+  http.get(`${API}/estimating/estimates/:id/price-sqft-benchmark`, async () => {
+    return HttpResponse.json({ sampleSize: 0, averageCentsPerSqft: null })
+  }),
+
   // GET /api/estimating/estimates/:id
   http.get(`${API}/estimating/estimates/:id`, async ({ params }) => {
     await delay(100)

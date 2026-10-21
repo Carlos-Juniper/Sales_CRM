@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { render, makeUser } from '@/test/utils'
 import { useAuthStore } from '@/store/authStore'
 import { buildMaintenanceEstimate, buildInstallEstimate } from '@/mocks/estimatingData'
+import { withMarginGroups } from '@/test/fixtures/marginGroups'
 import EstimatingPage from '@/views/inside-sales/EstimatingPage'
 
 function seedUser() {
@@ -154,7 +155,13 @@ describe('EstimatingPage feature tabs (existing components)', () => {
 
   it('MarginAnalysis renders KPI cards for the open estimate', async () => {
     const user = userEvent.setup()
-    render(<EstimatingPage initialOpenEstimate={buildMaintenanceEstimate()} />)
+    render(
+      <EstimatingPage
+        initialOpenEstimate={withMarginGroups(
+          buildMaintenanceEstimate({ crewRateCentsPerHour: 18_000 }),
+        )}
+      />,
+    )
 
     await user.click(screen.getByRole('tab', { name: 'Margin Analysis' }))
     await screen.findByTestId('margin-kpi-contract')
@@ -167,7 +174,13 @@ describe('EstimatingPage feature tabs (existing components)', () => {
 
   it('MarginAnalysis renders the service-group panel and benchmark check', async () => {
     const user = userEvent.setup()
-    render(<EstimatingPage initialOpenEstimate={buildMaintenanceEstimate()} />)
+    render(
+      <EstimatingPage
+        initialOpenEstimate={withMarginGroups(
+          buildMaintenanceEstimate({ crewRateCentsPerHour: 18_000 }),
+        )}
+      />,
+    )
 
     await user.click(screen.getByRole('tab', { name: 'Margin Analysis' }))
     expect(await screen.findByText('Margin by service group')).toBeInTheDocument()

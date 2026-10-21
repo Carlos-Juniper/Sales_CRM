@@ -81,6 +81,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from api.catalog_labels import catalog_label  # noqa: E402
+
 DEFAULT_EXTRACT = REPO_ROOT / "scripts" / "data" / "aspire_install_service_catalog.json"
 
 ESTIMATE_TYPE = "install"
@@ -192,7 +194,8 @@ def display_name(svc: dict) -> str:
     """Aspire's display name (else the name), whitespace-collapsed, without a
     leading "IN: " (the install-service marker; name keeps it verbatim)."""
     text = _text(svc.get("display_name")) or _text(svc["name"])
-    return _IN_PREFIX_RE.sub("", text) or text
+    stripped = _IN_PREFIX_RE.sub("", text) or text
+    return catalog_label(stripped) or stripped
 
 
 # Handoff 55: never seed a service named "DO NOT USE", active or not.

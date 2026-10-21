@@ -40,6 +40,7 @@ import {
   mowingPerOccurrenceCents,
   perAcreCents,
   serviceGroupMargins,
+  UnassignedMarginGroupError,
 } from '@/lib/estimating/margins'
 import { useEstimatingShell } from './useEstimatingShell'
 import { CrewRateProvenance, NoCrewRateState } from './CrewRateNotice'
@@ -81,7 +82,7 @@ function GroupHeader({ group, color, bands }: { group: ServiceGroupMargin; color
         <span className="h-3 w-3 rounded-sm flex-shrink-0 margin-category-dot" style={{ '--dot-color': color } as CSSProperties} />
         <span className="text-sm font-medium text-[hsl(var(--fg))] truncate">{group.label}</span>
         <span className="text-xs text-[hsl(var(--muted-fg))] whitespace-nowrap">
-          {Math.round(group.shareOfContract * 100)}% of contract
+          {group.sharePercent}% of contract
         </span>
       </div>
       <div className="flex items-center gap-1.5" data-testid="group-margin-value" data-band={band}>
@@ -240,17 +241,27 @@ export function MarginAnalysis() {
 
   // Non-null (or install → 0, unused by materials-basis cost).
   const crewRateCents = crew.crewRateCents ?? 0
-  const groups = serviceGroupMargins(estimate, crewRateCents, serviceKits)
+  // Grouping fails closed. An unassigned maintenance service is an error,
+  // not an empty group list that would invent a 0% overall GM.
+  let groupError: UnassignedMarginGroupError | null = null
+  let groups: ServiceGroupMargin[] = []
+  try {
+    groups = serviceGroupMargins(estimate, crewRateCents, serviceKits)
+  } catch (err) {
+    if (err instanceof UnassignedMarginGroupError) groupError = err
+    else throw err
+  }
   const contract = contractTotal(estimate)
-  const totalCost = groups.reduce((s, g) => s + g.costCents, 0)
-  const overall = groupMargin(contract, totalCost)
-  const overallBand = marginBand(overall, marginBands)
-  const overallMeta = BAND_META[overallBand]
+  const showMargin = groupError === null
+  const totalCost = showMargin ? groups.reduce((s, g) => s + g.costCents, 0) : 0
+  const overall = showMargin ? groupMargin(contract, totalCost) : 0
+  const overallBand = showMargin ? marginBand(overall, marginBands) : null
+  const overallMeta = overallBand ? BAND_META[overallBand] : null
   const deltaPts = (overall - estimate.targetMargin) * 100
   const aboveTarget = deltaPts >= 0
 
-  const bench = buildBenchCards(estimate, serviceKits)
-  const verdictMeta = STATUS_META[bench.verdict]
+  const bench = showMargin ? buildBenchCards(estimate, serviceKits) : null
+  const verdictMeta = bench ? STATUS_META[bench.verdict] : null
   const treeSorted = [...MARGIN_BENCHMARKS.treeWorkSaleCents].sort((a, b) => a - b)
   const treeMedian = medianCents(MARGIN_BENCHMARKS.treeWorkSaleCents)
 
@@ -309,27 +320,31 @@ export function MarginAnalysis() {
             <p className="text-lg font-bold text-[hsl(var(--fg))]">{formatCents(contract)}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="pt-3 pb-3" data-testid="margin-kpi-cost">
-            <p className="text-xs text-[hsl(var(--muted-fg))]">Total cost</p>
-            <p className="text-lg font-bold text-[hsl(var(--fg))]">{formatCents(totalCost)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-3 pb-3" data-testid="margin-kpi-margin" data-band={overallBand}>
-            <p className="text-xs text-[hsl(var(--muted-fg))]">Overall gross margin</p>
-            <p className={cn('text-lg font-bold', overallMeta.text)}>{(overall * 100).toFixed(1)}%</p>
-            <p className="text-[10px] text-[hsl(var(--muted-fg))] flex items-center gap-0.5">
-              {aboveTarget ? (
-                <TrendingUp className="h-3 w-3 text-green-600" />
-              ) : (
-                <TrendingDown className="h-3 w-3 text-red-500" />
-              )}
-              {aboveTarget ? '+' : ''}
-              {deltaPts.toFixed(1)}% vs target
-            </p>
-          </CardContent>
-        </Card>
+        {showMargin && overallMeta && overallBand ? (
+          <>
+            <Card>
+              <CardContent className="pt-3 pb-3" data-testid="margin-kpi-cost">
+                <p className="text-xs text-[hsl(var(--muted-fg))]">Total cost</p>
+                <p className="text-lg font-bold text-[hsl(var(--fg))]">{formatCents(totalCost)}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-3 pb-3" data-testid="margin-kpi-margin" data-band={overallBand}>
+                <p className="text-xs text-[hsl(var(--muted-fg))]">Overall gross margin</p>
+                <p className={cn('text-lg font-bold', overallMeta.text)}>{(overall * 100).toFixed(1)}%</p>
+                <p className="text-[10px] text-[hsl(var(--muted-fg))] flex items-center gap-0.5">
+                  {aboveTarget ? (
+                    <TrendingUp className="h-3 w-3 text-green-600" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3 text-red-500" />
+                  )}
+                  {aboveTarget ? '+' : ''}
+                  {deltaPts.toFixed(1)}% vs target
+                </p>
+              </CardContent>
+            </Card>
+          </>
+        ) : null}
         <Card>
           <CardContent className="pt-3 pb-3" data-testid="margin-kpi-target">
             <p className="text-xs text-[hsl(var(--muted-fg))]">Target margin</p>
@@ -341,28 +356,37 @@ export function MarginAnalysis() {
         </Card>
       </div>
 
-      {/* Margin by service group — branched by estimateType */}
-      <Card data-testid={isMaintenance ? 'margin-groups-maintenance' : 'margin-groups-install'}>
-        <CardHeader className="pb-2 pt-4">
-          <CardTitle className="text-sm">Margin by service group</CardTitle>
-          <p className="text-xs text-[hsl(var(--muted-fg))]">
-            {isMaintenance
-              ? 'Maintenance cost-basis view — hours-driven groups aggregated across every section, not an install-style Labor/Materials/Equipment stack.'
-              : 'Install materials-inclusive view — install pricing is materials-driven, so each group shows its materials/labor cost split (BRD II-9.7).'}
-          </p>
-        </CardHeader>
-        <CardContent className="pb-4 space-y-5">
-          {groups.map((g, i) =>
-            isMaintenance ? (
-              <MaintenanceGroupRow key={g.label} group={g} color={GROUP_COLORS[i % GROUP_COLORS.length]} bands={marginBands} />
-            ) : (
-              <InstallGroupRow key={g.label} group={g} color={GROUP_COLORS[i % GROUP_COLORS.length]} bands={marginBands} />
-            ),
-          )}
-        </CardContent>
-      </Card>
+      {/* Margin by service group — branched by estimateType.
+          An unassigned maintenance service replaces the group list. */}
+      {groupError ? (
+        <div data-testid="margin-group-error" role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          No margin group for {groupError.labels.join(', ')}. Each service must be Mowing, Pest
+          Control, Optional Services, or Subcontractors.
+        </div>
+      ) : (
+        <Card data-testid={isMaintenance ? 'margin-groups-maintenance' : 'margin-groups-install'}>
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-sm">Margin by service group</CardTitle>
+            <p className="text-xs text-[hsl(var(--muted-fg))]">
+              {isMaintenance
+                ? 'Maintenance cost-basis view — hours-driven groups aggregated across every section, not an install-style Labor/Materials/Equipment stack.'
+                : 'Install materials-inclusive view — install pricing is materials-driven, so each group shows its materials/labor cost split (BRD II-9.7).'}
+            </p>
+          </CardHeader>
+          <CardContent className="pb-4 space-y-5">
+            {groups.map((g, i) =>
+              isMaintenance ? (
+                <MaintenanceGroupRow key={g.label} group={g} color={GROUP_COLORS[i % GROUP_COLORS.length]} bands={marginBands} />
+              ) : (
+                <InstallGroupRow key={g.label} group={g} color={GROUP_COLORS[i % GROUP_COLORS.length]} bands={marginBands} />
+              ),
+            )}
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Benchmark check */}
+      {/* Benchmark check — skipped when grouping failed (mowing $ would throw). */}
+      {bench && verdictMeta ? (
       <Card data-testid="benchmark-panel">
         <CardHeader className="pb-2 pt-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -448,6 +472,7 @@ export function MarginAnalysis() {
           </div>
         </CardContent>
       </Card>
+      ) : null}
     </div>
   )
 }

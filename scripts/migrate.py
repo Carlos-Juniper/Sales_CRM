@@ -1320,6 +1320,35 @@ def detect_081(conn) -> bool:
     return column_exists(conn, "service_kit_links", "is_primary")
 
 
+def detect_083(conn) -> bool:
+    """083 applied ↔ no Additional Pruning #5 labels remain.
+
+    Data-only. A database that never stored the suffix is already clean, so
+    detect is True and the runner records the file without re-executing it.
+    A still-suffixed name or section label keeps detect False so the UPDATE
+    runs. Missing tables mean the catalog migrations have not landed yet.
+    """
+    if not table_exists(conn, "services") or not table_exists(conn, "section_services"):
+        return False
+    row = _fetch_one(
+        conn,
+        "SELECT ("
+        "  SELECT COUNT(*) FROM services"
+        "   WHERE (id = 'maint-svc-21186' AND (name LIKE '%#5%' OR IFNULL(display_name, '') LIKE '%#5%'))"
+        "      OR name LIKE '%Additional Pruning #5%'"
+        "      OR name LIKE '%Additional pruning #5%'"
+        "      OR IFNULL(display_name, '') LIKE '%Additional Pruning #5%'"
+        "      OR IFNULL(display_name, '') LIKE '%Additional pruning #5%'"
+        ") + ("
+        "  SELECT COUNT(*) FROM section_services"
+        "   WHERE (service_id = 'maint-svc-21186' AND label LIKE '%#5%')"
+        "      OR label LIKE '%Additional Pruning #5%'"
+        "      OR label LIKE '%Additional pruning #5%'"
+        ") AS cnt",
+    )
+    return bool(row) and int(row["cnt"]) == 0
+
+
 def detect_082(conn) -> bool:
     """082 applied ↔ Base Maintenance (maint-svc-50111) is inactive.
 
@@ -1413,6 +1442,7 @@ _DETECT: dict = {
     "080_section_services_sqft_override":         detect_080,
     "081_service_kit_links_markup_columns":       detect_081,
     "082_maintenance_catalog_curation":           detect_082,
+    "083_additional_pruning_label":               detect_083,
     "044_contract_generator":                     detect_044,
     "046_section_services_billing_type":          detect_046,
     "054_commissions_schema":                     detect_054,

@@ -70,7 +70,16 @@ import { useEstimatingShell } from './useEstimatingShell'
 import { IntakeAttachmentsPanel } from './IntakeAttachmentsPanel'
 import { RushBadge } from './RushIndicators'
 import { DisciplineSelect } from './DisciplineSelect'
-import { BLUE_CELL, GRID, cellInput, centsOrDash, gmCellClass } from './install-editor/grid'
+import {
+  BLUE_CELL,
+  GRID,
+  SERVICE_LINE_COST_HEADER,
+  SUBCONTRACTOR_COST_TITLE,
+  cellInput,
+  centsOrDash,
+  costExportLabel,
+  gmCellClass,
+} from './install-editor/grid'
 import { ComponentRow } from './install-editor/ComponentRow'
 import { AddServicePicker } from './install-editor/AddServicePicker'
 import { AddOptionalServicePicker } from './install-editor/AddOptionalServicePicker'
@@ -131,6 +140,7 @@ type ComponentChange = (
 
 const ServiceRow = memo(function ServiceRow({
   sectionId,
+  sectionName,
   svc,
   expanded,
   bands,
@@ -145,6 +155,8 @@ const ServiceRow = memo(function ServiceRow({
   sectionCategoryId,
 }: {
   sectionId: string
+  /** Section name — subcontract sections keep the "Sub cost" cost title. */
+  sectionName: string
   /** The section's service category (materials-search prefilter). */
   sectionCategoryId: string | null
   svc: SectionService
@@ -235,6 +247,7 @@ const ServiceRow = memo(function ServiceRow({
         <span className="text-right text-[hsl(var(--muted-fg))]">0.00</span>
         <span
           data-testid={`install-cost-${svc.label}`}
+          title={costExportLabel(sectionName)}
           className="text-right text-[hsl(var(--muted-fg))] tabular-nums"
         >
           {centsOrDash(costCents)}
@@ -342,8 +355,14 @@ const GroupRows = memo(function GroupRows({
         <span className="text-right text-[11px] text-[hsl(var(--muted-fg))]">0.00</span>
         <span
           data-testid={`install-group-cost-${section.id}`}
+          title={costExportLabel(section.name)}
           className="text-right text-[hsl(var(--muted-fg))] tabular-nums"
         >
+          {/subcontract/i.test(section.name) ? (
+            <span className="block text-[9px] font-semibold uppercase tracking-wide">
+              {SUBCONTRACTOR_COST_TITLE}
+            </span>
+          ) : null}
           {centsOrDash(rollup.costCents)}
         </span>
         <span
@@ -360,6 +379,7 @@ const GroupRows = memo(function GroupRows({
             <ServiceRow
               key={svc.id}
               sectionId={section.id}
+              sectionName={section.name}
               sectionCategoryId={section.serviceCategoryId ?? null}
               svc={svc}
               expanded={!!expanded[svc.id]}
@@ -689,7 +709,9 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
             <span className="text-right">U/P</span>
             <span className="text-right">TP</span>
             <span className="text-right">Tax</span>
-            <span className="text-right">Sub cost</span>
+            <span className="text-right" title={SERVICE_LINE_COST_HEADER}>
+              {SERVICE_LINE_COST_HEADER}
+            </span>
             <span className="text-right">GM %</span>
           </div>
 
@@ -720,6 +742,7 @@ export function InstallEditor({ estimate }: InstallEditorProps) {
             <span className="text-right text-xs text-[hsl(var(--muted-fg))]">0.00</span>
             <span
               data-testid="install-parent-cost"
+              title={SERVICE_LINE_COST_HEADER}
               className="text-right text-xs text-[hsl(var(--muted-fg))] tabular-nums"
             >
               {centsOrDash(totals.costCents)}

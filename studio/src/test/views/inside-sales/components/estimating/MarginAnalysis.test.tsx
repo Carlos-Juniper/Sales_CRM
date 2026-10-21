@@ -23,6 +23,7 @@ import { useAuthStore } from '@/store/authStore'
 import type { ReactNode } from 'react'
 import type { Estimate, MaintenanceEstimate } from '@/types/estimating'
 import { buildInstallEstimate, buildMaintenanceEstimate } from '@/mocks/estimatingData'
+import { withMarginGroups } from '@/test/fixtures/marginGroups'
 import { contractTotal, groupMargin, marginBand } from '@/lib/estimating/calc'
 import { DEFAULT_MARGIN_BANDS } from '@/lib/estimating/config'
 import {
@@ -69,7 +70,10 @@ function renderTab(estimate: Estimate | null) {
 // against a deterministic rate with no branch fetch (the no-rate + live-rate
 // paths are covered in the dedicated crew-rate block below).
 const CREW_RATE = 18_000
-const maint = { ...buildMaintenanceEstimate(), crewRateCentsPerHour: CREW_RATE }
+function maintEstimate(overrides: Partial<MaintenanceEstimate> = {}) {
+  return withMarginGroups({ ...buildMaintenanceEstimate(), ...overrides })
+}
+const maint = maintEstimate({ crewRateCentsPerHour: CREW_RATE })
 const install = buildInstallEstimate()
 
 describe('MarginAnalysis — KPI cards from the live estimate model', () => {
@@ -134,7 +138,7 @@ describe('MarginAnalysis — KPI cards from the live estimate model', () => {
 })
 
 describe('MarginAnalysis — margin by service group (maintenance, hours-driven)', () => {
-  it('renders one row per service label, aggregated across sections', () => {
+  it('renders the four commercial groups, aggregated across sections', () => {
     renderTab(maint)
     const panel = screen.getByTestId('margin-groups-maintenance')
     const rows = within(panel).getAllByTestId('margin-group-row')
@@ -144,7 +148,7 @@ describe('MarginAnalysis — margin by service group (maintenance, hours-driven)
     const mowing = groups[0]
     const mowingRow = rows[0]
     expect(mowingRow).toHaveTextContent('Mowing')
-    expect(mowingRow).toHaveTextContent(`${Math.round(mowing.shareOfContract * 100)}% of contract`)
+    expect(mowingRow).toHaveTextContent(`${mowing.sharePercent}% of contract`)
     expect(mowingRow).toHaveTextContent(`${(mowing.marginPct * 100).toFixed(1)}%`)
     expect(mowingRow).toHaveTextContent(`Cost: ${formatCents(mowing.costCents)}`)
     expect(mowingRow).toHaveTextContent(`Price: ${formatCents(mowing.priceCents)}`)
@@ -171,6 +175,67 @@ describe('MarginAnalysis — margin by service group (maintenance, hours-driven)
     renderTab(maint)
     expect(screen.getByTestId('margin-groups-maintenance')).toHaveTextContent(/hours-driven/i)
     expect(screen.queryByTestId('margin-groups-install')).not.toBeInTheDocument()
+  })
+
+  it('lists Mowing, Pest Control, Optional Services, and Subcontractors with percents that sum to 100', () => {
+    const base = buildMaintenanceEstimate()
+    const section = base.sections[0]
+    const [mow, bed, irrig, color] = [
+      base.sections[0].services[0],
+      base.sections[0].services[1],
+      base.sections[0].services[2],
+      base.sections[1].services[1],
+    ]
+    const estimate: MaintenanceEstimate = {
+      ...base,
+      crewRateCentsPerHour: CREW_RATE,
+      sections: [
+        {
+          ...section,
+          services: [
+            { ...mow, label: 'Small Area / Island Production Mowing', marginGroup: null },
+            { ...bed, label: 'Insect and Disease Control', marginGroup: null },
+            { ...irrig, label: 'Mulch', serviceType: 'Optional Services', marginGroup: null },
+            { ...color, sectionId: section.id, label: 'Subcontractors', marginGroup: null },
+          ],
+        },
+      ],
+    }
+    renderTab(estimate)
+    const panel = screen.getByTestId('margin-groups-maintenance')
+    const rows = within(panel).getAllByTestId('margin-group-row')
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('Mowing'),
+      expect.stringContaining('Pest Control'),
+      expect.stringContaining('Optional Services'),
+      expect.stringContaining('Subcontractors'),
+    ])
+    const percents = rows.map((row) => {
+      const match = row.textContent?.match(/(\d+)% of contract/)
+      return Number(match?.[1])
+    })
+    expect(percents.reduce((sum, n) => sum + n, 0)).toBe(100)
+    expect(within(rows[0]).getByTestId('group-margin-value')).toHaveTextContent(/%/)
+  })
+
+  it('shows an error instead of a margin when a service has no group', () => {
+    const base = buildMaintenanceEstimate()
+    const estimate: MaintenanceEstimate = {
+      ...base,
+      crewRateCentsPerHour: CREW_RATE,
+      sections: base.sections.map((section) => ({
+        ...section,
+        services: section.services.map((svc) => ({ ...svc, label: 'Mystery Work', marginGroup: null })),
+      })),
+    }
+    renderTab(estimate)
+    const alert = screen.getByTestId('margin-group-error')
+    expect(alert).toHaveAttribute('role', 'alert')
+    expect(alert).toHaveTextContent('Mystery Work')
+    expect(screen.queryByTestId('margin-group-row')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('margin-kpi-margin')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('margin-kpi-cost')).not.toBeInTheDocument()
+    expect(screen.getByTestId('margin-kpi-contract')).toBeInTheDocument()
   })
 })
 
@@ -202,7 +267,7 @@ describe('MarginAnalysis — crew-rate no-fallback panel state (§2.3 / §2.6)',
   it('refuses a margin number and shows the no-crew-rate notice when none resolves', async () => {
     // No snapshot + branch has no configured rate ⇒ resolved rate is null.
     mockBranchRate(null)
-    const noRate = { ...buildMaintenanceEstimate(), aspireBranchId: BRANCH_ID }
+    const noRate = { ...maintEstimate(), aspireBranchId: BRANCH_ID }
     renderTab(noRate)
 
     const notice = await screen.findByTestId('margin-no-crew-rate')
@@ -215,7 +280,7 @@ describe('MarginAnalysis — crew-rate no-fallback panel state (§2.3 / §2.6)',
 
   it('links the no-crew-rate notice to the branch crew-rate settings', async () => {
     mockBranchRate(null)
-    const noRate = { ...buildMaintenanceEstimate(), aspireBranchId: BRANCH_ID }
+    const noRate = { ...maintEstimate(), aspireBranchId: BRANCH_ID }
     renderTab(noRate)
 
     const link = await screen.findByTestId('crew-rate-settings-link')
@@ -226,7 +291,7 @@ describe('MarginAnalysis — crew-rate no-fallback panel state (§2.3 / §2.6)',
     // review-status estimate carrying its own frozen snapshot: the snapshot wins,
     // no branch fetch happens, and the provenance prints the snapshot rate.
     const frozen = {
-      ...buildMaintenanceEstimate(),
+      ...maintEstimate(),
       status: 'review' as const,
       crewRateCentsPerHour: 18_000,
     }
@@ -244,7 +309,7 @@ describe('MarginAnalysis — crew-rate no-fallback panel state (§2.3 / §2.6)',
     // pricing at its $180 snapshot — the displayed margin must not drift.
     mockBranchRate(25_000)
     const frozen = {
-      ...buildMaintenanceEstimate(),
+      ...maintEstimate(),
       aspireBranchId: BRANCH_ID,
       status: 'review' as const,
       crewRateCentsPerHour: 18_000,
@@ -266,7 +331,7 @@ describe('MarginAnalysis — crew-rate no-fallback panel state (§2.3 / §2.6)',
 
   it('prices from the live branch rate when there is no snapshot', async () => {
     mockBranchRate(19_500)
-    const live = { ...buildMaintenanceEstimate(), aspireBranchId: BRANCH_ID }
+    const live = { ...maintEstimate(), aspireBranchId: BRANCH_ID }
     renderTab(live)
 
     const prov = await screen.findByTestId('crew-rate-provenance')
@@ -343,7 +408,7 @@ describe('MarginAnalysis — crew-rate-changed notice (§2.6 hand-back)', () => 
     // Prior rate: $180.00/hr (submitted-at); current live: $195.00/hr
     mockBranchRate(19_500)
     const estimate = {
-      ...buildMaintenanceEstimate(),
+      ...maintEstimate(),
       status: 'in_progress' as const,
       aspireBranchId: BRANCH_ID,
       crewRateCentsPerHour: null,
@@ -361,7 +426,7 @@ describe('MarginAnalysis — crew-rate-changed notice (§2.6 hand-back)', () => 
     // Same rate — no drift since submission
     mockBranchRate(18_000)
     const estimate = {
-      ...buildMaintenanceEstimate(),
+      ...maintEstimate(),
       status: 'in_progress' as const,
       aspireBranchId: BRANCH_ID,
       crewRateCentsPerHour: null,
@@ -378,7 +443,7 @@ describe('MarginAnalysis — crew-rate-changed notice (§2.6 hand-back)', () => 
     // No prior rate means this is a fresh in_progress (never been through a freeze cycle)
     mockBranchRate(19_500)
     const estimate = {
-      ...buildMaintenanceEstimate(),
+      ...maintEstimate(),
       status: 'in_progress' as const,
       aspireBranchId: BRANCH_ID,
       crewRateCentsPerHour: null,
@@ -393,7 +458,7 @@ describe('MarginAnalysis — crew-rate-changed notice (§2.6 hand-back)', () => 
   it('does not show the notice on a frozen estimate (review status)', () => {
     // Review status has a snapshot — it is not in_progress, so no notice
     const estimate = {
-      ...buildMaintenanceEstimate(),
+      ...maintEstimate(),
       status: 'review' as const,
       crewRateCentsPerHour: 18_000,
       priorCrewRateCentsPerHour: 16_000,

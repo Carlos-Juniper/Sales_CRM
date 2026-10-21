@@ -84,6 +84,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from api.aspire_config import ASPIRE_DIVISION_MAP, ASPIRE_OPPORTUNITY_STATUS_WON  # noqa: E402
+from api.catalog_labels import catalog_label  # noqa: E402
 from api.maintenance_catalog import (  # noqa: E402
     KIT_LINK_BASIS_TAKEOFF,
     MAINTENANCE_CATEGORIES,
@@ -641,8 +642,8 @@ def derive(raw: RawPull, kits: dict[str, dict], min_opportunities: int = 1) -> P
             "aspire_service_id": sid,
             "category_code": category,
             "service_category_id": MAINTENANCE_CATEGORIES[category][0],
-            "name": name,
-            "display_name": display,
+            "name": catalog_label(name) or "",
+            "display_name": catalog_label(display) or "",
             "service_type": type_name,
             "aspire_sort_order": as_int(f(s, "SortOrder")),
             "contract_service": f(s, "ContractService"),

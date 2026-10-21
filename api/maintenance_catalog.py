@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import Awaitable, Callable, Optional
 
+from api.catalog_labels import catalog_label
 from db import query
 
 # The six maintenance service_categories rows migration 075 seeds, in render
@@ -119,7 +120,7 @@ MAINTENANCE_CURATED_ACTIVE_IDS: frozenset[str] = frozenset({
     "maint-svc-18902",  # Mulch
     "maint-svc-19486",  # Annual Flower Installation
     "maint-svc-46819",  # Additional Irrigation Wet Check #1
-    "maint-svc-21186",  # Additional Pruning #5
+    "maint-svc-21186",  # Additional Pruning
     "maint-svc-50244",  # Fertilize Shrubs Raleigh
     "maint-svc-50393",  # Palm Pruning
     "maint-svc-50242",  # Winter Maintenance
@@ -298,7 +299,8 @@ async def seed_standard_maintenance_services(
             kit_detail = kit_detail_rows[0] if kit_detail_rows else {}
 
             # Label at method level: kit description.
-            label = kit_detail.get("description") or svc.get("display_name") or svc.get("name", "")
+            raw_label = kit_detail.get("description") or svc.get("display_name") or svc.get("name") or ""
+            label = catalog_label(raw_label) or ""
             kit_uom = kit_detail.get("uom") or "/yr"
 
             # square_feet rule:

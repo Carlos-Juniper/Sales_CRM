@@ -14,7 +14,18 @@ export const BLUE_CELL = 'bg-[#eff6ff] border-[#bfdbfe] focus-visible:ring-[#2E7
 export const cellInput =
   'h-7 rounded-md border px-1.5 text-xs text-[hsl(var(--fg))] tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 transition-colors'
 
-/** Shared 9-column grid: Item | Qty | Comp | Hrs | U/P | TP | Tax | Sub cost | GM % */
+/** Column header for a service line's cost. Subcontractor sections keep their own title. */
+export const SERVICE_LINE_COST_HEADER = 'Cost'
+
+/** Visible title kept on a Subcontractors (or Subcontractor) section's cost cell. */
+export const SUBCONTRACTOR_COST_TITLE = 'Sub cost'
+
+/** Header, tooltip, and export label for one section's cost column. */
+export function costExportLabel(sectionName: string): string {
+  return /subcontract/i.test(sectionName) ? SUBCONTRACTOR_COST_TITLE : SERVICE_LINE_COST_HEADER
+}
+
+/** Shared 9-column grid: Item | Qty | Comp | Hrs | U/P | TP | Tax | Cost | GM % */
 export const GRID =
   'grid grid-cols-[2.6fr_0.9fr_0.5fr_0.6fr_0.9fr_0.9fr_0.5fr_0.9fr_0.7fr] gap-1.5 items-center'
 

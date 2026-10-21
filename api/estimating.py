@@ -34,6 +34,7 @@ import api.attachments as _att_mod
 from db import execute, query, transaction
 from api import aspire_sync
 from api import authz
+from api.catalog_labels import catalog_label
 from api.commission_service import cancel_for_estimate, create_on_won
 from api import properties as _props_mod
 from api.aspire_sync import OpportunityInput
@@ -545,7 +546,7 @@ def _service_out(
         "serviceKitId": r["service_kit_id"],
         "serviceId": r.get("service_id"),
         "discipline": r.get("discipline"),
-        "label": r["label"],
+        "label": catalog_label(r["label"]),
         "qty": _num(r["qty"]),
         "uom": r["uom"],
         "complexityPct": _num(r["complexity_pct"]),
@@ -1569,7 +1570,7 @@ async def _insert_service(section_id: str, svc: dict, idx: int) -> str:
             svc.get("serviceId"),
             svc.get("discipline"),
             svc.get("billingType"),
-            svc["label"],
+            catalog_label(svc["label"]),
             svc.get("qty", 0),
             svc.get("uom", ""),
             svc.get("complexityPct", 0),
@@ -2550,6 +2551,8 @@ def register(app, require_auth) -> None:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
+        if "label" in body:
+            body["label"] = catalog_label(body.get("label"))
         current = rows[0]
         est_rows = await query(
             "SELECT estimate_type, aspire_branch_id FROM estimates WHERE id = %s",

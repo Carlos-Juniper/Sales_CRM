@@ -98,7 +98,7 @@ UPDATE services SET active = 1 WHERE id IN (
     'maint-svc-18902',  -- Mulch
     'maint-svc-19486',  -- Annual Flower Installation
     'maint-svc-46819',  -- Additional Irrigation Wet Check #1
-    'maint-svc-21186',  -- Additional Pruning #5
+    'maint-svc-21186',  -- Additional Pruning
     'maint-svc-50244',  -- Fertilize Shrubs Raleigh
     'maint-svc-50393',  -- Palm Pruning
     'maint-svc-50242'   -- Winter Maintenance

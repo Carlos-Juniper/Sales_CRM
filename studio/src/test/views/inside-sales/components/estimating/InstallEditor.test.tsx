@@ -67,9 +67,29 @@ describe('InstallEditor — nested Parent → Group → Row → Components table
   it('renders the full column header set', () => {
     renderInstall()
     const header = screen.getByTestId('install-columns')
-    for (const col of ['Item', 'Qty', 'Comp', 'Hrs', 'U/P', 'TP', 'Tax', 'Sub cost', 'GM %']) {
+    for (const col of ['Item', 'Qty', 'Comp', 'Hrs', 'U/P', 'TP', 'Tax', 'Cost', 'GM %']) {
       expect(within(header).getByText(col)).toBeInTheDocument()
     }
+  })
+
+  it('names the service-line cost column Cost and keeps Sub cost on subcontract sections', () => {
+    const est = buildInstallEstimate()
+    est.sections[1] = { ...est.sections[1], name: 'Subcontractors' }
+    renderInstall(est)
+
+    const header = screen.getByTestId('install-columns')
+    const costHeader = within(header).getByText('Cost')
+    expect(costHeader).toHaveAttribute('title', 'Cost')
+    expect(within(header).queryByText('Sub cost')).not.toBeInTheDocument()
+
+    const subGroup = screen.getByTestId(`install-group-cost-${est.sections[1].id}`)
+    expect(subGroup).toHaveAttribute('title', 'Sub cost')
+    expect(subGroup).toHaveTextContent('Sub cost')
+
+    const streetLine = est.sections[0].services[0]
+    expect(screen.getByTestId(`install-cost-${streetLine.label}`)).toHaveAttribute('title', 'Cost')
+    const subLine = est.sections[1].services[0]
+    expect(screen.getByTestId(`install-cost-${subLine.label}`)).toHaveAttribute('title', 'Sub cost')
   })
 
   it('parent total row aggregates the whole estimate (TP + blended GM)', () => {

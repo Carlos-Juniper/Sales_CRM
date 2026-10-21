@@ -32,6 +32,15 @@ import {
   maintServiceLine,
 } from './calc'
 import { COMPONENT_KINDS, serviceSubCostCents } from './install'
+import {
+  MARGIN_GROUP_NAMES,
+  type MarginGroupName,
+  UnassignedMarginGroupError,
+  resolveMarginGroup,
+  roundedSharePercents,
+} from './marginGroups'
+
+export { UnassignedMarginGroupError } from './marginGroups'
 
 // ----- Benchmark config (provisional, BRD III-6) ------------------------------
 
@@ -269,7 +278,10 @@ export function installLineCostSplit(svc: SectionService): InstallCostSplit {
 // ----- Service-group pivot -------------------------------------------------------
 
 export interface ServiceGroupMargin {
-  /** Group key — the service label, merged across sections. */
+  /**
+   * Group key. Install: the service label, merged across sections.
+   * Maintenance: one of Mowing, Pest Control, Optional Services, Subcontractors.
+   */
   label: string
   priceCents: number
   costCents: number
@@ -285,6 +297,11 @@ export interface ServiceGroupMargin {
   marginPct: number
   /** Decimal share of the contract total. */
   shareOfContract: number
+  /**
+   * Integer percent of contract. Largest-remainder so the displayed
+   * percents sum to 100 (independent Math.round can sum to 99 or 101).
+   */
+  sharePercent: number
   /** Max occurrences/yr across the group's lines (an occurrence = one visit). */
   maxQty: number
 }
@@ -298,12 +315,92 @@ export interface ServiceGroupMargin {
  * caller resolves it (snapshot→live) and must NOT call this at all when the
  * rate is null (the panel refuses a number instead, §2.3). Install estimates
  * ignore it (their cost is materials-inclusive), so it may be 0 there.
+ *
+ * Maintenance replaces the per-label pivot with four commercial groups.
+ * A service that resolves to none of them throws UnassignedMarginGroupError
+ * after every line has been seen — nothing is silently dropped. Install
+ * stays per label.
  */
 export function serviceGroupMargins(
   estimate: Estimate,
   crewRateCents: number,
   serviceKits: ServiceKit[] = [],
 ): ServiceGroupMargin[] {
+  if (estimate.estimateType === 'maintenance') {
+    return maintenanceServiceGroupMargins(estimate, crewRateCents, serviceKits)
+  }
+  return labelServiceGroupMargins(estimate)
+}
+
+function emptyGroup(label: string): ServiceGroupMargin {
+  return {
+    label,
+    priceCents: 0,
+    costCents: 0,
+    materialCostCents: 0,
+    laborCostCents: 0,
+    otherBucketsCostCents: 0,
+    unattributedCostCents: 0,
+    hoursPerYear: 0,
+    marginPct: 0,
+    shareOfContract: 0,
+    sharePercent: 0,
+    maxQty: 0,
+  }
+}
+
+function withShares(groups: ServiceGroupMargin[], contract: number): ServiceGroupMargin[] {
+  const percents = roundedSharePercents(
+    groups.map((g) => g.priceCents),
+    contract,
+  )
+  return groups.map((g, i) => ({
+    ...g,
+    marginPct: groupMargin(g.priceCents, g.costCents),
+    shareOfContract: contract === 0 ? 0 : g.priceCents / contract,
+    sharePercent: percents[i],
+  }))
+}
+
+function maintenanceServiceGroupMargins(
+  estimate: Estimate,
+  crewRateCents: number,
+  serviceKits: ServiceKit[],
+): ServiceGroupMargin[] {
+  const contract = contractTotal(estimate)
+  const groups = new Map<MarginGroupName, ServiceGroupMargin>(
+    MARGIN_GROUP_NAMES.map((name) => [name, emptyGroup(name)]),
+  )
+  const unassigned: string[] = []
+
+  for (const section of estimate.sections) {
+    for (const svc of section.services) {
+      const name = resolveMarginGroup(svc.label, svc.serviceType, svc.marginGroup)
+      if (!name) {
+        unassigned.push(svc.label)
+        continue
+      }
+      const g = groups.get(name)!
+      g.priceCents += maintServiceLine(
+        section.squareFeet,
+        svc.unitSellCents ?? 0,
+        svc.qty,
+        svc.complexityPct,
+      )
+      g.costCents += maintenanceLineCost(section, svc, serviceKits, crewRateCents)
+      g.hoursPerYear += maintenanceLineHours(
+        svc,
+        resolveOccurrenceHours(section, svc, serviceKits) ?? 0,
+      )
+      g.maxQty = Math.max(g.maxQty, svc.qty)
+    }
+  }
+
+  if (unassigned.length > 0) throw new UnassignedMarginGroupError(unassigned)
+  return withShares(MARGIN_GROUP_NAMES.map((name) => groups.get(name)!), contract)
+}
+
+function labelServiceGroupMargins(estimate: Estimate): ServiceGroupMargin[] {
   const contract = contractTotal(estimate)
   const groups = new Map<string, ServiceGroupMargin>()
 
@@ -311,52 +408,22 @@ export function serviceGroupMargins(
     for (const svc of section.services) {
       let g = groups.get(svc.label)
       if (!g) {
-        g = {
-          label: svc.label,
-          priceCents: 0,
-          costCents: 0,
-          materialCostCents: 0,
-          laborCostCents: 0,
-          otherBucketsCostCents: 0,
-          unattributedCostCents: 0,
-          hoursPerYear: 0,
-          marginPct: 0,
-          shareOfContract: 0,
-          maxQty: 0,
-        }
+        g = emptyGroup(svc.label)
         groups.set(svc.label, g)
       }
-      if (estimate.estimateType === 'maintenance') {
-        g.priceCents += maintServiceLine(
-          section.squareFeet,
-          svc.unitSellCents ?? 0,
-          svc.qty,
-          svc.complexityPct,
-        )
-        g.costCents += maintenanceLineCost(section, svc, serviceKits, crewRateCents)
-        g.hoursPerYear += maintenanceLineHours(
-          svc,
-          resolveOccurrenceHours(section, svc, serviceKits) ?? 0,
-        )
-      } else {
-        const split = installLineCostSplit(svc)
-        g.priceCents += installLineTotal(svc.qty, svc.unitSellCents ?? 0)
-        g.costCents += installLineCost(svc)
-        g.materialCostCents += split.materialCents
-        g.laborCostCents += split.laborCents
-        g.otherBucketsCostCents +=
-          split.byKindCents.equipment + split.byKindCents.subcontractor + split.byKindCents.other
-        g.unattributedCostCents += split.unattributedCents
-      }
+      const split = installLineCostSplit(svc)
+      g.priceCents += installLineTotal(svc.qty, svc.unitSellCents ?? 0)
+      g.costCents += installLineCost(svc)
+      g.materialCostCents += split.materialCents
+      g.laborCostCents += split.laborCents
+      g.otherBucketsCostCents +=
+        split.byKindCents.equipment + split.byKindCents.subcontractor + split.byKindCents.other
+      g.unattributedCostCents += split.unattributedCents
       g.maxQty = Math.max(g.maxQty, svc.qty)
     }
   }
 
-  return [...groups.values()].map((g) => ({
-    ...g,
-    marginPct: groupMargin(g.priceCents, g.costCents),
-    shareOfContract: contract === 0 ? 0 : g.priceCents / contract,
-  }))
+  return withShares([...groups.values()], contract)
 }
 
 // ----- Benchmark reads --------------------------------------------------------------
@@ -386,6 +453,8 @@ export function mowingPerOccurrenceCents(
 ): number | null {
   // Price-basis read only (occurrence price ÷ max qty) — the crew rate never
   // enters here, so 0 is safe: it touches cost, which this ignores.
+  // Maintenance grouping fails closed: an unassigned line throws here too,
+  // rather than pricing mowing off a partial contract.
   const mowing = serviceGroupMargins(estimate, 0, serviceKits).find((g) => /mow/i.test(g.label))
   if (!mowing || mowing.maxQty === 0) return null
   return mowing.priceCents / mowing.maxQty

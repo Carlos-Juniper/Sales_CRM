@@ -14,6 +14,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { buildInstallEstimate, buildMaintenanceEstimate } from '@/mocks/estimatingData'
+import { withMarginGroups } from '@/test/fixtures/marginGroups'
 import { contractTotal, groupMargin } from '@/lib/estimating/calc'
 import {
   MARGIN_BENCHMARKS,
@@ -28,6 +29,7 @@ import {
   perAcreCents,
   resolveOccurrenceHours,
   serviceGroupMargins,
+  UnassignedMarginGroupError,
 } from '@/lib/estimating/margins'
 import type { ServiceKit } from '@/types/estimating'
 
@@ -36,7 +38,7 @@ import type { ServiceKit } from '@/types/estimating'
 // the pricing code may fall back to.
 const RATE = 18_000
 
-const maint = buildMaintenanceEstimate()
+const maint = withMarginGroups(buildMaintenanceEstimate())
 const install = buildInstallEstimate()
 
 /** A production-rated maintenance kit (mirrors the workbook seed rows). */
@@ -161,14 +163,14 @@ describe('install cost basis (materials-inclusive)', () => {
 })
 
 describe('serviceGroupMargins — pivot by service across sections', () => {
-  it('merges same-label services from every section into one group', () => {
+  it('rolls maintenance lines into the four commercial groups', () => {
     const groups = serviceGroupMargins(maint, RATE)
-    // Mowing appears in both sections; the other three labels once each.
+    // Mowing appears in both sections; the other lines land in the other three groups.
     expect(groups.map((g) => g.label)).toEqual([
       'Mowing',
-      'Detail / Bed Maintenance',
-      'Irrigation Inspection',
-      'Seasonal Color Rotation',
+      'Pest Control',
+      'Optional Services',
+      'Subcontractors',
     ])
     const mowing = groups[0]
     // Section 1: 2,494,800¢ · Section 2: (45,000/1000)×450×42×1.15 = 978,075¢
@@ -186,6 +188,22 @@ describe('serviceGroupMargins — pivot by service across sections', () => {
     const shareSum = groups.reduce((s, g) => s + g.shareOfContract, 0)
     expect(shareSum).toBeCloseTo(1, 10)
     expect(groups[0].shareOfContract).toBeCloseTo(groups[0].priceCents / contract, 10)
+    expect(groups.reduce((s, g) => s + g.sharePercent, 0)).toBe(100)
+    expect(groups.reduce((s, g) => s + g.priceCents, 0)).toBe(contract)
+  })
+
+  it('raises when a maintenance service has no group, instead of dropping it', () => {
+    expect(() => serviceGroupMargins(buildMaintenanceEstimate(), RATE)).toThrow(UnassignedMarginGroupError)
+    try {
+      serviceGroupMargins(buildMaintenanceEstimate(), RATE)
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnassignedMarginGroupError)
+      const labels = (err as UnassignedMarginGroupError).labels
+      expect(labels).toContain('Detail / Bed Maintenance')
+      expect(labels).toContain('Irrigation Inspection')
+      expect(labels).toContain('Seasonal Color Rotation')
+      expect(labels).not.toContain('Mowing')
+    }
   })
 
   it('aggregates the install estimate materials-inclusively', () => {

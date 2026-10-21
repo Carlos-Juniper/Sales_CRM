@@ -327,6 +327,12 @@ export interface SectionService {
    */
   discipline?: 'landscape' | 'irrigation' | null
   label: string
+  /**
+   * Explicit commercial margin group (Mowing, Pest Control, Optional
+   * Services, Subcontractors). Null/absent falls through to the label.
+   * Any other value is an error — it is not silently reclassified.
+   */
+  marginGroup?: string | null
   /** Occurrences/yr (maintenance) or quantity (install). */
   qty: number
   /** `/yr`, `ea`, `plt`, `FT`, `30g`, … */

@@ -20,6 +20,7 @@ from typing import Any, Awaitable, Callable, Optional
 from fastapi import Depends, HTTPException, Query
 
 from api import authz
+from api.catalog_labels import catalog_label
 from db import query
 
 ESTIMATE_TYPES = ("maintenance", "install")
@@ -78,8 +79,8 @@ def _catalog_service_out(
     return {
         "id": r["id"],
         "serviceCategoryId": r["service_category_id"],
-        "name": r["name"],
-        "displayName": r["display_name"],
+        "name": catalog_label(r["name"]),
+        "displayName": catalog_label(r.get("display_name")),
         "sortOrder": r["sort_order"],
         "defaultOccurrences": _int_or_none(r.get("default_occurrences")),
         "occurrenceSource": r.get("occurrence_source"),

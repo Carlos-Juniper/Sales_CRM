@@ -14,6 +14,7 @@ import type {
   SectionService,
   ServiceCategory,
 } from '@/types/estimating'
+import { catalogLabel } from './catalogLabels'
 import { catalogServiceKitIds, primaryKitId } from './maintenanceCatalogAdapter'
 import {
   COMPANY_DEFAULT_COMPLEXITY_PCT,
@@ -130,7 +131,7 @@ export function catalogServiceLine(
     sectionId,
     serviceKitId,
     serviceId: service.id,
-    label: service.displayName || service.name,
+    label: catalogLabel(service.displayName || service.name) ?? '',
     qty: service.defaultOccurrences ?? 0,
     uom: '/yr',
     complexityPct: COMPANY_DEFAULT_COMPLEXITY_PCT,

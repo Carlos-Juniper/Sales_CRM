@@ -286,6 +286,15 @@ export const estimatingApi = {
     return apiClient.get<Estimate[]>(`/estimating/estimates${q ? `?${q}` : ''}`)
   },
   get: (id: string) => apiClient.get<Estimate>(`/estimating/estimates/${id}`),
+  /**
+   * Company-wide mean of per-estimate maintenance $/sq ft, excluding this
+   * estimate. sampleSize 0 comes back with a null average — the panel must
+   * not invent one.
+   */
+  priceSqftBenchmark: (id: string) =>
+    apiClient.get<import('@/lib/estimating/pricePerSqft').PriceSqftBenchmark>(
+      `/estimating/estimates/${id}/price-sqft-benchmark`,
+    ),
   create: (body: CreateEstimatePayload) =>
     apiClient.post<Estimate>('/estimating/estimates', stripIsRush(body)),
   update: async (id: string, body: UpdateEstimatePayload) => {

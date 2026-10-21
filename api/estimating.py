@@ -42,6 +42,7 @@ from api.catalog_links import (prepare_component, validate_estimate_tree, valida
                                validate_service_ref)
 from api.install_sections import plan_install_create_sections
 from api.maintenance_catalog import seed_standard_maintenance_services  # §2
+from api.price_sqft_benchmark import benchmark_payload
 from api.maintenance_pricing import _live_branch_crew_rate, annotate_maintenance_sections, apply_maintenance_crew_prices
 import api.estimating_assign as _estimating_assign_mod  # Handoff 54 §6: assign endpoint
 
@@ -2035,6 +2036,30 @@ def register(app, require_auth) -> None:
         created = await _load_estimate(estimate_id)
         assert created is not None
         return created
+
+    @app.get("/api/estimating/estimates/{estimate_id}/price-sqft-benchmark")
+    async def get_price_sqft_benchmark(
+        estimate_id: str, _user: dict = Depends(require_auth)
+    ) -> dict:
+        """Mean $/sq ft of every other maintenance estimate.
+
+        Company-wide: not the caller's own estimates and not branch-scoped.
+        sampleSize 0 returns a null average. Missing or install estimates fail
+        rather than returning a number.
+        """
+        authz.require_estimate_viewer(_user)
+        rows = await query(
+            "SELECT id, estimate_type FROM estimates WHERE id = %s",
+            [estimate_id],
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Not found")
+        if rows[0]["estimate_type"] != "maintenance":
+            raise HTTPException(
+                status_code=400,
+                detail="Price per sq ft benchmark is maintenance-only",
+            )
+        return await benchmark_payload(estimate_id, query)
 
     @app.get("/api/estimating/estimates/{estimate_id}")
     async def get_estimate(estimate_id: str, _user: dict = Depends(require_auth)) -> dict:
